@@ -66,10 +66,10 @@ except Exception:  # pragma: no cover – fallback if dependency graph changes
         return digest.hexdigest()
 
 
-CODEX_CONFIG_BLOCK_TEMPLATE = """# IMPORTANT: Use your Azure *deployment name* here (e.g., "gpt5codex-prod")
-model = "{model_name}"
+CODEX_CONFIG_BLOCK_TEMPLATE = """# IMPORTANT: Use your Azure *deployment name* here (e.g., "gpt-5.2-codex")
+model = "gpt-5.2-codex"
 model_provider = "azure"
-model_reasoning_effort = "high"
+model_reasoning_effort = "xhigh"
 
 [model_providers.azure]
 name = "Azure OpenAI"
