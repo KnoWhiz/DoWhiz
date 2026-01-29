@@ -5,12 +5,15 @@ This document defines the MVP tech design for Icebrew "Digital Employee":
 - Email-driven task intake for `main@icebrew.ai`
 - Per-user workspace and thread memory with attachment versioning
 - Task classification, billing quota, retries, and concurrency safety
+- Public landing page with live digital worker status
+- Authenticated dashboard for subscription, usage, and plan upgrades
 - Modular, CLI-testable components
 
 This doc borrows structure and rigor from both Moltbot tech designs (Codex + Claude), but adapts them to an email-first, single-agent MVP.
 
 ## Product goals
 - Users work entirely from their email client.
+- Professional, office-worker-friendly web presence.
 - Tens of concurrent tasks without server instability.
 - Clear, enforceable free-tier limits and upgrade messaging.
 - Reliable, observable workflow with minimal manual intervention.
@@ -20,6 +23,8 @@ This doc borrows structure and rigor from both Moltbot tech designs (Codex + Cla
 - Real-time chat UI or multi-channel gateways.
 - Long-running multi-agent orchestration.
 - Advanced billing/usage metering beyond task counts.
+- Full customer support portal or helpdesk.
+- Custom SSO or enterprise provisioning.
 
 ## System overview
 High-level flow:
@@ -35,19 +40,22 @@ Key design choice: keep webhook handler fast and stateless; all heavy work is as
 ### Architecture diagram
 
 ```
-[Postmark Inbound]
+[Web Frontend] <---> [FastAPI API] <---- [Postmark Inbound]
+       |                 |    \               |
+       |                 |     \              v
+       |                 |      \--(enqueue)-> [Celery Queue Lanes]
+       |                 |                           |
+       |                 |                           v
+       |                 |                      [Workers]
+       |                 |                           |
+       |                 |                           v
+       |                 |             [LLM Runtime + Workspace]
+       |                 |                |                 |
+       v                 v                v                 v
+ [Auth Session]     [Postgres]        [Azure Blob]     [Postmark Outbound]
        |
        v
-[FastAPI Webhook] --(enqueue)--> [Celery Queue Lanes]
-       |                               |
-       |                               v
-       |                          [Workers]
-       |                               |
-       |                               v
-       |                 [LLM Runtime + Workspace]
-       |                    |                 |
-       v                    v                 v
-  [Postgres]           [Azure Blob]      [Postmark Outbound]
+ [Stripe Billing]
 ```
 
 ## Core concepts and identifiers
@@ -72,11 +80,15 @@ Thread key format (canonical, for logs/diagnostics):
 - **Email provider**: Postmark (inbound + outbound, reliable deliverability)
 - **LLM**: Claude Agent SDK (pipeline execution + LLM-as-judge)
 - **Observability**: Sentry (errors), logs + OpenTelemetry (optional)
+- **Web**: Next.js (App Router) + Tailwind, deployed on Vercel or Azure Static Web Apps
+- **Auth**: Magic link via email (session cookie)
+- **Payments**: Stripe (checkout + customer portal)
 
 Rationale:
 - Python ecosystem best fits Claude SDK and email parsing.
 - Postgres ensures atomic quota enforcement.
 - Celery provides stable retries and concurrency control.
+- Next.js provides SSR for landing SEO and a clean dashboard UX.
 
 ## Execution lanes (queue separation)
 Borrowing the Moltbot "lanes" concept, we split Celery into explicit queues to isolate workloads:
@@ -89,6 +101,64 @@ Borrowing the Moltbot "lanes" concept, we split Celery into explicit queues to i
 | `notify` | Outbound email and post-processing | High |
 
 Default single queue is acceptable for MVP; lane split is a safe upgrade path without code changes.
+
+## Web experience (MVP)
+The public website is a professional, office-ready experience that emphasizes reliability and clarity.
+
+### Landing page
+Primary goals:
+- Show live count of digital workers online right now.
+- Highlight the first digital employee: `mini-mouse`.
+- Provide a single clear CTA (get started or send first task).
+
+Content blocks:
+- Hero: "Your AI employee. Email any task." + CTA.
+- System Status card (professional style):
+  - `mini-mouse` online/offline and current activity.
+  - "X digital workers online now" (aggregate).
+  - Optional: uptime or average response time (one metric max).
+- "How it works" (3 steps).
+- Plan snapshot (Free / Paid 20 / Paid 200) with a link to full billing.
+- Footer (legal, support, status).
+
+Status update strategy:
+- Public endpoint polled every 30-60s (no websocket required for MVP).
+- If status endpoint fails, render cached value and show "Last updated".
+
+### Dashboard (post-login)
+Primary goals:
+- Make usage and plan status obvious within 5 seconds.
+- Provide a reliable path to upgrade and manage billing.
+
+Core sections:
+- Usage overview: tasks used / quota remaining with a progress bar.
+- Plan card: current plan, renewal date, and "Manage billing" action.
+- Task history: recent tasks with status and timestamps.
+- Settings: notification preferences (optional in MVP).
+
+### Visual direction
+- Muted, professional palette (slate/gray + one accent).
+- Generous spacing and consistent 8px grid.
+- Minimal outlined icons and no playful animations.
+- Confident, matter-of-fact copy (no exclamation marks).
+
+## Public + private APIs for web
+Public:
+- `GET /api/public/workers/status` -> counts + mini-mouse status + last_updated.
+
+Authenticated:
+- `GET /api/user/usage` -> tasks_used, tasks_limit, plan.
+- `GET /api/user/subscription` -> plan, renewal_date, status.
+- `POST /api/billing/checkout` -> Stripe checkout session.
+- `POST /api/billing/portal` -> Stripe customer portal session.
+
+Auth:
+- Magic link email; session stored in secure, httpOnly cookie.
+- Dashboard endpoints require session and user_id lookup.
+
+Worker status source of truth:
+- Redis heartbeat keys: `worker:{name}:heartbeat` updated every 30s.
+- API aggregates to "online" if heartbeat <= 90s old.
 
 ## Data model (PostgreSQL)
 Core tables and key constraints:
@@ -147,6 +217,13 @@ Indexes and constraints:
 - `messages.message_id` unique (idempotency)
 - `tasks.message_id` unique (exactly one task per message)
 - `attachments.message_id, filename, version` unique (deterministic versioning)
+
+Optional table (future):
+### worker_status
+- `name` (text, PK)
+- `last_heartbeat_at` (timestamp)
+- `tasks_in_flight` (int)
+- `avg_response_seconds` (int)
 
 ## Storage layout (Azure Blob)
 Workspace structure:
