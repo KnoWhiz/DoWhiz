@@ -53,6 +53,32 @@ Set:
 
 Then run the server; outbound replies will go through Postmark.
 
+## Start real email service (manual send → reply)
+Use this when you want to send real email from any inbox to `mini-mouse@deep-tutor.com`.
+
+Terminal 1: start the inbound webhook service
+```
+python -m mvp.email_pipeline.postmark_webhook_server --port 9000
+```
+
+Terminal 2: expose webhook with ngrok
+```
+ngrok http 9000
+```
+
+Terminal 3: set Postmark inbound hook to the ngrok URL
+```
+python -m mvp.email_pipeline.set_postmark_inbound_hook \
+  --hook-url https://YOUR-NGROK-URL.ngrok-free.dev/postmark/inbound
+```
+
+Send an email manually to:
+```
+mini-mouse@deep-tutor.com
+```
+
+The pipeline will run and reply via Postmark to the sender.
+
 ## Real email end-to-end (Postmark inbound + outbound)
 This test starts a Postmark inbound webhook receiver locally, exposes it with ngrok, sends a real email to your Postmark server’s inbound address (hash@inbound.postmarkapp.com), and verifies that a reply is sent back via Postmark.
 
@@ -61,3 +87,9 @@ python -m mvp.email_pipeline.real_email_test --from deep-tutor@deep-tutor.com
 ```
 
 Note: This uses the server token in `.env` to temporarily set `InboundHookUrl` on your Postmark server and resets it afterward.
+
+## Set Postmark inbound hook (helper)
+```
+python -m mvp.email_pipeline.set_postmark_inbound_hook \
+  --hook-url https://YOUR-NGROK-URL.ngrok-free.dev/postmark/inbound
+```
