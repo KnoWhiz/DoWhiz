@@ -84,10 +84,20 @@ def process_email(raw_bytes: bytes, settings: Settings, store: Optional[MongoSto
         attachments_dir=reply_attachments_dir,
     )
 
-    if settings.outbound_mode == "postmark":
-        send_via_postmark(reply_message, reply_attachments_dir, settings)
-    else:
-        send_via_smtp(reply_message, settings.outbound_host, settings.outbound_port)
+    outbound_error: str | None = None
+    try:
+        if settings.outbound_mode == "postmark":
+            send_via_postmark(reply_message, reply_attachments_dir, settings)
+        else:
+            send_via_smtp(reply_message, settings.outbound_host, settings.outbound_port)
+    except Exception as exc:
+        outbound_error = str(exc)
+        (workspace / "outbound_error.txt").write_text(outbound_error, encoding="utf-8")
+        # If Postmark blocks a recipient (4xx), don't retry the webhook endlessly.
+        if settings.outbound_mode == "postmark" and outbound_error.startswith("Postmark error 4"):
+            pass
+        else:
+            raise
 
     if store:
         store.record_inbound(
