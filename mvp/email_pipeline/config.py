@@ -8,6 +8,7 @@ import os
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_WORKSPACE_ROOT = REPO_ROOT / "mvp" / "email_pipeline" / "workspaces"
 DEFAULT_OUTBOX_DIR = REPO_ROOT / "mvp" / "email_pipeline" / "outbox"
+DEFAULT_STATE_DIR = REPO_ROOT / "mvp" / "email_pipeline" / "state"
 
 
 def _load_env_file(path: Path) -> None:
@@ -60,6 +61,10 @@ class Settings:
 
     workspace_root: Path = Path(_env("WORKSPACE_ROOT", str(DEFAULT_WORKSPACE_ROOT)))
     code_model: str = _env("CODEX_MODEL", "gpt-5.1-codex-max")
+
+    processed_ids_path: Path = Path(
+        _env("PROCESSED_IDS_PATH", str(DEFAULT_STATE_DIR / "postmark_processed_ids.txt"))
+    )
 
     dt_base_url: str = _env("DT_BASE_URL", "http://localhost:8081")
 

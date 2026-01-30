@@ -45,6 +45,7 @@ Artifacts are saved under:
 - `CODEX_MODEL`
 - `CODEX_DISABLED=1` to bypass Codex CLI
 - `MONGODB_URI`, `MONGODB_DB`, `USE_MONGODB=1`
+- `PROCESSED_IDS_PATH` to override webhook dedupe storage
 
 ## Postmark outbound (optional)
 Set:
@@ -78,6 +79,11 @@ mini-mouse@deep-tutor.com
 ```
 
 The pipeline will run and reply via Postmark to the sender.
+
+If you need to reprocess an email that was deduped, clear the dedupe file:
+```
+rm -f mvp/email_pipeline/state/postmark_processed_ids.txt
+```
 
 ## Real email end-to-end (Postmark inbound + outbound)
 This test starts a Postmark inbound webhook receiver locally, exposes it with ngrok, sends a real email to your Postmark server’s inbound address (hash@inbound.postmarkapp.com), and verifies that a reply is sent back via Postmark.

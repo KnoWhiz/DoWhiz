@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import logging
+import threading
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -16,6 +18,44 @@ from .storage import MongoStore, get_store
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(message)s")
 logger = logging.getLogger("postmark_webhook")
+
+
+class ProcessedMessageStore:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._seen: set[str] = set()
+        if self.path.exists():
+            for raw in self.path.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if line:
+                    self._seen.add(line)
+
+    def mark_if_new(self, ids: list[str]) -> bool:
+        candidates = [item for item in ids if item]
+        if not candidates:
+            return True
+        with self._lock:
+            if any(item in self._seen for item in candidates):
+                return False
+            with self.path.open("a", encoding="utf-8") as handle:
+                for item in candidates:
+                    self._seen.add(item)
+                    handle.write(item + "\n")
+        return True
+
+
+def _extract_message_ids(payload: dict, raw_payload: bytes) -> list[str]:
+    header_message_id = ""
+    for header in payload.get("Headers", []) or []:
+        name = (header.get("Name") or "").lower()
+        if name == "message-id":
+            header_message_id = (header.get("Value") or "").strip()
+            break
+    postmark_message_id = (payload.get("MessageID") or payload.get("MessageId") or "").strip()
+    fallback_id = hashlib.md5(raw_payload).hexdigest()
+    return [header_message_id, postmark_message_id, fallback_id]
 
 
 def _email_from_postmark(payload: dict) -> EmailMessage:
@@ -100,6 +140,16 @@ def _email_from_postmark(payload: dict) -> EmailMessage:
 class PostmarkWebhookHandler(BaseHTTPRequestHandler):
     settings: Settings
     store: Optional[MongoStore]
+    dedupe_store: ProcessedMessageStore
+
+    def _safe_respond(self, status: int, body: bytes) -> None:
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+        except BrokenPipeError:
+            logger.warning("Client closed connection before response was sent.")
 
     def do_GET(self):  # noqa: N802
         if self.path in {"/", "/health"}:
@@ -113,8 +163,7 @@ class PostmarkWebhookHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         if self.path not in {"/", "/postmark/inbound"}:
-            self.send_response(404)
-            self.end_headers()
+            self._safe_respond(404, b"{\"status\":\"not_found\"}")
             return
 
         length = int(self.headers.get("Content-Length", "0"))
@@ -123,25 +172,25 @@ class PostmarkWebhookHandler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(payload_bytes.decode("utf-8"))
         except Exception:
-            self.send_response(400)
-            self.end_headers()
+            self._safe_respond(400, b"{\"status\":\"bad_json\"}")
             return
 
-        try:
-            email_msg = _email_from_postmark(payload)
-            raw_bytes = email_msg.as_bytes()
-            workspace = process_email(raw_bytes, self.settings, self.store)
-            logger.info("Processed inbound webhook into workspace %s", workspace)
-        except Exception as exc:
-            logger.exception("Failed to process inbound webhook: %s", exc)
-            self.send_response(500)
-            self.end_headers()
+        message_ids = _extract_message_ids(payload, payload_bytes)
+        if not self.dedupe_store.mark_if_new(message_ids):
+            self._safe_respond(200, b"{\"status\":\"duplicate\"}")
             return
 
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(b"{\"status\":\"ok\"}")
+        def _run_pipeline() -> None:
+            try:
+                email_msg = _email_from_postmark(payload)
+                raw_bytes = email_msg.as_bytes()
+                workspace = process_email(raw_bytes, self.settings, self.store)
+                logger.info("Processed inbound webhook into workspace %s", workspace)
+            except Exception as exc:
+                logger.exception("Failed to process inbound webhook: %s", exc)
+
+        threading.Thread(target=_run_pipeline, daemon=True).start()
+        self._safe_respond(200, b"{\"status\":\"accepted\"}")
 
 
 def main() -> None:
@@ -155,6 +204,9 @@ def main() -> None:
 
     PostmarkWebhookHandler.settings = settings
     PostmarkWebhookHandler.store = store
+    PostmarkWebhookHandler.dedupe_store = ProcessedMessageStore(
+        settings.processed_ids_path
+    )
 
     server = ThreadingHTTPServer((args.host, args.port), PostmarkWebhookHandler)
     logger.info("Postmark inbound webhook listening on %s:%s", args.host, args.port)
