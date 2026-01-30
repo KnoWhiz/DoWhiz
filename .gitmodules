@@ -1,0 +1,3 @@
+[submodule "external/openclaw"]
+	path = external/openclaw
+	url = https://github.com/KnoWhiz/openclaw.git
