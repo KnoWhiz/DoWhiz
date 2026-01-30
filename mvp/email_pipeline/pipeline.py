@@ -26,6 +26,7 @@ def process_email(raw_bytes: bytes, settings: Settings, store: Optional[MongoSto
     message_id = msg.get("Message-ID") or make_msgid()
     subject = msg.get("Subject", "")
     from_addr = extract_addresses(msg.get("From"))
+    reply_to_addr = extract_addresses(msg.get("Reply-To"))
     to_addr = extract_addresses(msg.get("To"))
     references = msg.get("References")
     in_reply_to = msg.get("In-Reply-To")
@@ -71,9 +72,11 @@ def process_email(raw_bytes: bytes, settings: Settings, store: Optional[MongoSto
     else:
         reply_references = message_id
 
+    reply_recipient = reply_to_addr[0] if reply_to_addr else (from_addr[0] if from_addr else "")
+
     reply_message = build_reply_message(
         settings=settings,
-        to_address=from_addr[0] if from_addr else "",
+        to_address=reply_recipient,
         subject=subject,
         body_text=reply_text,
         in_reply_to=message_id,

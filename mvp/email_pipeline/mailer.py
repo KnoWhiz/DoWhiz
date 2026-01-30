@@ -103,9 +103,13 @@ def send_via_postmark(message: EmailMessage, attachments_dir: Path, settings: Se
         method="POST",
     )
 
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        if resp.status >= 400:
-            raise RuntimeError(f"Postmark error: {resp.status} {resp.read().decode('utf-8')}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            if resp.status >= 400:
+                raise RuntimeError(f"Postmark error: {resp.status} {resp.read().decode('utf-8')}")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Postmark error {exc.code}: {detail}") from exc
 
 
 def _iter_attachments(attachments_dir: Path) -> Iterable[Path]:
