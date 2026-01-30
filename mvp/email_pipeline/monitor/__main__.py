@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 
-from .config import load_settings
-from .monitor import start_monitor
+from ..config import load_settings
+from . import start_monitor
 
 
 def main() -> None:

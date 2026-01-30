@@ -10,8 +10,8 @@ from email.utils import make_msgid
 from pathlib import Path
 from typing import Iterable
 
-from .config import load_settings
-from .email_utils import safe_filename
+from ..config import load_settings
+from ..email_utils import safe_filename
 
 try:  # Optional dependency for nicer HTML rendering.
     import markdown as md  # type: ignore

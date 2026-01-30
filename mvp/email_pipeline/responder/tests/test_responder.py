@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from mvp.email_pipeline.responder import generate_response
+from mvp.email_pipeline.responder import _build_codex_prompt, generate_response
 
 
 class ResponderTests(unittest.TestCase):
@@ -17,6 +17,17 @@ class ResponderTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tempdir.cleanup()
+
+    def test_missing_inbox_returns_error(self) -> None:
+        (self.workspace / "email_inbox.md").unlink()
+        result = generate_response(str(self.workspace))
+        self.assertFalse(result["success"])
+        self.assertIn("Missing inbox", result["error"])
+
+    def test_unsupported_model(self) -> None:
+        result = generate_response(str(self.workspace), model="other")
+        self.assertFalse(result["success"])
+        self.assertIn("Unsupported model", result["error"])
 
     def test_generate_response_writes_reply(self) -> None:
         def _fake_run(prompt, workspace_dir, reply_path, model_name, codex_disabled=False):
@@ -31,11 +42,16 @@ class ResponderTests(unittest.TestCase):
         self.assertTrue(reply_path.exists())
         self.assertEqual(reply_path.read_text(encoding="utf-8"), "Reply")
 
-    def test_generate_response_missing_inbox(self) -> None:
-        (self.workspace / "email_inbox.md").unlink()
-        result = generate_response(str(self.workspace))
-        self.assertFalse(result["success"])
-        self.assertIn("Missing inbox", result["error"])
+    def test_reply_attachments_dir_created(self) -> None:
+        with mock.patch("mvp.email_pipeline.responder.run_codex_reply", return_value="Reply"):
+            generate_response(str(self.workspace))
+        reply_dir = self.workspace / "email_reply_attachments"
+        self.assertTrue(reply_dir.exists())
+
+    def test_prompt_includes_attachments(self) -> None:
+        (self.workspace / "email_inbox_attachments" / "file.txt").write_text("data", encoding="utf-8")
+        prompt = _build_codex_prompt("Body", ["file.txt"])
+        self.assertIn("Attachments: file.txt", prompt)
 
 
 if __name__ == "__main__":

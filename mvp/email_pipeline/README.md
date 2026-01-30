@@ -1,12 +1,14 @@
 # IceBrew Email Pipeline
 
-This refactor organizes the pipeline into five clear modules with CLI tooling and tests:
+Core modules are now structured as packages (one folder per module):
 
-- `sender.py`: Postmark outbound email sending
-- `responder.py`: AI response generation
-- `workspace.py`: Workspace preparation
-- `monitor.py`: Postmark inbound webhook + orchestration
-- `task_store.py`: MongoDB task state tracking
+- `sender/`: Postmark outbound sending
+- `responder/`: AI response generation
+- `workspace/`: Workspace preparation
+- `monitor/`: Webhook + orchestration
+- `task_store/`: MongoDB task tracking
+
+Supporting utilities remain at the package root (`config.py`, `email_utils.py`, `codex_runner.py`, `storage.py`).
 
 ## Prereqs
 - Python 3.12
@@ -23,96 +25,31 @@ This refactor organizes the pipeline into five clear modules with CLI tooling an
 - `MONITOR_WEBHOOK_PORT`: Webhook server port
 - `MAX_RETRIES`: Default retry count
 
-## CLI Tests
-All CLI tests run in dry-run mode unless `--real` is passed.
+## Module Tests (with per-folder reports)
+Each module has 5 tests. Running tests via the module test package writes `report.json`
+inside that module's `tests/` folder.
 
-### Sender
 ```
-python -m mvp.email_pipeline.cli.test_sender \
-  --real \
-  --from "mini-mouse@deep-tutor.com" \
-  --to "deep-tutor@deep-tutor.com" \
-  --subject "Test Email" \
-  --markdown-file "/path/to/test.md"
-
-python -m mvp.email_pipeline.cli.test_sender \
-  --real \
-  --from "mini-mouse@deep-tutor.com" \
-  --to "deep-tutor@deep-tutor.com,another@example.com" \
-  --subject "Multi-recipient Test" \
-  --markdown-file "/path/to/test.md" \
-  --attachments-dir "/path/to/attachments"
+python -m mvp.email_pipeline.sender.tests
+python -m mvp.email_pipeline.responder.tests
+python -m mvp.email_pipeline.workspace.tests
+python -m mvp.email_pipeline.monitor.tests
+python -m mvp.email_pipeline.task_store.tests
 ```
 
-### Responder
-```
-python -m mvp.email_pipeline.cli.test_responder \
-  --workspace "/path/to/workspace" \
-  --dry-run
-
-python -m mvp.email_pipeline.cli.test_responder \
-  --real \
-  --workspace "/path/to/workspace" \
-  --verbose
-```
-
-### Workspace
-```
-python -m mvp.email_pipeline.cli.test_workspace \
-  --eml-file "/path/to/test.eml" \
-  --workspace-root "/path/to/workspaces"
-
-python -m mvp.email_pipeline.cli.test_workspace \
-  --inbox-md "/path/to/email.md" \
-  --inbox-attachments "/path/to/attachments" \
-  --workspace-root "/path/to/workspaces"
-
-python -m mvp.email_pipeline.cli.test_workspace \
-  --list \
-  --workspace-root "/path/to/workspaces"
-
-python -m mvp.email_pipeline.cli.test_workspace \
-  --inspect "/path/to/workspaces/some_message_id"
-```
-
-### Monitor
-```
-python -m mvp.email_pipeline.cli.test_monitor \
-  --start \
-  --port 9000
-
-python -m mvp.email_pipeline.cli.test_monitor \
-  --simulate \
-  --eml-file "/path/to/test.eml"
-
-python -m mvp.email_pipeline.cli.test_monitor \
-  --status \
-  --message-id "<some-message-id@example.com>"
-```
-
-### Task Status
-```
-python -m mvp.email_pipeline.cli.task_status --list --limit 20
-python -m mvp.email_pipeline.cli.task_status --get "<message-id@example.com>"
-python -m mvp.email_pipeline.cli.task_status --failed
-python -m mvp.email_pipeline.cli.task_status --pending
-python -m mvp.email_pipeline.cli.task_status --stats
-python -m mvp.email_pipeline.cli.task_status --retry "<message-id@example.com>"
-python -m mvp.email_pipeline.cli.task_status --sender "user@gmail.com"
-```
+Reports are written to:
+- `mvp/email_pipeline/sender/tests/report.json`
+- `mvp/email_pipeline/responder/tests/report.json`
+- `mvp/email_pipeline/workspace/tests/report.json`
+- `mvp/email_pipeline/monitor/tests/report.json`
+- `mvp/email_pipeline/task_store/tests/report.json`
 
 ## Webhook Server
 Start the Postmark inbound webhook listener:
 ```
-python -m mvp.email_pipeline.postmark_webhook_server --port 9000
-```
-
-## Legacy SMTP Ingress (Deprecated)
-A legacy SMTP ingress still exists for local testing:
-```
-python -m mvp.email_pipeline.server --inbound-port 8025
+python -m mvp.email_pipeline.monitor --port 9000
 ```
 
 ## Migration
-A migration helper (`task_store.migrate_from_txt`) is used by the monitor on startup to import the old
-dedupe file into MongoDB and rename it to `*.migrated`.
+A migration helper (`task_store.migrate_from_txt`) runs at monitor startup to import the old
+`state/postmark_processed_ids.txt` into MongoDB (and rename it to `*.migrated` if found).

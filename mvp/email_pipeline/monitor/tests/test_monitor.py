@@ -65,16 +65,17 @@ class MonitorTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tempdir.cleanup()
 
-    def _build_email(self) -> bytes:
+    def _build_email(self, include_from: bool = True) -> bytes:
         msg = EmailMessage()
-        msg["From"] = "sender@example.com"
+        if include_from:
+            msg["From"] = "sender@example.com"
         msg["To"] = "receiver@example.com"
         msg["Subject"] = "Hello"
         msg["Message-ID"] = "<monitor-test@example.com>"
         msg.set_content("Hello")
         return msg.as_bytes()
 
-    def test_process_success(self) -> None:
+    def test_success_path(self) -> None:
         def responder(workspace_dir: str, model: str = "codex") -> dict:
             reply_path = Path(workspace_dir) / "email_reply.md"
             reply_path.write_text("Reply", encoding="utf-8")
@@ -98,10 +99,9 @@ class MonitorTests(unittest.TestCase):
 
         self.assertTrue(result["success"])
         task = self.store.get_task("<monitor-test@example.com>")
-        self.assertIsNotNone(task)
         self.assertEqual(task.status, TaskStatus.COMPLETED)
 
-    def test_process_failure(self) -> None:
+    def test_responder_failure_marks_failed(self) -> None:
         def responder(_workspace_dir: str, _model: str = "codex") -> dict:
             return {"success": False, "reply_path": "", "attachments_dir": "", "error": "boom"}
 
@@ -109,7 +109,7 @@ class MonitorTests(unittest.TestCase):
             raw_email=self._build_email(),
             task_store=self.store,  # type: ignore[arg-type]
             settings=self.settings,
-            max_retries=1,
+            max_retries=0,
             postmark_message_id=None,
             responder_fn=responder,
             sender_fn=lambda **_kwargs: {"success": True, "message_id": "<reply@example.com>", "error": None},
@@ -145,6 +145,54 @@ class MonitorTests(unittest.TestCase):
             sleep_fn=lambda _: None,
         )
         self.assertEqual(result["error"], "duplicate")
+
+    def test_already_processing(self) -> None:
+        task = EmailTask(
+            message_id="<monitor-test@example.com>",
+            postmark_message_id=None,
+            content_hash="hash",
+            from_address="sender@example.com",
+            to_addresses=["receiver@example.com"],
+            subject="Hello",
+            status=TaskStatus.PROCESSING,
+            attempts=1,
+            max_retries=1,
+        )
+        self.store.create_task(task)
+
+        result = _process_incoming_email(
+            raw_email=self._build_email(),
+            task_store=self.store,  # type: ignore[arg-type]
+            settings=self.settings,
+            max_retries=1,
+            postmark_message_id=None,
+            responder_fn=lambda *_args, **_kwargs: {"success": True, "reply_path": "", "attachments_dir": "", "error": None},
+            sender_fn=lambda **_kwargs: {"success": True, "message_id": "<reply@example.com>", "error": None},
+            sleep_fn=lambda _: None,
+        )
+        self.assertEqual(result["error"], "already_processing")
+
+    def test_missing_reply_recipient(self) -> None:
+        def responder(workspace_dir: str, model: str = "codex") -> dict:
+            reply_path = Path(workspace_dir) / "email_reply.md"
+            reply_path.write_text("Reply", encoding="utf-8")
+            attachments_dir = Path(workspace_dir) / "email_reply_attachments"
+            attachments_dir.mkdir(parents=True, exist_ok=True)
+            return {"success": True, "reply_path": str(reply_path), "attachments_dir": str(attachments_dir), "error": None}
+
+        result = _process_incoming_email(
+            raw_email=self._build_email(include_from=False),
+            task_store=self.store,  # type: ignore[arg-type]
+            settings=self.settings,
+            max_retries=0,
+            postmark_message_id=None,
+            responder_fn=responder,
+            sender_fn=lambda **_kwargs: {"success": True, "message_id": "<reply@example.com>", "error": None},
+            sleep_fn=lambda _: None,
+        )
+
+        self.assertFalse(result["success"])
+        self.assertIn("reply recipient", result["error"])
 
 
 if __name__ == "__main__":

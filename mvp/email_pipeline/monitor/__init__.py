@@ -14,12 +14,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
 
-from .config import Settings, load_settings
-from .responder import generate_response
-from .sender import send_email
-from .storage import get_store
-from .task_store import EmailTask, TaskStatus, TaskStore, migrate_from_txt
-from .workspace import prepare_workspace
+from ..config import Settings, load_settings
+from ..responder import generate_response
+from ..sender import send_email
+from ..storage import get_store
+from ..task_store import EmailTask, TaskStatus, TaskStore, migrate_from_txt
+from ..workspace import prepare_workspace
 
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(message)s")

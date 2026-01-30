@@ -8,7 +8,7 @@ from email.parser import BytesParser
 from email.utils import make_msgid
 from pathlib import Path
 
-from .email_utils import extract_addresses, extract_body_text, safe_message_id, save_attachments
+from ..email_utils import extract_addresses, extract_body_text, safe_message_id, save_attachments
 
 
 def prepare_workspace(
@@ -146,4 +146,3 @@ def create_workspace_from_files(
         metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
     return {"workspace_path": str(workspace_path), "success": True, "error": None}
-

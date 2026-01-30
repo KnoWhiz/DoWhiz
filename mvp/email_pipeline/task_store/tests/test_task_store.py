@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import unittest
-from unittest import mock
 from datetime import datetime
 from types import SimpleNamespace
+from unittest import mock
 
 from mvp.email_pipeline import task_store
 from mvp.email_pipeline.task_store import EmailTask, TaskStatus, TaskStore
@@ -88,7 +88,7 @@ class FakeDB:
     def __init__(self) -> None:
         self.collection = FakeCollection()
 
-    def __getitem__(self, name):
+    def __getitem__(self, _name):
         return self.collection
 
 
@@ -122,71 +122,68 @@ class TaskStoreTests(unittest.TestCase):
         self.mongo_patch.stop()
         self.error_patch.stop()
 
-    def test_create_and_duplicate(self) -> None:
-        store = TaskStore("mongodb://fake")
-        task = EmailTask(
-            message_id="<id@example.com>",
+    def _task(self, message_id: str, attempts: int = 0, max_retries: int = 2) -> EmailTask:
+        return EmailTask(
+            message_id=message_id,
             postmark_message_id=None,
             content_hash="hash",
             from_address="sender@example.com",
             to_addresses=["receiver@example.com"],
             subject="Hi",
             status=TaskStatus.PENDING,
-            attempts=0,
-            max_retries=2,
+            attempts=attempts,
+            max_retries=max_retries,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
         )
+
+    def test_create_and_duplicate(self) -> None:
+        store = TaskStore("mongodb://fake")
+        task = self._task("<id@example.com>")
         self.assertTrue(store.create_task(task))
         self.assertFalse(store.create_task(task))
 
-    def test_mark_processing_and_failed(self) -> None:
+    def test_mark_processing_increments_attempts(self) -> None:
         store = TaskStore("mongodb://fake")
-        task = EmailTask(
-            message_id="<id2@example.com>",
-            postmark_message_id=None,
-            content_hash="hash2",
-            from_address="sender@example.com",
-            to_addresses=["receiver@example.com"],
-            subject="Hi",
-            status=TaskStatus.PENDING,
-            attempts=0,
-            max_retries=1,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
+        task = self._task("<id2@example.com>")
         store.create_task(task)
-        self.assertTrue(store.mark_processing(task.message_id))
+        store.mark_processing(task.message_id)
+        stored = store.get_task(task.message_id)
+        self.assertEqual(stored.attempts, 1)
+        self.assertEqual(stored.status, TaskStatus.PROCESSING)
+
+    def test_mark_failed_transitions(self) -> None:
+        store = TaskStore("mongodb://fake")
+        task = self._task("<id3@example.com>", max_retries=1)
+        store.create_task(task)
+        store.mark_processing(task.message_id)
         store.mark_failed(task.message_id, "err1")
         stored = store.get_task(task.message_id)
         self.assertEqual(stored.status, TaskStatus.PENDING)
-        self.assertTrue(store.mark_processing(task.message_id))
+        store.mark_processing(task.message_id)
         store.mark_failed(task.message_id, "err2")
         stored = store.get_task(task.message_id)
         self.assertEqual(stored.status, TaskStatus.FAILED)
 
-    def test_mark_completed_and_stats(self) -> None:
+    def test_reset_for_retry(self) -> None:
         store = TaskStore("mongodb://fake")
-        task = EmailTask(
-            message_id="<id3@example.com>",
-            postmark_message_id=None,
-            content_hash="hash3",
-            from_address="sender@example.com",
-            to_addresses=["receiver@example.com"],
-            subject="Hi",
-            status=TaskStatus.PENDING,
-            attempts=0,
-            max_retries=2,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
+        task = self._task("<id4@example.com>", attempts=2)
+        store.create_task(task)
+        store.mark_failed(task.message_id, "boom")
+        self.assertTrue(store.reset_for_retry(task.message_id))
+        stored = store.get_task(task.message_id)
+        self.assertEqual(stored.status, TaskStatus.PENDING)
+        self.assertEqual(stored.attempts, 0)
+
+    def test_stats_counts(self) -> None:
+        store = TaskStore("mongodb://fake")
+        task = self._task("<id5@example.com>")
         store.create_task(task)
         store.mark_processing(task.message_id)
         store.mark_completed(task.message_id, "<reply@example.com>", "/tmp/workspace")
-        stored = store.get_task(task.message_id)
-        self.assertEqual(stored.status, TaskStatus.COMPLETED)
         stats = store.get_stats()
         self.assertEqual(stats["completed"], 1)
+        self.assertEqual(stats["total"], 1)
 
 
 if __name__ == "__main__":

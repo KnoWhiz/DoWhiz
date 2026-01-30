@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .codex_runner import run_codex_reply
-from .config import load_settings
+from ..codex_runner import run_codex_reply
+from ..config import load_settings
 
 
 def generate_response(
