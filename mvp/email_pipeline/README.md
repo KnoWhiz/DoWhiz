@@ -1,101 +1,118 @@
-# Local Email Pipeline MVP
+# IceBrew Email Pipeline
 
-This MVP runs a local SMTP server that receives emails for `mini-mouse@deep-tutor.com`, triggers the Codex CLI, writes `email_reply.md`, and sends a reply in the same thread. Outbound replies are captured by a local SMTP sink for easy inspection.
+This refactor organizes the pipeline into five clear modules with CLI tooling and tests:
+
+- `sender.py`: Postmark outbound email sending
+- `responder.py`: AI response generation
+- `workspace.py`: Workspace preparation
+- `monitor.py`: Postmark inbound webhook + orchestration
+- `task_store.py`: MongoDB task state tracking
 
 ## Prereqs
 - Python 3.12
-- `codex` CLI on your PATH
-- `.env` contains `AZURE_OPENAI_API_KEY_BACKUP` and `AZURE_OPENAI_ENDPOINT_BACKUP`
+- `pymongo` installed (`pip install -r mvp/email_pipeline/requirements.txt`)
+- `POSTMARK_SERVER_TOKEN` for real email sends
+- `MONGODB_URI` pointing to a running MongoDB instance
 
-Install deps:
+## Environment Variables
+- `POSTMARK_SERVER_TOKEN`: Postmark API token
+- `OUTBOUND_FROM`: Default sender address
+- `WORKSPACE_ROOT`: Root directory for workspaces
+- `MONGODB_URI`: MongoDB connection string
+- `MONGODB_DB`: MongoDB database name
+- `MONITOR_WEBHOOK_PORT`: Webhook server port
+- `MAX_RETRIES`: Default retry count
+
+## CLI Tests
+All CLI tests run in dry-run mode unless `--real` is passed.
+
+### Sender
 ```
-pip install -r mvp/email_pipeline/requirements.txt
+python -m mvp.email_pipeline.cli.test_sender \
+  --real \
+  --from "mini-mouse@deep-tutor.com" \
+  --to "deep-tutor@deep-tutor.com" \
+  --subject "Test Email" \
+  --markdown-file "/path/to/test.md"
+
+python -m mvp.email_pipeline.cli.test_sender \
+  --real \
+  --from "mini-mouse@deep-tutor.com" \
+  --to "deep-tutor@deep-tutor.com,another@example.com" \
+  --subject "Multi-recipient Test" \
+  --markdown-file "/path/to/test.md" \
+  --attachments-dir "/path/to/attachments"
 ```
 
-## Run end-to-end (two terminals)
+### Responder
+```
+python -m mvp.email_pipeline.cli.test_responder \
+  --workspace "/path/to/workspace" \
+  --dry-run
 
-Terminal 1: start the pipeline server
-```
-python -m mvp.email_pipeline.server
-```
-
-Terminal 2: send a test email with PDF + DOCX attachments
-```
-python -m mvp.email_pipeline.send_test_email \
-  --from deep-tutor@deep-tutor.com \
-  --to mini-mouse@deep-tutor.com
+python -m mvp.email_pipeline.cli.test_responder \
+  --real \
+  --workspace "/path/to/workspace" \
+  --verbose
 ```
 
-Check the reply captured in the outbox:
+### Workspace
 ```
-python -m mvp.email_pipeline.read_outbox
+python -m mvp.email_pipeline.cli.test_workspace \
+  --eml-file "/path/to/test.eml" \
+  --workspace-root "/path/to/workspaces"
+
+python -m mvp.email_pipeline.cli.test_workspace \
+  --inbox-md "/path/to/email.md" \
+  --inbox-attachments "/path/to/attachments" \
+  --workspace-root "/path/to/workspaces"
+
+python -m mvp.email_pipeline.cli.test_workspace \
+  --list \
+  --workspace-root "/path/to/workspaces"
+
+python -m mvp.email_pipeline.cli.test_workspace \
+  --inspect "/path/to/workspaces/some_message_id"
 ```
 
-Artifacts are saved under:
-- `mvp/email_pipeline/workspaces/<message_id>/email_reply.md`
-- `mvp/email_pipeline/workspaces/<message_id>/email_reply_attachments/`
-- `mvp/email_pipeline/outbox/`
+### Monitor
+```
+python -m mvp.email_pipeline.cli.test_monitor \
+  --start \
+  --port 9000
 
-## Environment knobs
-- `INBOUND_SMTP_HOST` / `INBOUND_SMTP_PORT`
-- `OUTBOUND_MODE` = `smtp` (default) or `postmark`
-- `OUTBOUND_SMTP_HOST` / `OUTBOUND_SMTP_PORT`
-- `START_OUTBOX_SERVER` = `1` (default)
-- `WORKSPACE_ROOT`
-- `CODEX_MODEL`
-- `CODEX_DISABLED=1` to bypass Codex CLI
-- `MONGODB_URI`, `MONGODB_DB`, `USE_MONGODB=1`
-- `PROCESSED_IDS_PATH` to override webhook dedupe storage
+python -m mvp.email_pipeline.cli.test_monitor \
+  --simulate \
+  --eml-file "/path/to/test.eml"
 
-## Postmark outbound (optional)
-Set:
-- `OUTBOUND_MODE=postmark`
-- `POSTMARK_SERVER_TOKEN`
+python -m mvp.email_pipeline.cli.test_monitor \
+  --status \
+  --message-id "<some-message-id@example.com>"
+```
 
-Then run the server; outbound replies will go through Postmark.
+### Task Status
+```
+python -m mvp.email_pipeline.cli.task_status --list --limit 20
+python -m mvp.email_pipeline.cli.task_status --get "<message-id@example.com>"
+python -m mvp.email_pipeline.cli.task_status --failed
+python -m mvp.email_pipeline.cli.task_status --pending
+python -m mvp.email_pipeline.cli.task_status --stats
+python -m mvp.email_pipeline.cli.task_status --retry "<message-id@example.com>"
+python -m mvp.email_pipeline.cli.task_status --sender "user@gmail.com"
+```
 
-## Start real email service (manual send → reply)
-Use this when you want to send real email from any inbox to `mini-mouse@deep-tutor.com`.
-
-Terminal 1: start the inbound webhook service
+## Webhook Server
+Start the Postmark inbound webhook listener:
 ```
 python -m mvp.email_pipeline.postmark_webhook_server --port 9000
 ```
 
-Terminal 2: expose webhook with ngrok
+## Legacy SMTP Ingress (Deprecated)
+A legacy SMTP ingress still exists for local testing:
 ```
-ngrok http 9000
-```
-
-Terminal 3: set Postmark inbound hook to the ngrok URL
-```
-python -m mvp.email_pipeline.set_postmark_inbound_hook \
-  --hook-url https://YOUR-NGROK-URL.ngrok-free.dev/postmark/inbound
+python -m mvp.email_pipeline.server --inbound-port 8025
 ```
 
-Send an email manually to:
-```
-mini-mouse@deep-tutor.com
-```
-
-The pipeline will run and reply via Postmark to the sender.
-
-If you need to reprocess an email that was deduped, clear the dedupe file:
-```
-rm -f mvp/email_pipeline/state/postmark_processed_ids.txt
-```
-
-## Real email end-to-end (Postmark inbound + outbound)
-This test starts a Postmark inbound webhook receiver locally, exposes it with ngrok, sends a real email to your Postmark server’s inbound address (hash@inbound.postmarkapp.com), and verifies that a reply is sent back via Postmark.
-
-```
-python -m mvp.email_pipeline.real_email_test --from deep-tutor@deep-tutor.com
-```
-
-Note: This uses the server token in `.env` to temporarily set `InboundHookUrl` on your Postmark server and resets it afterward.
-
-## Set Postmark inbound hook (helper)
-```
-python -m mvp.email_pipeline.set_postmark_inbound_hook \
-  --hook-url https://YOUR-NGROK-URL.ngrok-free.dev/postmark/inbound
-```
+## Migration
+A migration helper (`task_store.migrate_from_txt`) is used by the monitor on startup to import the old
+dedupe file into MongoDB and rename it to `*.migrated`.

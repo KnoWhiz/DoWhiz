@@ -61,6 +61,8 @@ class Settings:
 
     workspace_root: Path = Path(_env("WORKSPACE_ROOT", str(DEFAULT_WORKSPACE_ROOT)))
     code_model: str = _env("CODEX_MODEL", "gpt-5.1-codex-max")
+    monitor_webhook_port: int = _env_int("MONITOR_WEBHOOK_PORT", 9000)
+    max_retries: int = _env_int("MAX_RETRIES", 2)
 
     processed_ids_path: Path = Path(
         _env("PROCESSED_IDS_PATH", str(DEFAULT_STATE_DIR / "postmark_processed_ids.txt"))

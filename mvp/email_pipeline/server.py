@@ -3,11 +3,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-from datetime import datetime
-from email.parser import BytesParser
-from email import policy
-from pathlib import Path
-from typing import Optional
 
 from aiosmtpd.controller import Controller
 
@@ -21,7 +16,7 @@ logger = logging.getLogger("email_pipeline")
 
 
 class InboundHandler:
-    def __init__(self, settings: Settings, store: Optional[MongoStore]) -> None:
+    def __init__(self, settings: Settings, store: MongoStore | None) -> None:
         self.settings = settings
         self.store = store
 
@@ -40,28 +35,6 @@ class InboundHandler:
         return "250 OK"
 
 
-class OutboxHandler:
-    def __init__(self, outbox_dir: Path) -> None:
-        self.outbox_dir = outbox_dir
-        self.outbox_dir.mkdir(parents=True, exist_ok=True)
-
-    async def handle_DATA(self, server, session, envelope):  # type: ignore[override]
-        raw_bytes = envelope.original_content or envelope.content
-        timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-        filename = f"outbound_{timestamp}.eml"
-        path = self.outbox_dir / filename
-        path.write_bytes(raw_bytes)
-
-        msg = BytesParser(policy=policy.default).parsebytes(raw_bytes)
-        logger.info(
-            "Captured outbound email to %s subject=%s file=%s",
-            msg.get("To"),
-            msg.get("Subject"),
-            path,
-        )
-        return "250 OK"
-
-
 def _start_controller(handler, hostname: str, port: int) -> Controller:
     controller = Controller(handler, hostname=hostname, port=port)
     controller.start()
@@ -69,30 +42,20 @@ def _start_controller(handler, hostname: str, port: int) -> Controller:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="IceBrew local email pipeline server")
+    parser = argparse.ArgumentParser(description="IceBrew SMTP ingress (legacy)")
     parser.add_argument("--inbound-host", default=None)
     parser.add_argument("--inbound-port", type=int, default=None)
-    parser.add_argument("--outbound-host", default=None)
-    parser.add_argument("--outbound-port", type=int, default=None)
     args = parser.parse_args()
 
     settings = load_settings()
     inbound_host = args.inbound_host or settings.inbound_host
     inbound_port = args.inbound_port or settings.inbound_port
-    outbound_host = args.outbound_host or settings.outbound_host
-    outbound_port = args.outbound_port or settings.outbound_port
 
     store = get_store(settings)
 
     inbound_handler = InboundHandler(settings, store)
     inbound_controller = _start_controller(inbound_handler, inbound_host, inbound_port)
     logger.info("Inbound SMTP listening on %s:%s", inbound_host, inbound_port)
-
-    outbox_controller = None
-    if settings.outbound_mode == "smtp" and settings.start_outbox_server:
-        outbox_handler = OutboxHandler(settings.outbox_dir)
-        outbox_controller = _start_controller(outbox_handler, outbound_host, outbound_port)
-        logger.info("Outbox SMTP sink listening on %s:%s", outbound_host, outbound_port)
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -104,8 +67,6 @@ def main() -> None:
         loop.stop()
         loop.close()
         inbound_controller.stop()
-        if outbox_controller:
-            outbox_controller.stop()
 
 
 if __name__ == "__main__":

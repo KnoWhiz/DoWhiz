@@ -3,3 +3,4 @@
 mvp/email_pipeline/workspaces/
 mvp/email_pipeline/outbox/
 *.pyc
+mvp/email_pipeline/state/postmark_processed_ids.txt

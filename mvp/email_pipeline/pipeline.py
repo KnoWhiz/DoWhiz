@@ -1,150 +1,94 @@
 from __future__ import annotations
 
-import shutil
-import time
-from email import policy
-from email.parser import BytesParser
-from email.utils import make_msgid
 from pathlib import Path
 from typing import Optional
 
-from .codex_runner import run_codex_reply
 from .config import Settings
-from .email_utils import (
-    extract_addresses,
-    extract_body_text,
-    safe_message_id,
-    save_attachments,
-)
-from .mailer import build_reply_message, send_via_postmark, send_via_smtp
+from .responder import generate_response
+from .sender import send_email
 from .storage import MongoStore
+from .workspace import prepare_workspace
 
 
 def process_email(raw_bytes: bytes, settings: Settings, store: Optional[MongoStore]) -> Path:
-    msg = BytesParser(policy=policy.default).parsebytes(raw_bytes)
+    workspace_info = prepare_workspace(raw_bytes, str(settings.workspace_root))
+    if not workspace_info.get("success"):
+        raise RuntimeError(workspace_info.get("error") or "Failed to prepare workspace")
 
-    message_id = msg.get("Message-ID") or make_msgid()
-    subject = msg.get("Subject", "")
-    from_addr = extract_addresses(msg.get("From"))
-    reply_to_addr = extract_addresses(msg.get("Reply-To"))
-    to_addr = extract_addresses(msg.get("To"))
-    references = msg.get("References")
-    in_reply_to = msg.get("In-Reply-To")
+    workspace_path = Path(workspace_info["workspace_path"])
 
-    text_body, html_body = extract_body_text(msg)
+    response = generate_response(str(workspace_path))
+    if not response.get("success"):
+        raise RuntimeError(response.get("error") or "Failed to generate response")
 
-    workspace_name = safe_message_id(message_id, f"email_{int(time.time())}")
-    workspace = settings.workspace_root / workspace_name
-    workspace.mkdir(parents=True, exist_ok=True)
+    reply_to_addresses = workspace_info.get("reply_to_addresses", [])
+    from_address = workspace_info.get("from_address", "")
+    reply_recipient = reply_to_addresses[0] if reply_to_addresses else from_address
+    if not reply_recipient:
+        raise RuntimeError("No reply recipient resolved.")
 
-    raw_path = workspace / "raw_email.eml"
-    raw_path.write_bytes(raw_bytes)
+    message_id = workspace_info.get("message_id")
+    references = _build_references(workspace_info.get("references"), message_id)
 
-    incoming_dir = workspace / "incoming_attachments"
-    incoming_paths = save_attachments(msg, incoming_dir)
-
-    reply_path = workspace / "email_reply.md"
-    reply_attachments_dir = workspace / "email_reply_attachments"
-    reply_attachments_dir.mkdir(parents=True, exist_ok=True)
-
-    prompt = _build_codex_prompt(
-        from_addr=from_addr[0] if from_addr else "",
-        to_addr=to_addr,
-        subject=subject,
-        body=text_body or html_body,
-        attachment_names=[p.name for p in incoming_paths],
+    send_result = send_email(
+        from_address=settings.outbound_from,
+        to_addresses=[reply_recipient],
+        subject=_normalize_subject(workspace_info.get("subject", "")),
+        markdown_file_path=response["reply_path"],
+        attachments_dir_path=response["attachments_dir"],
+        reply_to_message_id=message_id,
+        references=references,
     )
 
-    reply_text = run_codex_reply(
-        prompt,
-        workspace_dir=workspace,
-        reply_path=reply_path,
-        model_name=settings.code_model,
-        codex_disabled=settings.codex_disabled,
-    )
-
-    if settings.echo_attachments and not list(reply_attachments_dir.iterdir()):
-        for path in incoming_paths:
-            shutil.copy2(path, reply_attachments_dir / path.name)
-
-    if references:
-        reply_references = f"{references} {message_id}".strip()
-    else:
-        reply_references = message_id
-
-    reply_recipient = reply_to_addr[0] if reply_to_addr else (from_addr[0] if from_addr else "")
-
-    reply_message = build_reply_message(
-        settings=settings,
-        to_address=reply_recipient,
-        subject=subject,
-        body_text=reply_text,
-        in_reply_to=message_id,
-        references=reply_references,
-        attachments_dir=reply_attachments_dir,
-    )
-
-    outbound_error: str | None = None
-    try:
-        if settings.outbound_mode == "postmark":
-            send_via_postmark(reply_message, reply_attachments_dir, settings)
-        else:
-            send_via_smtp(reply_message, settings.outbound_host, settings.outbound_port)
-    except Exception as exc:
-        outbound_error = str(exc)
-        (workspace / "outbound_error.txt").write_text(outbound_error, encoding="utf-8")
-        # If Postmark blocks a recipient (4xx), don't retry the webhook endlessly.
-        if settings.outbound_mode == "postmark" and outbound_error.startswith("Postmark error 4"):
-            pass
-        else:
-            raise
+    if not send_result.get("success"):
+        error_text = send_result.get("error") or "Failed to send"
+        (workspace_path / "outbound_error.txt").write_text(error_text, encoding="utf-8")
+        raise RuntimeError(error_text)
 
     if store:
         store.record_inbound(
             {
-                "message_id": message_id,
-                "from": from_addr,
-                "to": to_addr,
-                "subject": subject,
-                "text_body": text_body,
-                "html_body": html_body,
-                "workspace": str(workspace),
-                "attachments": [p.name for p in incoming_paths],
+                "message_id": workspace_info.get("message_id"),
+                "from": workspace_info.get("from_address"),
+                "to": workspace_info.get("to_addresses"),
+                "subject": workspace_info.get("subject"),
+                "workspace": str(workspace_path),
             }
         )
         store.record_outbound(
             {
-                "in_reply_to": message_id,
-                "to": from_addr,
-                "subject": reply_message["Subject"],
-                "workspace": str(workspace),
-                "attachments": [p.name for p in reply_attachments_dir.iterdir()],
+                "in_reply_to": workspace_info.get("message_id"),
+                "to": reply_recipient,
+                "subject": _normalize_subject(workspace_info.get("subject", "")),
+                "workspace": str(workspace_path),
+                "attachments": _list_attachments(response.get("attachments_dir")),
             }
         )
 
-    return workspace
+    return workspace_path
 
 
-def _build_codex_prompt(
-    *,
-    from_addr: str,
-    to_addr: list[str],
-    subject: str,
-    body: str,
-    attachment_names: list[str],
-) -> str:
-    attachments_line = ", ".join(attachment_names) if attachment_names else "(none)"
-    to_line = ", ".join(to_addr) if to_addr else ""
+def _normalize_subject(subject: str) -> str:
+    normalized = (subject or "").strip()
+    if not normalized:
+        return "Re:"
+    if normalized.lower().startswith("re:"):
+        return normalized
+    return f"Re: {normalized}"
 
-    return (
-        "You are the IceBrew email agent.\n"
-        "Write a helpful reply to the incoming email.\n"
-        "You must write the reply to a file named email_reply.md in the current directory.\n"
-        "If you create any files to send back, place them in email_reply_attachments/.\n"
-        "Do not include anything else outside the reply text in email_reply.md.\n\n"
-        f"From: {from_addr}\n"
-        f"To: {to_line}\n"
-        f"Subject: {subject}\n"
-        f"Attachments: {attachments_line}\n\n"
-        f"Body:\n{body}\n"
-    )
+
+def _build_references(existing: str | None, message_id: str | None) -> str | None:
+    if not message_id:
+        return existing
+    if existing:
+        return f"{existing} {message_id}".strip()
+    return message_id
+
+
+def _list_attachments(path: str | None) -> list[str]:
+    if not path:
+        return []
+    attachments_dir = Path(path)
+    if not attachments_dir.exists():
+        return []
+    return [p.name for p in attachments_dir.iterdir() if p.is_file()]
