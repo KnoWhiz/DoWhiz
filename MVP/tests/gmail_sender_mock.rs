@@ -7,7 +7,7 @@ use tempfile::TempDir;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use dowhiz_mvp::gmail_sender::{GmailSender, GmailSenderConfig, SendTiming};
+use dowhiz_mvp::gmail_sender::{GmailSender, GmailSenderConfig, ScheduleMode, SendTiming};
 
 fn write_fixture_files(temp_dir: &TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
     let html_path = temp_dir.path().join("reply_email_draft.html");
@@ -97,6 +97,39 @@ async fn delays_send_until_ready() {
         .unwrap();
 
     assert!(start.elapsed() >= Duration::from_millis(200));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn gmail_schedule_mode_returns_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/gmail/v1/users/me/messages/send"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "msg-3"})))
+        .mount(&server)
+        .await;
+
+    let temp_dir = TempDir::new().unwrap();
+    let (html_path, attachments_dir) = write_fixture_files(&temp_dir);
+
+    let mut config = GmailSenderConfig::default();
+    config.base_url = format!("{}/gmail/v1", server.uri());
+    config.access_token_override = Some("test-token".to_string());
+    config.schedule_mode = ScheduleMode::Gmail;
+
+    let sender = GmailSender::new(config).unwrap();
+    let err = sender
+        .send_email(
+            "Scheduled",
+            html_path,
+            attachments_dir,
+            &["recipient@example.com".to_string()],
+            SendTiming::Delay(Duration::from_secs(1)),
+        )
+        .await
+        .expect_err("expected schedule not supported error");
+
+    let message = err.to_string();
+    assert!(message.contains("scheduled send"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

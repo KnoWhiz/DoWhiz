@@ -48,8 +48,17 @@ fn ensure_refresh_token(config: &GmailSenderConfig) {
     if std::env::var("GMAIL_REFRESH_TOKEN").is_ok() {
         return;
     }
-    if config.token_path.exists() {
-        return;
+    if let Ok(contents) = std::fs::read_to_string(&config.token_path) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) {
+            if value
+                .get("refresh_token")
+                .and_then(|v| v.as_str())
+                .map(|s| !s.is_empty())
+                .unwrap_or(false)
+            {
+                return;
+            }
+        }
     }
     if let Ok(refresh_token) = std::env::var("GMAIL_REFRESH_TOKEN_FALLBACK") {
         let payload = serde_json::json!({

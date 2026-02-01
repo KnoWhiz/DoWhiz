@@ -19,7 +19,7 @@ pub enum GmailError {
     Json(#[from] serde_json::Error),
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
-    #[error("missing refresh token; set GMAIL_REFRESH_TOKEN or provide a token file with refresh_token")]
+    #[error("missing refresh token; set GMAIL_REFRESH_TOKEN or add refresh_token to the token file")]
     MissingRefreshToken,
     #[error("invalid credentials file: {0}")]
     InvalidCredentials(String),
@@ -27,12 +27,26 @@ pub enum GmailError {
     ApiError { status: u16, body: String },
     #[error("invalid configuration: {0}")]
     InvalidConfig(String),
+    #[error("Gmail API does not support scheduled send; use ScheduleMode::LocalDelay or schedule outside Gmail")]
+    ScheduleNotSupported,
 }
 
 #[derive(Debug, Clone)]
 pub enum SendTiming {
     Immediate,
     Delay(Duration),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScheduleMode {
+    LocalDelay,
+    Gmail,
+}
+
+impl Default for ScheduleMode {
+    fn default() -> Self {
+        ScheduleMode::LocalDelay
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -45,12 +59,13 @@ pub struct GmailSenderConfig {
     pub application_name: String,
     pub timeout: Duration,
     pub access_token_override: Option<String>,
+    pub schedule_mode: ScheduleMode,
 }
 
 impl Default for GmailSenderConfig {
     fn default() -> Self {
         let credentials_path = PathBuf::from(".gmail_client_secret.json");
-        let token_path = PathBuf::from(".gmail_token.json");
+        let token_path = credentials_path.clone();
         Self {
             credentials_path,
             token_path,
@@ -60,6 +75,7 @@ impl Default for GmailSenderConfig {
             application_name: "DoWhiz MVP Gmail Sender".to_string(),
             timeout: Duration::from_secs(30),
             access_token_override: None,
+            schedule_mode: ScheduleMode::LocalDelay,
         }
     }
 }
@@ -105,7 +121,10 @@ impl GmailSender {
 
         if let SendTiming::Delay(delay) = timing {
             if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
+                match self.config.schedule_mode {
+                    ScheduleMode::LocalDelay => tokio::time::sleep(delay).await,
+                    ScheduleMode::Gmail => return Err(GmailError::ScheduleNotSupported),
+                }
             }
         }
 
@@ -251,6 +270,8 @@ struct StoredToken {
     access_token: Option<String>,
     refresh_token: Option<String>,
     expires_at: Option<u64>,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl StoredToken {

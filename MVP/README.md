@@ -13,7 +13,7 @@ Important: Gmail API does **not** support Gmail-side “Schedule send”. The `D
 ## Step 1: Place credentials
 
 1. Download OAuth client credentials from Google Cloud Console.
-2. Save the file as `.gmail_client_secret.json` in the `MVP` folder.
+2. Save the file as `.gmail_client_secret.json` in the `MVP` folder (or pass its path explicitly).
 
 The file should look like this:
 
@@ -39,7 +39,7 @@ Option A: environment variable
 
 Option B: token file
 
-- Create `.gmail_token.json` in the `MVP` folder:
+- Add `refresh_token` to `.gmail_client_secret.json` (default token file), or create a separate token file and point `GMAIL_TOKEN_PATH` to it. Example:
 
 ```
 {
@@ -88,7 +88,7 @@ cargo test --test gmail_sender_integration
 ```
 
 Optional variables:
-- `GMAIL_TOKEN_PATH`: override token file path (default: `.gmail_token.json`)
+- `GMAIL_TOKEN_PATH`: override token file path (default: `.gmail_client_secret.json`)
 - `GMAIL_CLIENT_SECRET_PATH`: override credentials file path (default: `.gmail_client_secret.json`)
 - `GMAIL_TEST_RECIPIENTS`: comma-separated recipients
 
