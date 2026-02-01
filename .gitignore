@@ -6,3 +6,7 @@ mvp/email_pipeline/outbox/
 mvp/email_pipeline/state/postmark_processed_ids.txt
 mvp/email_pipeline/**/tests/report.json
 .gmail_client_secret.json
+/MVP/target/debug/.fingerprint
+/MVP/target/debug
+MVP/target/.rustc_info.json
+MVP/target/CACHEDIR.TAG
