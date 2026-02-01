@@ -1,7 +1,21 @@
+# Secrets / local env
 .env
-.vscode/settings.json
+.gmail_client_secret.json
+.gmail_token.json
+
+# Local IDE settings
+.vscode/
+
+# Python artifacts (existing)
+*.pyc
+
+# Rust build artifacts
+target/
+MVP/target/
+
+# Existing pipeline outputs
 mvp/email_pipeline/workspaces/
 mvp/email_pipeline/outbox/
-*.pyc
 mvp/email_pipeline/state/postmark_processed_ids.txt
 mvp/email_pipeline/**/tests/report.json
+/.workspace
