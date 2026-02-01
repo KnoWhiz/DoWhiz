@@ -26,7 +26,8 @@ The Gmail API communicates errors at two levels: HTTP status codes in response h
         "message": "Sorting is not supported for queries with fullText terms. Results are always in descending relevance order.",
         "reason": "badRequest"
       }
-    ]
+    ],
+    "message": "Sorting is not supported for queries with fullText terms. Results are always in descending relevance order."
   }
 }
 ```
@@ -37,6 +38,25 @@ The Gmail API communicates errors at two levels: HTTP status codes in response h
 
 **Cause:** Expired or invalid access token, or missing authorization for required scopes.
 
+**Sample Error Response:**
+```json
+{
+  "error": {
+    "errors": [
+      {
+        "domain": "global",
+        "reason": "authError",
+        "message": "Invalid Credentials",
+        "locationType": "header",
+        "location": "Authorization",
+      }
+    ],
+    "code": 401,
+    "message": "Invalid Credentials"
+  }
+}
+```
+
 **Resolution:** Refresh the access token using your long-lived refresh token. Client libraries handle this automatically. If refresh fails, complete the OAuth authorization flow again.
 
 ### 403 Error: Usage Limit Exceeded
@@ -45,19 +65,87 @@ This error occurs when quota limits are reached or user lacks proper privileges.
 
 #### 403 - Daily Limit Exceeded
 
+**Sample Error Response:**
+```json
+{
+  "error": {
+    "errors": [
+      {
+        "domain": "usageLimits",
+        "reason": "dailyLimitExceeded",
+        "message": "Daily Limit Exceeded"
+      }
+    ],
+    "code": 403,
+    "message": "Daily Limit Exceeded"
+  }
+}
+```
+
 Visit Google API Console → select your project → Quotas tab → request additional quota.
 
 #### 403 - User Rate Limit Exceeded
 
+**Sample Error Response:**
+```json
+{
+ "error": {
+  "errors": [
+   {
+    "domain": "usageLimits",
+    "reason": "userRateLimitExceeded",
+    "message": "User Rate Limit Exceeded"
+   }
+  ],
+  "code": 403,
+  "message": "User Rate Limit Exceeded"
+ }
+}
+```
+
 **Resolution:** Optimize code to make fewer requests or implement retry logic.
 
 #### 403 - Rate Limit Exceeded
+
+**Sample Error Response:**
+```json
+{
+ "error": {
+  "errors": [
+   {
+    "domain": "usageLimits",
+    "message": "Rate Limit Exceeded",
+    "reason": "rateLimitExceeded",
+   }
+  ],
+  "code": 403,
+  "message": "Rate Limit Exceeded"
+ }
+}
+```
 
 **Resolution:** Implement exponential backoff retry strategy.
 
 #### 403 - Domain Policy
 
 **Message:** "Domain administrators have disabled Gmail apps."
+
+**Sample Error Response:**
+```json
+{
+  "error": {
+    "errors": [
+      {
+        "domain": "global",
+        "reason": "domainPolicy",
+        "message": "The domain administrators have disabled Gmail apps."
+      }
+    ],
+    "code": 403,
+    "message": "The domain administrators have disabled Gmail apps."
+  }
+}
+```
 
 **Resolution:** Inform the user and have them contact their domain administrator for access approval.
 
@@ -81,6 +169,23 @@ This occurs due to:
 Unexpected errors during request processing.
 
 **Related codes:** 502 Bad Gateway, 503 Service Unavailable, 504 Gateway Timeout
+
+**Sample Error Response:**
+```json
+{
+ "error": {
+  "errors": [
+   {
+    "domain": "global",
+    "reason": "backendError",
+    "message": "Backend Error",
+   }
+  ],
+  "code": 500,
+  "message": "Backend Error"
+ }
+}
+```
 
 **Resolution:** Implement exponential backoff retry strategy.
 

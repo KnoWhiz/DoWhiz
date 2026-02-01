@@ -39,15 +39,91 @@ The server returns a `multipart/mixed` response with parts corresponding to requ
 
 ```
 POST /batch/farm/v1 HTTP/1.1
-Authorization: Bearer token
+Authorization: Bearer your_auth_token
 Host: www.googleapis.com
+Content-Type: multipart/mixed; boundary=batch_foobarbaz
+Content-Length: total_content_length
+
+--batch_foobarbaz
+Content-Type: application/http
+Content-ID: <item1:12930812@barnyard.example.com>
+
+GET /farm/v1/animals/pony
+
+--batch_foobarbaz
+Content-Type: application/http
+Content-ID: <item2:12930812@barnyard.example.com>
+
+PUT /farm/v1/animals/sheep
+Content-Type: application/json
+Content-Length: part_content_length
+If-Match: "etag/sheep"
+
+{
+  "animalName": "sheep",
+  "animalAge": "5"
+  "peltColor": "green",
+}
+
+--batch_foobarbaz
+Content-Type: application/http
+Content-ID: <item3:12930812@barnyard.example.com>
+
+GET /farm/v1/animals
+If-None-Match: "etag/animals"
+
+--batch_foobarbaz--
+```
+
+## Example Response Structure
+
+```
+HTTP/1.1 200
+Content-Length: response_total_content_length
 Content-Type: multipart/mixed; boundary=batch_foobarbaz
 
 --batch_foobarbaz
 Content-Type: application/http
-Content-ID: <item1:id@example.com>
+Content-ID: <response-item1:12930812@barnyard.example.com>
 
-GET /farm/v1/animals/pony
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: response_part_1_content_length
+ETag: "etag/pony"
+
+{
+  "kind": "farm#animal",
+  "etag": "etag/pony",
+  "selfLink": "/farm/v1/animals/pony",
+  "animalName": "pony",
+  "animalAge": 34,
+  "peltColor": "white"
+}
+
+--batch_foobarbaz
+Content-Type: application/http
+Content-ID: <response-item2:12930812@barnyard.example.com>
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: response_part_2_content_length
+ETag: "etag/sheep"
+
+{
+  "kind": "farm#animal",
+  "etag": "etag/sheep",
+  "selfLink": "/farm/v1/animals/sheep",
+  "animalName": "sheep",
+  "animalAge": 5,
+  "peltColor": "green"
+}
+
+--batch_foobarbaz
+Content-Type: application/http
+Content-ID: <response-item3:12930812@barnyard.example.com>
+
+HTTP/1.1 304 Not Modified
+ETag: "etag/animals"
 
 --batch_foobarbaz--
 ```
