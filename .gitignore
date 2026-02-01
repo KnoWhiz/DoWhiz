@@ -5,3 +5,4 @@ mvp/email_pipeline/outbox/
 *.pyc
 mvp/email_pipeline/state/postmark_processed_ids.txt
 mvp/email_pipeline/**/tests/report.json
+.gmail_client_secret.json
