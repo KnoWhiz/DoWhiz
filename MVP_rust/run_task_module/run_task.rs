@@ -19,12 +19,24 @@ wire_api = "responses"
 "#;
 
 #[derive(Debug, Clone)]
-pub struct RunTaskRequest<'a> {
-    pub workspace_dir: &'a Path,
-    pub input_email_dir: &'a Path,
-    pub input_attachments_dir: &'a Path,
-    pub memory_dir: &'a Path,
-    pub reference_dir: &'a Path,
+pub struct RunTaskParams {
+    pub workspace_dir: PathBuf,
+    pub input_email_dir: PathBuf,
+    pub input_attachments_dir: PathBuf,
+    pub memory_dir: PathBuf,
+    pub reference_dir: PathBuf,
+    pub model_name: String,
+    pub codex_disabled: bool,
+}
+
+#[derive(Debug, Clone)]
+struct RunTaskRequest<'a> {
+    workspace_dir: &'a Path,
+    input_email_dir: &'a Path,
+    input_attachments_dir: &'a Path,
+    memory_dir: &'a Path,
+    reference_dir: &'a Path,
+    model_name: &'a str,
 }
 
 #[derive(Debug, Clone)]
@@ -77,24 +89,35 @@ impl From<io::Error> for RunTaskError {
     }
 }
 
-pub fn run_codex_task(request: RunTaskRequest<'_>) -> Result<RunTaskOutput, RunTaskError> {
-    ensure_workspace_dir(request.workspace_dir)?;
+pub fn run_task(params: &RunTaskParams) -> Result<RunTaskOutput, RunTaskError> {
+    let request = RunTaskRequest {
+        workspace_dir: &params.workspace_dir,
+        input_email_dir: &params.input_email_dir,
+        input_attachments_dir: &params.input_attachments_dir,
+        memory_dir: &params.memory_dir,
+        reference_dir: &params.reference_dir,
+        model_name: params.model_name.as_str(),
+    };
 
-    let _input_email_dir =
-        resolve_rel_dir(request.workspace_dir, request.input_email_dir, "input_email_dir")?;
-    let _input_attachments_dir = resolve_rel_dir(
-        request.workspace_dir,
-        request.input_attachments_dir,
-        "input_attachments_dir",
-    )?;
-    let _memory_dir = resolve_rel_dir(request.workspace_dir, request.memory_dir, "memory_dir")?;
-    let _reference_dir =
-        resolve_rel_dir(request.workspace_dir, request.reference_dir, "reference_dir")?;
+    let (reply_html_path, reply_attachments_dir) = prepare_workspace(&request)?;
 
-    let reply_html_path = request.workspace_dir.join("reply_email_draft.html");
-    let reply_attachments_dir = request.workspace_dir.join("reply_email_attachments");
-    ensure_dir_exists(&reply_attachments_dir, "reply_attachments_dir")?;
+    if params.codex_disabled {
+        write_placeholder_reply(&reply_html_path)?;
+        return Ok(RunTaskOutput {
+            reply_html_path,
+            reply_attachments_dir,
+            codex_output: "codex disabled".to_string(),
+        });
+    }
 
+    run_codex_task(request, reply_html_path, reply_attachments_dir)
+}
+
+fn run_codex_task(
+    request: RunTaskRequest<'_>,
+    reply_html_path: PathBuf,
+    reply_attachments_dir: PathBuf,
+) -> Result<RunTaskOutput, RunTaskError> {
     load_env_sources(request.workspace_dir)?;
 
     let api_key = env::var("AZURE_OPENAI_API_KEY_BACKUP")
@@ -112,7 +135,11 @@ pub fn run_codex_task(request: RunTaskRequest<'_>) -> Result<RunTaskOutput, RunT
         });
     }
 
-    let model_name = env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string());
+    let model_name = if request.model_name.trim().is_empty() {
+        env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string())
+    } else {
+        request.model_name.to_string()
+    };
 
     ensure_codex_config(&model_name, &azure_endpoint)?;
 
@@ -169,6 +196,33 @@ pub fn run_codex_task(request: RunTaskRequest<'_>) -> Result<RunTaskOutput, RunT
         reply_attachments_dir,
         codex_output: output_tail,
     })
+}
+
+fn prepare_workspace(request: &RunTaskRequest<'_>) -> Result<(PathBuf, PathBuf), RunTaskError> {
+    ensure_workspace_dir(request.workspace_dir)?;
+
+    let _input_email_dir =
+        resolve_rel_dir(request.workspace_dir, request.input_email_dir, "input_email_dir")?;
+    let _input_attachments_dir = resolve_rel_dir(
+        request.workspace_dir,
+        request.input_attachments_dir,
+        "input_attachments_dir",
+    )?;
+    let _memory_dir = resolve_rel_dir(request.workspace_dir, request.memory_dir, "memory_dir")?;
+    let _reference_dir =
+        resolve_rel_dir(request.workspace_dir, request.reference_dir, "reference_dir")?;
+
+    let reply_html_path = request.workspace_dir.join("reply_email_draft.html");
+    let reply_attachments_dir = request.workspace_dir.join("reply_email_attachments");
+    ensure_dir_exists(&reply_attachments_dir, "reply_attachments_dir")?;
+
+    Ok((reply_html_path, reply_attachments_dir))
+}
+
+fn write_placeholder_reply(path: &Path) -> Result<(), RunTaskError> {
+    let placeholder = "<html><body><p>Codex disabled. Received your email.</p></body></html>";
+    fs::write(path, placeholder)?;
+    Ok(())
 }
 
 fn ensure_workspace_dir(path: &Path) -> Result<(), RunTaskError> {

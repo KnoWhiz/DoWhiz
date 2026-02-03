@@ -1,10 +1,10 @@
 mod support;
 
-use run_task_module::run_codex_task;
+use run_task_module::run_task;
 use std::env;
 use std::fs;
 use support::{
-    build_request, create_workspace, write_fake_codex, EnvGuard, FakeCodexMode, TempDir, ENV_MUTEX,
+    build_params, create_workspace, write_fake_codex, EnvGuard, FakeCodexMode, TempDir, ENV_MUTEX,
 };
 
 #[test]
@@ -54,7 +54,9 @@ value = "still"
         ("CODEX_MODEL", "new-model"),
     ]);
 
-    let _result = run_codex_task(build_request(&workspace)).unwrap();
+    let mut params = build_params(&workspace);
+    params.model_name = "new-model".to_string();
+    let _result = run_task(&params).unwrap();
 
     let updated = fs::read_to_string(&config_path).unwrap();
     assert!(updated.contains("value = \"keep\""));

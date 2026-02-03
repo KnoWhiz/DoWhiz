@@ -11,7 +11,7 @@ cargo test
 ```
 
 The tests spin up a temporary workspace, inject a fake `codex` executable, and
-verify that `run_codex_task` writes `reply_email_draft.html`, creates the
+verify that `run_task` writes `reply_email_draft.html`, creates the
 attachments directory, and handles error cases (missing env, missing CLI,
 failed CLI, missing output, invalid paths).
 
@@ -28,7 +28,7 @@ workspace/
 ```
 
 2) Ensure AZURE_OPENAI_API_KEY_BACKUP and AZURE_OPENAI_ENDPOINT_BACKUP are set.
-3) Run a small Rust harness that calls run_codex_task from run_task.rs.
+3) Run a small Rust harness that calls run_task from run_task.rs.
 4) Verify the outputs:
    - reply_email_draft.html exists in the workspace root.
    - reply_email_attachments/ exists (and contains any generated attachments).

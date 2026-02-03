@@ -21,6 +21,7 @@ pub struct SendEmailParams {
 pub struct PostmarkSendResponse {
     pub error_code: i64,
     pub message: String,
+    #[serde(rename = "MessageID", alias = "MessageId")]
     pub message_id: String,
     pub submitted_at: String,
     pub to: String,
@@ -71,7 +72,13 @@ pub fn send_email(params: &SendEmailParams) -> Result<PostmarkSendResponse, Send
 
     let token = env::var("POSTMARK_SERVER_TOKEN")
         .map_err(|_| SendEmailError::MissingEnv("POSTMARK_SERVER_TOKEN"))?;
-    let from = env::var("OUTBOUND_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
+    if token.trim().is_empty() {
+        return Err(SendEmailError::MissingEnv("POSTMARK_SERVER_TOKEN"));
+    }
+    let mut from = env::var("OUTBOUND_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
+    if from.trim().is_empty() {
+        from = "oliver@dowhiz.com".to_string();
+    }
 
     let to = join_recipients(&params.to).ok_or(SendEmailError::MissingRecipient)?;
     let cc = join_recipients(&params.cc);
@@ -96,9 +103,13 @@ pub fn send_email(params: &SendEmailParams) -> Result<PostmarkSendResponse, Send
         attachments,
     };
 
+    let api_base =
+        env::var("POSTMARK_API_BASE_URL").unwrap_or_else(|_| "https://api.postmarkapp.com".to_string());
+    let url = format!("{}/email", api_base.trim_end_matches('/'));
+
     let client = reqwest::blocking::Client::new();
     let response = client
-        .post("https://api.postmarkapp.com/email")
+        .post(url)
         .header("Accept", "application/json")
         .header("Content-Type", "application/json")
         .header("X-Postmark-Server-Token", token)
@@ -129,7 +140,7 @@ fn join_recipients(list: &[String]) -> Option<String> {
     if cleaned.is_empty() {
         None
     } else {
-        Some(cleaned.join(","))
+        Some(cleaned.join(", "))
     }
 }
 

@@ -7,6 +7,7 @@ Send HTML emails with attachments via the Postmark API. This module reads a repl
 Environment variables (loaded from `.env` if present):
 - `POSTMARK_SERVER_TOKEN` (required)
 - `OUTBOUND_FROM` (optional, defaults to `oliver@dowhiz.com`)
+- `POSTMARK_API_BASE_URL` (optional, override Postmark base URL for tests)
 - `POSTMARK_LIVE_TEST` (required by tests, must be `1`)
 
 Example:
@@ -36,3 +37,4 @@ println!("Sent: {}", response.message_id);
 
 - Attachments are all files in `reply_email_attachments/` (no subfolders).
 - Tests run live against Postmark and will fail unless `POSTMARK_LIVE_TEST=1` and credentials are set.
+- Use `POSTMARK_TEST_TO` to control the live-test recipient address.

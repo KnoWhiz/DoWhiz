@@ -1,4 +1,4 @@
-use run_task_module::RunTaskRequest;
+use run_task_module::RunTaskParams;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -123,12 +123,14 @@ pub fn create_workspace(root: &Path) -> io::Result<PathBuf> {
     Ok(workspace)
 }
 
-pub fn build_request(workspace: &Path) -> RunTaskRequest<'_> {
-    RunTaskRequest {
-        workspace_dir: workspace,
-        input_email_dir: Path::new("incoming_email"),
-        input_attachments_dir: Path::new("incoming_attachments"),
-        memory_dir: Path::new("memory"),
-        reference_dir: Path::new("references"),
+pub fn build_params(workspace: &Path) -> RunTaskParams {
+    RunTaskParams {
+        workspace_dir: workspace.to_path_buf(),
+        input_email_dir: PathBuf::from("incoming_email"),
+        input_attachments_dir: PathBuf::from("incoming_attachments"),
+        memory_dir: PathBuf::from("memory"),
+        reference_dir: PathBuf::from("references"),
+        model_name: "test-model".to_string(),
+        codex_disabled: false,
     }
 }

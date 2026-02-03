@@ -17,16 +17,16 @@ use std::path::PathBuf;
 
 let params = RunTaskParams {
     workspace_dir: PathBuf::from("/path/to/workspace"),
-    input_email_path: PathBuf::from("input_email.eml"),
+    input_email_dir: PathBuf::from("incoming_email"),
     input_attachments_dir: PathBuf::from("input_attachments"),
     memory_dir: PathBuf::from("memory"),
-    references_dir: PathBuf::from("references"),
+    reference_dir: PathBuf::from("references"),
     model_name: "gpt-5.2-codex".to_string(),
     codex_disabled: false,
 };
 
 let result = run_task(&params)?;
-println!("Reply saved at: {}", result.reply_path.display());
+println!("Reply saved at: {}", result.reply_html_path.display());
 ```
 
 ## Folder structure
@@ -36,5 +36,6 @@ println!("Reply saved at: {}", result.reply_path.display());
 
 ## Notes
 
+- Input paths must be relative to `workspace_dir`.
 - The module creates `reply_email_draft.html` and `reply_email_attachments/` inside the workspace.
 - When `codex_disabled` is true, it writes a placeholder reply instead of calling Codex.

@@ -27,7 +27,8 @@ fn require_live_config() -> (String, String) {
     );
     let token = env::var("POSTMARK_SERVER_TOKEN")
         .expect("POSTMARK_SERVER_TOKEN must be set for live Postmark tests");
-    let recipient = "mini-mouse@deep-tutor.com".to_string();
+    let recipient =
+        env::var("POSTMARK_TEST_TO").unwrap_or_else(|_| "mini-mouse@deep-tutor.com".to_string());
     (token, recipient)
 }
 
@@ -40,7 +41,10 @@ fn unique_subject(prefix: &str) -> String {
 }
 
 fn poll_for_delivery(token: &str, message_id: &str, timeout: Duration) -> Result<(), String> {
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|err| format!("client build failed: {}", err))?;
     let url = format!(
         "https://api.postmarkapp.com/messages/outbound/{}/details",
         message_id
@@ -52,8 +56,19 @@ fn poll_for_delivery(token: &str, message_id: &str, timeout: Duration) -> Result
             .get(&url)
             .header("Accept", "application/json")
             .header("X-Postmark-Server-Token", token)
-            .send()
-            .map_err(|err| format!("request failed: {}", err))?;
+            .send();
+
+        let elapsed = start.elapsed().unwrap_or_default();
+        let response = match response {
+            Ok(response) => response,
+            Err(err) => {
+                if elapsed >= timeout {
+                    return Err(format!("timed out waiting for delivery event: {}", err));
+                }
+                std::thread::sleep(Duration::from_secs(5));
+                continue;
+            }
+        };
 
         let status = response.status();
         let body = response
@@ -77,7 +92,6 @@ fn poll_for_delivery(token: &str, message_id: &str, timeout: Duration) -> Result
             }
         }
 
-        let elapsed = start.elapsed().unwrap_or_default();
         if elapsed >= timeout {
             return Err("timed out waiting for delivery event".to_string());
         }
@@ -91,7 +105,10 @@ fn poll_outbound_message(
     subject: &str,
     message_id: &str,
 ) -> Result<serde_json::Value, String> {
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|err| format!("client build failed: {}", err))?;
     let start = SystemTime::now();
 
     loop {
@@ -105,8 +122,19 @@ fn poll_outbound_message(
                 ("count", "20"),
                 ("offset", "0"),
             ])
-            .send()
-            .map_err(|err| format!("search request failed: {}", err))?;
+            .send();
+
+        let elapsed = start.elapsed().unwrap_or_default();
+        let response = match response {
+            Ok(response) => response,
+            Err(err) => {
+                if elapsed >= Duration::from_secs(60) {
+                    return Err(format!("message not found in outbound search: {}", err));
+                }
+                std::thread::sleep(Duration::from_secs(5));
+                continue;
+            }
+        };
 
         let body = response
             .text()
@@ -126,7 +154,6 @@ fn poll_outbound_message(
             }
         }
 
-        let elapsed = start.elapsed().unwrap_or_default();
         if elapsed >= Duration::from_secs(60) {
             return Err("message not found in outbound search".to_string());
         }

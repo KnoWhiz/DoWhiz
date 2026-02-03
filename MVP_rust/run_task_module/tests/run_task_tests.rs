@@ -1,11 +1,11 @@
 mod support;
 
-use run_task_module::{run_codex_task, RunTaskError, RunTaskRequest};
+use run_task_module::{run_task, RunTaskError, RunTaskParams};
 use std::env;
 use std::fs;
 use std::path::Path;
 use support::{
-    build_request, create_workspace, write_fake_codex, EnvGuard, FakeCodexMode, TempDir, ENV_MUTEX,
+    build_params, create_workspace, write_fake_codex, EnvGuard, FakeCodexMode, TempDir, ENV_MUTEX,
 };
 
 #[test]
@@ -31,7 +31,8 @@ fn run_task_success_with_fake_codex() {
         ("CODEX_MODEL", "test-model"),
     ]);
 
-    let result = run_codex_task(build_request(&workspace)).unwrap();
+    let params = build_params(&workspace);
+    let result = run_task(&params).unwrap();
     assert!(result.reply_html_path.exists());
     assert!(result.reply_attachments_dir.is_dir());
 
@@ -63,7 +64,8 @@ fn run_task_reports_missing_output() {
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
     ]);
 
-    let err = run_codex_task(build_request(&workspace)).unwrap_err();
+    let params = build_params(&workspace);
+    let err = run_task(&params).unwrap_err();
     assert!(matches!(err, RunTaskError::OutputMissing { .. }));
 }
 
@@ -89,7 +91,8 @@ fn run_task_reports_codex_failure() {
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
     ]);
 
-    let err = run_codex_task(build_request(&workspace)).unwrap_err();
+    let params = build_params(&workspace);
+    let err = run_task(&params).unwrap_err();
     assert!(matches!(
         err,
         RunTaskError::CodexFailed {
@@ -115,7 +118,8 @@ fn run_task_reports_missing_codex_cli() {
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
     ]);
 
-    let err = run_codex_task(build_request(&workspace)).unwrap_err();
+    let params = build_params(&workspace);
+    let err = run_task(&params).unwrap_err();
     assert!(matches!(err, RunTaskError::CodexNotFound));
 }
 
@@ -141,7 +145,8 @@ fn run_task_reports_missing_env() {
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
     ]);
 
-    let err = run_codex_task(build_request(&workspace)).unwrap_err();
+    let params = build_params(&workspace);
+    let err = run_task(&params).unwrap_err();
     assert!(matches!(
         err,
         RunTaskError::MissingEnv {
@@ -157,14 +162,31 @@ fn run_task_rejects_absolute_input_dir() {
     let temp = TempDir::new("codex_task_absolute").unwrap();
     let workspace = create_workspace(&temp.path).unwrap();
 
-    let request = RunTaskRequest {
-        workspace_dir: &workspace,
-        input_email_dir: Path::new("/absolute/path"),
-        input_attachments_dir: Path::new("incoming_attachments"),
-        memory_dir: Path::new("memory"),
-        reference_dir: Path::new("references"),
+    let request = RunTaskParams {
+        workspace_dir: workspace,
+        input_email_dir: Path::new("/absolute/path").to_path_buf(),
+        input_attachments_dir: Path::new("incoming_attachments").to_path_buf(),
+        memory_dir: Path::new("memory").to_path_buf(),
+        reference_dir: Path::new("references").to_path_buf(),
+        model_name: "test-model".to_string(),
+        codex_disabled: false,
     };
 
-    let err = run_codex_task(request).unwrap_err();
+    let err = run_task(&request).unwrap_err();
     assert!(matches!(err, RunTaskError::InvalidPath { .. }));
+}
+
+#[test]
+fn run_task_codex_disabled_writes_placeholder() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("codex_task_disabled").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let mut params = build_params(&workspace);
+    params.codex_disabled = true;
+
+    let result = run_task(&params).unwrap();
+    let html = fs::read_to_string(&result.reply_html_path).unwrap();
+    assert!(html.contains("Codex disabled"));
+    assert!(result.reply_attachments_dir.is_dir());
 }

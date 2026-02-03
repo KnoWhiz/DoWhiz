@@ -29,10 +29,12 @@ pub struct SendEmailTask {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunTaskTask {
     pub workspace_dir: PathBuf,
-    pub input_email_path: PathBuf,
+    #[serde(alias = "input_email_path")]
+    pub input_email_dir: PathBuf,
     pub input_attachments_dir: PathBuf,
     pub memory_dir: PathBuf,
-    pub references_dir: PathBuf,
+    #[serde(alias = "references_dir")]
+    pub reference_dir: PathBuf,
     pub model_name: String,
     pub codex_disabled: bool,
 }
@@ -98,10 +100,10 @@ impl TaskExecutor for ModuleExecutor {
             TaskKind::RunTask(task) => {
                 let params = run_task_module::RunTaskParams {
                     workspace_dir: task.workspace_dir.clone(),
-                    input_email_path: task.input_email_path.clone(),
+                    input_email_dir: task.input_email_dir.clone(),
                     input_attachments_dir: task.input_attachments_dir.clone(),
                     memory_dir: task.memory_dir.clone(),
-                    references_dir: task.references_dir.clone(),
+                    reference_dir: task.reference_dir.clone(),
                     model_name: task.model_name.clone(),
                     codex_disabled: task.codex_disabled,
                 };
