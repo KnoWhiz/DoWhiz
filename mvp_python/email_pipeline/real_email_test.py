@@ -190,7 +190,7 @@ def main() -> None:
     env["OUTBOUND_MODE"] = "postmark"
 
     webhook_proc = subprocess.Popen(
-        ["python", "-m", "mvp.email_pipeline.postmark_webhook_server", "--port", str(args.webhook_port)],
+        ["python", "-m", "mvp_python.email_pipeline.postmark_webhook_server", "--port", str(args.webhook_port)],
         cwd=str(repo_root),
         env=env,
         stdout=subprocess.PIPE,

@@ -9,32 +9,32 @@ This MVP runs a local SMTP server that receives emails for `oliver@dowhiz.com`, 
 
 Install deps:
 ```
-pip install -r mvp/email_pipeline/requirements.txt
+pip install -r mvp_python/email_pipeline/requirements.txt
 ```
 
 ## Run end-to-end (two terminals)
 
 Terminal 1: start the pipeline server
 ```
-python -m mvp.email_pipeline.server
+python -m mvp_python.email_pipeline.server
 ```
 
 Terminal 2: send a test email with PDF + DOCX attachments
 ```
-python -m mvp.email_pipeline.send_test_email \
+python -m mvp_python.email_pipeline.send_test_email \
   --from oliver@dowhiz.com \
   --to deep-tutor@deep-tutor.com
 ```
 
 Check the reply captured in the outbox:
 ```
-python -m mvp.email_pipeline.read_outbox
+python -m mvp_python.email_pipeline.read_outbox
 ```
 
 Artifacts are saved under:
-- `mvp/email_pipeline/workspaces/<message_id>/email_reply.md`
-- `mvp/email_pipeline/workspaces/<message_id>/email_reply_attachments/`
-- `mvp/email_pipeline/outbox/`
+- `mvp_python/email_pipeline/workspaces/<message_id>/email_reply.md`
+- `mvp_python/email_pipeline/workspaces/<message_id>/email_reply_attachments/`
+- `mvp_python/email_pipeline/outbox/`
 
 ## Environment knobs
 - `INBOUND_SMTP_HOST` / `INBOUND_SMTP_PORT`
@@ -59,7 +59,7 @@ Use this when you want to send real email from any inbox to `oliver@dowhiz.com`.
 
 Terminal 1: start the inbound webhook service
 ```
-python -m mvp.email_pipeline.postmark_webhook_server --port 9000
+python -m mvp_python.email_pipeline.postmark_webhook_server --port 9000
 ```
 
 Terminal 2: expose webhook with ngrok
@@ -69,7 +69,7 @@ ngrok http 9000
 
 Terminal 3: set Postmark inbound hook to the ngrok URL
 ```
-python -m mvp.email_pipeline.set_postmark_inbound_hook \
+python -m mvp_python.email_pipeline.set_postmark_inbound_hook \
   --hook-url https://YOUR-NGROK-URL.ngrok-free.dev/postmark/inbound
 ```
 
@@ -82,20 +82,20 @@ The pipeline will run and reply via Postmark to the sender.
 
 If you need to reprocess an email that was deduped, clear the dedupe file:
 ```
-rm -f mvp/email_pipeline/state/postmark_processed_ids.txt
+rm -f mvp_python/email_pipeline/state/postmark_processed_ids.txt
 ```
 
 ## Real email end-to-end (Postmark inbound + outbound)
 This test starts a Postmark inbound webhook receiver locally, exposes it with ngrok, sends a real email to your Postmark server’s inbound address (hash@inbound.postmarkapp.com), and verifies that a reply is sent back via Postmark.
 
 ```
-python -m mvp.email_pipeline.real_email_test --from oliver@dowhiz.com
+python -m mvp_python.email_pipeline.real_email_test --from oliver@dowhiz.com
 ```
 
 Note: This uses the server token in `.env` to temporarily set `InboundHookUrl` on your Postmark server and resets it afterward.
 
 ## Set Postmark inbound hook (helper)
 ```
-python -m mvp.email_pipeline.set_postmark_inbound_hook \
+python -m mvp_python.email_pipeline.set_postmark_inbound_hook \
   --hook-url https://YOUR-NGROK-URL.ngrok-free.dev/postmark/inbound
 ```

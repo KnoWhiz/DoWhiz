@@ -6,9 +6,9 @@ import os
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_WORKSPACE_ROOT = REPO_ROOT / "mvp" / "email_pipeline" / "workspaces"
-DEFAULT_OUTBOX_DIR = REPO_ROOT / "mvp" / "email_pipeline" / "outbox"
-DEFAULT_STATE_DIR = REPO_ROOT / "mvp" / "email_pipeline" / "state"
+DEFAULT_WORKSPACE_ROOT = REPO_ROOT / "mvp_python" / "email_pipeline" / "workspaces"
+DEFAULT_OUTBOX_DIR = REPO_ROOT / "mvp_python" / "email_pipeline" / "outbox"
+DEFAULT_STATE_DIR = REPO_ROOT / "mvp_python" / "email_pipeline" / "state"
 
 
 def _load_env_file(path: Path) -> None:

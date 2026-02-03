@@ -1,0 +1,156 @@
+From: bingran.you@berkeley.edu
+To: oliver@dowhiz.com
+Bcc: f4539b87b9eb29a0ecce5585895e7a6c@inbound.postmarkapp.com
+Subject: Hi this is a test
+Message-ID:
+ <CAD8_00dB6Gcmh65LXhjVhX5B0BXzo+Fi_Sr03FVdEpxhoaOn8Q@mail.gmail.com>
+Return-Path: =?utf-8?q?=3Cagent+caf=5F=3Df4539b87b9eb29a0ecce5585895e7a6c=3D?=
+ =?utf-8?q?inbound=2Epostmarkapp=2Ecom=40dowhiz=2Ecom=3E?=
+Received: by p-pm-inboundg01a-aws-useast1a.inbound.postmarkapp.com (Postfix,
+ from userid 996)	id 67D6640504B; Tue,  3 Feb 2026 04:30:39 +0000 (UTC)
+X-Spam-Checker-Version:
+ SpamAssassin 3.4.0 (2014-02-07) on	p-pm-inboundg01a-aws-useast1a
+X-Spam-Status: No
+X-Spam-Score: 1.9
+X-Spam-Tests: DKIMWL_WL_MED,DKIM_SIGNED,DKIM_VALID,DKIM_VALID_AU,
+	HTML_IMAGE_ONLY_16,HTML_IMAGE_RATIO_02,HTML_MESSAGE,LONG_HEX_URI,
+	RCVD_IN_DNSWL_BLOCKED,RCVD_IN_MSPIKE_H3,RCVD_IN_MSPIKE_WL,
+	RCVD_IN_VALIDITY_RPBL_BLOCKED,RCVD_IN_VALIDITY_SAFE_BLOCKED,
+	RCVD_IN_ZEN_BLOCKED_OPENDNS,SPF_HELO_NONE,SPF_PASS,T_KAM_HTML_FONT_INVALID,
+	URIBL_DBL_BLOCKED_OPENDNS,URIBL_ZEN_BLOCKED_OPENDNS
+Received-SPF: pass (dowhiz.com: Sender is authorized to use =?utf-8?q?=27age?=
+ =?utf-8?q?nt+caf=5F=3Df4539b87b9eb29a0ecce5585895e7a6c=3Dinbound=2Epostmark?=
+ =?utf-8?q?app=2Ecom=40dowhiz=2Ecom=27?= in 'mfrom' identity (mechanism
+ 'include:dc-aa8e722993._spfm.dowhiz.com' matched))
+ receiver=p-pm-inboundg01a-aws-useast1a; identity=mailfrom; =?utf-8?q?envelo?=
+ =?utf-8?q?pe-from=3D=22agent+caf=5F=3Df4539b87b9eb29a0ecce5585895e7a6c=3Din?=
+ =?utf-8?q?bound=2Epostmarkapp=2Ecom=40dowhiz=2Ecom=22=3B?=
+ helo=mail-ot1-f46.google.com; client-ip=209.85.210.46
+ARC-Seal: i=3; a=rsa-sha256; t=1770093038; cv=pass;        d=google.com;
+ s=arc-20240605;       
+ b=LXT+Rfcs2xDGsEOoVAvJF6aXh8ilfQ2PFiyRRECAh2lNlQF+L2nmdX7Ej8yVueoGbz        
+ GtOqtW+bHpw0V3X/5YrgKCsK7IeKwh4iJIsQeQYStoBR8BG8BGEdaHObW6QH7IUUECZj        
+ +RslWZ55j2hyeFpfkBlcSL9Ut83ZjfTnj5Jd3FBFW/Actrr9rWa7a3Y62XREt7VZvM6F        
+ +fTQ7aM0am68bMAKp+x2AlJgPq4S4XLiwXFrfyB5A9qvOW+2wG+/PmhOgkBlj8MnB4dJ        
+ WjClfu6q4hvFkXe8Y2TrFRItu2l+6oTexjOgiQ7uU+uWe4+7FntZIEHxMBwKjqtRwhg4        
+ rMmA==
+ARC-Message-Signature: i=3; a=rsa-sha256; c=relaxed/relaxed; d=google.com;
+ s=arc-20240605;       
+ h=to:subject:message-id:date:from:mime-version:dkim-signature        
+ :delivered-to;        bh=9IRpFOYF9EpiNTWfnmn+mDp+5sd40Bs8+wM/8BVg41w=;
+        fh=7bF0udLYBeCE5Y6YEr0nJyafhgVcQhUUZNEKFnK8YoU=;       
+ b=J9RcxCnLCg3a+8Rv1tAswIeIOtQ3PcxzBbxVYF+fzdvWovhPQSOcvomy1g/vfcj+dm        
+ Km7z2snXCkGfZnJPF0t0ymCAeI76eeQPCTKaRZevEDdU5vEJ5HmslygpZxlPllKPvkmG        
+ 0rh74V1o7Uy0tkX94RL4Fxet6a+JqPz8tE0yRLB9oJGHi4htiwCfVQHiS7aeTTYzrenU        
+ BN5Wg+GTAiBIRD2va38Wxeo3PUklMaIqQqexab+MUo1zjPu6vHK248nUafAcbu2d8ZWj        
+ f1JY4qRW/xenDgwtSalE0Cp4hE575zfkeG0wC5SWsEV3adt358Q7K0keP0q9QGXl14iJ        
+ 2nQQ==;        darn=inbound.postmarkapp.com
+ARC-Authentication-Results: i=3; mx.google.com;       dkim=pass
+ header.i=@berkeley.edu header.s=google header.b=Qqo7igq8;       arc=pass
+ (i=1);       spf=pass (google.com: domain of bingran.you@berkeley.edu
+ designates 209.85.220.41 as permitted sender)
+ smtp.mailfrom=bingran.you@berkeley.edu;       dmarc=pass (p=REJECT sp=REJECT
+ dis=NONE) header.from=berkeley.edu;       dara=neutral header.i=@dowhiz.com
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;       
+ d=1e100.net; s=20230601; t=1770093038; x=1770697838;       
+ h=to:subject:message-id:date:from:mime-version:x-gm-gg:dkim-signature
+         :delivered-to:x-forwarded-for:x-forwarded-to:x-gm-message-state:from
+         :to:cc:subject:date:message-id:reply-to;       
+ bh=9IRpFOYF9EpiNTWfnmn+mDp+5sd40Bs8+wM/8BVg41w=;       
+ b=uBRH3LX/n3CfwumtftfU36AUPJESIBmHlEyCbz4qUwAhkIZSxb3p21jImsj4+D1Wtz        
+ Mf0KjnIHm/lzGSMWMGK0Gu63vjoLdyGycsHeF0LFb+m3wmKeyrfh81Jo5g5zsl9sCmhw        
+ fdIL+VNbs1OmsIPenR90X7wJ4CGPLDlgdui1ffT4hOVVCTdsc4G/AX6QNlUCk3cBvPxd        
+ +OGoLyEVawo9114WXQHOlZ7Xdn5n31l0S5r8oMgMkmcy1HSnUzUZfSFgJRUwWY4KJt7E        
+ wE4Vzye4NI1OVUbO1E57yIJ4Dgjw4jcIJ8nVFzHpWn6583erV8ovVY5MGUzbOdezDjHX        
+ CV9w==
+X-Forwarded-Encrypted: i=3; =?utf-8?q?AJvYcCWhNCsWKb4wDPQkBjj6Tl3bq336FFV5pX?=
+ =?utf-8?q?bWHi7TG40iAgWYpJg0Eo7JL5M1M6/H4krG1wzUiaNiPYsSGQg4Dgi4VTFamuZ7lW2?=
+ =?utf-8?q?rb8mI/s63cQ=3D=3D=40inbound=2Epostmarkapp=2Ecom?=
+X-Gm-Message-State: AOJu0Yw2fuYpGZbKsTXzqJH51+6yjQoiDHlc9ds3++d2iswmW9auhZfy
+	8t4UMaLc/+1ps/ciwEukWF3VHvOz9btQWZverXAcIRRYob51REhegL0rQMAi46dw3AoxF1V+bw+
+	GgR5qCLZK+CM1uF8FzAvyLYIgzJz3ciFyKXDIQugoWBRIlVQoRFdho8H7ncdDkX5K9VM/L7vipO
+	oU5X/pNAuU
+X-Received: by 2002:a05:6830:6683:b0:7cf:d1b7:40b6 with SMTP id
+ 46e09a7af769-7d1a528659amr8961931a34.11.1770093038329;        Mon, 02 Feb
+ 2026 20:30:38 -0800 (PST)
+X-Forwarded-To: f4539b87b9eb29a0ecce5585895e7a6c@inbound.postmarkapp.com
+X-Forwarded-For:
+ agent@dowhiz.com f4539b87b9eb29a0ecce5585895e7a6c@inbound.postmarkapp.com
+Delivered-To: oliver@dowhiz.com
+Authentication-Results: mx.google.com;       dkim=pass header.i=@berkeley.edu
+ header.s=google header.b=Qqo7igq8;       arc=pass (i=1);       spf=pass
+ (google.com: domain of bingran.you@berkeley.edu designates 209.85.220.41 as
+ permitted sender) smtp.mailfrom=bingran.you@berkeley.edu;       dmarc=pass
+ (p=REJECT sp=REJECT dis=NONE) header.from=berkeley.edu;       dara=neutral
+ header.i=@dowhiz.com
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=berkeley.edu;
+ s=google; t=1770093037; x=1770697837; darn=dowhiz.com;       
+ h=to:subject:message-id:date:from:mime-version:from:to:cc:subject        
+ :date:message-id:reply-to;       
+ bh=9IRpFOYF9EpiNTWfnmn+mDp+5sd40Bs8+wM/8BVg41w=;       
+ b=Qqo7igq8eplB22epgHn1NNF/Czyjcx2tpfZKjLn0YUd6vtq9wd7xM01TiAUQUlR1Pu        
+ toVD7Q8sVJX2827s46V80T/CsncVeqa2hrWFUTAvfKdkefRcyFD1xMmAdE+8+RQ3Yfd2        
+ HMn0n4lu39DdOhF6EdH/Y7lpAMGS2Le9syZmW96fTB0ac1kLRs9fiiq+Cz0eo2Bm+aDP        
+ xff5DV41ijWuV/bFKva9VnX3hji+2+pAI3Qa5uLgSO+9xlt72Ay7sUCIjRCKXImBTml4        
+ C+HskWZ5bxRtlvh1fVcwcORjE19bmy89jjHcrPQHFIPEAggI5gMy0oYN10Sg659GMR5s        
+ ERtQ==
+X-Gm-Gg: AZuq6aJFKpD1Eai4bBbFs/qDpXS2qO45fhjzcoIJouwrBxiXk5wfeHXnGondqfNJ/0F
+	cJlFD6G8hVkzY9Kws3dcalqELAdLna6+GUV6qEjmHnpRQn9xHNP9fRT8bdV1JPTCe8rn9H2bYyp
+	r3h7+5eRucaataVgOgHuKItiJq/mWmNgbl9AOY72oWTzE+mF6tZByIiX1hcxjDdgHxKE2LHyelJ
+	QH6rFC87VzKQ1TqqyvsRPmgGKumhpvT0+k+sJlpw0S/r2/G9CsiXbvkZHaXxk2/bYNBgVlIsfhv
+	3BBbFypKTfZlgA8BCYsvirkzbeJe4zHmJwFOg8cevOaxTKKUOts5Q8pw0g==
+MIME-Version: 1.0
+X-Gm-Features: AZwV_QgdLkru3jb-uHhpziMqVHYMs4ZPRv9M-9U6JRjalbbmnJwgSmbmqHtJRc4
+Content-Type: multipart/alternative;
+ boundary="===============8774734413344777900=="
+
+--===============8774734413344777900==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Hi this is a test
+
+
+
+[image: Mailsuite] Email tracked with Mailsuite  =C2=B7  Opt out
+<https://u.list-preferences.com/en/privacy/opt-out/unsubscribe/637155decd034c=
+69a07b68fc72a956b2f7080867/f0cf44e360f92aba372552296617622b0ba30f43d68c9d36ef=
+821efea06dd403fdb51ee4a213d3972c10764f76023429676117f9ad3fd6b7e58301050713835=
+b>
+02/02/26, 08:30:10 PM
+
+--===============8774734413344777900==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<div dir=3D"ltr">Hi this is a test<br><br><br><br><div id=3D"mt-signature">
+        <table border=3D"0" cellpadding=3D"8" cellspacing=3D"0" style=3D"user=
+-select: none;">
+            <tbody><tr style=3D"display:flex">
+                <td style=3D"padding:0 4px 0 0">
+                    <img src=3D"https://s3.amazonaws.com/mailtrack-signature/=
+logo-grey.png" alt=3D"Mailsuite" class=3D"" width=3D"24" height=3D"20">
+                </td>
+                <td style=3D"padding:0 10px 0 0">
+                    <span style=3D"color:#333;font-size:12px;font-family:Inte=
+r,sans-serif;font-weight:400;line-height:185%">Email tracked with Mailsuite =
+=C2=A0=C2=B7=C2=A0 <a href=3D"https://u.list-preferences.com/en/privacy/opt-o=
+ut/unsubscribe/637155decd034c69a07b68fc72a956b2f7080867/f0cf44e360f92aba37255=
+2296617622b0ba30f43d68c9d36ef821efea06dd403fdb51ee4a213d3972c10764f7602342967=
+6117f9ad3fd6b7e58301050713835b" target=3D"_blank" style=3D"color:#666;font-si=
+ze:11px;font-family:Inter,sans-serif;font-weight:400;line-height:185%">Opt ou=
+t</a></span><br>
+                </td>
+               =20
+    <td><span style=3D"color:transparent;font-size:0">02/02/26, 08:30:10 PM</=
+span></td>
+
+               =20
+            </tr>
+        </tbody></table>
+    </div><img width=3D"0" height=3D"0" class=3D"mailtrack-img" alt=3D"" styl=
+e=3D"display:flex" src=3D"https://mailtrack.io/trace/mail/637155decd034c69a07=
+b68fc72a956b2f7080867.png?u=3D13450896"></div>
+
+--===============8774734413344777900==--
