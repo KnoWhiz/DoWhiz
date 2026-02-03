@@ -49,12 +49,12 @@ def _env_bool(key: str, default: bool) -> bool:
 class Settings:
     inbound_host: str = _env("INBOUND_SMTP_HOST", "127.0.0.1")
     inbound_port: int = _env_int("INBOUND_SMTP_PORT", 8025)
-    inbound_address: str = _env("INBOUND_ADDRESS", "agent@dowhiz.com")
+    inbound_address: str = _env("INBOUND_ADDRESS", "oliver@dowhiz.com")
 
     outbound_mode: str = _env("OUTBOUND_MODE", "smtp")
     outbound_host: str = _env("OUTBOUND_SMTP_HOST", "127.0.0.1")
     outbound_port: int = _env_int("OUTBOUND_SMTP_PORT", 8026)
-    outbound_from: str = _env("OUTBOUND_FROM", "agent@dowhiz.com")
+    outbound_from: str = _env("OUTBOUND_FROM", "oliver@dowhiz.com")
 
     start_outbox_server: bool = _env_bool("START_OUTBOX_SERVER", True)
     outbox_dir: Path = Path(_env("OUTBOX_DIR", str(DEFAULT_OUTBOX_DIR)))

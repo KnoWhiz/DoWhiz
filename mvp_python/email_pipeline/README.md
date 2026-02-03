@@ -1,6 +1,6 @@
 # Local Email Pipeline MVP
 
-This MVP runs a local SMTP server that receives emails for `agent@dowhiz.com`, triggers the Codex CLI, writes `email_reply.md`, and sends a reply in the same thread. Outbound replies are captured by a local SMTP sink for easy inspection.
+This MVP runs a local SMTP server that receives emails for `oliver@dowhiz.com`, triggers the Codex CLI, writes `email_reply.md`, and sends a reply in the same thread. Outbound replies are captured by a local SMTP sink for easy inspection.
 
 ## Prereqs
 - Python 3.12
@@ -22,7 +22,7 @@ python -m mvp.email_pipeline.server
 Terminal 2: send a test email with PDF + DOCX attachments
 ```
 python -m mvp.email_pipeline.send_test_email \
-  --from agent@dowhiz.com \
+  --from oliver@dowhiz.com \
   --to deep-tutor@deep-tutor.com
 ```
 
@@ -55,7 +55,7 @@ Set:
 Then run the server; outbound replies will go through Postmark.
 
 ## Start real email service (manual send → reply)
-Use this when you want to send real email from any inbox to `agent@dowhiz.com`.
+Use this when you want to send real email from any inbox to `oliver@dowhiz.com`.
 
 Terminal 1: start the inbound webhook service
 ```
@@ -75,7 +75,7 @@ python -m mvp.email_pipeline.set_postmark_inbound_hook \
 
 Send an email manually to:
 ```
-agent@dowhiz.com
+oliver@dowhiz.com
 ```
 
 The pipeline will run and reply via Postmark to the sender.
@@ -89,7 +89,7 @@ rm -f mvp/email_pipeline/state/postmark_processed_ids.txt
 This test starts a Postmark inbound webhook receiver locally, exposes it with ngrok, sends a real email to your Postmark server’s inbound address (hash@inbound.postmarkapp.com), and verifies that a reply is sent back via Postmark.
 
 ```
-python -m mvp.email_pipeline.real_email_test --from agent@dowhiz.com
+python -m mvp.email_pipeline.real_email_test --from oliver@dowhiz.com
 ```
 
 Note: This uses the server token in `.env` to temporarily set `InboundHookUrl` on your Postmark server and resets it afterward.
