@@ -162,6 +162,12 @@ fn process_payload(
     raw_payload: &[u8],
 ) -> Result<(), BoxError> {
     info!("processing inbound payload into workspace");
+
+    let sender = payload.from.as_deref().unwrap_or("").trim();
+    if is_blacklisted_sender(sender) {
+        info!("skipping blacklisted sender: {}", sender);
+        return Ok(());
+    }
     let workspace = create_workspace(config, payload, raw_payload)?;
     info!("workspace created at {}", workspace.display());
 
@@ -207,6 +213,17 @@ fn process_payload(
     info!("scheduler tick complete");
 
     Ok(())
+}
+
+fn is_blacklisted_sender(sender: &str) -> bool {
+    if sender.is_empty() {
+        return false;
+    }
+    let sender_lc = sender.to_ascii_lowercase();
+    matches!(
+        sender_lc.as_str(),
+        "agent@dowhiz.com" | "oliver@dowhiz.com"
+    )
 }
 
 fn create_workspace(
