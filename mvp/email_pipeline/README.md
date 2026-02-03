@@ -22,8 +22,8 @@ python -m mvp.email_pipeline.server
 Terminal 2: send a test email with PDF + DOCX attachments
 ```
 python -m mvp.email_pipeline.send_test_email \
-  --from deep-tutor@deep-tutor.com \
-  --to agent@dowhiz.com
+  --from agent@dowhiz.com \
+  --to deep-tutor@deep-tutor.com
 ```
 
 Check the reply captured in the outbox:
@@ -89,7 +89,7 @@ rm -f mvp/email_pipeline/state/postmark_processed_ids.txt
 This test starts a Postmark inbound webhook receiver locally, exposes it with ngrok, sends a real email to your Postmark server’s inbound address (hash@inbound.postmarkapp.com), and verifies that a reply is sent back via Postmark.
 
 ```
-python -m mvp.email_pipeline.real_email_test --from deep-tutor@deep-tutor.com
+python -m mvp.email_pipeline.real_email_test --from agent@dowhiz.com
 ```
 
 Note: This uses the server token in `.env` to temporarily set `InboundHookUrl` on your Postmark server and resets it afterward.
