@@ -1,10 +1,10 @@
-From: agent@dowhiz.com
+From: oliver@dowhiz.com
 To: "mini-mouse@deep-tutor.com" <mini-mouse@deep-tutor.com>
 Bcc: e04398781609c3efe9827446535ae04f@inbound.postmarkapp.com
 Subject: Hi
 Message-ID:
  <CALXgKXYZxTMmXfKwjYaDm4O6hDm-j8yuXaCA_1N6Fjm-LVSAmw@mail.gmail.com>
-Return-Path: <agent@dowhiz.com>
+Return-Path: <oliver@dowhiz.com>
 Received: by p-pm-inboundg05c-aws-useast1c.inbound.postmarkapp.com (Postfix,
  from userid 996)	id 1471644FE05; Tue,  3 Feb 2026 00:37:30 +0000 (UTC)
 X-Spam-Checker-Version:
@@ -15,10 +15,10 @@ X-Spam-Tests: DKIM_SIGNED,DKIM_VALID,HTML_MESSAGE,RCVD_IN_DNSWL_BLOCKED,
 	RCVD_IN_MSPIKE_H3,RCVD_IN_MSPIKE_WL,RCVD_IN_VALIDITY_RPBL_BLOCKED,
 	RCVD_IN_VALIDITY_SAFE_BLOCKED,RCVD_IN_ZEN_BLOCKED_OPENDNS,SPF_HELO_NONE,
 	SPF_PASS
-Received-SPF: pass (dowhiz.com: Sender is authorized to use 'agent@dowhiz.com'
+Received-SPF: pass (dowhiz.com: Sender is authorized to use 'oliver@dowhiz.com'
  in 'mfrom' identity (mechanism 'include:dc-aa8e722993._spfm.dowhiz.com'
  matched)) receiver=p-pm-inboundg05c-aws-useast1c; identity=mailfrom;
- envelope-from="agent@dowhiz.com"; helo=mail-ot1-f72.google.com;
+ envelope-from="oliver@dowhiz.com"; helo=mail-ot1-f72.google.com;
  client-ip=209.85.210.72
 ARC-Seal: i=3; a=rsa-sha256; t=1770079049; cv=pass;        d=google.com;
  s=arc-20240605;       
@@ -42,8 +42,8 @@ ARC-Message-Signature: i=3; a=rsa-sha256; c=relaxed/relaxed; d=google.com;
 ARC-Authentication-Results: i=3; mx.google.com;       dkim=pass
  header.i=@dowhiz-com.20230601.gappssmtp.com header.s=20230601
  header.b=rwADYqhb;       arc=pass (i=1);       spf=pass (google.com: domain
- of agent@dowhiz.com designates 209.85.220.41 as permitted sender)
- smtp.mailfrom=agent@dowhiz.com;       dmarc=pass (p=QUARANTINE sp=QUARANTINE
+ of oliver@dowhiz.com designates 209.85.220.41 as permitted sender)
+ smtp.mailfrom=oliver@dowhiz.com;       dmarc=pass (p=QUARANTINE sp=QUARANTINE
  dis=NONE) header.from=dowhiz.com;       dara=neutral header.i=@deep-tutor.com
 X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;       
  d=1e100.net; s=20230601; t=1770079049; x=1770683849;       
@@ -75,8 +75,8 @@ X-Received: by 2002:a9d:5f16:0:b0:7cf:cbff:85e6 with SMTP id
 Authentication-Results: mx.google.com;       dkim=pass
  header.i=@dowhiz-com.20230601.gappssmtp.com header.s=20230601
  header.b=rwADYqhb;       arc=pass (i=1);       spf=pass (google.com: domain
- of agent@dowhiz.com designates 209.85.220.41 as permitted sender)
- smtp.mailfrom=agent@dowhiz.com;       dmarc=pass (p=QUARANTINE sp=QUARANTINE
+ of oliver@dowhiz.com designates 209.85.220.41 as permitted sender)
+ smtp.mailfrom=oliver@dowhiz.com;       dmarc=pass (p=QUARANTINE sp=QUARANTINE
  dis=NONE) header.from=dowhiz.com;       dara=neutral header.i=@deep-tutor.com
 DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;       
  d=dowhiz-com.20230601.gappssmtp.com; s=20230601; t=1770079048; x=1770683848;

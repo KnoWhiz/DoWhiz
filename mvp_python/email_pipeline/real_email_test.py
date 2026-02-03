@@ -157,8 +157,8 @@ def poll_outbound(token: str, recipient: str, subject_hint: str, timeout_s: int 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run real-email end-to-end test via Postmark inbound webhook")
-    parser.add_argument("--from", dest="from_addr", default="agent@dowhiz.com")
-    parser.add_argument("--to", dest="to_addr", default=None, help="Recipient address (e.g. agent@dowhiz.com)")
+    parser.add_argument("--from", dest="from_addr", default="oliver@dowhiz.com")
+    parser.add_argument("--to", dest="to_addr", default=None, help="Recipient address (e.g. oliver@dowhiz.com)")
     parser.add_argument("--subject", default="Real email MVP test")
     parser.add_argument("--webhook-port", type=int, default=9000)
     parser.add_argument(
@@ -190,7 +190,7 @@ def main() -> None:
     env["OUTBOUND_MODE"] = "postmark"
 
     webhook_proc = subprocess.Popen(
-        ["python", "-m", "mvp.email_pipeline.postmark_webhook_server", "--port", str(args.webhook_port)],
+        ["python", "-m", "mvp_python.email_pipeline.postmark_webhook_server", "--port", str(args.webhook_port)],
         cwd=str(repo_root),
         env=env,
         stdout=subprocess.PIPE,

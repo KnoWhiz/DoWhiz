@@ -1,0 +1,304 @@
+use scheduler_module::service::{run_server, ServiceConfig};
+use scheduler_module::ScheduledTask;
+use lettre::Transport;
+use serde_json::{json, Value};
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tempfile::TempDir;
+use tokio::runtime::Runtime;
+use tokio::sync::oneshot;
+
+struct HookRestore {
+    token: String,
+    previous_hook: String,
+}
+
+impl Drop for HookRestore {
+    fn drop(&mut self) {
+        let _ = postmark_request(
+            "PUT",
+            "https://api.postmarkapp.com/server",
+            &self.token,
+            Some(json!({ "InboundHookUrl": self.previous_hook })),
+        );
+    }
+}
+
+fn env_enabled(key: &str) -> bool {
+    matches!(env::var(key).as_deref(), Ok("1"))
+}
+
+fn timestamp_suffix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn postmark_request(
+    method: &str,
+    url: &str,
+    token: &str,
+    payload: Option<Value>,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
+    let request = client
+        .request(method.parse()?, url)
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/json")
+        .header("X-Postmark-Server-Token", token);
+    let request = if let Some(body) = payload {
+        request.json(&body)
+    } else {
+        request
+    };
+    let response = request.send()?;
+    let status = response.status();
+    let body = response.text()?;
+    if !status.is_success() {
+        return Err(format!("postmark request failed: {} {}", status, body).into());
+    }
+    Ok(serde_json::from_str(&body)?)
+}
+
+fn poll_outbound(
+    token: &str,
+    recipient: &str,
+    subject_hint: &str,
+    timeout: Duration,
+) -> Result<Option<Value>, Box<dyn std::error::Error>> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()?;
+    let start = SystemTime::now();
+
+    loop {
+        let url = format!(
+            "https://api.postmarkapp.com/messages/outbound?recipient={}&count=50&offset=0",
+            recipient
+        );
+        let response = client
+            .get(&url)
+            .header("Accept", "application/json")
+            .header("X-Postmark-Server-Token", token)
+            .send();
+
+        let response = match response {
+            Ok(response) => response,
+            Err(err) => {
+                if start.elapsed().unwrap_or_default() >= timeout {
+                    return Err(format!("postmark search timed out: {}", err).into());
+                }
+                std::thread::sleep(Duration::from_secs(2));
+                continue;
+            }
+        };
+
+        let body = response.text()?;
+        let payload: Value = serde_json::from_str(&body)?;
+        if let Some(messages) = payload.get("Messages").and_then(|value| value.as_array()) {
+            for message in messages {
+                let subject = message.get("Subject").and_then(|value| value.as_str()).unwrap_or("");
+                if subject.contains(subject_hint) {
+                    return Ok(Some(message.clone()));
+                }
+            }
+        }
+
+        if start.elapsed().unwrap_or_default() >= timeout {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+}
+
+fn send_smtp_inbound(
+    from_addr: &str,
+    to_addr: &str,
+    subject: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let message = lettre::Message::builder()
+        .from(from_addr.parse()?)
+        .to(to_addr.parse()?)
+        .subject(subject)
+        .body("Rust service live email test.".to_string())?;
+
+    let mailer = lettre::SmtpTransport::builder_dangerous("inbound.postmarkapp.com")
+        .port(25)
+        .build();
+    mailer.send(&message)?;
+    Ok(())
+}
+
+fn wait_for_workspace(root: &Path, timeout: Duration) -> Option<PathBuf> {
+    let start = SystemTime::now();
+    loop {
+        if let Ok(entries) = fs::read_dir(root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() && path.join("reply_email_draft.html").exists() {
+                    return Some(path);
+                }
+            }
+        }
+        if start.elapsed().unwrap_or_default() >= timeout {
+            return None;
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+}
+
+fn wait_for_tasks_complete(
+    tasks_path: &Path,
+    timeout: Duration,
+) -> Result<Vec<ScheduledTask>, Box<dyn std::error::Error>> {
+    let start = SystemTime::now();
+    loop {
+        if let Ok(raw) = fs::read_to_string(tasks_path) {
+            if !raw.trim().is_empty() {
+                let tasks: Vec<ScheduledTask> = serde_json::from_str(&raw)?;
+                if tasks
+                    .iter()
+                    .all(|task| !task.enabled && task.last_run.is_some())
+                {
+                    return Ok(tasks);
+                }
+            }
+        }
+        if start.elapsed().unwrap_or_default() >= timeout {
+            return Err("timed out waiting for tasks to complete".into());
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+}
+
+#[test]
+fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
+    let _ = tracing_subscriber::fmt().with_target(false).try_init();
+    if !env_enabled("RUST_SERVICE_LIVE_TEST") {
+        eprintln!("Skipping Rust service live email test. Set RUST_SERVICE_LIVE_TEST=1 to run.");
+        return Ok(());
+    }
+
+    let token = env::var("POSTMARK_SERVER_TOKEN")
+        .map_err(|_| "POSTMARK_SERVER_TOKEN must be set for live tests")?;
+    let public_url = env::var("POSTMARK_INBOUND_HOOK_URL")
+        .map_err(|_| "POSTMARK_INBOUND_HOOK_URL must be set (ngrok URL)")?;
+    let from_addr = env::var("POSTMARK_TEST_FROM")
+        .unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
+
+    let server_info = postmark_request("GET", "https://api.postmarkapp.com/server", &token, None)?;
+    let inbound_address = server_info
+        .get("InboundAddress")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    if inbound_address.is_empty() {
+        return Err("Postmark server does not have an inbound address configured".into());
+    }
+    let previous_hook = server_info
+        .get("InboundHookUrl")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let _restore = HookRestore {
+        token: token.clone(),
+        previous_hook: previous_hook.clone(),
+    };
+
+    let temp = TempDir::new()?;
+    let workspace_root = temp.path().join("workspaces");
+    let state_dir = temp.path().join("state");
+
+    let port = env::var("RUST_SERVICE_TEST_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(9010);
+
+    let codex_disabled = !env_enabled("RUN_CODEX_E2E");
+    let config = ServiceConfig {
+        host: "127.0.0.1".to_string(),
+        port,
+        workspace_root: workspace_root.clone(),
+        scheduler_state_path: state_dir.join("tasks.json"),
+        processed_ids_path: state_dir.join("postmark_processed_ids.txt"),
+        codex_model: env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string()),
+        codex_disabled,
+    };
+
+    let rt = Runtime::new()?;
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let server_handle = rt.spawn(async move {
+        run_server(config, async {
+            let _ = shutdown_rx.await;
+        })
+        .await
+    });
+
+    rt.block_on(async {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    });
+
+    let hook_url = format!("{}/postmark/inbound", public_url.trim_end_matches('/'));
+    println!("Setting Postmark inbound hook to {}", hook_url);
+    postmark_request(
+        "PUT",
+        "https://api.postmarkapp.com/server",
+        &token,
+        Some(json!({ "InboundHookUrl": hook_url })),
+    )?;
+
+    let subject = format!("Rust service live test {}", timestamp_suffix());
+    println!("Sending inbound SMTP message with subject: {}", subject);
+    send_smtp_inbound(&from_addr, &inbound_address, &subject)?;
+    println!("Inbound message sent; waiting for workspace output...");
+
+    let workspace_timeout = if env_enabled("RUN_CODEX_E2E") {
+        Duration::from_secs(600)
+    } else {
+        Duration::from_secs(120)
+    };
+
+    let workspace = wait_for_workspace(&workspace_root, workspace_timeout)
+        .ok_or("timed out waiting for workspace output")?;
+    let reply_path = workspace.join("reply_email_draft.html");
+    if !reply_path.exists() {
+        return Err("reply_email_draft.html not written by run_task".into());
+    }
+
+    let reply_subject = format!("Re: {}", subject);
+    let outbound_timeout = if env_enabled("RUN_CODEX_E2E") {
+        Duration::from_secs(300)
+    } else {
+        Duration::from_secs(120)
+    };
+    let outbound = poll_outbound(&token, &from_addr, &reply_subject, outbound_timeout)?
+        .ok_or("timed out waiting for outbound reply")?;
+    let status = outbound
+        .get("Status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if !matches!(status, "Delivered" | "Sent") {
+        return Err(format!("unexpected outbound status: {}", status).into());
+    }
+
+    let tasks_path = state_dir.join("tasks.json");
+    let tasks_timeout = if env_enabled("RUN_CODEX_E2E") {
+        Duration::from_secs(480)
+    } else {
+        Duration::from_secs(120)
+    };
+    let tasks = wait_for_tasks_complete(&tasks_path, tasks_timeout)?;
+    if tasks.len() < 2 {
+        return Err("expected at least two scheduled tasks".into());
+    }
+
+    let _ = shutdown_tx.send(());
+    let _ = rt.block_on(async { server_handle.await })?;
+
+    Ok(())
+}

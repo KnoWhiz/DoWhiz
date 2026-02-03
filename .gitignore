@@ -14,8 +14,11 @@ target/
 MVP/target/
 
 # Existing pipeline outputs
-mvp/email_pipeline/workspaces/
-mvp/email_pipeline/outbox/
-mvp/email_pipeline/state/postmark_processed_ids.txt
-mvp/email_pipeline/**/tests/report.json
+mvp_python/email_pipeline/workspaces/
+mvp_python/email_pipeline/outbox/
+mvp_python/email_pipeline/state/postmark_processed_ids.txt
+mvp_python/email_pipeline/**/tests/report.json
 /.workspace
+/mvp
+mvp_python/email_pipeline/state/postmark_processed_ids.txt
+/MVP_rust/.workspace

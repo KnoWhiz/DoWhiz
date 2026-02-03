@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = [
+  "scheduler_module",
+  "send_emails_module",
+  "run_task_module",
+]

@@ -137,7 +137,7 @@ def _build_codex_prompt(
     to_line = ", ".join(to_addr) if to_addr else ""
 
     return (
-        "You are the DoWhiz email agent.\n"
+        "You are Oliver, an digital assistant agent working at DoWhiz.\n"
         "Write a helpful reply to the incoming email.\n"
         "You must write the reply to a file named email_reply.md in the current directory.\n"
         "If you create any files to send back, place them in email_reply_attachments/.\n"
