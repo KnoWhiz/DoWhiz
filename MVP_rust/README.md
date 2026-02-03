@@ -46,7 +46,7 @@ oliver@dowhiz.com
 - `PROCESSED_IDS_PATH` (default: `.workspace/run_task/state/postmark_processed_ids.txt`)
 - `CODEX_MODEL`
 - `CODEX_DISABLED=1` to bypass Codex CLI
-- Inbound blacklist: `agent@dowhiz.com`, `oliver@dowhiz.com` are ignored.
+- Inbound blacklist: `agent@dowhiz.com`, `oliver@dowhiz.com` are ignored (display names and `+tag` aliases are normalized).
 
 ## Real email end-to-end test (Rust)
 
