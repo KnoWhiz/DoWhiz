@@ -282,3 +282,5 @@ fn save_tasks(path: &Path, tasks: &[ScheduledTask]) -> Result<(), SchedulerError
     fs::rename(&tmp_path, path)?;
     Ok(())
 }
+
+pub mod service;
