@@ -25,7 +25,7 @@ ngrok http 9001
 
 3) Set the Postmark inbound hook to the **new** ngrok URL (Terminal 3):
 ```
-python -m mvp_python.email_pipeline.set_postmark_inbound_hook \
+cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
   --hook-url https://YOUR-NEW-NGROK-URL.ngrok-free.dev/postmark/inbound
 ```
 
