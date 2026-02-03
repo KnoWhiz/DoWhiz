@@ -162,6 +162,12 @@ fn process_payload(
     raw_payload: &[u8],
 ) -> Result<(), BoxError> {
     info!("processing inbound payload into workspace");
+
+    let sender = payload.from.as_deref().unwrap_or("").trim();
+    if is_blacklisted_sender(sender) {
+        info!("skipping blacklisted sender: {}", sender);
+        return Ok(());
+    }
     let workspace = create_workspace(config, payload, raw_payload)?;
     info!("workspace created at {}", workspace.display());
 
@@ -207,6 +213,87 @@ fn process_payload(
     info!("scheduler tick complete");
 
     Ok(())
+}
+
+fn is_blacklisted_sender(sender: &str) -> bool {
+    if sender.is_empty() {
+        return false;
+    }
+    let mut matched = false;
+    let addresses = extract_emails(sender);
+    for address in addresses {
+        if is_blacklisted_address(&address) {
+            matched = true;
+            break;
+        }
+    }
+    matched
+}
+
+fn is_blacklisted_address(address: &str) -> bool {
+    matches!(
+        address,
+        "agent@dowhiz.com" | "oliver@dowhiz.com"
+    )
+}
+
+fn extract_emails(raw: &str) -> Vec<String> {
+    let mut emails = Vec::new();
+    let mut seen = HashSet::new();
+
+    let mut remainder = raw;
+    while let Some(start) = remainder.find('<') {
+        let after_start = &remainder[start + 1..];
+        if let Some(end) = after_start.find('>') {
+            let inside = &after_start[..end];
+            if let Some(email) = normalize_email(inside) {
+                if seen.insert(email.clone()) {
+                    emails.push(email);
+                }
+            }
+            remainder = &after_start[end + 1..];
+        } else {
+            break;
+        }
+    }
+
+    for token in raw.split(|ch| matches!(ch, ',' | ';' | ' ' | '\t' | '\n' | '\r')) {
+        if let Some(email) = normalize_email(token) {
+            if seen.insert(email.clone()) {
+                emails.push(email);
+            }
+        }
+    }
+
+    emails
+}
+
+fn normalize_email(raw: &str) -> Option<String> {
+    let mut value = raw.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if let Some(stripped) = value.strip_prefix("mailto:") {
+        value = stripped.trim();
+    }
+    value = value.trim_matches(|ch: char| matches!(ch, '<' | '>' | '"' | '\'' | ',' | ';'));
+    if !value.contains('@') {
+        return None;
+    }
+
+    let mut parts = value.splitn(2, '@');
+    let local = parts.next().unwrap_or("").trim();
+    let domain = parts.next().unwrap_or("").trim();
+    if local.is_empty() || domain.is_empty() {
+        return None;
+    }
+    let local = local.split('+').next().unwrap_or(local);
+
+    Some(format!(
+        "{}@{}",
+        local.to_ascii_lowercase(),
+        domain.to_ascii_lowercase()
+    ))
 }
 
 fn create_workspace(

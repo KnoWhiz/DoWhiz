@@ -25,8 +25,8 @@ ngrok http 9001
 
 3) Set the Postmark inbound hook to the **new** ngrok URL (Terminal 3):
 ```
-python -m mvp_python.email_pipeline.set_postmark_inbound_hook \
-  --hook-url https://YOUR-NEW-NGROK-URL.ngrok-free.dev/postmark/inbound
+cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
+  --hook-url https://kameron-viewiest-undignifiedly.ngrok-free.dev/postmark/inbound
 ```
 
 4) Send an email to:
@@ -46,6 +46,7 @@ oliver@dowhiz.com
 - `PROCESSED_IDS_PATH` (default: `.workspace/run_task/state/postmark_processed_ids.txt`)
 - `CODEX_MODEL`
 - `CODEX_DISABLED=1` to bypass Codex CLI
+- Inbound blacklist: `agent@dowhiz.com`, `oliver@dowhiz.com` are ignored (display names and `+tag` aliases are normalized).
 
 ## Real email end-to-end test (Rust)
 
