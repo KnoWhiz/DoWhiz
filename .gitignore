@@ -1,5 +1,6 @@
 # Secrets / local env
 .env
+.env.script
 .gmail_client_secret.json
 .gmail_token.json
 
@@ -22,3 +23,4 @@ mvp_python/email_pipeline/**/tests/report.json
 /mvp
 mvp_python/email_pipeline/state/postmark_processed_ids.txt
 /MVP_rust/.workspace
+.codex/environments/environment.toml
