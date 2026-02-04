@@ -295,6 +295,7 @@ fn process_payload(
 
     let subject = payload.subject.clone().unwrap_or_default();
     let reply_subject = reply_subject(&subject);
+    let (in_reply_to, references) = reply_headers(payload);
 
     let run_task = RunTaskTask {
         workspace_dir: workspace.clone(),
@@ -314,6 +315,8 @@ fn process_payload(
         to: to_list,
         cc: Vec::new(),
         bcc: Vec::new(),
+        in_reply_to,
+        references,
     };
 
     let mut scheduler =
@@ -550,6 +553,40 @@ fn reply_subject(original: &str) -> String {
     }
 }
 
+fn reply_headers(payload: &PostmarkInbound) -> (Option<String>, Option<String>) {
+    let message_id = payload
+        .header_message_id()
+        .or(payload.message_id.as_deref())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+
+    let mut references = payload
+        .header_value("References")
+        .or_else(|| payload.header_value("In-Reply-To"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    if let Some(ref msg_id) = message_id {
+        references = match references {
+            Some(existing) => {
+                if references_contains(&existing, msg_id) {
+                    Some(existing)
+                } else {
+                    Some(format!("{existing} {msg_id}"))
+                }
+            }
+            None => Some(msg_id.clone()),
+        };
+    }
+
+    (message_id, references)
+}
+
+fn references_contains(references: &str, message_id: &str) -> bool {
+    references.split_whitespace().any(|entry| entry == message_id)
+}
+
 fn env_flag(key: &str, default: bool) -> bool {
     match env::var(key) {
         Ok(value) => matches!(
@@ -599,13 +636,17 @@ struct PostmarkInbound {
 }
 
 impl PostmarkInbound {
-    fn header_message_id(&self) -> Option<&str> {
+    fn header_value(&self, name: &str) -> Option<&str> {
         self.headers.as_ref().and_then(|headers| {
             headers
                 .iter()
-                .find(|header| header.name.eq_ignore_ascii_case("message-id"))
+                .find(|header| header.name.eq_ignore_ascii_case(name))
                 .map(|header| header.value.as_str())
         })
+    }
+
+    fn header_message_id(&self) -> Option<&str> {
+        self.header_value("Message-ID")
     }
 }
 

@@ -14,6 +14,8 @@ pub struct SendEmailParams {
     pub to: Vec<String>,
     pub cc: Vec<String>,
     pub bcc: Vec<String>,
+    pub in_reply_to: Option<String>,
+    pub references: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -56,6 +58,8 @@ struct PostmarkSendRequest {
     text_body: String,
     html_body: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    headers: Vec<PostmarkHeader>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     attachments: Vec<PostmarkAttachment>,
 }
 
@@ -65,6 +69,13 @@ struct PostmarkAttachment {
     name: String,
     content: String,
     content_type: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct PostmarkHeader {
+    name: String,
+    value: String,
 }
 
 pub fn send_email(params: &SendEmailParams) -> Result<PostmarkSendResponse, SendEmailError> {
@@ -92,6 +103,20 @@ pub fn send_email(params: &SendEmailParams) -> Result<PostmarkSendResponse, Send
 
     let attachments = load_attachments(&params.attachments_dir)?;
 
+    let mut headers = Vec::new();
+    if let Some(value) = clean_header_value(&params.in_reply_to) {
+        headers.push(PostmarkHeader {
+            name: "In-Reply-To".to_string(),
+            value,
+        });
+    }
+    if let Some(value) = clean_header_value(&params.references) {
+        headers.push(PostmarkHeader {
+            name: "References".to_string(),
+            value,
+        });
+    }
+
     let payload = PostmarkSendRequest {
         from,
         to,
@@ -100,6 +125,7 @@ pub fn send_email(params: &SendEmailParams) -> Result<PostmarkSendResponse, Send
         subject: params.subject.clone(),
         text_body,
         html_body,
+        headers,
         attachments,
     };
 
@@ -142,6 +168,14 @@ fn join_recipients(list: &[String]) -> Option<String> {
     } else {
         Some(cleaned.join(", "))
     }
+}
+
+fn clean_header_value(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|trimmed| !trimmed.is_empty())
+        .map(|trimmed| trimmed.to_string())
 }
 
 fn strip_html_tags(input: &str) -> String {
