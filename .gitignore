@@ -25,3 +25,4 @@ mvp_python/email_pipeline/state/postmark_processed_ids.txt
 /DoWhiz_service/.workspace
 .codex/environments/environment.toml
 /mvp_python/email_pipeline/workspaces
+.DS_Store

@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import oliverImg from './assets/Oliver.jpg';
+import miniMouseImg from './assets/Mini-Mouse.jpg';
 
 function App() {
   const [mounted, setMounted] = useState(false);
@@ -68,9 +70,12 @@ function App() {
             {/* Oliver */}
             <div className="role-card active-role">
               <div className="role-header">
-                <div>
-                  <h3>Oliver</h3>
-                  <code className="email-tag">Oliver@DoWhiz.com</code>
+                <div className="role-profile">
+                  <img src={oliverImg} alt="Oliver" className="role-avatar" />
+                  <div>
+                    <h3>Oliver</h3>
+                    <code className="email-tag">Oliver@DoWhiz.com</code>
+                  </div>
                 </div>
                 <span className="status-badge status-active">Active</span>
               </div>
@@ -84,11 +89,14 @@ function App() {
             {/* Mini-Mouse */}
             <div className="role-card coming-soon">
               <div className="role-header">
-                <div>
-                  <h3>Mini-Mouse</h3>
-                  <code className="email-tag">Mini-Mouse@DoWhiz.com</code>
+                <div className="role-profile">
+                  <img src={miniMouseImg} alt="Mini-Mouse" className="role-avatar" />
+                  <div>
+                    <h3>Mini-Mouse</h3>
+                    <code className="email-tag">Mini-Mouse@DoWhiz.com</code>
+                  </div>
                 </div>
-                <span className="status-badge status-soon">Coming Soon</span>
+                <span className="status-badge status-soon">Coming</span>
               </div>
               <p className="role-desc">Expert in creativity like video editing, content drafts, and visual storytelling.</p>
               <div className="role-example">
