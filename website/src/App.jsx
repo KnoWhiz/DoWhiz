@@ -1,4 +1,10 @@
 import { useState, useEffect } from 'react';
+import oliverImg from './assets/Oliver.jpg';
+import miniMouseImg from './assets/Mini-Mouse.jpg';
+import workflowEmail from './assets/Workflow-Email.png';
+import workflowTriage from './assets/Workflow-Triage.png';
+import workflowExecution from './assets/Workflow-Execution.png';
+import workflowReturn from './assets/Workflow-Return.png';
 
 function App() {
   const [mounted, setMounted] = useState(false);
@@ -63,14 +69,21 @@ function App() {
       {/* Roles & Scenarios */}
       <section id="roles" className="section roles-section">
         <div className="container">
-          <h2 className="section-title">Meet Your Digital Team</h2>
+          <h2 className="section-title">Meet Your Digital Employee Team</h2>
           <div className="roles-grid">
             {/* Oliver */}
-            <div className="role-card active-role">
+            <div
+              className="role-card active-role clickable-card"
+              onClick={() => window.location.href = 'mailto:Oliver@DoWhiz.com'}
+              title="Click to email Oliver"
+            >
               <div className="role-header">
-                <div>
-                  <h3>Oliver</h3>
-                  <code className="email-tag">Oliver@DoWhiz.com</code>
+                <div className="role-profile">
+                  <img src={oliverImg} alt="Oliver" className="role-avatar" />
+                  <div>
+                    <h3>Oliver</h3>
+                    <code className="email-tag">Oliver@DoWhiz.com</code>
+                  </div>
                 </div>
                 <span className="status-badge status-active">Active</span>
               </div>
@@ -82,13 +95,20 @@ function App() {
             </div>
 
             {/* Mini-Mouse */}
-            <div className="role-card coming-soon">
+            <div
+              className="role-card coming-soon clickable-card"
+              onClick={() => window.location.href = 'mailto:Mini-Mouse@DoWhiz.com'}
+              title="Click to email Mini-Mouse"
+            >
               <div className="role-header">
-                <div>
-                  <h3>Mini-Mouse</h3>
-                  <code className="email-tag">Mini-Mouse@DoWhiz.com</code>
+                <div className="role-profile">
+                  <img src={miniMouseImg} alt="Mini-Mouse" className="role-avatar" />
+                  <div>
+                    <h3>Mini-Mouse</h3>
+                    <code className="email-tag">Mini-Mouse@DoWhiz.com</code>
+                  </div>
                 </div>
-                <span className="status-badge status-soon">Coming Soon</span>
+                <span className="status-badge status-soon">Coming</span>
               </div>
               <p className="role-desc">Expert in creativity like video editing, content drafts, and visual storytelling.</p>
               <div className="role-example">
@@ -107,14 +127,16 @@ function App() {
           <div className="workflow-container">
             <div className="workflow-line"></div>
             {[
-              { step: "1", label: "Email", icon: "✉️" },
-              { step: "2", label: "Triage", icon: "🧠" },
-              { step: "3", label: "Execution", icon: "⚙️" },
-              { step: "4", label: "Return", icon: "✅" },
+              { step: "1", label: "Email", img: workflowEmail },
+              { step: "2", label: "Triage", img: workflowTriage },
+              { step: "3", label: "Execution", img: workflowExecution },
+              { step: "4", label: "Return", img: workflowReturn },
             ].map((s, i) => (
-              <div key={i} className="workflow-step">
-                <div className="step-icon">
-                  {s.icon}
+              <div key={i} className="workflow-step" style={{ animationDelay: `${i * 0.2}s` }}>
+                <div className="step-icon-wrapper">
+                  <div className="step-icon">
+                    <img src={s.img} alt={s.label} />
+                  </div>
                 </div>
                 <h4>{s.label}</h4>
               </div>
