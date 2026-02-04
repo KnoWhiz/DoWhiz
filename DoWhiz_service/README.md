@@ -81,6 +81,7 @@ cargo run -p scheduler_module --bin hydrate_past_emails -- \
 ```
 
 ### `index.json` schema
+Entry directories are named `YYYY-MM-DD_<action>_<topic>_<shortid>`.
 `direction` is `"inbound"` or `"outbound"`.
 ```
 {
@@ -90,17 +91,17 @@ cargo run -p scheduler_module --bin hydrate_past_emails -- \
   "entries": [
     {
       "entry_id": "message-id",
-      "display_name": "2026-02-03_hi__abc123",
-      "path": "2026-02-03_hi__abc123",
+      "display_name": "2026-02-03_message_archive-hello_abc123",
+      "path": "2026-02-03_message_archive-hello_abc123",
       "direction": "inbound",
-      "subject": "Hi",
+      "subject": "Archive hello",
       "from": "Sender <sender@example.com>",
       "to": "Recipient <recipient@example.com>",
       "cc": "",
       "bcc": "",
       "date": "RFC3339 timestamp",
       "message_id": "message-id",
-      "attachments_manifest": "2026-02-03_hi__abc123/attachments_manifest.json",
+      "attachments_manifest": "2026-02-03_message_archive-hello_abc123/attachments_manifest.json",
       "attachments_count": 1,
       "large_attachments_count": 0
     }
