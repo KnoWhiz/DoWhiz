@@ -27,11 +27,11 @@ function App() {
         <div className="halo-effect"></div>
         <div className="container hero-content">
           <h1 className="hero-title">
-            让每个用户拥有一支<br />
-            <span className="text-gradient">可邮件协作的数字员工团队</span>
+            Empower Every User with <br />
+            <span className="text-gradient">A Digital Team via Email</span>
           </h1>
           <p className="hero-subtitle">
-            Work with Oliver, Mini-Mouse, and more via simple email.
+            Seamlessly collaborate with Oliver, Mini-Mouse, and your entire digital workforce—directly from your inbox.
           </p>
           <div className="hero-cta">
             <button className="btn btn-primary">
@@ -47,9 +47,9 @@ function App() {
           <h2 className="section-title">Core Experience</h2>
           <div className="features-grid">
             {[
-              { title: "邮件派单", desc: "Send tasks via email just like you would to a human colleague. No new apps to learn." },
-              { title: "工具自选", desc: "Agents autonomously select the right tools for the job. You don't need to configure pipelines." },
-              { title: "结果回传", desc: "Receive completed work directly in your inbox. Users don't care about the details, only results." }
+              { title: "Task via Email", desc: "Delegate tasks naturally by sending an email. No complex dashboards or new apps to master." },
+              { title: "Autonomous Tools", desc: "Agents intelligently select and utilize the right tools for each request without manual configuration." },
+              { title: "Direct Delivery", desc: "Completed work is delivered straight back to your inbox. Focus on results, not the process." }
             ].map((item, idx) => (
               <div key={idx} className="feature-card">
                 <h3>{item.title}</h3>
@@ -63,7 +63,7 @@ function App() {
       {/* Roles & Scenarios */}
       <section id="roles" className="section roles-section">
         <div className="container">
-          <h2 className="section-title">Meet Your Team</h2>
+          <h2 className="section-title">Meet Your Digital Team</h2>
           <div className="roles-grid">
             {/* Oliver */}
             <div className="role-card active-role">
@@ -74,10 +74,10 @@ function App() {
                 </div>
                 <span className="status-badge status-active">Active</span>
               </div>
-              <p className="role-desc">Expert in data analysis, report generation, and market research.</p>
+              <p className="role-desc">Specialist in data analysis, comprehensive reporting, and market intelligence.</p>
               <div className="role-example">
                 <span className="example-label">Example Task</span>
-                <p>"Analyze the sales data attached and summarize key trends for Q3."</p>
+                <p>"Analyze the attached sales report and summarize key Q3 trends."</p>
               </div>
             </div>
 
@@ -90,10 +90,10 @@ function App() {
                 </div>
                 <span className="status-badge status-soon">Coming Soon</span>
               </div>
-              <p className="role-desc">Specialist in creative writing, drafting communications, and PR.</p>
+              <p className="role-desc">Expert in creative writing, PR communications, and content drafting.</p>
               <div className="role-example">
                 <span className="example-label">Example Task</span>
-                <p>"Draft a press release for our new product launch based on these notes."</p>
+                <p>"Draft a press release for our product launch based on these notes."</p>
               </div>
             </div>
           </div>
