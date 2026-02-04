@@ -4,11 +4,15 @@ Convert a repo-root .env file into a copy-friendly .env.script file.
 
 Default output uses shell export lines for easy pasting into
 environment-variable settings pages. Use --format env for KEY=VALUE lines.
+If the repo-root .env is missing (common in git worktrees), the script
+tries to locate an existing .env from other git worktrees.
 """
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -122,6 +126,34 @@ def resolve_repo_root(script_path: Path) -> Path:
     return script_path.parent
 
 
+def find_env_from_git_worktrees(start_dir: Path) -> Path | None:
+    try:
+        result = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=start_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return None
+
+    if result.returncode != 0:
+        warn("Unable to query git worktrees for .env fallback")
+        return None
+
+    candidates: list[Path] = []
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            path = Path(line.split(" ", 1)[1].strip())
+            candidates.append(path / ".env")
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def main() -> int:
     script_path = Path(__file__).resolve()
     repo_root = resolve_repo_root(script_path)
@@ -149,12 +181,27 @@ def main() -> int:
     )
 
     args = parser.parse_args()
-    input_path = Path(args.input)
+    input_path = Path(args.input).expanduser()
     output_path = Path(args.output)
 
     if not input_path.exists():
-        warn(f"Input file not found: {input_path}")
-        return 1
+        default_input = repo_root / ".env"
+        fallback: Path | None = None
+        if input_path == default_input:
+            env_override = os.environ.get("ENV_TO_SCRIPT_INPUT")
+            if env_override:
+                candidate = Path(env_override).expanduser()
+                if candidate.exists():
+                    fallback = candidate
+            if fallback is None:
+                fallback = find_env_from_git_worktrees(repo_root)
+
+        if fallback is None:
+            warn(f"Input file not found: {input_path}")
+            return 1
+
+        warn(f"Input file not found in worktree; using {fallback}")
+        input_path = fallback
 
     lines = input_path.read_text(encoding="utf-8").splitlines()
     output_lines: list[str] = []
