@@ -31,8 +31,8 @@ println!("Reply saved at: {}", result.reply_html_path.display());
 
 ## Folder structure
 
-- `MVP_rust/run_task_module/src/lib.rs` : Codex CLI runner and prompt builder.
-- `MVP_rust/run_task_module/tests/` : Basic test that verifies output file creation when Codex is disabled.
+- `DoWhiz_service/run_task_module/src/lib.rs` : Codex CLI runner and prompt builder.
+- `DoWhiz_service/run_task_module/tests/` : Basic test that verifies output file creation when Codex is disabled.
 
 ## Notes
 

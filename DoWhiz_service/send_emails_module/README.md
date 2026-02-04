@@ -32,8 +32,8 @@ println!("Sent: {}", response.message_id);
 
 ## Folder structure
 
-- `MVP_rust/send_emails_module/src/lib.rs` : Postmark send logic and request payload construction.
-- `MVP_rust/send_emails_module/tests/` : Live Postmark tests (send + delivery status polling).
+- `DoWhiz_service/send_emails_module/src/lib.rs` : Postmark send logic and request payload construction.
+- `DoWhiz_service/send_emails_module/tests/` : Live Postmark tests (send + delivery status polling).
 
 ## Notes
 

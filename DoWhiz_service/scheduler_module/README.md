@@ -39,8 +39,8 @@ scheduler.run_loop(Duration::from_secs(1), &stop_flag)?;
 
 ## Folder structure
 
-- `MVP_rust/scheduler_module/src/lib.rs` : Scheduler core, task definitions, persistence.
-- `MVP_rust/scheduler_module/tests/` : Cron validation, persistence, and tick tests.
+- `DoWhiz_service/scheduler_module/src/lib.rs` : Scheduler core, task definitions, persistence.
+- `DoWhiz_service/scheduler_module/tests/` : Cron validation, persistence, and tick tests.
 
 ## Notes
 

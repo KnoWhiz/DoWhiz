@@ -22,6 +22,6 @@ mvp_python/email_pipeline/**/tests/report.json
 /.workspace
 /mvp
 mvp_python/email_pipeline/state/postmark_processed_ids.txt
-/MVP_rust/.workspace
+/DoWhiz_service/.workspace
 .codex/environments/environment.toml
 /mvp_python/email_pipeline/workspaces

@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 - `mvp_python/email_pipeline/`: Python MVP for inbound email → Codex → reply flow (SMTP server, Postmark webhook helpers, local outbox).
-- `MVP_rust/`: Rust workspace (`scheduler_module`, `run_task_module`, `send_emails_module`) for Postmark webhook intake and scheduled replies.
+- `DoWhiz_service/`: Rust workspace (`scheduler_module`, `run_task_module`, `send_emails_module`) for Postmark webhook intake and scheduled replies.
 - `external/openclaw/`: Vendored upstream project with its own tooling and contributor guide; follow `external/openclaw/AGENTS.md` when working there.
 - `api_reference_documentation/postmark_api/`: Postmark API reference notes used by the email pipeline.
 - `example_files/`: Sample attachments used for local testing.
@@ -12,7 +12,7 @@
 - Run local pipeline server: `python -m mvp_python.email_pipeline.server`
 - Send a local test email: `python -m mvp_python.email_pipeline.send_test_email --from you@… --to you@…`
 - Read captured replies: `python -m mvp_python.email_pipeline.read_outbox`
-- Rust service (from `MVP_rust`): `cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001`
+- Rust service (from `DoWhiz_service`): `cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001`
 - Rust tests: `cargo test -p scheduler_module` (add `-- --nocapture` for integration logs)
 - For OpenClaw build/test commands, see `external/openclaw/AGENTS.md`.
 
@@ -33,4 +33,4 @@
 
 ## Security & Configuration Tips
 - Keep secrets in `.env`; never commit `.env`, Postmark tokens, or Gmail credentials (ignored by `.gitignore`).
-- Generated artifacts live in `mvp_python/email_pipeline/workspaces/`, `mvp_python/email_pipeline/outbox/`, and `MVP_rust/.workspace`; don’t add them to git.
+- Generated artifacts live in `mvp_python/email_pipeline/workspaces/`, `mvp_python/email_pipeline/outbox/`, and `DoWhiz_service/.workspace`; don’t add them to git.

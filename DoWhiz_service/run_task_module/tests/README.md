@@ -6,7 +6,7 @@ fake Codex CLI script.
 ## Run tests
 
 ```
-cd MVP_rust/run_task_module
+cd DoWhiz_service/run_task_module
 cargo test
 ```
 

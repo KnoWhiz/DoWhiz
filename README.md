@@ -13,7 +13,7 @@ See `vision.md` for the full narrative (currently in Chinese).
 
 ## MVPs in this repo
 - `mvp_python/email_pipeline/`: Local SMTP pipeline with a captured outbox.
-- `MVP_rust/`: Postmark inbound webhook service with a scheduler for follow-ups.
+- `DoWhiz_service/`: Postmark inbound webhook service with a scheduler for follow-ups.
 
 ## Quick start
 
@@ -59,11 +59,11 @@ cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
   --hook-url https://YOUR-NGROK-URL.ngrok-free.dev/postmark/inbound
 ```
 
-See `MVP_rust/README.md` for full setup and tests.
+See `DoWhiz_service/README.md` for full setup and tests.
 
 ## Repo layout
 - `mvp_python/email_pipeline/`: Python MVP for inbound email and replies.
-- `MVP_rust/`: Rust workspace (scheduler, run_task, send_emails).
+- `DoWhiz_service/`: Rust workspace (scheduler, run_task, send_emails).
 - `external/openclaw/`: Vendored upstream project; see its `AGENTS.md`.
 - `api_reference_documentation/postmark_api/`: Postmark API notes.
 - `example_files/`: Sample attachments for local testing.
@@ -75,7 +75,7 @@ See `MVP_rust/README.md` for full setup and tests.
 
 ## Generated artifacts (gitignored)
 - `mvp_python/email_pipeline/workspaces/` and `mvp_python/email_pipeline/outbox/`
-- `MVP_rust/.workspace`
+- `DoWhiz_service/.workspace`
 
 ## Testing
 - Rust: `cargo test -p scheduler_module`
