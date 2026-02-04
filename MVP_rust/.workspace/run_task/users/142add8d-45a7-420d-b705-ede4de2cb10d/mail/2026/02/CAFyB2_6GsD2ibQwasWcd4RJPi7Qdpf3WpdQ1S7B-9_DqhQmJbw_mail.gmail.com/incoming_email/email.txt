@@ -1,9 +1,0 @@
-From: mini-mouse@deep-tutor.com
-To: "oliver@dowhiz.com" <oliver@dowhiz.com>
-Cc: 
-Bcc: f4539b87b9eb29a0ecce5585895e7a6c@inbound.postmarkapp.com
-Subject: 帮我高亮和注释文件中的缺陷和不足，提出修改意见（使用review模式）
-Attachments: CV - Bingran You.docx (application/vnd.openxmlformats-officedocument.wordprocessingml.document)
-
-
-

@@ -1,9 +1,0 @@
-From: mini-mouse@deep-tutor.com
-To: "oliver@dowhiz.com" <oliver@dowhiz.com>
-Cc: 
-Bcc: f4539b87b9eb29a0ecce5585895e7a6c@inbound.postmarkapp.com
-Subject: 帮我分析这篇文章
-Attachments: Experience _ Tianyi Zhang _ LinkedIn.pdf (application/pdf)
-
-帮我分析这个文件，把这个人的经历列出表格
-
