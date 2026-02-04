@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import oliverImg from './assets/Oliver.jpg';
 import miniMouseImg from './assets/Mini-Mouse.jpg';
+import workflowEmail from './assets/Workflow-Email.png';
+import workflowTriage from './assets/Workflow-Triage.png';
+import workflowExecution from './assets/Workflow-Execution.png';
+import workflowReturn from './assets/Workflow-Return.png';
 
 function App() {
   const [mounted, setMounted] = useState(false);
@@ -123,14 +127,16 @@ function App() {
           <div className="workflow-container">
             <div className="workflow-line"></div>
             {[
-              { step: "1", label: "Email", icon: "✉️" },
-              { step: "2", label: "Triage", icon: "🧠" },
-              { step: "3", label: "Execution", icon: "⚙️" },
-              { step: "4", label: "Return", icon: "✅" },
+              { step: "1", label: "Email", img: workflowEmail },
+              { step: "2", label: "Triage", img: workflowTriage },
+              { step: "3", label: "Execution", img: workflowExecution },
+              { step: "4", label: "Return", img: workflowReturn },
             ].map((s, i) => (
-              <div key={i} className="workflow-step">
-                <div className="step-icon">
-                  {s.icon}
+              <div key={i} className="workflow-step" style={{ animationDelay: `${i * 0.2}s` }}>
+                <div className="step-icon-wrapper">
+                  <div className="step-icon">
+                    <img src={s.img} alt={s.label} />
+                  </div>
                 </div>
                 <h4>{s.label}</h4>
               </div>

@@ -436,12 +436,21 @@ ul {
   top: 50%;
   left: 4rem;
   right: 4rem;
-  height: 1px;
-  background: radial-gradient(circle, var(--glass-border) 0%, transparent 100%);
-  border-top: 1px dashed rgba(255, 255, 255, 0.15);
-  /* Dashed line looks more flow-y */
+  height: 2px;
+  background: linear-gradient(90deg,
+      rgba(255, 255, 255, 0.05) 0%,
+      var(--accent-color) 50%,
+      rgba(255, 255, 255, 0.05) 100%);
+  background-size: 200% 100%;
+  animation: flowLine 3s linear infinite;
   z-index: 0;
   transform: translateY(-25px);
+  opacity: 0.5;
+}
+
+.step-icon-wrapper {
+  display: flex;
+  justify-content: center;
 }
 
 .workflow-step {
@@ -451,25 +460,64 @@ ul {
   flex: 1;
 }
 
+/* Floating animation for the icons */
+@keyframes float {
+  0% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+/* Flowing line animation */
+@keyframes flowLine {
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: -100% 0;
+  }
+}
+
 .step-icon {
-  width: 5rem;
-  height: 5rem;
+  width: 6rem;
+  height: 6rem;
   margin: 0 auto 1.5rem;
-  background: #0a0a0a;
+  background: rgba(10, 10, 10, 0.8);
   border: 1px solid var(--glass-border);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 2rem;
-  box-shadow: 0 0 0 10px var(--bg-color);
-  /* Masking */
+  box-shadow: 0 0 0 10px var(--bg-color), 0 0 20px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+  animation: float 4s ease-in-out infinite;
+}
+
+.step-icon img {
+  width: 60%;
+  height: 60%;
+  object-fit: contain;
+  filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.5));
   transition: all 0.3s ease;
 }
 
 .workflow-step:hover .step-icon {
   border-color: var(--accent-color);
-  box-shadow: 0 0 20px rgba(59, 130, 246, 0.2), 0 0 0 10px var(--bg-color);
+  box-shadow: 0 0 30px rgba(59, 130, 246, 0.3), 0 0 0 10px var(--bg-color);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.workflow-step:hover .step-icon img {
+  filter: drop-shadow(0 0 15px rgba(59, 130, 246, 0.8));
   transform: scale(1.1);
 }
 
