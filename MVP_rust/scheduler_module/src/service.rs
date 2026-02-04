@@ -16,15 +16,16 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::{error, info};
+use uuid::Uuid;
 
-use crate::index_store::IndexStore;
+use crate::index_store::{IndexStore, TaskRef};
 use crate::user_store::{extract_emails, UserStore};
-use crate::{ModuleExecutor, RunTaskTask, Scheduler, SendEmailTask, TaskKind};
+use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -41,6 +42,7 @@ pub struct ServiceConfig {
     pub codex_model: String,
     pub codex_disabled: bool,
     pub scheduler_poll_interval: Duration,
+    pub scheduler_max_concurrency: usize,
 }
 
 impl ServiceConfig {
@@ -81,6 +83,11 @@ impl ServiceConfig {
             .filter(|value| *value > 0)
             .map(Duration::from_secs)
             .unwrap_or_else(|| Duration::from_secs(1));
+        let scheduler_max_concurrency = env::var("SCHEDULER_MAX_CONCURRENCY")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(10);
 
         Ok(Self {
             host,
@@ -94,6 +101,7 @@ impl ServiceConfig {
             codex_model,
             codex_disabled,
             scheduler_poll_interval,
+            scheduler_max_concurrency,
         })
     }
 }
@@ -104,6 +112,67 @@ struct AppState {
     dedupe_store: Arc<AsyncMutex<ProcessedMessageStore>>,
     user_store: Arc<UserStore>,
     index_store: Arc<IndexStore>,
+}
+
+#[derive(Default)]
+struct SchedulerClaims {
+    running_tasks: HashSet<String>,
+    running_users: HashSet<String>,
+}
+
+impl SchedulerClaims {
+    fn try_claim(&mut self, task_ref: &TaskRef) -> bool {
+        if self.running_users.contains(&task_ref.user_id) {
+            return false;
+        }
+        if self.running_tasks.contains(&task_ref.task_id) {
+            return false;
+        }
+        self.running_users.insert(task_ref.user_id.clone());
+        self.running_tasks.insert(task_ref.task_id.clone());
+        true
+    }
+
+    fn release(&mut self, task_ref: &TaskRef) {
+        self.running_users.remove(&task_ref.user_id);
+        self.running_tasks.remove(&task_ref.task_id);
+    }
+}
+
+struct ConcurrencyLimiter {
+    max: usize,
+    in_flight: Mutex<usize>,
+}
+
+impl ConcurrencyLimiter {
+    fn new(max: usize) -> Self {
+        Self {
+            max,
+            in_flight: Mutex::new(0),
+        }
+    }
+
+    fn try_acquire(&self) -> bool {
+        let mut in_flight = self
+            .in_flight
+            .lock()
+            .expect("concurrency limiter lock poisoned");
+        if *in_flight >= self.max {
+            return false;
+        }
+        *in_flight += 1;
+        true
+    }
+
+    fn release(&self) {
+        let mut in_flight = self
+            .in_flight
+            .lock()
+            .expect("concurrency limiter lock poisoned");
+        if *in_flight > 0 {
+            *in_flight -= 1;
+        }
+    }
 }
 
 pub async fn run_server(
@@ -132,37 +201,60 @@ pub async fn run_server(
     }
     let scheduler_stop = Arc::new(AtomicBool::new(false));
     let scheduler_poll_interval = config.scheduler_poll_interval;
+    let scheduler_max_concurrency = config.scheduler_max_concurrency;
+    let claims = Arc::new(Mutex::new(SchedulerClaims::default()));
+    let limiter = Arc::new(ConcurrencyLimiter::new(scheduler_max_concurrency));
     {
         let config = config.clone();
         let user_store = user_store.clone();
         let index_store = index_store.clone();
         let scheduler_stop = scheduler_stop.clone();
+        let claims = claims.clone();
+        let limiter = limiter.clone();
+        let query_limit = scheduler_max_concurrency.saturating_mul(4).max(1);
         thread::spawn(move || {
             while !scheduler_stop.load(Ordering::Relaxed) {
                 let now = Utc::now();
-                match index_store.due_user_ids(now, 50) {
-                    Ok(user_ids) => {
-                        for user_id in user_ids {
-                            let paths = user_store.user_paths(&config.users_root, &user_id);
-                            let mut scheduler = match Scheduler::load(
-                                &paths.tasks_db_path,
-                                ModuleExecutor::default(),
-                            ) {
-                                Ok(scheduler) => scheduler,
-                                Err(err) => {
-                                    error!("scheduler load failed for {}: {}", user_id, err);
-                                    continue;
-                                }
+                match index_store.due_task_refs(now, query_limit) {
+                    Ok(task_refs) => {
+                        for task_ref in task_refs {
+                            if !limiter.try_acquire() {
+                                break;
+                            }
+                            let claimed = {
+                                let mut claims = claims
+                                    .lock()
+                                    .unwrap_or_else(|poison| poison.into_inner());
+                                claims.try_claim(&task_ref)
                             };
-                            if let Err(err) = scheduler.tick() {
-                                error!("scheduler tick failed for {}: {}", user_id, err);
+                            if !claimed {
+                                limiter.release();
                                 continue;
                             }
-                            if let Err(err) =
-                                index_store.sync_user_tasks(&user_id, scheduler.tasks())
-                            {
-                                error!("index sync failed for {}: {}", user_id, err);
-                            }
+
+                            let config = config.clone();
+                            let user_store = user_store.clone();
+                            let index_store = index_store.clone();
+                            let claims = claims.clone();
+                            let limiter = limiter.clone();
+                            thread::spawn(move || {
+                                if let Err(err) = execute_due_task(
+                                    &config,
+                                    &user_store,
+                                    &index_store,
+                                    &task_ref,
+                                ) {
+                                    error!(
+                                        "scheduler task {} for user {} failed: {}",
+                                        task_ref.task_id, task_ref.user_id, err
+                                    );
+                                }
+                                let mut claims = claims
+                                    .lock()
+                                    .unwrap_or_else(|poison| poison.into_inner());
+                                claims.release(&task_ref);
+                                limiter.release();
+                            });
                         }
                     }
                     Err(err) => {
@@ -198,6 +290,23 @@ pub async fn run_server(
         .with_graceful_shutdown(shutdown)
         .await?;
     scheduler_stop.store(true, Ordering::Relaxed);
+    Ok(())
+}
+
+fn execute_due_task(
+    config: &ServiceConfig,
+    user_store: &UserStore,
+    index_store: &IndexStore,
+    task_ref: &TaskRef,
+) -> Result<(), BoxError> {
+    let task_id = Uuid::parse_str(&task_ref.task_id)?;
+    let user_paths = user_store.user_paths(&config.users_root, &task_ref.user_id);
+    let mut scheduler =
+        Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+    let executed = scheduler.execute_task_by_id(task_id)?;
+    if executed {
+        index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks())?;
+    }
     Ok(())
 }
 
@@ -293,10 +402,6 @@ fn process_payload(
         return Err("missing reply recipient".into());
     }
 
-    let subject = payload.subject.clone().unwrap_or_default();
-    let reply_subject = reply_subject(&subject);
-    let (in_reply_to, references) = reply_headers(payload);
-
     let run_task = RunTaskTask {
         workspace_dir: workspace.clone(),
         input_email_dir: PathBuf::from("incoming_email"),
@@ -306,23 +411,12 @@ fn process_payload(
         model_name: config.codex_model.clone(),
         codex_disabled: config.codex_disabled,
         reply_to: to_list.clone(),
-    };
-
-    let send_task = SendEmailTask {
-        subject: reply_subject,
-        html_path: workspace.join("reply_email_draft.html"),
-        attachments_dir: workspace.join("reply_email_attachments"),
-        to: to_list,
-        cc: Vec::new(),
-        bcc: Vec::new(),
-        in_reply_to,
-        references,
+        archive_root: Some(user_paths.mail_root.clone()),
     };
 
     let mut scheduler =
         Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
     scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
-    scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::SendEmail(send_task))?;
     index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
     info!("scheduler tasks enqueued");
 
@@ -550,51 +644,6 @@ fn split_recipients(value: &str) -> Vec<String> {
         .filter(|part| !part.is_empty())
         .map(|part| part.to_string())
         .collect()
-}
-
-fn reply_subject(original: &str) -> String {
-    let trimmed = original.trim();
-    if trimmed.is_empty() {
-        "Re: (no subject)".to_string()
-    } else if trimmed.to_lowercase().starts_with("re:") {
-        trimmed.to_string()
-    } else {
-        format!("Re: {}", trimmed)
-    }
-}
-
-fn reply_headers(payload: &PostmarkInbound) -> (Option<String>, Option<String>) {
-    let message_id = payload
-        .header_message_id()
-        .or(payload.message_id.as_deref())
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_string());
-
-    let mut references = payload
-        .header_value("References")
-        .or_else(|| payload.header_value("In-Reply-To"))
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-
-    if let Some(ref msg_id) = message_id {
-        references = match references {
-            Some(existing) => {
-                if references_contains(&existing, msg_id) {
-                    Some(existing)
-                } else {
-                    Some(format!("{existing} {msg_id}"))
-                }
-            }
-            None => Some(msg_id.clone()),
-        };
-    }
-
-    (message_id, references)
-}
-
-fn references_contains(references: &str, message_id: &str) -> bool {
-    references.split_whitespace().any(|entry| entry == message_id)
 }
 
 fn env_flag(key: &str, default: bool) -> bool {

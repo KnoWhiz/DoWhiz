@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -46,6 +46,8 @@ struct PostmarkPayload {
     date: Option<String>,
     #[serde(rename = "MessageID", alias = "MessageId")]
     message_id: Option<String>,
+    #[serde(rename = "Direction")]
+    direction: Option<String>,
     #[serde(rename = "Attachments")]
     attachments: Option<Vec<PostmarkAttachment>>,
 }
@@ -71,6 +73,7 @@ struct PastEmailsIndexEntry {
     entry_id: String,
     display_name: String,
     path: String,
+    direction: String,
     subject: String,
     from: String,
     to: String,
@@ -128,6 +131,11 @@ pub fn hydrate_past_emails(
 
     for message in messages {
         let subject = message.payload.subject.clone().unwrap_or_default();
+        let direction = message
+            .payload
+            .direction
+            .clone()
+            .unwrap_or_else(|| "inbound".to_string());
         let date = parse_payload_date(message.payload.date.as_deref());
         let date_str = date.map(|value| value.to_rfc3339());
         let date_prefix = date
@@ -175,6 +183,7 @@ pub fn hydrate_past_emails(
             entry_id: message_id.clone(),
             display_name: display_name.clone(),
             path: display_name.clone(),
+            direction,
             subject: subject.clone(),
             from: message.payload.from.clone().unwrap_or_default(),
             to: message.payload.to.clone().unwrap_or_default(),
@@ -190,6 +199,79 @@ pub fn hydrate_past_emails(
 
     write_index(&past_root, user_id, &entries)?;
     Ok(report)
+}
+
+pub fn archive_outbound(
+    archive_root: &Path,
+    subject: &str,
+    html_path: &Path,
+    attachments_dir: &Path,
+    to: &[String],
+    cc: &[String],
+    bcc: &[String],
+    in_reply_to: Option<&str>,
+    references: Option<&str>,
+    message_id: &str,
+    submitted_at: &str,
+    from: &str,
+) -> Result<(), PastEmailsError> {
+    let html_body = fs::read_to_string(html_path)?;
+    let mut text_body = strip_html_tags(&html_body);
+    if text_body.trim().is_empty() {
+        text_body = "(no content)".to_string();
+    }
+
+    let submitted_at = submitted_at.trim();
+    let parsed_date = parse_payload_date(Some(submitted_at)).unwrap_or_else(Utc::now);
+    let date_value = if submitted_at.is_empty() {
+        parsed_date.to_rfc3339()
+    } else {
+        submitted_at.to_string()
+    };
+    let year = parsed_date.format("%Y").to_string();
+    let month = parsed_date.format("%m").to_string();
+
+    let fallback = format!("email_{}", parsed_date.timestamp());
+    let message_id_value = if message_id.trim().is_empty() {
+        fallback.clone()
+    } else {
+        message_id.trim().to_string()
+    };
+    let base = sanitize_token(&message_id_value, &fallback);
+
+    let mail_root = archive_root.join(year).join(month);
+    fs::create_dir_all(&mail_root)?;
+    let mail_dir = create_unique_dir(&mail_root, &base)?;
+    let incoming_email = mail_dir.join("incoming_email");
+    let incoming_attachments = mail_dir.join("incoming_attachments");
+    fs::create_dir_all(&incoming_email)?;
+    fs::create_dir_all(&incoming_attachments)?;
+
+    let attachments = archive_attachments(attachments_dir, &incoming_attachments)?;
+
+    let headers = build_headers(in_reply_to, references);
+    let payload = serde_json::json!({
+        "From": from,
+        "To": join_recipients(to),
+        "Cc": join_recipients(cc),
+        "Bcc": join_recipients(bcc),
+        "Subject": subject,
+        "Date": date_value,
+        "MessageID": message_id_value,
+        "TextBody": text_body,
+        "HtmlBody": html_body,
+        "Headers": headers,
+        "Attachments": attachments,
+        "Direction": "outbound",
+    });
+    fs::write(
+        incoming_email.join("postmark_payload.json"),
+        serde_json::to_string_pretty(&payload)?,
+    )?;
+
+    let email_text = render_email_text_from_payload(&payload);
+    fs::write(incoming_email.join("email.txt"), email_text)?;
+    Ok(())
 }
 
 fn write_index(
@@ -246,6 +328,8 @@ fn hydrate_attachments(
 ) -> Result<(AttachmentsManifest, AttachmentCounts), PastEmailsError> {
     let mut entries = Vec::new();
     let mut counts = AttachmentCounts::default();
+    let mut seen_files = HashSet::new();
+    let mut azure_urls = HashMap::new();
     fs::create_dir_all(dest_attachments_dir)?;
 
     let attachment_meta = payload
@@ -274,6 +358,26 @@ fn hydrate_attachments(
             }
             let file_name = entry.file_name().to_string_lossy().to_string();
             if file_name.ends_with(".azure_url") {
+                let base = file_name.trim_end_matches(".azure_url").to_string();
+                let content = fs::read_to_string(entry.path())?;
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    azure_urls.insert(base, trimmed.to_string());
+                }
+                continue;
+            }
+        }
+    }
+
+    if incoming_attachments_dir.is_dir() {
+        for entry in fs::read_dir(incoming_attachments_dir)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            if !file_type.is_file() {
+                continue;
+            }
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if file_name.ends_with(".azure_url") {
                 continue;
             }
             let path = entry.path();
@@ -284,10 +388,12 @@ fn hydrate_attachments(
                 .cloned()
                 .unwrap_or_else(|| (file_name.clone(), String::new()));
 
+            seen_files.insert(file_name.clone());
+
             if size_bytes > max_attachment_bytes {
                 counts.large += 1;
                 counts.total += 1;
-                let azure_blob_url = read_azure_url(incoming_attachments_dir, &file_name);
+                let azure_blob_url = azure_urls.get(&file_name).cloned();
                 entries.push(AttachmentEntry {
                     file_name,
                     original_name,
@@ -313,6 +419,27 @@ fn hydrate_attachments(
                 azure_blob_url: None,
             });
         }
+    }
+
+    for (file_name, azure_blob_url) in azure_urls {
+        if seen_files.contains(&file_name) {
+            continue;
+        }
+        let (original_name, content_type) = attachment_meta
+            .get(&file_name)
+            .cloned()
+            .unwrap_or_else(|| (file_name.clone(), String::new()));
+        counts.large += 1;
+        counts.total += 1;
+        entries.push(AttachmentEntry {
+            file_name,
+            original_name,
+            content_type,
+            size_bytes: 0,
+            storage: "azure".to_string(),
+            relative_path: None,
+            azure_blob_url: Some(azure_blob_url),
+        });
     }
 
     let manifest = AttachmentsManifest {
@@ -345,15 +472,151 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn read_azure_url(dir: &Path, file_name: &str) -> Option<String> {
-    let url_path = dir.join(format!("{}.azure_url", file_name));
-    let content = fs::read_to_string(url_path).ok()?;
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
+fn archive_attachments(
+    src_dir: &Path,
+    dest_dir: &Path,
+) -> Result<Vec<serde_json::Value>, PastEmailsError> {
+    let mut attachments = Vec::new();
+    if !src_dir.is_dir() {
+        return Ok(attachments);
     }
+
+    let mut entries: Vec<_> = fs::read_dir(src_dir)?.collect::<Result<_, _>>()?;
+    entries.sort_by_key(|entry| entry.path());
+
+    for entry in entries {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        if file_name.ends_with(".azure_url") {
+            fs::copy(&path, dest_dir.join(&file_name))?;
+            continue;
+        }
+        fs::copy(&path, dest_dir.join(&file_name))?;
+        attachments.push(serde_json::json!({
+            "Name": file_name,
+            "ContentType": "",
+        }));
+    }
+
+    Ok(attachments)
+}
+
+fn build_headers(in_reply_to: Option<&str>, references: Option<&str>) -> Vec<serde_json::Value> {
+    let mut headers = Vec::new();
+    if let Some(value) = clean_header_value(in_reply_to) {
+        headers.push(serde_json::json!({
+            "Name": "In-Reply-To",
+            "Value": value,
+        }));
+    }
+    if let Some(value) = clean_header_value(references) {
+        headers.push(serde_json::json!({
+            "Name": "References",
+            "Value": value,
+        }));
+    }
+    headers
+}
+
+fn clean_header_value(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|trimmed| !trimmed.is_empty())
+        .map(|trimmed| trimmed.to_string())
+}
+
+fn join_recipients(values: &[String]) -> String {
+    values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn render_email_text_from_payload(payload: &serde_json::Value) -> String {
+    let subject = payload
+        .get("Subject")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let from = payload
+        .get("From")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let to = payload
+        .get("To")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let cc = payload
+        .get("Cc")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let bcc = payload
+        .get("Bcc")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+
+    let body = payload
+        .get("TextBody")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.to_string())
+        .or_else(|| {
+            payload
+                .get("HtmlBody")
+                .and_then(|value| value.as_str())
+                .map(strip_html_tags)
+        })
+        .unwrap_or_default();
+
+    let attachment_line = payload
+        .get("Attachments")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let name = item.get("Name")?.as_str()?;
+                    let content_type = item
+                        .get("ContentType")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("");
+                    if content_type.trim().is_empty() {
+                        Some(name.to_string())
+                    } else {
+                        Some(format!("{} ({})", name, content_type))
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let attachment_line = if attachment_line.is_empty() {
+        "(none)".to_string()
+    } else {
+        attachment_line.join(", ")
+    };
+
+    format!(
+        "From: {from}\nTo: {to}\nCc: {cc}\nBcc: {bcc}\nSubject: {subject}\nAttachments: {attachment_line}\n\n{body}\n"
+    )
+}
+
+fn strip_html_tags(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_tag = false;
+    for ch in input.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out
 }
 
 fn parse_payload_date(raw: Option<&str>) -> Option<DateTime<Utc>> {
@@ -422,4 +685,73 @@ fn create_unique_dir(root: &Path, base: &str) -> Result<PathBuf, io::Error> {
         io::ErrorKind::AlreadyExists,
         "failed to create unique past_emails directory",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn find_payload(root: &Path) -> Option<PathBuf> {
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let payload = dir.join("incoming_email").join("postmark_payload.json");
+            if payload.is_file() {
+                return Some(payload);
+            }
+            if let Ok(entries) = fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                        stack.push(entry.path());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn archive_outbound_writes_payload_and_attachments() {
+        let temp = TempDir::new().expect("tempdir");
+        let archive_root = temp.path().join("mail");
+        fs::create_dir_all(&archive_root).expect("archive root");
+
+        let html_path = temp.path().join("reply.html");
+        fs::write(&html_path, "<html><body>Hello</body></html>").expect("html");
+        let attachments_dir = temp.path().join("attachments");
+        fs::create_dir_all(&attachments_dir).expect("attachments dir");
+        fs::write(attachments_dir.join("note.txt"), "hello").expect("attachment");
+
+        archive_outbound(
+            &archive_root,
+            "Subject",
+            &html_path,
+            &attachments_dir,
+            &[String::from("user@example.com")],
+            &[],
+            &[],
+            None,
+            None,
+            "msg-123@example.com",
+            "2026-02-03T20:10:44Z",
+            "agent@example.com",
+        )
+        .expect("archive outbound");
+
+        let payload_path = find_payload(&archive_root).expect("payload");
+        let payload_data = fs::read_to_string(&payload_path).expect("payload read");
+        let payload_json: serde_json::Value =
+            serde_json::from_str(&payload_data).expect("payload json");
+        assert_eq!(payload_json["Direction"], "outbound");
+
+        let mail_dir = payload_path
+            .parent()
+            .and_then(|value| value.parent())
+            .expect("mail dir");
+        assert!(mail_dir.join("incoming_email").join("email.txt").exists());
+        assert!(mail_dir
+            .join("incoming_attachments")
+            .join("note.txt")
+            .exists());
+    }
 }

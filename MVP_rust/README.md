@@ -48,6 +48,7 @@ oliver@dowhiz.com
 - `USERS_DB_PATH` (default: `.workspace/run_task/state/users.db`)
 - `TASK_INDEX_PATH` (default: `.workspace/run_task/state/task_index.db`)
 - `SCHEDULER_POLL_INTERVAL_SECS` (default: `1`)
+- `SCHEDULER_MAX_CONCURRENCY` (default: `10`)
 - `CODEX_MODEL`
 - `CODEX_DISABLED=1` to bypass Codex CLI
 - Inbound blacklist: `agent@dowhiz.com`, `oliver@dowhiz.com` are ignored (display names and `+tag` aliases are normalized).
@@ -57,7 +58,8 @@ Each new workspace populates `references/past_emails/` from the user archive und
 `.workspace/run_task/users/<user_id>/mail`. The hydrator copies `incoming_email/`
 and any attachments <= 50MB; larger attachments are referenced via
 `attachments_manifest.json` (set `*.azure_url` sidecar files to supply the Azure
-blob URL if needed).
+blob URL if needed). Outgoing agent replies are archived after successful
+`send_email` execution and appear in `past_emails` with `direction: "outbound"`.
 
 Manual run:
 ```
@@ -68,6 +70,7 @@ cargo run -p scheduler_module --bin hydrate_past_emails -- \
 ```
 
 ### `index.json` schema
+`direction` is `"inbound"` or `"outbound"`.
 ```
 {
   "version": 1,
@@ -78,6 +81,7 @@ cargo run -p scheduler_module --bin hydrate_past_emails -- \
       "entry_id": "message-id",
       "display_name": "2026-02-03_hi__abc123",
       "path": "2026-02-03_hi__abc123",
+      "direction": "inbound",
       "subject": "Hi",
       "from": "Sender <sender@example.com>",
       "to": "Recipient <recipient@example.com>",

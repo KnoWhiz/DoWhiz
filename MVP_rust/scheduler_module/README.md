@@ -28,6 +28,7 @@ let task = SendEmailTask {
     bcc: Vec::new(),
     in_reply_to: None,
     references: None,
+    archive_root: None,
 };
 
 scheduler.add_cron_task("0 */5 * * * *", TaskKind::SendEmail(task))?;
