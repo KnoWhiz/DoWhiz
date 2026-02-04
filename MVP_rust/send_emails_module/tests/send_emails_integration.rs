@@ -26,15 +26,6 @@ impl EnvGuard {
         }
         Self { saved }
     }
-
-    fn remove(keys: &[&str]) -> Self {
-        let mut saved = Vec::with_capacity(keys.len());
-        for key in keys {
-            saved.push((key.to_string(), env::var_os(key)));
-            env::remove_var(key);
-        }
-        Self { saved }
-    }
 }
 
 impl Drop for EnvGuard {
