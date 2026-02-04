@@ -37,27 +37,41 @@ oliver@dowhiz.com
 5) Watch logs for task execution. Outputs appear under:
 - `.workspace/run_task/workspaces/<message_id>/reply_email_draft.html`
 - `.workspace/run_task/workspaces/<message_id>/reply_email_attachments/`
-- Scheduler state: `.workspace/run_task/state/tasks.json`
+- Scheduler state: `.workspace/run_task/state/tasks.db`
 
 ## Environment knobs
 - `RUST_SERVICE_HOST` / `RUST_SERVICE_PORT`
 - `WORKSPACE_ROOT` (default: `.workspace/run_task/workspaces`)
-- `SCHEDULER_STATE_PATH` (default: `.workspace/run_task/state/tasks.json`)
+- `SCHEDULER_STATE_PATH` (default: `.workspace/run_task/state/tasks.db`)
 - `PROCESSED_IDS_PATH` (default: `.workspace/run_task/state/postmark_processed_ids.txt`)
+- `SCHEDULER_POLL_INTERVAL_SECS` (default: `1`)
 - `CODEX_MODEL`
 - `CODEX_DISABLED=1` to bypass Codex CLI
 - Inbound blacklist: `agent@dowhiz.com`, `oliver@dowhiz.com` are ignored (display names and `+tag` aliases are normalized).
+
+## Scheduled follow-ups
+If the agent needs to send a follow-up later, it should emit a schedule block to stdout at the end
+of its response. The scheduler parses the block and stores follow-up tasks in SQLite.
+
+Example schedule block:
+```
+SCHEDULED_TASKS_JSON_BEGIN
+[{"type":"send_email","delay_minutes":15,"subject":"Quick reminder","html_path":"reminder_email_draft.html","attachments_dir":"reminder_email_attachments","to":["you@example.com"],"cc":[],"bcc":[]}]
+SCHEDULED_TASKS_JSON_END
+```
 
 ## Real email end-to-end test (Rust)
 
 This test starts the Rust service, sets the Postmark inbound hook to your public
 URL, sends a real email to the Postmark inbound address, and verifies the reply.
+It sends a single inbound email and expects a single reply (no batch sends).
 
 Prereqs:
 - `RUST_SERVICE_LIVE_TEST=1`
 - `POSTMARK_SERVER_TOKEN`
-- `POSTMARK_INBOUND_HOOK_URL` (public URL, e.g. ngrok)
+- `POSTMARK_INBOUND_HOOK_URL` (public URL, e.g. ngrok base or full `/postmark/inbound` endpoint)
 - `POSTMARK_TEST_FROM` (your inbox for replies)
+- `RUST_SERVICE_TEST_PORT` (optional, defaults to `9010`; ensure ngrok forwards to this port)
 
 Run:
 ```

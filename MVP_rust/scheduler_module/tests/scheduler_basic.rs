@@ -1,4 +1,4 @@
-use scheduler_module::{Scheduler, SchedulerError, TaskExecutor, TaskKind};
+use scheduler_module::{Scheduler, SchedulerError, TaskExecution, TaskExecutor, TaskKind};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
@@ -6,15 +6,15 @@ use std::time::Duration;
 struct NoopExecutor;
 
 impl TaskExecutor for NoopExecutor {
-    fn execute(&self, _task: &TaskKind) -> Result<(), SchedulerError> {
-        Ok(())
+    fn execute(&self, _task: &TaskKind) -> Result<TaskExecution, SchedulerError> {
+        Ok(TaskExecution::default())
     }
 }
 
 #[test]
 fn cron_requires_six_fields() {
     let temp = tempfile::tempdir().expect("tempdir failed");
-    let storage = temp.path().join("tasks.json");
+    let storage = temp.path().join("tasks.db");
     let mut scheduler = Scheduler::load(storage, NoopExecutor).expect("load failed");
 
     let bad = scheduler.add_cron_task("0 0 * * *", TaskKind::Noop);
@@ -27,7 +27,7 @@ fn cron_requires_six_fields() {
 #[test]
 fn one_shot_persists_across_restarts() {
     let temp = tempfile::tempdir().expect("tempdir failed");
-    let storage = temp.path().join("tasks.json");
+    let storage = temp.path().join("tasks.db");
     let mut scheduler = Scheduler::load(&storage, NoopExecutor).expect("load failed");
 
     scheduler
@@ -41,7 +41,7 @@ fn one_shot_persists_across_restarts() {
 #[test]
 fn tick_disables_one_shot_tasks() {
     let temp = tempfile::tempdir().expect("tempdir failed");
-    let storage = temp.path().join("tasks.json");
+    let storage = temp.path().join("tasks.db");
     let mut scheduler = Scheduler::load(storage, NoopExecutor).expect("load failed");
     let task_id = scheduler
         .add_one_shot_in(Duration::from_secs(0), TaskKind::Noop)
@@ -60,7 +60,7 @@ fn tick_disables_one_shot_tasks() {
 #[test]
 fn tick_sets_last_run_for_one_shot() {
     let temp = tempfile::tempdir().expect("tempdir failed");
-    let storage = temp.path().join("tasks.json");
+    let storage = temp.path().join("tasks.db");
     let mut scheduler = Scheduler::load(storage, NoopExecutor).expect("load failed");
     let task_id = scheduler
         .add_one_shot_in(Duration::from_secs(0), TaskKind::Noop)
@@ -79,7 +79,7 @@ fn tick_sets_last_run_for_one_shot() {
 #[test]
 fn run_loop_stops_when_flag_set() {
     let temp = tempfile::tempdir().expect("tempdir failed");
-    let storage = temp.path().join("tasks.json");
+    let storage = temp.path().join("tasks.db");
     let mut scheduler = Scheduler::load(storage, NoopExecutor).expect("load failed");
     let stop_flag = AtomicBool::new(true);
 

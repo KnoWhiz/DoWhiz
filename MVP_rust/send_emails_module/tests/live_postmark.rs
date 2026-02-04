@@ -42,6 +42,7 @@ fn unique_subject(prefix: &str) -> String {
 
 fn poll_for_delivery(token: &str, message_id: &str, timeout: Duration) -> Result<(), String> {
     let client = reqwest::blocking::Client::builder()
+        .no_proxy()
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|err| format!("client build failed: {}", err))?;
@@ -106,6 +107,7 @@ fn poll_outbound_message(
     message_id: &str,
 ) -> Result<serde_json::Value, String> {
     let client = reqwest::blocking::Client::builder()
+        .no_proxy()
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|err| format!("client build failed: {}", err))?;
@@ -217,7 +219,19 @@ fn send_multiple_emails_batch() {
     let attachments_dir = temp.path().join("reply_email_attachments");
     fs::create_dir_all(&attachments_dir).expect("failed to create attachments dir");
 
-    for idx in 0..2 {
+    let requested = env::var("POSTMARK_BATCH_COUNT")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(2);
+    let batch_count = requested.clamp(1, 5);
+    if requested > batch_count {
+        eprintln!(
+            "Capping POSTMARK_BATCH_COUNT={} to {} to limit test cost.",
+            requested, batch_count
+        );
+    }
+
+    for idx in 0..batch_count {
         let subject = unique_subject(&format!("DoWhiz live batch test {}", idx + 1));
         let params = SendEmailParams {
             subject: subject.clone(),

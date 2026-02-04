@@ -15,9 +15,11 @@ use std::fs;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::sync::Mutex as AsyncMutex;
 use tracing::{error, info};
 
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, SendEmailTask, TaskKind};
@@ -33,6 +35,7 @@ pub struct ServiceConfig {
     pub processed_ids_path: PathBuf,
     pub codex_model: String,
     pub codex_disabled: bool,
+    pub scheduler_poll_interval: Duration,
 }
 
 impl ServiceConfig {
@@ -49,7 +52,7 @@ impl ServiceConfig {
             ".workspace/run_task/workspaces".to_string()
         }))?;
         let scheduler_state_path = resolve_path(env::var("SCHEDULER_STATE_PATH").unwrap_or_else(
-            |_| ".workspace/run_task/state/tasks.json".to_string(),
+            |_| ".workspace/run_task/state/tasks.db".to_string(),
         ))?;
         let processed_ids_path =
             resolve_path(env::var("PROCESSED_IDS_PATH").unwrap_or_else(|_| {
@@ -58,6 +61,12 @@ impl ServiceConfig {
         let codex_model =
             env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string());
         let codex_disabled = env_flag("CODEX_DISABLED", false);
+        let scheduler_poll_interval = env::var("SCHEDULER_POLL_INTERVAL_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .map(Duration::from_secs)
+            .unwrap_or_else(|| Duration::from_secs(1));
 
         Ok(Self {
             host,
@@ -67,6 +76,7 @@ impl ServiceConfig {
             processed_ids_path,
             codex_model,
             codex_disabled,
+            scheduler_poll_interval,
         })
     }
 }
@@ -74,7 +84,8 @@ impl ServiceConfig {
 #[derive(Clone)]
 struct AppState {
     config: Arc<ServiceConfig>,
-    dedupe_store: Arc<Mutex<ProcessedMessageStore>>,
+    dedupe_store: Arc<AsyncMutex<ProcessedMessageStore>>,
+    scheduler: Arc<Mutex<Scheduler<ModuleExecutor>>>,
 }
 
 pub async fn run_server(
@@ -83,9 +94,38 @@ pub async fn run_server(
 ) -> Result<(), BoxError> {
     let config = Arc::new(config);
     let dedupe_store = ProcessedMessageStore::load(&config.processed_ids_path)?;
+    let scheduler = Arc::new(Mutex::new(Scheduler::load(
+        &config.scheduler_state_path,
+        ModuleExecutor::default(),
+    )?));
+    let scheduler_stop = Arc::new(AtomicBool::new(false));
+    let scheduler_poll_interval = config.scheduler_poll_interval;
+    {
+        let scheduler = scheduler.clone();
+        let scheduler_stop = scheduler_stop.clone();
+        thread::spawn(move || {
+            while !scheduler_stop.load(Ordering::Relaxed) {
+                let tick_result = {
+                    let mut scheduler = match scheduler.lock() {
+                        Ok(guard) => guard,
+                        Err(err) => {
+                            error!("scheduler lock poisoned: {}", err);
+                            break;
+                        }
+                    };
+                    scheduler.tick()
+                };
+                if let Err(err) = tick_result {
+                    error!("scheduler tick failed: {}", err);
+                }
+                thread::sleep(scheduler_poll_interval);
+            }
+        });
+    }
     let state = AppState {
         config: config.clone(),
-        dedupe_store: Arc::new(Mutex::new(dedupe_store)),
+        dedupe_store: Arc::new(AsyncMutex::new(dedupe_store)),
+        scheduler,
     };
 
     let host: IpAddr = config
@@ -105,6 +145,7 @@ pub async fn run_server(
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
         .await?;
+    scheduler_stop.store(true, Ordering::Relaxed);
     Ok(())
 }
 
@@ -145,10 +186,11 @@ async fn postmark_inbound(
     }
 
     let config = state.config.clone();
+    let scheduler = state.scheduler.clone();
     let payload_clone = payload.clone();
     let body_bytes = body.to_vec();
     tokio::task::spawn_blocking(move || {
-        if let Err(err) = process_payload(&config, &payload_clone, &body_bytes) {
+        if let Err(err) = process_payload(&config, &scheduler, &payload_clone, &body_bytes) {
             error!("failed to process inbound payload: {err}");
         }
     });
@@ -158,6 +200,7 @@ async fn postmark_inbound(
 
 fn process_payload(
     config: &ServiceConfig,
+    scheduler: &Arc<Mutex<Scheduler<ModuleExecutor>>>,
     payload: &PostmarkInbound,
     raw_payload: &[u8],
 ) -> Result<(), BoxError> {
@@ -193,6 +236,7 @@ fn process_payload(
         reference_dir: PathBuf::from("references"),
         model_name: config.codex_model.clone(),
         codex_disabled: config.codex_disabled,
+        reply_to: to_list.clone(),
     };
 
     let send_task = SendEmailTask {
@@ -204,13 +248,14 @@ fn process_payload(
         bcc: Vec::new(),
     };
 
-    let mut scheduler =
-        Scheduler::load(&config.scheduler_state_path, ModuleExecutor::default())?;
-    scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
-    scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::SendEmail(send_task))?;
-    info!("scheduler tasks enqueued, running tick");
-    scheduler.tick()?;
-    info!("scheduler tick complete");
+    {
+        let mut scheduler = scheduler
+            .lock()
+            .map_err(|_| "scheduler lock poisoned")?;
+        scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
+        scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::SendEmail(send_task))?;
+    }
+    info!("scheduler tasks enqueued");
 
     Ok(())
 }
@@ -363,6 +408,8 @@ fn render_email_text(payload: &PostmarkInbound) -> String {
     let subject = payload.subject.as_deref().unwrap_or("");
     let from = payload.from.as_deref().unwrap_or("");
     let to = payload.to.as_deref().unwrap_or("");
+    let cc = payload.cc.as_deref().unwrap_or("");
+    let bcc = payload.bcc.as_deref().unwrap_or("");
     let body = payload
         .text_body
         .as_deref()
@@ -378,7 +425,14 @@ fn render_email_text(payload: &PostmarkInbound) -> String {
         .map(|items| {
             items
                 .iter()
-                .map(|item| item.name.as_str())
+                .map(|item| {
+                    let content_type = item.content_type.trim();
+                    if content_type.is_empty() {
+                        item.name.clone()
+                    } else {
+                        format!("{} ({})", item.name, content_type)
+                    }
+                })
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -389,7 +443,7 @@ fn render_email_text(payload: &PostmarkInbound) -> String {
     };
 
     format!(
-        "From: {from}\nTo: {to}\nSubject: {subject}\nAttachments: {attachment_line}\n\n{body}\n"
+        "From: {from}\nTo: {to}\nCc: {cc}\nBcc: {bcc}\nSubject: {subject}\nAttachments: {attachment_line}\n\n{body}\n"
     )
 }
 
@@ -524,21 +578,37 @@ struct PostmarkAttachment {
 
 fn extract_message_ids(payload: &PostmarkInbound, raw_payload: &[u8]) -> Vec<String> {
     let mut ids = Vec::new();
-    if let Some(header_id) = payload.header_message_id() {
-        let trimmed = header_id.trim();
-        if !trimmed.is_empty() {
-            ids.push(trimmed.to_string());
+    let mut seen = HashSet::new();
+    if let Some(header_id) = payload
+        .header_message_id()
+        .and_then(normalize_message_id)
+    {
+        if seen.insert(header_id.clone()) {
+            ids.push(header_id);
         }
     }
-    if let Some(message_id) = payload.message_id.as_ref() {
-        let trimmed = message_id.trim();
-        if !trimmed.is_empty() {
-            ids.push(trimmed.to_string());
+    if let Some(message_id) = payload
+        .message_id
+        .as_ref()
+        .and_then(|value| normalize_message_id(value))
+    {
+        if seen.insert(message_id.clone()) {
+            ids.push(message_id);
         }
     }
     let fallback = format!("{:x}", md5::compute(raw_payload));
-    ids.push(fallback);
+    if seen.insert(fallback.clone()) {
+        ids.push(fallback);
+    }
     ids
+}
+
+fn normalize_message_id(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_matches(|ch| matches!(ch, '<' | '>'));
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_ascii_lowercase())
 }
 
 struct ProcessedMessageStore {

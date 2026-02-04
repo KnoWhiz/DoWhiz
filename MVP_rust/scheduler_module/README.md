@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-let storage_path = PathBuf::from("/tmp/dowhiz_tasks.json");
+let storage_path = PathBuf::from("/tmp/dowhiz_tasks.db");
 let executor = ModuleExecutor::default();
 let mut scheduler = Scheduler::load(storage_path, executor)?;
 
@@ -41,5 +41,6 @@ scheduler.run_loop(Duration::from_secs(1), &stop_flag)?;
 
 ## Notes
 
-- Tasks are stored as JSON at the provided storage path and reloaded on startup.
+- Tasks are stored in a SQLite database at the provided storage path and reloaded on startup.
+- Execution attempts are recorded in the `task_executions` table with status and error details.
 - Use `add_one_shot_in` to schedule “N minutes from now” tasks based on local time converted to UTC.

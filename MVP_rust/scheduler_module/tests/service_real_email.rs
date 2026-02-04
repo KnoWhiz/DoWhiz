@@ -1,5 +1,5 @@
 use scheduler_module::service::{run_server, ServiceConfig};
-use scheduler_module::ScheduledTask;
+use scheduler_module::{Scheduler, ScheduledTask, SchedulerError, TaskExecution, TaskExecutor, TaskKind};
 use lettre::Transport;
 use serde_json::{json, Value};
 use std::env;
@@ -9,6 +9,30 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
+
+#[derive(Clone, Default)]
+struct NoopExecutor;
+
+impl TaskExecutor for NoopExecutor {
+    fn execute(&self, _task: &TaskKind) -> Result<TaskExecution, SchedulerError> {
+        Ok(TaskExecution::default())
+    }
+}
+
+fn load_env_from_repo() {
+    let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    loop {
+        let candidate = dir.join(".env");
+        if candidate.exists() {
+            let _ = dotenvy::from_path(candidate);
+            break;
+        }
+        match dir.parent() {
+            Some(parent) => dir = parent.to_path_buf(),
+            None => break,
+        }
+    }
+}
 
 struct HookRestore {
     token: String,
@@ -44,6 +68,7 @@ fn postmark_request(
     payload: Option<Value>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let client = reqwest::blocking::Client::builder()
+        .no_proxy()
         .timeout(Duration::from_secs(30))
         .build()?;
     let request = client
@@ -72,6 +97,7 @@ fn poll_outbound(
     timeout: Duration,
 ) -> Result<Option<Value>, Box<dyn std::error::Error>> {
     let client = reqwest::blocking::Client::builder()
+        .no_proxy()
         .timeout(Duration::from_secs(20))
         .build()?;
     let start = SystemTime::now();
@@ -113,6 +139,30 @@ fn poll_outbound(
             return Ok(None);
         }
         std::thread::sleep(Duration::from_secs(2));
+    }
+}
+
+fn check_public_health(base_url: &str, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    let client = reqwest::blocking::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(10))
+        .build()?;
+    let health_url = format!("{}/health", base_url.trim_end_matches('/'));
+    let response = client.get(&health_url).send();
+    match response {
+        Ok(response) if response.status().is_success() => Ok(()),
+        Ok(response) => Err(format!(
+            "public health check failed: {} {} (ensure ngrok forwards to http://127.0.0.1:{})",
+            response.status(),
+            health_url,
+            port
+        )
+        .into()),
+        Err(err) => Err(format!(
+            "public health check error: {} {} (ensure ngrok forwards to http://127.0.0.1:{})",
+            err, health_url, port
+        )
+        .into()),
     }
 }
 
@@ -158,15 +208,15 @@ fn wait_for_tasks_complete(
 ) -> Result<Vec<ScheduledTask>, Box<dyn std::error::Error>> {
     let start = SystemTime::now();
     loop {
-        if let Ok(raw) = fs::read_to_string(tasks_path) {
-            if !raw.trim().is_empty() {
-                let tasks: Vec<ScheduledTask> = serde_json::from_str(&raw)?;
-                if tasks
+        if tasks_path.exists() {
+            let scheduler = Scheduler::load(tasks_path, NoopExecutor)?;
+            let tasks = scheduler.tasks().to_vec();
+            if !tasks.is_empty()
+                && tasks
                     .iter()
                     .all(|task| !task.enabled && task.last_run.is_some())
-                {
-                    return Ok(tasks);
-                }
+            {
+                return Ok(tasks);
             }
         }
         if start.elapsed().unwrap_or_default() >= timeout {
@@ -179,6 +229,7 @@ fn wait_for_tasks_complete(
 #[test]
 fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
     let _ = tracing_subscriber::fmt().with_target(false).try_init();
+    load_env_from_repo();
     if !env_enabled("RUST_SERVICE_LIVE_TEST") {
         eprintln!("Skipping Rust service live email test. Set RUST_SERVICE_LIVE_TEST=1 to run.");
         return Ok(());
@@ -224,10 +275,11 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         host: "127.0.0.1".to_string(),
         port,
         workspace_root: workspace_root.clone(),
-        scheduler_state_path: state_dir.join("tasks.json"),
+        scheduler_state_path: state_dir.join("tasks.db"),
         processed_ids_path: state_dir.join("postmark_processed_ids.txt"),
         codex_model: env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string()),
         codex_disabled,
+        scheduler_poll_interval: Duration::from_secs(1),
     };
 
     let rt = Runtime::new()?;
@@ -243,7 +295,10 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         tokio::time::sleep(Duration::from_secs(1)).await;
     });
 
-    let hook_url = format!("{}/postmark/inbound", public_url.trim_end_matches('/'));
+    let base_url = public_url.trim_end_matches('/');
+    let base_url = base_url.strip_suffix("/postmark/inbound").unwrap_or(base_url);
+    check_public_health(base_url, port)?;
+    let hook_url = format!("{}/postmark/inbound", base_url);
     println!("Setting Postmark inbound hook to {}", hook_url);
     postmark_request(
         "PUT",
@@ -286,7 +341,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         return Err(format!("unexpected outbound status: {}", status).into());
     }
 
-    let tasks_path = state_dir.join("tasks.json");
+    let tasks_path = state_dir.join("tasks.db");
     let tasks_timeout = if env_enabled("RUN_CODEX_E2E") {
         Duration::from_secs(480)
     } else {

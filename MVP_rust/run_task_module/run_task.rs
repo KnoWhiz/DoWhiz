@@ -4,6 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use serde::Deserialize;
 
 const CODEX_CONFIG_MARKER: &str = "# IMPORTANT: Use your Azure *deployment name* here";
 const CODEX_CONFIG_BLOCK_TEMPLATE: &str = r#"# IMPORTANT: Use your Azure *deployment name* here (e.g., "gpt-5.2-codex")
@@ -17,6 +18,8 @@ base_url = "{azure_endpoint}"
 env_key = "AZURE_OPENAI_API_KEY_BACKUP"
 wire_api = "responses"
 "#;
+const SCHEDULED_TASKS_BEGIN: &str = "SCHEDULED_TASKS_JSON_BEGIN";
+const SCHEDULED_TASKS_END: &str = "SCHEDULED_TASKS_JSON_END";
 
 #[derive(Debug, Clone)]
 pub struct RunTaskParams {
@@ -39,11 +42,42 @@ struct RunTaskRequest<'a> {
     model_name: &'a str,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ScheduledTaskRequest {
+    SendEmail(ScheduledSendEmailTask),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScheduledSendEmailTask {
+    pub subject: String,
+    pub html_path: String,
+    pub attachments_dir: Option<String>,
+    #[serde(default)]
+    pub to: Vec<String>,
+    #[serde(default)]
+    pub cc: Vec<String>,
+    #[serde(default)]
+    pub bcc: Vec<String>,
+    pub delay_minutes: Option<i64>,
+    pub delay_seconds: Option<i64>,
+    pub run_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ScheduledTasksBlock {
+    List(Vec<ScheduledTaskRequest>),
+    Wrapper { tasks: Vec<ScheduledTaskRequest> },
+}
+
 #[derive(Debug, Clone)]
 pub struct RunTaskOutput {
     pub reply_html_path: PathBuf,
     pub reply_attachments_dir: PathBuf,
     pub codex_output: String,
+    pub scheduled_tasks: Vec<ScheduledTaskRequest>,
+    pub scheduled_tasks_error: Option<String>,
 }
 
 #[derive(Debug)]
@@ -107,6 +141,8 @@ pub fn run_task(params: &RunTaskParams) -> Result<RunTaskOutput, RunTaskError> {
             reply_html_path,
             reply_attachments_dir,
             codex_output: "codex disabled".to_string(),
+            scheduled_tasks: Vec::new(),
+            scheduled_tasks_error: None,
         });
     }
 
@@ -152,7 +188,6 @@ fn run_codex_task(
 
     let mut cmd = Command::new("codex");
     cmd.arg("exec")
-        .arg("--json")
         .arg("--skip-git-repo-check")
         .arg("-m")
         .arg(&model_name)
@@ -176,6 +211,7 @@ fn run_codex_task(
     let mut combined_output = String::new();
     combined_output.push_str(&String::from_utf8_lossy(&output.stdout));
     combined_output.push_str(&String::from_utf8_lossy(&output.stderr));
+    let (scheduled_tasks, scheduled_tasks_error) = extract_scheduled_tasks(&combined_output);
     let output_tail = tail_string(&combined_output, 2000);
 
     if !output.status.success() {
@@ -195,6 +231,8 @@ fn run_codex_task(
         reply_html_path,
         reply_attachments_dir,
         codex_output: output_tail,
+        scheduled_tasks,
+        scheduled_tasks_error,
     })
 }
 
@@ -412,6 +450,43 @@ fn update_config_block(existing: &str, block: &str) -> String {
     updated
 }
 
+fn extract_scheduled_tasks(
+    output: &str,
+) -> (Vec<ScheduledTaskRequest>, Option<String>) {
+    let end = match output.rfind(SCHEDULED_TASKS_END) {
+        Some(end) => end,
+        None => return (Vec::new(), None),
+    };
+    let start = match output[..end].rfind(SCHEDULED_TASKS_BEGIN) {
+        Some(start) => start + SCHEDULED_TASKS_BEGIN.len(),
+        None => {
+            return (
+                Vec::new(),
+                Some("missing scheduled tasks start marker".to_string()),
+            )
+        }
+    };
+
+    let raw = output[start..end].trim();
+    if raw.is_empty() {
+        return (Vec::new(), None);
+    }
+
+    match serde_json::from_str::<ScheduledTasksBlock>(raw) {
+        Ok(parsed) => {
+            let tasks = match parsed {
+                ScheduledTasksBlock::List(tasks) => tasks,
+                ScheduledTasksBlock::Wrapper { tasks } => tasks,
+            };
+            (tasks, None)
+        }
+        Err(err) => (
+            Vec::new(),
+            Some(format!("failed to parse scheduled tasks JSON: {}", err)),
+        ),
+    }
+}
+
 fn build_prompt(
     input_email_dir: &Path,
     input_attachments_dir: &Path,
@@ -434,15 +509,31 @@ Task:\n\
 3) Write the reply as a full HTML email to reply_email_draft.html in the workspace root.\n\
 4) Place any files to attach in reply_email_attachments/ (create it if missing).\n\
 \n\
+Optional scheduling:\n\
+- If the user asks you to send a follow-up email later, create the follow-up draft HTML in the\n\
+  workspace root and any attachment directory it needs.\n\
+- Then output a schedule block to stdout at the end of your response, exactly in this format:\n\
+  {schedule_begin}\n\
+  [{{\"type\":\"send_email\",\"delay_minutes\":15,\"subject\":\"Quick reminder\",\"html_path\":\"reminder_email_draft.html\",\"attachments_dir\":\"reminder_email_attachments\",\"to\":[\"you@example.com\"],\"cc\":[],\"bcc\":[]}}]\n\
+  {schedule_end}\n\
+- Use delay_minutes for \"N minutes later\" requests. Use run_at (RFC3339 UTC) only for specific\n\
+  times.\n\
+- If no follow-up is needed, output an empty array in the schedule block.\n\
+- Do not write scheduled_tasks.json or any other scheduling file.\n\
+\n\
 Rules:\n\
 - Do not modify input directories.\n\
 - If attachments include version suffixes like _v1, _v2, use the highest version.\n\
 - Only write reply_email_draft.html and files under reply_email_attachments/.\n\
+- If scheduling follow-ups, you may also write the follow-up draft HTML and any attachment\n\
+  dirs referenced in the schedule block.\n\
 - Keep the reply concise, friendly, and professional.\n",
         input_email = input_email_dir.display(),
         input_attachments = input_attachments_dir.display(),
         memory = memory_dir.display(),
         reference = reference_dir.display(),
+        schedule_begin = SCHEDULED_TASKS_BEGIN,
+        schedule_end = SCHEDULED_TASKS_END,
     )
 }
 
