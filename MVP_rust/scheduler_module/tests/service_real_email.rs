@@ -313,6 +313,8 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         codex_model: env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string()),
         codex_disabled,
         scheduler_poll_interval: Duration::from_secs(1),
+        scheduler_max_concurrency: 10,
+        scheduler_user_max_concurrency: 3,
     };
 
     let rt = Runtime::new()?;

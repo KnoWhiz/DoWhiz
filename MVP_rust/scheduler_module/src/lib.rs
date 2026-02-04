@@ -3,6 +3,7 @@ use cron::Schedule as CronSchedule;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::env;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
@@ -31,6 +32,8 @@ pub struct SendEmailTask {
     pub in_reply_to: Option<String>,
     #[serde(default)]
     pub references: Option<String>,
+    #[serde(default)]
+    pub archive_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +49,8 @@ pub struct RunTaskTask {
     pub codex_disabled: bool,
     #[serde(default)]
     pub reply_to: Vec<String>,
+    #[serde(default)]
+    pub archive_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,8 +127,32 @@ impl TaskExecutor for ModuleExecutor {
                     in_reply_to: task.in_reply_to.clone(),
                     references: task.references.clone(),
                 };
-                send_emails_module::send_email(&params)
+                let response = send_emails_module::send_email(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
+                if let Some(archive_root) = task.archive_root.as_ref() {
+                    dotenvy::dotenv().ok();
+                    let mut from =
+                        env::var("OUTBOUND_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
+                    if from.trim().is_empty() {
+                        from = "oliver@dowhiz.com".to_string();
+                    }
+                    if let Err(err) = crate::past_emails::archive_outbound(
+                        archive_root,
+                        &task.subject,
+                        &task.html_path,
+                        &task.attachments_dir,
+                        &task.to,
+                        &task.cc,
+                        &task.bcc,
+                        task.in_reply_to.as_deref(),
+                        task.references.as_deref(),
+                        &response.message_id,
+                        &response.submitted_at,
+                        &from,
+                    ) {
+                        warn!("failed to archive outbound email: {}", err);
+                    }
+                }
                 Ok(TaskExecution::empty())
             }
             TaskKind::RunTask(task) => {
@@ -239,6 +268,19 @@ impl<E: TaskExecutor> Scheduler<E> {
         Ok(self.tasks.last().unwrap().id)
     }
 
+    pub fn execute_task_by_id(&mut self, task_id: Uuid) -> Result<bool, SchedulerError> {
+        let now = Utc::now();
+        let index = match self.tasks.iter().position(|task| task.id == task_id) {
+            Some(index) => index,
+            None => return Ok(false),
+        };
+        if !self.tasks[index].enabled || !self.tasks[index].is_due(now) {
+            return Ok(false);
+        }
+        self.execute_task_at_index(index)?;
+        Ok(true)
+    }
+
     pub fn tick(&mut self) -> Result<(), SchedulerError> {
         let now = Utc::now();
         let task_count = self.tasks.len();
@@ -249,45 +291,57 @@ impl<E: TaskExecutor> Scheduler<E> {
             if !self.tasks[index].is_due(now) {
                 continue;
             }
+            self.execute_task_at_index(index)?;
+        }
 
-            let task_id = self.tasks[index].id;
-            let task_kind = self.tasks[index].kind.clone();
-            let started_at = Utc::now();
-            let execution_id = self.store.record_execution_start(task_id, started_at)?;
-            let result = self.executor.execute(&task_kind);
-            let executed_at = Utc::now();
+        Ok(())
+    }
 
-            match result {
-                Ok(execution) => {
-                    self.store.record_execution_finish(execution_id, executed_at, "success", None)?;
-                    self.tasks[index].last_run = Some(executed_at);
-                    match &mut self.tasks[index].schedule {
-                        Schedule::Cron { expression, next_run } => {
-                            *next_run = next_run_after(expression, executed_at)?;
-                        }
-                        Schedule::OneShot { .. } => {
-                            self.tasks[index].enabled = false;
-                        }
+    fn execute_task_at_index(&mut self, index: usize) -> Result<(), SchedulerError> {
+        let task_id = self.tasks[index].id;
+        let task_kind = self.tasks[index].kind.clone();
+        let started_at = Utc::now();
+        let execution_id = self.store.record_execution_start(task_id, started_at)?;
+        let result = self.executor.execute(&task_kind);
+        let executed_at = Utc::now();
+
+        match result {
+            Ok(execution) => {
+                self.store.record_execution_finish(execution_id, executed_at, "success", None)?;
+                self.tasks[index].last_run = Some(executed_at);
+                match &mut self.tasks[index].schedule {
+                    Schedule::Cron { expression, next_run } => {
+                        *next_run = next_run_after(expression, executed_at)?;
                     }
-                    let updated_task = self.tasks[index].clone();
-                    self.store.update_task(&updated_task)?;
-                    if let TaskKind::RunTask(task) = &task_kind {
-                        if let Some(err) = execution.follow_up_error.as_deref() {
-                            warn!("scheduled tasks parse error: {}", err);
-                        }
-                        ingest_follow_up_tasks(self, task, &execution.follow_up_tasks);
+                    Schedule::OneShot { .. } => {
+                        self.tasks[index].enabled = false;
                     }
                 }
-                Err(err) => {
-                    let message = err.to_string();
-                    self.store.record_execution_finish(
-                        execution_id,
-                        executed_at,
-                        "failed",
-                        Some(&message),
-                    )?;
-                    return Err(err);
+                let updated_task = self.tasks[index].clone();
+                self.store.update_task(&updated_task)?;
+                if let TaskKind::RunTask(task) = &task_kind {
+                    if let Some(err) = execution.follow_up_error.as_deref() {
+                        warn!("scheduled tasks parse error: {}", err);
+                    }
+                    ingest_follow_up_tasks(self, task, &execution.follow_up_tasks);
+                    if let Err(err) = schedule_auto_reply(self, task) {
+                        warn!(
+                            "failed to schedule auto reply from {}: {}",
+                            task.workspace_dir.display(),
+                            err
+                        );
+                    }
                 }
+            }
+            Err(err) => {
+                let message = err.to_string();
+                self.store.record_execution_finish(
+                    execution_id,
+                    executed_at,
+                    "failed",
+                    Some(&message),
+                )?;
+                return Err(err);
             }
         }
 
@@ -357,7 +411,8 @@ CREATE TABLE IF NOT EXISTS send_email_tasks (
     html_path TEXT NOT NULL,
     attachments_dir TEXT NOT NULL,
     in_reply_to TEXT,
-    references_header TEXT
+    references_header TEXT,
+    archive_root TEXT
 );
 
 CREATE TABLE IF NOT EXISTS send_email_recipients (
@@ -376,7 +431,8 @@ CREATE TABLE IF NOT EXISTS run_task_tasks (
     reference_dir TEXT NOT NULL,
     model_name TEXT NOT NULL,
     codex_disabled INTEGER NOT NULL,
-    reply_to TEXT NOT NULL
+    reply_to TEXT NOT NULL,
+    archive_root TEXT
 );
 
 CREATE TABLE IF NOT EXISTS task_executions (
@@ -406,6 +462,29 @@ fn ensure_send_email_task_columns(conn: &Connection) -> Result<(), SchedulerErro
     if !columns.contains("references_header") {
         conn.execute(
             "ALTER TABLE send_email_tasks ADD COLUMN references_header TEXT",
+            [],
+        )?;
+    }
+    if !columns.contains("archive_root") {
+        conn.execute(
+            "ALTER TABLE send_email_tasks ADD COLUMN archive_root TEXT",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_run_task_task_columns(conn: &Connection) -> Result<(), SchedulerError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(run_task_tasks)")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let mut columns = HashSet::new();
+    for row in rows {
+        columns.insert(row?);
+    }
+
+    if !columns.contains("archive_root") {
+        conn.execute(
+            "ALTER TABLE run_task_tasks ADD COLUMN archive_root TEXT",
             [],
         )?;
     }
@@ -541,8 +620,8 @@ impl SqliteSchedulerStore {
         match &task.kind {
             TaskKind::SendEmail(send) => {
                 tx.execute(
-                    "INSERT INTO send_email_tasks (task_id, subject, html_path, attachments_dir, in_reply_to, references_header)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    "INSERT INTO send_email_tasks (task_id, subject, html_path, attachments_dir, in_reply_to, references_header, archive_root)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
                         task.id.to_string(),
                         send.subject.as_str(),
@@ -550,6 +629,9 @@ impl SqliteSchedulerStore {
                         send.attachments_dir.to_string_lossy().into_owned(),
                         send.in_reply_to.as_deref(),
                         send.references.as_deref(),
+                        send.archive_root
+                            .as_ref()
+                            .map(|value| value.to_string_lossy().into_owned()),
                     ],
                 )?;
                 insert_recipients(
@@ -573,8 +655,8 @@ impl SqliteSchedulerStore {
             }
             TaskKind::RunTask(run) => {
                 tx.execute(
-                    "INSERT INTO run_task_tasks (task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, codex_disabled, reply_to)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    "INSERT INTO run_task_tasks (task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, codex_disabled, reply_to, archive_root)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                     params![
                         task.id.to_string(),
                         run.workspace_dir.to_string_lossy().into_owned(),
@@ -584,7 +666,10 @@ impl SqliteSchedulerStore {
                         run.reference_dir.to_string_lossy().into_owned(),
                         run.model_name.as_str(),
                         bool_to_int(run.codex_disabled),
-                        join_recipients(&run.reply_to)
+                        join_recipients(&run.reply_to),
+                        run.archive_root
+                            .as_ref()
+                            .map(|value| value.to_string_lossy().into_owned()),
                     ],
                 )?;
             }
@@ -665,7 +750,7 @@ impl SqliteSchedulerStore {
     ) -> Result<SendEmailTask, SchedulerError> {
         let row = conn
             .query_row(
-                "SELECT subject, html_path, attachments_dir, in_reply_to, references_header
+                "SELECT subject, html_path, attachments_dir, in_reply_to, references_header, archive_root
                  FROM send_email_tasks
                  WHERE task_id = ?1",
                 params![task_id],
@@ -676,11 +761,12 @@ impl SqliteSchedulerStore {
                         row.get::<_, String>(2)?,
                         row.get::<_, Option<String>>(3)?,
                         row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
                     ))
                 },
             )
             .optional()?;
-        let (subject, html_path, attachments_dir, in_reply_to_raw, references_raw) =
+        let (subject, html_path, attachments_dir, in_reply_to_raw, references_raw, archive_root) =
             row.ok_or_else(|| {
             SchedulerError::Storage(format!(
                 "missing send_email_tasks row for task {}",
@@ -719,6 +805,7 @@ impl SqliteSchedulerStore {
             bcc,
             in_reply_to: normalize_header_value(in_reply_to_raw),
             references: normalize_header_value(references_raw),
+            archive_root: normalize_optional_path(archive_root),
         })
     }
 
@@ -729,7 +816,7 @@ impl SqliteSchedulerStore {
     ) -> Result<RunTaskTask, SchedulerError> {
         let row = conn
             .query_row(
-                "SELECT workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, codex_disabled, reply_to
+                "SELECT workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, codex_disabled, reply_to, archive_root
                  FROM run_task_tasks
                  WHERE task_id = ?1",
                 params![task_id],
@@ -743,6 +830,7 @@ impl SqliteSchedulerStore {
                         row.get::<_, String>(5)?,
                         row.get::<_, i64>(6)?,
                         row.get::<_, String>(7)?,
+                        row.get::<_, Option<String>>(8)?,
                     ))
                 },
             )
@@ -756,6 +844,7 @@ impl SqliteSchedulerStore {
             model_name,
             codex_disabled,
             reply_to_raw,
+            archive_root,
         ) = row.ok_or_else(|| {
             SchedulerError::Storage(format!(
                 "missing run_task_tasks row for task {}",
@@ -772,6 +861,7 @@ impl SqliteSchedulerStore {
             model_name,
             codex_disabled: codex_disabled != 0,
             reply_to: split_recipients(&reply_to_raw),
+            archive_root: normalize_optional_path(archive_root),
         })
     }
 
@@ -783,6 +873,7 @@ impl SqliteSchedulerStore {
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.execute_batch(SCHEDULER_SCHEMA)?;
         ensure_send_email_task_columns(&conn)?;
+        ensure_run_task_task_columns(&conn)?;
         Ok(conn)
     }
 }
@@ -857,6 +948,14 @@ fn normalize_header_value(value: Option<String>) -> Option<String> {
         .map(|trimmed| trimmed.to_string())
 }
 
+fn normalize_optional_path(value: Option<String>) -> Option<PathBuf> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|trimmed| !trimmed.is_empty())
+        .map(PathBuf::from)
+}
+
 fn insert_recipients(
     tx: &rusqlite::Transaction<'_>,
     task_id: &str,
@@ -903,6 +1002,49 @@ fn ingest_follow_up_tasks<E: TaskExecutor>(
         scheduled,
         task.workspace_dir.display()
     );
+}
+
+fn schedule_auto_reply<E: TaskExecutor>(
+    scheduler: &mut Scheduler<E>,
+    task: &RunTaskTask,
+) -> Result<bool, SchedulerError> {
+    if task.reply_to.is_empty() {
+        return Ok(false);
+    }
+
+    let html_path = task.workspace_dir.join("reply_email_draft.html");
+    if !html_path.exists() {
+        warn!(
+            "auto reply missing reply_email_draft.html in workspace {}",
+            task.workspace_dir.display()
+        );
+        return Ok(false);
+    }
+    let attachments_dir = task.workspace_dir.join("reply_email_attachments");
+    let reply_context = load_reply_context(&task.workspace_dir);
+
+    let send_task = SendEmailTask {
+        subject: reply_context.subject,
+        html_path,
+        attachments_dir,
+        to: task.reply_to.clone(),
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        in_reply_to: reply_context.in_reply_to,
+        references: reply_context.references,
+        archive_root: task.archive_root.clone(),
+    };
+
+    let task_id = scheduler.add_one_shot_in(
+        Duration::from_secs(0),
+        TaskKind::SendEmail(send_task),
+    )?;
+    info!(
+        "scheduled auto reply task {} from {}",
+        task_id,
+        task.workspace_dir.display()
+    );
+    Ok(true)
 }
 
 fn schedule_send_email<E: TaskExecutor>(
@@ -975,12 +1117,20 @@ fn schedule_send_email<E: TaskExecutor>(
         bcc: request.bcc.clone(),
         in_reply_to: None,
         references: None,
+        archive_root: task.archive_root.clone(),
     };
 
     if let Some(run_at_raw) = request.run_at.as_deref() {
         match parse_datetime(run_at_raw) {
             Ok(run_at) => {
-                scheduler.add_one_shot_at(run_at, TaskKind::SendEmail(send_task))?;
+                let task_id =
+                    scheduler.add_one_shot_at(run_at, TaskKind::SendEmail(send_task))?;
+                info!(
+                    "scheduled follow-up send_email task {} from {} run_at={}",
+                    task_id,
+                    task.workspace_dir.display(),
+                    run_at.to_rfc3339()
+                );
                 return Ok(true);
             }
             Err(err) => {
@@ -1009,10 +1159,16 @@ fn schedule_send_email<E: TaskExecutor>(
         }
     };
 
-    scheduler.add_one_shot_in(
+    let task_id = scheduler.add_one_shot_in(
         Duration::from_secs(delay_seconds),
         TaskKind::SendEmail(send_task),
     )?;
+    info!(
+        "scheduled follow-up send_email task {} from {} delay_seconds={}",
+        task_id,
+        task.workspace_dir.display(),
+        delay_seconds
+    );
     Ok(true)
 }
 
@@ -1029,6 +1185,117 @@ fn resolve_rel_path(root: &Path, raw: &str) -> Option<PathBuf> {
         return None;
     }
     Some(root.join(rel))
+}
+
+#[derive(Debug)]
+struct ReplyContext {
+    subject: String,
+    in_reply_to: Option<String>,
+    references: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PostmarkInboundLite {
+    #[serde(rename = "Subject")]
+    subject: Option<String>,
+    #[serde(rename = "MessageID", alias = "MessageId")]
+    message_id: Option<String>,
+    #[serde(rename = "Headers")]
+    headers: Option<Vec<PostmarkHeaderLite>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PostmarkHeaderLite {
+    #[serde(rename = "Name")]
+    name: String,
+    #[serde(rename = "Value")]
+    value: String,
+}
+
+impl PostmarkInboundLite {
+    fn header_value(&self, name: &str) -> Option<&str> {
+        self.headers.as_ref().and_then(|headers| {
+            headers
+                .iter()
+                .find(|header| header.name.eq_ignore_ascii_case(name))
+                .map(|header| header.value.as_str())
+        })
+    }
+
+    fn header_message_id(&self) -> Option<&str> {
+        self.header_value("message-id")
+    }
+}
+
+fn load_reply_context(workspace_dir: &Path) -> ReplyContext {
+    let payload_path = workspace_dir
+        .join("incoming_email")
+        .join("postmark_payload.json");
+    let payload = fs::read_to_string(&payload_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<PostmarkInboundLite>(&content).ok());
+
+    if let Some(payload) = payload {
+        let subject_raw = payload.subject.as_deref().unwrap_or("");
+        let subject = reply_subject(subject_raw);
+        let (in_reply_to, references) = reply_headers(&payload);
+        ReplyContext {
+            subject,
+            in_reply_to,
+            references,
+        }
+    } else {
+        ReplyContext {
+            subject: reply_subject(""),
+            in_reply_to: None,
+            references: None,
+        }
+    }
+}
+
+fn reply_subject(original: &str) -> String {
+    let trimmed = original.trim();
+    if trimmed.is_empty() {
+        "Re: (no subject)".to_string()
+    } else if trimmed.to_lowercase().starts_with("re:") {
+        trimmed.to_string()
+    } else {
+        format!("Re: {}", trimmed)
+    }
+}
+
+fn reply_headers(payload: &PostmarkInboundLite) -> (Option<String>, Option<String>) {
+    let message_id = payload
+        .header_message_id()
+        .or(payload.message_id.as_deref())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+
+    let mut references = payload
+        .header_value("References")
+        .or_else(|| payload.header_value("In-Reply-To"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    if let Some(ref msg_id) = message_id {
+        references = match references {
+            Some(existing) => {
+                if references_contains(&existing, msg_id) {
+                    Some(existing)
+                } else {
+                    Some(format!("{existing} {msg_id}"))
+                }
+            }
+            None => Some(msg_id.clone()),
+        };
+    }
+
+    (message_id, references)
+}
+
+fn references_contains(references: &str, message_id: &str) -> bool {
+    references.split_whitespace().any(|entry| entry == message_id)
 }
 
 pub mod service;

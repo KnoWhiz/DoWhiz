@@ -50,6 +50,7 @@ fn run_task_followups_persist_to_sqlite() {
         model_name: "gpt-5.2-codex".to_string(),
         codex_disabled: true,
         reply_to: Vec::new(),
+        archive_root: None,
     };
 
     let mut scheduler =

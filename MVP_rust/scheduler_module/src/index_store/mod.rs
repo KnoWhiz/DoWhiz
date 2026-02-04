@@ -10,6 +10,12 @@ pub struct IndexStore {
     path: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+pub struct TaskRef {
+    pub task_id: String,
+    pub user_id: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum IndexStoreError {
     #[error("sqlite error: {0}")]
@@ -80,6 +86,35 @@ impl IndexStore {
             user_ids.push(row?);
         }
         Ok(user_ids)
+    }
+
+    pub fn due_task_refs(
+        &self,
+        now: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<TaskRef>, IndexStoreError> {
+        let conn = self.open()?;
+        let mut stmt = conn.prepare(
+            "SELECT task_id, user_id
+             FROM task_index
+             WHERE enabled = 1 AND next_run <= ?1
+             ORDER BY next_run
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(
+            params![format_datetime(&now), limit as i64],
+            |row| {
+                Ok(TaskRef {
+                    task_id: row.get::<_, String>(0)?,
+                    user_id: row.get::<_, String>(1)?,
+                })
+            },
+        )?;
+        let mut task_refs = Vec::new();
+        for row in rows {
+            task_refs.push(row?);
+        }
+        Ok(task_refs)
     }
 
     fn open(&self) -> Result<Connection, IndexStoreError> {

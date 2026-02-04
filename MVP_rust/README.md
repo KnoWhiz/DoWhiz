@@ -48,16 +48,28 @@ oliver@dowhiz.com
 - `USERS_DB_PATH` (default: `.workspace/run_task/state/users.db`)
 - `TASK_INDEX_PATH` (default: `.workspace/run_task/state/task_index.db`)
 - `SCHEDULER_POLL_INTERVAL_SECS` (default: `1`)
+- `SCHEDULER_MAX_CONCURRENCY` (default: `10`)
 - `CODEX_MODEL`
 - `CODEX_DISABLED=1` to bypass Codex CLI
 - Inbound blacklist: `agent@dowhiz.com`, `oliver@dowhiz.com` are ignored (display names and `+tag` aliases are normalized).
+
+## Database files
+- `MVP_rust/.workspace/run_task/state/users.db`: user registry. Table `users(id, email, created_at, last_seen_at)` stores normalized email, creation time, and last activity time (RFC3339 UTC). `last_seen_at` updates on inbound email.
+- `MVP_rust/.workspace/run_task/state/task_index.db`: global task index for due work. Table `task_index(task_id, user_id, next_run, enabled)` plus indexes on `next_run` and `user_id`. This is a derived index synced from each user's `tasks.db` and used by the scheduler thread to query due tasks efficiently.
+- `MVP_rust/.workspace/run_task/users/<user_id>/state/tasks.db`: per-user scheduler store (SQLite with foreign keys on). Key tables:
+  - `tasks(id, kind, enabled, created_at, last_run, schedule_type, cron_expression, next_run, run_at)` holds scheduling metadata. `schedule_type` is `cron` or `one_shot`; cron uses `cron_expression` + `next_run`, one-shot uses `run_at`.
+  - `send_email_tasks(task_id, subject, html_path, attachments_dir, in_reply_to, references_header[, archive_root])` stores email task payloads. `archive_root` may be added by auto-migration.
+  - `send_email_recipients(id, task_id, recipient_type, address)` stores `to`/`cc`/`bcc` recipients.
+  - `run_task_tasks(task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, codex_disabled, reply_to[, archive_root])` stores RunTask parameters. `reply_to` is newline-separated; `archive_root` may be added by auto-migration.
+  - `task_executions(id, task_id, started_at, finished_at, status, error_message)` records execution history and errors.
 
 ## Past email hydration
 Each new workspace populates `references/past_emails/` from the user archive under
 `.workspace/run_task/users/<user_id>/mail`. The hydrator copies `incoming_email/`
 and any attachments <= 50MB; larger attachments are referenced via
 `attachments_manifest.json` (set `*.azure_url` sidecar files to supply the Azure
-blob URL if needed).
+blob URL if needed). Outgoing agent replies are archived after successful
+`send_email` execution and appear in `past_emails` with `direction: "outbound"`.
 
 Manual run:
 ```
@@ -68,6 +80,7 @@ cargo run -p scheduler_module --bin hydrate_past_emails -- \
 ```
 
 ### `index.json` schema
+`direction` is `"inbound"` or `"outbound"`.
 ```
 {
   "version": 1,
@@ -78,6 +91,7 @@ cargo run -p scheduler_module --bin hydrate_past_emails -- \
       "entry_id": "message-id",
       "display_name": "2026-02-03_hi__abc123",
       "path": "2026-02-03_hi__abc123",
+      "direction": "inbound",
       "subject": "Hi",
       "from": "Sender <sender@example.com>",
       "to": "Recipient <recipient@example.com>",
