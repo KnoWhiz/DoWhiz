@@ -1034,3 +1034,4 @@ fn resolve_rel_path(root: &Path, raw: &str) -> Option<PathBuf> {
 pub mod service;
 pub mod index_store;
 pub mod user_store;
+pub mod past_emails;

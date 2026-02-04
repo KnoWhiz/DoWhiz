@@ -276,7 +276,7 @@ fn process_payload(
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     user_store.ensure_user_dirs(&user_paths)?;
 
-    let workspace = create_workspace(&user_paths, payload, raw_payload)?;
+    let workspace = create_workspace(&user_paths, &user.user_id, payload, raw_payload)?;
     if let Err(err) = archive_inbound(&user_paths, payload, raw_payload) {
         error!("failed to archive inbound email: {}", err);
     }
@@ -353,6 +353,7 @@ fn is_blacklisted_address(address: &str) -> bool {
 
 fn create_workspace(
     user_paths: &crate::user_store::UserPaths,
+    user_id: &str,
     payload: &PostmarkInbound,
     raw_payload: &[u8],
 ) -> Result<PathBuf, BoxError> {
@@ -375,6 +376,15 @@ fn create_workspace(
     fs::create_dir_all(&incoming_attachments)?;
     fs::create_dir_all(&memory)?;
     fs::create_dir_all(&references)?;
+
+    if let Err(err) = crate::past_emails::hydrate_past_emails(
+        &user_paths.mail_root,
+        &references,
+        user_id,
+        None,
+    ) {
+        error!("failed to hydrate past_emails: {}", err);
+    }
 
     write_inbound_payload(
         payload,
@@ -752,5 +762,84 @@ impl ProcessedMessageStore {
             writeln!(handle, "{}", value)?;
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn create_workspace_hydrates_past_emails() {
+        let temp = TempDir::new().expect("tempdir");
+        let user_root = temp.path().join("user");
+        let user_paths = crate::user_store::UserPaths {
+            root: user_root.clone(),
+            state_dir: user_root.join("state"),
+            tasks_db_path: user_root.join("state/tasks.db"),
+            memory_dir: user_root.join("memory"),
+            mail_root: user_root.join("mail"),
+            workspaces_root: user_root.join("workspaces"),
+        };
+        fs::create_dir_all(&user_paths.mail_root).expect("mail root");
+        fs::create_dir_all(&user_paths.workspaces_root).expect("workspaces root");
+
+        let archive_dir = user_paths
+            .mail_root
+            .join("2026")
+            .join("02")
+            .join("msg_1");
+        let incoming_email = archive_dir.join("incoming_email");
+        let incoming_attachments = archive_dir.join("incoming_attachments");
+        fs::create_dir_all(&incoming_email).expect("incoming_email");
+        fs::create_dir_all(&incoming_attachments).expect("incoming_attachments");
+        fs::write(incoming_email.join("email.txt"), "Hello").expect("email.txt");
+        let archived_payload = r#"{
+  "From": "Alice <alice@example.com>",
+  "To": "Bob <bob@example.com>",
+  "Subject": "Archive hello",
+  "Date": "Tue, 03 Feb 2026 20:10:44 -0800",
+  "MessageID": "<msg-1@example.com>",
+  "Attachments": [
+    {"Name": "report.pdf", "ContentType": "application/pdf"}
+  ]
+}"#;
+        fs::write(
+            incoming_email.join("postmark_payload.json"),
+            archived_payload,
+        )
+        .expect("postmark payload");
+        fs::write(incoming_attachments.join("report.pdf"), "data").expect("attachment");
+
+        let inbound_raw = r#"{
+  "From": "New <new@example.com>",
+  "To": "Service <service@example.com>",
+  "Subject": "New request",
+  "TextBody": "Hi"
+}"#;
+        let inbound_payload: PostmarkInbound =
+            serde_json::from_str(inbound_raw).expect("parse inbound");
+        let workspace =
+            create_workspace(&user_paths, "user123", &inbound_payload, inbound_raw.as_bytes())
+                .expect("create workspace");
+
+        let past_root = workspace.join("references").join("past_emails");
+        let index_path = past_root.join("index.json");
+        assert!(index_path.exists(), "index.json created");
+
+        let index_data = fs::read_to_string(index_path).expect("read index");
+        let index_json: serde_json::Value =
+            serde_json::from_str(&index_data).expect("parse index");
+        let entries = index_json["entries"]
+            .as_array()
+            .expect("entries array");
+        assert_eq!(entries.len(), 1, "one archived entry");
+        let entry_path = entries[0]["path"].as_str().expect("entry path");
+        assert!(past_root.join(entry_path).join("incoming_email").exists());
+        assert!(past_root
+            .join(entry_path)
+            .join("attachments_manifest.json")
+            .exists());
     }
 }

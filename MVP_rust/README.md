@@ -52,6 +52,67 @@ oliver@dowhiz.com
 - `CODEX_DISABLED=1` to bypass Codex CLI
 - Inbound blacklist: `agent@dowhiz.com`, `oliver@dowhiz.com` are ignored (display names and `+tag` aliases are normalized).
 
+## Past email hydration
+Each new workspace populates `references/past_emails/` from the user archive under
+`.workspace/run_task/users/<user_id>/mail`. The hydrator copies `incoming_email/`
+and any attachments <= 50MB; larger attachments are referenced via
+`attachments_manifest.json` (set `*.azure_url` sidecar files to supply the Azure
+blob URL if needed).
+
+Manual run:
+```
+cargo run -p scheduler_module --bin hydrate_past_emails -- \
+  --archive-root .workspace/run_task/users/<user_id>/mail \
+  --references-dir /path/to/workspace/references \
+  --user-id <user_id>
+```
+
+### `index.json` schema
+```
+{
+  "version": 1,
+  "generated_at": "RFC3339 timestamp",
+  "user_id": "uuid",
+  "entries": [
+    {
+      "entry_id": "message-id",
+      "display_name": "2026-02-03_hi__abc123",
+      "path": "2026-02-03_hi__abc123",
+      "subject": "Hi",
+      "from": "Sender <sender@example.com>",
+      "to": "Recipient <recipient@example.com>",
+      "cc": "",
+      "bcc": "",
+      "date": "RFC3339 timestamp",
+      "message_id": "message-id",
+      "attachments_manifest": "2026-02-03_hi__abc123/attachments_manifest.json",
+      "attachments_count": 1,
+      "large_attachments_count": 0
+    }
+  ]
+}
+```
+
+### `attachments_manifest.json` schema
+```
+{
+  "version": 1,
+  "generated_at": "RFC3339 timestamp",
+  "message_id": "message-id",
+  "attachments": [
+    {
+      "file_name": "report.pdf",
+      "original_name": "Report.pdf",
+      "content_type": "application/pdf",
+      "size_bytes": 12345,
+      "storage": "local",
+      "relative_path": "incoming_attachments/report.pdf",
+      "azure_blob_url": null
+    }
+  ]
+}
+```
+
 ## Scheduled follow-ups
 If the agent needs to send a follow-up later, it should emit a schedule block to stdout at the end
 of its response. The scheduler parses the block and stores follow-up tasks in SQLite.
