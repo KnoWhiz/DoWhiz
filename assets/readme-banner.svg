@@ -1,0 +1,37 @@
+<svg width="1200" height="360" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">DoWhiz - Email-first digital employees</title>
+  <desc id="desc">Dark banner with a blue gradient halo and DoWhiz wordmark</desc>
+  <defs>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="50%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#0EA5E9"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(600 180) rotate(90) scale(180 380)">
+      <stop offset="0%" stop-color="#3B82F6" stop-opacity="0.35"/>
+      <stop offset="45%" stop-color="#6366F1" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#050505" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="360" fill="#050505"/>
+  <rect width="1200" height="360" fill="url(#halo)"/>
+  <g>
+    <text x="600" y="170" text-anchor="middle" font-size="96" font-weight="700" font-family="Inter, Segoe UI, Arial, sans-serif" fill="#FFFFFF" letter-spacing="-1.5">
+      Do<tspan fill="url(#accent)">Whiz</tspan>
+    </text>
+    <text x="600" y="230" text-anchor="middle" font-size="24" font-weight="500" font-family="Inter, Segoe UI, Arial, sans-serif" fill="#A1A1AA" letter-spacing="2">
+      EMAIL-FIRST DIGITAL EMPLOYEES
+    </text>
+  </g>
+  <g opacity="0.5">
+    <rect x="470" y="260" width="260" height="38" rx="19" fill="white" fill-opacity="0.06" stroke="white" stroke-opacity="0.1"/>
+    <text x="600" y="285" text-anchor="middle" font-size="14" font-weight="600" font-family="Inter, Segoe UI, Arial, sans-serif" fill="#E4E4E7">
+      Email in. Results out.
+    </text>
+  </g>
+  <g opacity="0.2">
+    <circle cx="185" cy="92" r="4" fill="#3B82F6"/>
+    <circle cx="1000" cy="70" r="3" fill="#6366F1"/>
+    <circle cx="1020" cy="270" r="5" fill="#0EA5E9"/>
+  </g>
+</svg>

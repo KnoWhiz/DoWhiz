@@ -1,7 +1,24 @@
-# DoWhiz
+# DoWhiz - Email-first digital employees
 
-Email-first digital employees that turn inbound messages into structured work
-and deliver results back in the same channel.
+<p align="center">
+  <img src="assets/readme-banner.svg" alt="DoWhiz - Email-first digital employees" width="1200" />
+</p>
+
+<p align="center">
+  <a href="LICENSE">
+    <img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache%202.0-0f172a?style=for-the-badge" />
+  </a>
+  <a href="DoWhiz_service/README.md">
+    <img alt="Rust service" src="https://img.shields.io/badge/Rust-Service-0ea5e9?style=for-the-badge&logo=rust&logoColor=white" />
+  </a>
+  <a href="website/README.md">
+    <img alt="React website" src="https://img.shields.io/badge/React-Website-3b82f6?style=for-the-badge&logo=react&logoColor=white" />
+  </a>
+  <img alt="Email first" src="https://img.shields.io/badge/Email-First-6366f1?style=for-the-badge" />
+</p>
+
+Send tasks by email and get structured work and results back in the same
+channel.
 
 ## Overview
 DoWhiz lets users send tasks to role-based agents over email. The platform
