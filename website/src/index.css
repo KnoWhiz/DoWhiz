@@ -344,8 +344,22 @@ ul {
 .email-tag {
   font-family: 'DM Mono', 'Courier New', monospace;
   font-size: 0.9rem;
-  color: var(--text-secondary);
-  opacity: 0.8;
+  color: var(--accent-color);
+  background: rgba(59, 130, 246, 0.1);
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  transition: all 0.3s ease;
+}
+
+.clickable-card {
+  cursor: pointer;
+}
+
+.clickable-card:hover .email-tag {
+  background: var(--accent-color);
+  color: white;
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
 }
 
 .status-badge {

@@ -65,10 +65,14 @@ function App() {
       {/* Roles & Scenarios */}
       <section id="roles" className="section roles-section">
         <div className="container">
-          <h2 className="section-title">Meet Your Digital Team</h2>
+          <h2 className="section-title">Meet Your Digital Employee Team</h2>
           <div className="roles-grid">
             {/* Oliver */}
-            <div className="role-card active-role">
+            <div
+              className="role-card active-role clickable-card"
+              onClick={() => window.location.href = 'mailto:Oliver@DoWhiz.com'}
+              title="Click to email Oliver"
+            >
               <div className="role-header">
                 <div className="role-profile">
                   <img src={oliverImg} alt="Oliver" className="role-avatar" />
@@ -87,7 +91,11 @@ function App() {
             </div>
 
             {/* Mini-Mouse */}
-            <div className="role-card coming-soon">
+            <div
+              className="role-card coming-soon clickable-card"
+              onClick={() => window.location.href = 'mailto:Mini-Mouse@DoWhiz.com'}
+              title="Click to email Mini-Mouse"
+            >
               <div className="role-header">
                 <div className="role-profile">
                   <img src={miniMouseImg} alt="Mini-Mouse" className="role-avatar" />
