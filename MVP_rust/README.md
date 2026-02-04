@@ -44,6 +44,9 @@ oliver@dowhiz.com
 - `WORKSPACE_ROOT` (default: `.workspace/run_task/workspaces`)
 - `SCHEDULER_STATE_PATH` (default: `.workspace/run_task/state/tasks.db`)
 - `PROCESSED_IDS_PATH` (default: `.workspace/run_task/state/postmark_processed_ids.txt`)
+- `USERS_ROOT` (default: `.workspace/run_task/users`)
+- `USERS_DB_PATH` (default: `.workspace/run_task/state/users.db`)
+- `TASK_INDEX_PATH` (default: `.workspace/run_task/state/task_index.db`)
 - `SCHEDULER_POLL_INTERVAL_SECS` (default: `1`)
 - `CODEX_MODEL`
 - `CODEX_DISABLED=1` to bypass Codex CLI

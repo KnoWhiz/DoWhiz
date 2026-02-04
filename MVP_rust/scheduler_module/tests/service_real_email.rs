@@ -1,6 +1,8 @@
 use scheduler_module::service::{run_server, ServiceConfig};
+use scheduler_module::user_store::normalize_email;
 use scheduler_module::{Scheduler, ScheduledTask, SchedulerError, TaskExecution, TaskExecutor, TaskKind};
 use lettre::Transport;
+use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 use std::env;
 use std::fs;
@@ -226,6 +228,33 @@ fn wait_for_tasks_complete(
     }
 }
 
+fn wait_for_user_id(users_db_path: &Path, email: &str, timeout: Duration) -> Option<String> {
+    let normalized = normalize_email(email)?;
+    let start = SystemTime::now();
+    loop {
+        if users_db_path.exists() {
+            if let Ok(conn) = rusqlite::Connection::open(users_db_path) {
+                if let Ok(row) = conn
+                    .query_row(
+                        "SELECT id FROM users WHERE email = ?1",
+                        rusqlite::params![normalized.as_str()],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()
+                {
+                    if let Some(user_id) = row {
+                        return Some(user_id);
+                    }
+                }
+            }
+        }
+        if start.elapsed().unwrap_or_default() >= timeout {
+            return None;
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+}
+
 #[test]
 fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
     let _ = tracing_subscriber::fmt().with_target(false).try_init();
@@ -264,6 +293,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
     let temp = TempDir::new()?;
     let workspace_root = temp.path().join("workspaces");
     let state_dir = temp.path().join("state");
+    let users_root = temp.path().join("users");
 
     let port = env::var("RUST_SERVICE_TEST_PORT")
         .ok()
@@ -277,6 +307,9 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         workspace_root: workspace_root.clone(),
         scheduler_state_path: state_dir.join("tasks.db"),
         processed_ids_path: state_dir.join("postmark_processed_ids.txt"),
+        users_root: users_root.clone(),
+        users_db_path: state_dir.join("users.db"),
+        task_index_path: state_dir.join("task_index.db"),
         codex_model: env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string()),
         codex_disabled,
         scheduler_poll_interval: Duration::from_secs(1),
@@ -318,6 +351,9 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         Duration::from_secs(120)
     };
 
+    let user_id = wait_for_user_id(&state_dir.join("users.db"), &from_addr, workspace_timeout)
+        .ok_or("timed out waiting for user record")?;
+    let workspace_root = users_root.join(&user_id).join("workspaces");
     let workspace = wait_for_workspace(&workspace_root, workspace_timeout)
         .ok_or("timed out waiting for workspace output")?;
     let reply_path = workspace.join("reply_email_draft.html");
@@ -341,7 +377,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         return Err(format!("unexpected outbound status: {}", status).into());
     }
 
-    let tasks_path = state_dir.join("tasks.db");
+    let tasks_path = users_root.join(&user_id).join("state").join("tasks.db");
     let tasks_timeout = if env_enabled("RUN_CODEX_E2E") {
         Duration::from_secs(480)
     } else {

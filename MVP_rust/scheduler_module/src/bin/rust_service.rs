@@ -76,9 +76,10 @@ async fn main() -> Result<(), BoxError> {
     });
 
     info!(
-        "starting service with workspace_root={} scheduler_state_path={}",
-        config.workspace_root.display(),
-        config.scheduler_state_path.display()
+        "starting service with users_root={} users_db_path={} task_index_path={}",
+        config.users_root.display(),
+        config.users_db_path.display(),
+        config.task_index_path.display()
     );
 
     run_server(config, async {

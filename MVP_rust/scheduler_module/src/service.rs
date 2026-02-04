@@ -16,12 +16,14 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::{error, info};
 
+use crate::index_store::IndexStore;
+use crate::user_store::{extract_emails, UserStore};
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, SendEmailTask, TaskKind};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -33,6 +35,9 @@ pub struct ServiceConfig {
     pub workspace_root: PathBuf,
     pub scheduler_state_path: PathBuf,
     pub processed_ids_path: PathBuf,
+    pub users_root: PathBuf,
+    pub users_db_path: PathBuf,
+    pub task_index_path: PathBuf,
     pub codex_model: String,
     pub codex_disabled: bool,
     pub scheduler_poll_interval: Duration,
@@ -58,6 +63,15 @@ impl ServiceConfig {
             resolve_path(env::var("PROCESSED_IDS_PATH").unwrap_or_else(|_| {
                 ".workspace/run_task/state/postmark_processed_ids.txt".to_string()
             }))?;
+        let users_root = resolve_path(env::var("USERS_ROOT").unwrap_or_else(|_| {
+            ".workspace/run_task/users".to_string()
+        }))?;
+        let users_db_path = resolve_path(env::var("USERS_DB_PATH").unwrap_or_else(|_| {
+            ".workspace/run_task/state/users.db".to_string()
+        }))?;
+        let task_index_path = resolve_path(env::var("TASK_INDEX_PATH").unwrap_or_else(|_| {
+            ".workspace/run_task/state/task_index.db".to_string()
+        }))?;
         let codex_model =
             env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string());
         let codex_disabled = env_flag("CODEX_DISABLED", false);
@@ -74,6 +88,9 @@ impl ServiceConfig {
             workspace_root,
             scheduler_state_path,
             processed_ids_path,
+            users_root,
+            users_db_path,
+            task_index_path,
             codex_model,
             codex_disabled,
             scheduler_poll_interval,
@@ -85,7 +102,8 @@ impl ServiceConfig {
 struct AppState {
     config: Arc<ServiceConfig>,
     dedupe_store: Arc<AsyncMutex<ProcessedMessageStore>>,
-    scheduler: Arc<Mutex<Scheduler<ModuleExecutor>>>,
+    user_store: Arc<UserStore>,
+    index_store: Arc<IndexStore>,
 }
 
 pub async fn run_server(
@@ -94,29 +112,62 @@ pub async fn run_server(
 ) -> Result<(), BoxError> {
     let config = Arc::new(config);
     let dedupe_store = ProcessedMessageStore::load(&config.processed_ids_path)?;
-    let scheduler = Arc::new(Mutex::new(Scheduler::load(
-        &config.scheduler_state_path,
-        ModuleExecutor::default(),
-    )?));
+    let user_store = Arc::new(UserStore::new(&config.users_db_path)?);
+    let index_store = Arc::new(IndexStore::new(&config.task_index_path)?);
+    if let Ok(user_ids) = user_store.list_user_ids() {
+        for user_id in user_ids {
+            let paths = user_store.user_paths(&config.users_root, &user_id);
+            let scheduler = Scheduler::load(&paths.tasks_db_path, ModuleExecutor::default());
+            match scheduler {
+                Ok(scheduler) => {
+                    if let Err(err) = index_store.sync_user_tasks(&user_id, scheduler.tasks()) {
+                        error!("index bootstrap failed for {}: {}", user_id, err);
+                    }
+                }
+                Err(err) => {
+                    error!("scheduler bootstrap failed for {}: {}", user_id, err);
+                }
+            }
+        }
+    }
     let scheduler_stop = Arc::new(AtomicBool::new(false));
     let scheduler_poll_interval = config.scheduler_poll_interval;
     {
-        let scheduler = scheduler.clone();
+        let config = config.clone();
+        let user_store = user_store.clone();
+        let index_store = index_store.clone();
         let scheduler_stop = scheduler_stop.clone();
         thread::spawn(move || {
             while !scheduler_stop.load(Ordering::Relaxed) {
-                let tick_result = {
-                    let mut scheduler = match scheduler.lock() {
-                        Ok(guard) => guard,
-                        Err(err) => {
-                            error!("scheduler lock poisoned: {}", err);
-                            break;
+                let now = Utc::now();
+                match index_store.due_user_ids(now, 50) {
+                    Ok(user_ids) => {
+                        for user_id in user_ids {
+                            let paths = user_store.user_paths(&config.users_root, &user_id);
+                            let mut scheduler = match Scheduler::load(
+                                &paths.tasks_db_path,
+                                ModuleExecutor::default(),
+                            ) {
+                                Ok(scheduler) => scheduler,
+                                Err(err) => {
+                                    error!("scheduler load failed for {}: {}", user_id, err);
+                                    continue;
+                                }
+                            };
+                            if let Err(err) = scheduler.tick() {
+                                error!("scheduler tick failed for {}: {}", user_id, err);
+                                continue;
+                            }
+                            if let Err(err) =
+                                index_store.sync_user_tasks(&user_id, scheduler.tasks())
+                            {
+                                error!("index sync failed for {}: {}", user_id, err);
+                            }
                         }
-                    };
-                    scheduler.tick()
-                };
-                if let Err(err) = tick_result {
-                    error!("scheduler tick failed: {}", err);
+                    }
+                    Err(err) => {
+                        error!("index store query failed: {}", err);
+                    }
                 }
                 thread::sleep(scheduler_poll_interval);
             }
@@ -125,7 +176,8 @@ pub async fn run_server(
     let state = AppState {
         config: config.clone(),
         dedupe_store: Arc::new(AsyncMutex::new(dedupe_store)),
-        scheduler,
+        user_store,
+        index_store,
     };
 
     let host: IpAddr = config
@@ -186,11 +238,14 @@ async fn postmark_inbound(
     }
 
     let config = state.config.clone();
-    let scheduler = state.scheduler.clone();
+    let user_store = state.user_store.clone();
+    let index_store = state.index_store.clone();
     let payload_clone = payload.clone();
     let body_bytes = body.to_vec();
     tokio::task::spawn_blocking(move || {
-        if let Err(err) = process_payload(&config, &scheduler, &payload_clone, &body_bytes) {
+        if let Err(err) =
+            process_payload(&config, &user_store, &index_store, &payload_clone, &body_bytes)
+        {
             error!("failed to process inbound payload: {err}");
         }
     });
@@ -200,7 +255,8 @@ async fn postmark_inbound(
 
 fn process_payload(
     config: &ServiceConfig,
-    scheduler: &Arc<Mutex<Scheduler<ModuleExecutor>>>,
+    user_store: &UserStore,
+    index_store: &IndexStore,
     payload: &PostmarkInbound,
     raw_payload: &[u8],
 ) -> Result<(), BoxError> {
@@ -211,7 +267,19 @@ fn process_payload(
         info!("skipping blacklisted sender: {}", sender);
         return Ok(());
     }
-    let workspace = create_workspace(config, payload, raw_payload)?;
+    let user_email = payload.from.as_deref().unwrap_or("").trim();
+    let user_email = extract_emails(user_email)
+        .into_iter()
+        .next()
+        .ok_or_else(|| "missing sender email".to_string())?;
+    let user = user_store.get_or_create_user(&user_email)?;
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+    user_store.ensure_user_dirs(&user_paths)?;
+
+    let workspace = create_workspace(&user_paths, payload, raw_payload)?;
+    if let Err(err) = archive_inbound(&user_paths, payload, raw_payload) {
+        error!("failed to archive inbound email: {}", err);
+    }
     info!("workspace created at {}", workspace.display());
 
     let reply_target = payload
@@ -248,13 +316,11 @@ fn process_payload(
         bcc: Vec::new(),
     };
 
-    {
-        let mut scheduler = scheduler
-            .lock()
-            .map_err(|_| "scheduler lock poisoned")?;
-        scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
-        scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::SendEmail(send_task))?;
-    }
+    let mut scheduler =
+        Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+    scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
+    scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::SendEmail(send_task))?;
+    index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
     info!("scheduler tasks enqueued");
 
     Ok(())
@@ -282,71 +348,12 @@ fn is_blacklisted_address(address: &str) -> bool {
     )
 }
 
-fn extract_emails(raw: &str) -> Vec<String> {
-    let mut emails = Vec::new();
-    let mut seen = HashSet::new();
-
-    let mut remainder = raw;
-    while let Some(start) = remainder.find('<') {
-        let after_start = &remainder[start + 1..];
-        if let Some(end) = after_start.find('>') {
-            let inside = &after_start[..end];
-            if let Some(email) = normalize_email(inside) {
-                if seen.insert(email.clone()) {
-                    emails.push(email);
-                }
-            }
-            remainder = &after_start[end + 1..];
-        } else {
-            break;
-        }
-    }
-
-    for token in raw.split(|ch| matches!(ch, ',' | ';' | ' ' | '\t' | '\n' | '\r')) {
-        if let Some(email) = normalize_email(token) {
-            if seen.insert(email.clone()) {
-                emails.push(email);
-            }
-        }
-    }
-
-    emails
-}
-
-fn normalize_email(raw: &str) -> Option<String> {
-    let mut value = raw.trim();
-    if value.is_empty() {
-        return None;
-    }
-    if let Some(stripped) = value.strip_prefix("mailto:") {
-        value = stripped.trim();
-    }
-    value = value.trim_matches(|ch: char| matches!(ch, '<' | '>' | '"' | '\'' | ',' | ';'));
-    if !value.contains('@') {
-        return None;
-    }
-
-    let mut parts = value.splitn(2, '@');
-    let local = parts.next().unwrap_or("").trim();
-    let domain = parts.next().unwrap_or("").trim();
-    if local.is_empty() || domain.is_empty() {
-        return None;
-    }
-    let local = local.split('+').next().unwrap_or(local);
-
-    Some(format!(
-        "{}@{}",
-        local.to_ascii_lowercase(),
-        domain.to_ascii_lowercase()
-    ))
-}
-
 fn create_workspace(
-    config: &ServiceConfig,
+    user_paths: &crate::user_store::UserPaths,
     payload: &PostmarkInbound,
     raw_payload: &[u8],
 ) -> Result<PathBuf, BoxError> {
-    fs::create_dir_all(&config.workspace_root)?;
+    fs::create_dir_all(&user_paths.workspaces_root)?;
 
     let fallback = format!("email_{}", Utc::now().timestamp());
     let message_id = payload
@@ -354,7 +361,7 @@ fn create_workspace(
         .or(payload.message_id.as_deref())
         .unwrap_or("");
     let base = sanitize_token(message_id, &fallback);
-    let workspace = create_unique_dir(&config.workspace_root, &base)?;
+    let workspace = create_unique_dir(&user_paths.workspaces_root, &base)?;
 
     let incoming_email = workspace.join("incoming_email");
     let incoming_attachments = workspace.join("incoming_attachments");
@@ -366,6 +373,51 @@ fn create_workspace(
     fs::create_dir_all(&memory)?;
     fs::create_dir_all(&references)?;
 
+    write_inbound_payload(
+        payload,
+        raw_payload,
+        &incoming_email,
+        &incoming_attachments,
+    )?;
+
+    Ok(workspace)
+}
+
+fn archive_inbound(
+    user_paths: &crate::user_store::UserPaths,
+    payload: &PostmarkInbound,
+    raw_payload: &[u8],
+) -> Result<(), BoxError> {
+    let fallback = format!("email_{}", Utc::now().timestamp());
+    let message_id = payload
+        .header_message_id()
+        .or(payload.message_id.as_deref())
+        .unwrap_or("");
+    let base = sanitize_token(message_id, &fallback);
+    let year = Utc::now().format("%Y").to_string();
+    let month = Utc::now().format("%m").to_string();
+    let mail_root = user_paths.mail_root.join(year).join(month);
+    fs::create_dir_all(&mail_root)?;
+    let mail_dir = create_unique_dir(&mail_root, &base)?;
+    let incoming_email = mail_dir.join("incoming_email");
+    let incoming_attachments = mail_dir.join("incoming_attachments");
+    fs::create_dir_all(&incoming_email)?;
+    fs::create_dir_all(&incoming_attachments)?;
+    write_inbound_payload(
+        payload,
+        raw_payload,
+        &incoming_email,
+        &incoming_attachments,
+    )?;
+    Ok(())
+}
+
+fn write_inbound_payload(
+    payload: &PostmarkInbound,
+    raw_payload: &[u8],
+    incoming_email: &Path,
+    incoming_attachments: &Path,
+) -> Result<(), BoxError> {
     fs::write(incoming_email.join("postmark_payload.json"), raw_payload)?;
     let email_text = render_email_text(payload);
     fs::write(incoming_email.join("email.txt"), email_text)?;
@@ -380,8 +432,7 @@ fn create_workspace(
             fs::write(target, data)?;
         }
     }
-
-    Ok(workspace)
+    Ok(())
 }
 
 fn create_unique_dir(root: &Path, base: &str) -> Result<PathBuf, io::Error> {
