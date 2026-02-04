@@ -22,6 +22,8 @@ let params = SendEmailParams {
     to: vec!["mini-mouse@deep-tutor.com".to_string()],
     cc: Vec::new(),
     bcc: Vec::new(),
+    in_reply_to: None,
+    references: None,
 };
 
 let response = send_email(&params)?;

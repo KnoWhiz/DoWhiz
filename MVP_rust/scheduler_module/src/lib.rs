@@ -2,6 +2,7 @@ use chrono::{DateTime, Local, Utc};
 use cron::Schedule as CronSchedule;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
@@ -26,6 +27,10 @@ pub struct SendEmailTask {
     pub to: Vec<String>,
     pub cc: Vec<String>,
     pub bcc: Vec<String>,
+    #[serde(default)]
+    pub in_reply_to: Option<String>,
+    #[serde(default)]
+    pub references: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +119,8 @@ impl TaskExecutor for ModuleExecutor {
                     to: task.to.clone(),
                     cc: task.cc.clone(),
                     bcc: task.bcc.clone(),
+                    in_reply_to: task.in_reply_to.clone(),
+                    references: task.references.clone(),
                 };
                 send_emails_module::send_email(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -348,7 +355,9 @@ CREATE TABLE IF NOT EXISTS send_email_tasks (
     task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
     subject TEXT NOT NULL,
     html_path TEXT NOT NULL,
-    attachments_dir TEXT NOT NULL
+    attachments_dir TEXT NOT NULL,
+    in_reply_to TEXT,
+    references_header TEXT
 );
 
 CREATE TABLE IF NOT EXISTS send_email_recipients (
@@ -379,6 +388,29 @@ CREATE TABLE IF NOT EXISTS task_executions (
     error_message TEXT
 );
 "#;
+
+fn ensure_send_email_task_columns(conn: &Connection) -> Result<(), SchedulerError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(send_email_tasks)")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let mut columns = HashSet::new();
+    for row in rows {
+        columns.insert(row?);
+    }
+
+    if !columns.contains("in_reply_to") {
+        conn.execute(
+            "ALTER TABLE send_email_tasks ADD COLUMN in_reply_to TEXT",
+            [],
+        )?;
+    }
+    if !columns.contains("references_header") {
+        conn.execute(
+            "ALTER TABLE send_email_tasks ADD COLUMN references_header TEXT",
+            [],
+        )?;
+    }
+    Ok(())
+}
 
 #[derive(Debug)]
 struct SqliteSchedulerStore {
@@ -509,13 +541,15 @@ impl SqliteSchedulerStore {
         match &task.kind {
             TaskKind::SendEmail(send) => {
                 tx.execute(
-                    "INSERT INTO send_email_tasks (task_id, subject, html_path, attachments_dir)
-                     VALUES (?1, ?2, ?3, ?4)",
+                    "INSERT INTO send_email_tasks (task_id, subject, html_path, attachments_dir, in_reply_to, references_header)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
                         task.id.to_string(),
                         send.subject.as_str(),
                         send.html_path.to_string_lossy().into_owned(),
-                        send.attachments_dir.to_string_lossy().into_owned()
+                        send.attachments_dir.to_string_lossy().into_owned(),
+                        send.in_reply_to.as_deref(),
+                        send.references.as_deref(),
                     ],
                 )?;
                 insert_recipients(
@@ -631,7 +665,7 @@ impl SqliteSchedulerStore {
     ) -> Result<SendEmailTask, SchedulerError> {
         let row = conn
             .query_row(
-                "SELECT subject, html_path, attachments_dir
+                "SELECT subject, html_path, attachments_dir, in_reply_to, references_header
                  FROM send_email_tasks
                  WHERE task_id = ?1",
                 params![task_id],
@@ -640,11 +674,14 @@ impl SqliteSchedulerStore {
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
                     ))
                 },
             )
             .optional()?;
-        let (subject, html_path, attachments_dir) = row.ok_or_else(|| {
+        let (subject, html_path, attachments_dir, in_reply_to_raw, references_raw) =
+            row.ok_or_else(|| {
             SchedulerError::Storage(format!(
                 "missing send_email_tasks row for task {}",
                 task_id
@@ -680,6 +717,8 @@ impl SqliteSchedulerStore {
             to,
             cc,
             bcc,
+            in_reply_to: normalize_header_value(in_reply_to_raw),
+            references: normalize_header_value(references_raw),
         })
     }
 
@@ -743,6 +782,7 @@ impl SqliteSchedulerStore {
         let conn = Connection::open(&self.path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.execute_batch(SCHEDULER_SCHEMA)?;
+        ensure_send_email_task_columns(&conn)?;
         Ok(conn)
     }
 }
@@ -807,6 +847,14 @@ fn split_recipients(raw: &str) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .map(|value| value.to_string())
         .collect()
+}
+
+fn normalize_header_value(value: Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|trimmed| !trimmed.is_empty())
+        .map(|trimmed| trimmed.to_string())
 }
 
 fn insert_recipients(
@@ -925,6 +973,8 @@ fn schedule_send_email<E: TaskExecutor>(
         to,
         cc: request.cc.clone(),
         bcc: request.bcc.clone(),
+        in_reply_to: None,
+        references: None,
     };
 
     if let Some(run_at_raw) = request.run_at.as_deref() {

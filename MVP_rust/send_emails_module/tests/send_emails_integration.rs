@@ -208,6 +208,8 @@ fn send_payload_includes_recipients_and_attachments() -> Result<(), Box<dyn std:
         to: vec!["to1@example.com".to_string(), "to2@example.com".to_string()],
         cc: vec!["cc@example.com".to_string()],
         bcc: vec!["bcc@example.com".to_string()],
+        in_reply_to: None,
+        references: None,
     };
 
     let response = send_email(&request)?;
@@ -260,6 +262,8 @@ fn live_postmark_delivery_with_attachments() -> Result<(), Box<dyn std::error::E
         to: vec![to_addr.clone()],
         cc: cc_addr.clone().map(|addr| vec![addr]).unwrap_or_default(),
         bcc: bcc_addr.clone().map(|addr| vec![addr]).unwrap_or_default(),
+        in_reply_to: None,
+        references: None,
     };
 
     let response = send_email(&request)?;
@@ -301,6 +305,8 @@ fn send_email_requires_recipient() {
         to: Vec::new(),
         cc: Vec::new(),
         bcc: Vec::new(),
+        in_reply_to: None,
+        references: None,
     };
 
     let err = send_email(&params).expect_err("expected missing recipient error");
@@ -323,6 +329,8 @@ fn send_email_requires_token() {
         to: vec!["to@example.com".to_string()],
         cc: Vec::new(),
         bcc: Vec::new(),
+        in_reply_to: None,
+        references: None,
     };
 
     let err = send_email(&params).expect_err("expected missing token error");

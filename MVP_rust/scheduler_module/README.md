@@ -26,6 +26,8 @@ let task = SendEmailTask {
     to: vec!["mini-mouse@deep-tutor.com".to_string()],
     cc: Vec::new(),
     bcc: Vec::new(),
+    in_reply_to: None,
+    references: None,
 };
 
 scheduler.add_cron_task("0 */5 * * * *", TaskKind::SendEmail(task))?;
