@@ -141,8 +141,7 @@ pub fn hydrate_past_emails(
         let date_prefix = date
             .map(|value| value.format("%Y-%m-%d").to_string())
             .unwrap_or_else(|| "unknown_date".to_string());
-        let subject_slug = sanitize_token(&subject, "no_subject").to_lowercase();
-        let subject_slug = truncate_ascii(&subject_slug, 60);
+        let direction = direction.to_ascii_lowercase();
         let message_id = normalize_message_id(message.payload.message_id.as_deref()).unwrap_or_else(|| {
             let fallback = message
                 .root_dir
@@ -151,8 +150,7 @@ pub fn hydrate_past_emails(
                 .unwrap_or_else(|| "msg".to_string());
             sanitize_token(&fallback, "msg")
         });
-        let short_id = truncate_ascii(&sanitize_token(&message_id, "msg"), 12);
-        let base = format!("{}_{}_{}", date_prefix, subject_slug, short_id);
+        let base = build_past_email_dir_name(&date_prefix, &subject, &direction, &message_id);
         let entry_dir = create_unique_dir(&past_root, &base)?;
         let display_name = entry_dir
             .file_name()
@@ -183,7 +181,7 @@ pub fn hydrate_past_emails(
             entry_id: message_id.clone(),
             display_name: display_name.clone(),
             path: display_name.clone(),
-            direction,
+            direction: direction.clone(),
             subject: subject.clone(),
             from: message.payload.from.clone().unwrap_or_default(),
             to: message.payload.to.clone().unwrap_or_default(),
@@ -665,6 +663,164 @@ fn truncate_ascii(value: &str, max_len: usize) -> String {
         return value.to_string();
     }
     value[..max_len].to_string()
+}
+
+fn build_past_email_dir_name(
+    date_prefix: &str,
+    subject: &str,
+    direction: &str,
+    message_id: &str,
+) -> String {
+    let (action, topic) = derive_action_topic(subject, direction);
+    let action = sanitize_token(&action, "message").to_lowercase();
+    let action = truncate_slug(&action, 24);
+    let topic = sanitize_token(&topic, "topic").to_lowercase();
+    let topic = truncate_slug(&topic, 60);
+    let short_id = truncate_ascii(&sanitize_token(message_id, "msg"), 12);
+    format!("{}_{}_{}_{}", date_prefix, action, topic, short_id)
+}
+
+fn derive_action_topic(subject: &str, direction: &str) -> (String, String) {
+    let direction = normalize_direction(direction);
+    let prefix_action = subject_prefix_action(subject);
+    let mut tokens = extract_ascii_tokens(subject);
+    strip_reply_prefixes(&mut tokens);
+
+    let keyword_action = find_action_keyword(&tokens);
+    let action = prefix_action
+        .or(keyword_action)
+        .unwrap_or_else(|| default_action(direction));
+
+    let topic_tokens: Vec<String> = tokens
+        .into_iter()
+        .filter(|token| !is_reply_prefix(token))
+        .filter(|token| token != action)
+        .collect();
+
+    let fallback_topic = default_topic(direction, action);
+    let topic = slug_from_tokens(&topic_tokens, fallback_topic, 60);
+
+    (action.to_string(), topic)
+}
+
+fn normalize_direction(direction: &str) -> &'static str {
+    if direction.eq_ignore_ascii_case("outbound") {
+        "outbound"
+    } else {
+        "inbound"
+    }
+}
+
+fn subject_prefix_action(subject: &str) -> Option<&'static str> {
+    let lower = subject.trim_start().to_ascii_lowercase();
+    if lower.starts_with("re:") {
+        Some("reply")
+    } else if lower.starts_with("fw:") || lower.starts_with("fwd:") {
+        Some("forward")
+    } else {
+        None
+    }
+}
+
+fn default_action(direction: &str) -> &'static str {
+    if direction == "outbound" {
+        "reply"
+    } else {
+        "message"
+    }
+}
+
+fn default_topic(direction: &str, action: &str) -> &'static str {
+    let fallback = if direction == "outbound" {
+        "response"
+    } else {
+        "request"
+    };
+    if fallback == action {
+        "topic"
+    } else {
+        fallback
+    }
+}
+
+fn slug_from_tokens(tokens: &[String], fallback: &str, max_len: usize) -> String {
+    let mut slug = tokens
+        .iter()
+        .filter(|token| !token.is_empty())
+        .map(|token| token.to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join("-");
+    if slug.is_empty() {
+        slug = fallback.to_string();
+    }
+    let slug = sanitize_token(&slug, fallback).to_lowercase();
+    let slug = truncate_slug(&slug, max_len);
+    if slug.is_empty() {
+        fallback.to_string()
+    } else {
+        slug
+    }
+}
+
+fn truncate_slug(value: &str, max_len: usize) -> String {
+    let truncated = truncate_ascii(value, max_len);
+    truncated.trim_matches(&['-', '_', '.'][..]).to_string()
+}
+
+fn extract_ascii_tokens(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut buf = String::new();
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            buf.push(ch.to_ascii_lowercase());
+        } else if !buf.is_empty() {
+            tokens.push(std::mem::take(&mut buf));
+        }
+    }
+    if !buf.is_empty() {
+        tokens.push(buf);
+    }
+    tokens
+}
+
+fn strip_reply_prefixes(tokens: &mut Vec<String>) {
+    while tokens
+        .first()
+        .map(|token| is_reply_prefix(token))
+        .unwrap_or(false)
+    {
+        tokens.remove(0);
+    }
+}
+
+fn is_reply_prefix(token: &str) -> bool {
+    matches!(token, "re" | "fw" | "fwd")
+}
+
+fn find_action_keyword(tokens: &[String]) -> Option<&'static str> {
+    for token in tokens {
+        match token.as_str() {
+            "review" => return Some("review"),
+            "draft" => return Some("draft"),
+            "reply" | "respond" | "response" => return Some("reply"),
+            "followup" | "follow" => return Some("followup"),
+            "schedule" | "meeting" => return Some("schedule"),
+            "invoice" => return Some("invoice"),
+            "payment" => return Some("payment"),
+            "refund" => return Some("refund"),
+            "update" => return Some("update"),
+            "bug" | "issue" => return Some("bugfix"),
+            "support" => return Some("support"),
+            "proposal" => return Some("proposal"),
+            "summary" => return Some("summary"),
+            "report" => return Some("report"),
+            "contract" => return Some("contract"),
+            "onboarding" => return Some("onboarding"),
+            "interview" => return Some("interview"),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn create_unique_dir(root: &Path, base: &str) -> Result<PathBuf, io::Error> {
