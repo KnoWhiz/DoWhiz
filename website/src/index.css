@@ -244,7 +244,7 @@ ul {
 .hero-content {
   position: relative;
   z-index: 1;
-  max-width: 900px;
+  max-width: 1200px;
 }
 
 .hero-title {
@@ -257,10 +257,29 @@ ul {
   font-size: 1.35rem;
   color: var(--text-secondary);
   margin-bottom: 3.5rem;
-  max-width: 650px;
+  max-width: 1000px;
   margin-left: auto;
   margin-right: auto;
   font-weight: 400;
+}
+
+.role-link {
+  color: var(--accent-color);
+  background: rgba(59, 130, 246, 0.1);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.role-link:hover {
+  background: var(--accent-color);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
 }
 
 /* Features - Grid */

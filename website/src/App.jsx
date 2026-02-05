@@ -55,11 +55,11 @@ function App() {
         <div className="halo-effect"></div>
         <div className="container hero-content">
           <h1 className="hero-title">
-            Empower Everyone with <br />
-            <span className="text-gradient">A Digital Employee Team</span>
+            Empower Everyone<br />
+            <span className="text-gradient">with A Digital Employee Team</span>
           </h1>
           <p className="hero-subtitle">
-            Seamlessly collaborate with Oliver, Mini-Mouse, and your entire digital workforce—directly from your email inbox.
+            Seamlessly collaborate with <a href="#roles" className="role-link">Oliver</a>, <a href="#roles" className="role-link">Mini-Mouse</a>, and your entire digital workforce—directly from your email inbox.
           </p>
           <div className="hero-cta">
             <a className="btn btn-primary" href="mailto:oliver@dowhiz.com">
