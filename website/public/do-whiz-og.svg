@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="DoWhiz">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#050505" />
+      <stop offset="1" stop-color="#0f172a" />
+    </linearGradient>
+    <radialGradient id="glow" cx="0.2" cy="0.2" r="0.6">
+      <stop offset="0" stop-color="#1d4ed8" stop-opacity="0.5" />
+      <stop offset="1" stop-color="#0f172a" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="markBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a" />
+      <stop offset="0.55" stop-color="#1d4ed8" />
+      <stop offset="1" stop-color="#0ea5e9" />
+    </linearGradient>
+    <linearGradient id="markStroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fafc" />
+      <stop offset="1" stop-color="#e2e8f0" />
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#93c5fd" />
+      <stop offset="1" stop-color="#38bdf8" />
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)" />
+  <circle cx="220" cy="170" r="280" fill="url(#glow)" />
+
+  <g transform="translate(120 150)">
+    <rect x="0" y="0" width="280" height="280" rx="64" fill="url(#markBg)" />
+    <path
+      d="M48 76 L104 228 L140 136 L176 228 L232 76"
+      fill="none"
+      stroke="url(#markStroke)"
+      stroke-width="26"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <path d="M200 44 L218 64 L200 84 L182 64 Z" fill="#fbbf24" />
+  </g>
+
+  <text
+    x="440"
+    y="290"
+    font-size="96"
+    font-weight="700"
+    fill="#f8fafc"
+    font-family="Calibri, 'Gill Sans', 'Gill Sans MT', 'Myriad Pro', 'Myriad', 'DejaVu Sans Condensed', 'Liberation Sans', 'Nimbus Sans L', Tahoma, Geneva, 'Helvetica Neue', Helvetica, Arial, sans-serif"
+  >
+    Do<tspan fill="url(#title)">Whiz</tspan>
+  </text>
+  <text
+    x="440"
+    y="350"
+    font-size="30"
+    font-weight="500"
+    fill="#cbd5f5"
+    font-family="Calibri, 'Gill Sans', 'Gill Sans MT', 'Myriad Pro', 'Myriad', 'DejaVu Sans Condensed', 'Liberation Sans', 'Nimbus Sans L', Tahoma, Geneva, 'Helvetica Neue', Helvetica, Arial, sans-serif"
+  >
+    Digital employees, right from your inbox.
+  </text>
+</svg>
