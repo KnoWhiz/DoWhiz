@@ -26,6 +26,124 @@
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
+[data-theme="light"] {
+  --bg-color: #f8fafc;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+
+  --glass-bg: rgba(255, 255, 255, 0.6);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --card-hover-border: rgba(59, 130, 246, 0.3);
+
+  /* Buttons need adjustment for light mode */
+  .btn-primary {
+    background: #0f172a;
+    color: #ffffff;
+  }
+
+  .btn-primary:hover {
+    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.25);
+  }
+
+  .btn-small {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.1);
+    color: var(--text-primary);
+  }
+
+  .btn-small:hover {
+    background: rgba(0, 0, 0, 0.08);
+    border-color: rgba(0, 0, 0, 0.2);
+  }
+
+  .navbar {
+    background: rgba(248, 250, 252, 0.8);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  }
+
+  .logo {
+    color: #1e293b;
+  }
+
+  .nav-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
+  }
+
+  .role-card,
+  .feature-card {
+    background: rgba(255, 255, 255, 0.7);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  }
+
+  .role-card:hover,
+  .feature-card:hover {
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05);
+  }
+
+  .social-icon:hover {
+    color: var(--accent-color);
+  }
+
+  .workflow-line {
+    background: linear-gradient(90deg,
+        rgba(0, 0, 0, 0.05) 0%,
+        var(--accent-color) 50%,
+        rgba(0, 0, 0, 0.05) 100%);
+  }
+
+  .step-icon {
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 0 0 10px var(--bg-color), 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  }
+
+  .role-example {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.05);
+  }
+
+  .role-example p {
+    color: #475569;
+  }
+
+  .security-card h3 {
+    color: var(--text-primary);
+  }
+}
+
+/* Theme Toggle Button */
+.theme-toggle {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(10px);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1001;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.theme-toggle:hover {
+  transform: scale(1.1) rotate(15deg);
+  border-color: var(--accent-color);
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.25);
+}
+
+.theme-toggle svg {
+  width: 1.5rem;
+  height: 1.5rem;
+  stroke-width: 2;
+}
+
 /* Reset & Base */
 * {
   box-sizing: border-box;
