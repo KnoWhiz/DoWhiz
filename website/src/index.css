@@ -514,7 +514,7 @@ ul {
 }
 
 .email-tag {
-  font-family: 'DM Mono', 'Courier New', monospace;
+  font-family: inherit;
   font-size: 0.9rem;
   color: var(--accent-color);
   background: rgba(59, 130, 246, 0.1);
@@ -584,7 +584,6 @@ ul {
   font-size: 1rem;
   font-style: italic;
   color: #e4e4e7;
-  font-family: serif;
   /* Classy touch for quotes */
 }
 

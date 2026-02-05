@@ -16,16 +16,16 @@
   <rect width="1200" height="360" fill="#050505"/>
   <rect width="1200" height="360" fill="url(#halo)"/>
   <g>
-    <text x="600" y="170" text-anchor="middle" font-size="96" font-weight="700" font-family="Inter, Segoe UI, Arial, sans-serif" fill="#FFFFFF" letter-spacing="-1.5">
+    <text x="600" y="170" text-anchor="middle" font-size="96" font-weight="700" font-family="Calibri, Gill Sans, Gill Sans MT, Myriad Pro, Myriad, DejaVu Sans Condensed, Liberation Sans, Nimbus Sans L, Tahoma, Geneva, Helvetica Neue, Helvetica, Arial, sans-serif" fill="#FFFFFF" letter-spacing="-1.5">
       Do<tspan fill="url(#accent)">Whiz</tspan>
     </text>
-    <text x="600" y="230" text-anchor="middle" font-size="24" font-weight="500" font-family="Inter, Segoe UI, Arial, sans-serif" fill="#A1A1AA" letter-spacing="2">
+    <text x="600" y="230" text-anchor="middle" font-size="24" font-weight="500" font-family="Calibri, Gill Sans, Gill Sans MT, Myriad Pro, Myriad, DejaVu Sans Condensed, Liberation Sans, Nimbus Sans L, Tahoma, Geneva, Helvetica Neue, Helvetica, Arial, sans-serif" fill="#A1A1AA" letter-spacing="2">
       EMAIL-FIRST DIGITAL EMPLOYEES
     </text>
   </g>
   <g opacity="0.5">
     <rect x="470" y="260" width="260" height="38" rx="19" fill="white" fill-opacity="0.06" stroke="white" stroke-opacity="0.1"/>
-    <text x="600" y="285" text-anchor="middle" font-size="14" font-weight="600" font-family="Inter, Segoe UI, Arial, sans-serif" fill="#E4E4E7">
+    <text x="600" y="285" text-anchor="middle" font-size="14" font-weight="600" font-family="Calibri, Gill Sans, Gill Sans MT, Myriad Pro, Myriad, DejaVu Sans Condensed, Liberation Sans, Nimbus Sans L, Tahoma, Geneva, Helvetica Neue, Helvetica, Arial, sans-serif" fill="#E4E4E7">
       Email in. Results out.
     </text>
   </g>
