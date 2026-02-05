@@ -144,7 +144,11 @@ fn poll_outbound(
     }
 }
 
-fn check_public_health(base_url: &str, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+fn check_public_health(
+    base_url: &str,
+    local_host: &str,
+    port: u16,
+) -> Result<(), Box<dyn std::error::Error>> {
     let client = reqwest::blocking::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(10))
@@ -154,15 +158,16 @@ fn check_public_health(base_url: &str, port: u16) -> Result<(), Box<dyn std::err
     match response {
         Ok(response) if response.status().is_success() => Ok(()),
         Ok(response) => Err(format!(
-            "public health check failed: {} {} (ensure ngrok forwards to http://127.0.0.1:{})",
+            "public health check failed: {} {} (ensure ngrok forwards to http://{}:{})",
             response.status(),
             health_url,
+            local_host,
             port
         )
         .into()),
         Err(err) => Err(format!(
-            "public health check error: {} {} (ensure ngrok forwards to http://127.0.0.1:{})",
-            err, health_url, port
+            "public health check error: {} {} (ensure ngrok forwards to http://{}:{})",
+            err, health_url, local_host, port
         )
         .into()),
     }
@@ -295,6 +300,8 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
     let state_dir = temp.path().join("state");
     let users_root = temp.path().join("users");
 
+    let test_host =
+        env::var("RUST_SERVICE_TEST_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port = env::var("RUST_SERVICE_TEST_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
@@ -302,7 +309,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
 
     let codex_disabled = !env_enabled("RUN_CODEX_E2E");
     let config = ServiceConfig {
-        host: "127.0.0.1".to_string(),
+        host: test_host.clone(),
         port,
         workspace_root: workspace_root.clone(),
         scheduler_state_path: state_dir.join("tasks.db"),
@@ -332,7 +339,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
 
     let base_url = public_url.trim_end_matches('/');
     let base_url = base_url.strip_suffix("/postmark/inbound").unwrap_or(base_url);
-    check_public_health(base_url, port)?;
+    check_public_health(base_url, &test_host, port)?;
     let hook_url = format!("{}/postmark/inbound", base_url);
     println!("Setting Postmark inbound hook to {}", hook_url);
     postmark_request(

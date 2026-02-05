@@ -1,0 +1,8 @@
+*
+!DoWhiz_service/
+!DoWhiz_service/**
+
+DoWhiz_service/.workspace/
+DoWhiz_service/target/
+DoWhiz_service/**/.env
+DoWhiz_service/**/.env.*
