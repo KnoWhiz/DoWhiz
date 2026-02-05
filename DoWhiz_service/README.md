@@ -11,6 +11,17 @@ then schedules a SendEmail job and sends the reply via Postmark.
   - `OUTBOUND_FROM` (optional, defaults to `oliver@dowhiz.com`)
   - `AZURE_OPENAI_API_KEY_BACKUP` and `AZURE_OPENAI_ENDPOINT_BACKUP` (required when Codex is enabled)
 
+## Docker (production image)
+Build the image from the repo root and run it with the same `.env` file mounted
+so `dotenv` can load it inside the container:
+```
+docker build -t dowhiz-service .
+docker run --rm -p 9001:9001 \
+  -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
+  -v dowhiz-workspace:/app/.workspace \
+  dowhiz-service
+```
+
 ## Step-by-step: start the Rust service and send real email
 
 1) Start the Rust service (Terminal 1):

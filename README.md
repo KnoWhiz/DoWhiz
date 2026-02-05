@@ -57,6 +57,15 @@ Rust service:
 cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
 ```
 
+Docker (production image):
+```
+docker build -t dowhiz-service .
+docker run --rm -p 9001:9001 \
+  -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
+  -v dowhiz-workspace:/app/.workspace \
+  dowhiz-service
+```
+
 Website:
 ```
 cd website
