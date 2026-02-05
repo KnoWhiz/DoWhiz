@@ -1,0 +1,25 @@
+{
+  "version": "2.0",
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[4.*, 5.0.0)"
+  },
+  "extensions": {
+    "http": {
+      "routePrefix": ""
+    }
+  },
+  "customHandler": {
+    "description": {
+      "defaultExecutablePath": "rust_service",
+      "arguments": [
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "%FUNCTIONS_CUSTOMHANDLER_PORT%"
+      ],
+      "workingDirectory": "."
+    },
+    "enableProxyingHttpRequest": true
+  }
+}

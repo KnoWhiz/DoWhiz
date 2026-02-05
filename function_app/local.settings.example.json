@@ -1,0 +1,15 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "custom",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "WORKSPACE_ROOT": ".workspace/run_task/workspaces",
+    "SCHEDULER_STATE_PATH": ".workspace/run_task/state/tasks.db",
+    "PROCESSED_IDS_PATH": ".workspace/run_task/state/postmark_processed_ids.txt",
+    "USERS_ROOT": ".workspace/run_task/users",
+    "USERS_DB_PATH": ".workspace/run_task/state/users.db",
+    "TASK_INDEX_PATH": ".workspace/run_task/state/task_index.db",
+    "CODEX_MODEL": "gpt-5.2-codex",
+    "CODEX_DISABLED": "1"
+  }
+}
