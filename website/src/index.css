@@ -80,6 +80,8 @@ ul {
   -webkit-text-fill-color: transparent;
   background-clip: text;
   display: inline-block;
+  padding-bottom: 0.2em;
+  /* Fix for descenders being clipped */
   /* Fix for some browsers */
 }
 
@@ -661,27 +663,106 @@ footer {
 
 @media (max-width: 768px) {
   .hero-title {
-    font-size: 2.75rem;
+    font-size: 2.5rem;
     padding: 0 1rem;
+    margin-bottom: 1.5rem;
   }
 
   .hero-subtitle {
+    font-size: 1.1rem;
     padding: 0 1rem;
+    margin-bottom: 2.5rem;
+  }
+
+  .section-title {
+    font-size: 2rem;
+    margin-bottom: 3rem;
+  }
+
+  .container {
+    padding: 0 1.25rem;
+  }
+
+  /* Navbar Mobile Optimizations */
+  .nav-content {
+    height: auto;
+    padding: 1rem 0;
+    flex-wrap: wrap;
+    gap: 1rem;
   }
 
   .nav-links {
     display: none;
   }
 
+  .nav-actions {
+    width: 100%;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .social-links {
+    gap: 0.5rem;
+  }
+
+  .logo {
+    width: 100%;
+    text-align: center;
+    margin-bottom: 0.5rem;
+    justify-self: center;
+  }
+
+  /* Compact Buttons for Mobile */
+  .btn-small {
+    padding: 0.5rem 0.8rem;
+    font-size: 0.8rem;
+  }
+
+  .social-links .btn-small svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* Hide text in buttons on mobile */
+  .btn-small span {
+    display: none;
+  }
+
+  .btn-small {
+    padding: 0.6rem;
+    border-radius: 50%;
+    /* Make them circular */
+    justify-content: center;
+  }
+
+  /* Card Spacing */
   .features-grid,
   .roles-grid,
   .security-grid {
     grid-template-columns: 1fr;
+    gap: 1.5rem;
   }
 
+  .feature-card,
+  .role-card,
+  .security-card {
+    padding: 1.5rem;
+  }
+
+  .role-header h3 {
+    font-size: 1.5rem;
+  }
+
+  .role-avatar {
+    width: 50px;
+    height: 50px;
+  }
+
+  /* Workflow Mobile */
   .workflow-container {
     flex-direction: column;
-    gap: 3rem;
+    gap: 2.5rem;
+    padding: 1rem 0;
   }
 
   .workflow-line {
@@ -697,6 +778,8 @@ footer {
   }
 
   .step-icon {
+    width: 5rem;
+    height: 5rem;
     margin-bottom: 1rem;
   }
 }
