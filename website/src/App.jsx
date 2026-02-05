@@ -69,25 +69,6 @@ function App() {
         </div>
       </section>
 
-      {/* Core Experience */}
-      <section id="features" className="section features-section">
-        <div className="container">
-          <h2 className="section-title">Core Experience</h2>
-          <div className="features-grid">
-            {[
-              { title: "Task via Email", desc: "Delegate tasks naturally by sending an email. No complex dashboards or new apps to master." },
-              { title: "Autonomous Tools", desc: "Agents intelligently select and utilize the right tools for each request without manual configuration." },
-              { title: "Direct Delivery", desc: "Completed work is delivered straight back to your inbox. Focus on results, not the process." }
-            ].map((item, idx) => (
-              <div key={idx} className="feature-card">
-                <h3>{item.title}</h3>
-                <p>{item.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Roles & Scenarios */}
       <section id="roles" className="section roles-section">
         <div className="container">
@@ -138,6 +119,25 @@ function App() {
                 <p>"Draft a press release for our product launch based on these notes."</p>
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Core Experience */}
+      <section id="features" className="section features-section">
+        <div className="container">
+          <h2 className="section-title">Core Experience</h2>
+          <div className="features-grid">
+            {[
+              { title: "Task via Email", desc: "Delegate tasks naturally by sending an email. No complex dashboards or new apps to master." },
+              { title: "Autonomous Tools", desc: "Agents intelligently select and utilize the right tools for each request without manual configuration." },
+              { title: "Direct Delivery", desc: "Completed work is delivered straight back to your inbox. Focus on results, not the process." }
+            ].map((item, idx) => (
+              <div key={idx} className="feature-card">
+                <h3>{item.title}</h3>
+                <p>{item.desc}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
