@@ -66,6 +66,9 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
             codex_disabled: false,
             reply_to: Vec::new(),
             archive_root: None,
+            thread_id: None,
+            thread_epoch: None,
+            thread_state_path: None,
         };
 
         let mut scheduler =

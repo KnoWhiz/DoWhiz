@@ -24,8 +24,11 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::index_store::{IndexStore, TaskRef};
+use crate::thread_state::{bump_thread_state, default_thread_state_path};
 use crate::user_store::{extract_emails, UserStore};
-use crate::{ModuleExecutor, RunTaskTask, Schedule, Scheduler, ScheduledTask, TaskKind};
+use crate::{
+    ModuleExecutor, RunTaskTask, Schedule, Scheduler, ScheduledTask, SchedulerError, TaskKind,
+};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -225,6 +228,7 @@ pub async fn run_server(
     let scheduler_max_concurrency = config.scheduler_max_concurrency;
     let scheduler_user_max_concurrency = config.scheduler_user_max_concurrency;
     let claims = Arc::new(Mutex::new(SchedulerClaims::default()));
+    let running_threads = Arc::new(Mutex::new(HashSet::new()));
     let limiter = Arc::new(ConcurrencyLimiter::new(scheduler_max_concurrency));
     {
         let config = config.clone();
@@ -232,6 +236,7 @@ pub async fn run_server(
         let index_store = index_store.clone();
         let scheduler_stop = scheduler_stop.clone();
         let claims = claims.clone();
+        let running_threads = running_threads.clone();
         let limiter = limiter.clone();
         let query_limit = scheduler_max_concurrency.saturating_mul(4).max(1);
         thread::spawn(move || {
@@ -332,12 +337,14 @@ pub async fn run_server(
                             let index_store = index_store.clone();
                             let claims = claims.clone();
                             let limiter = limiter.clone();
+                            let running_threads = running_threads.clone();
                             thread::spawn(move || {
                                 if let Err(err) = execute_due_task(
                                     &config,
                                     &user_store,
                                     &index_store,
                                     &task_ref,
+                                    &running_threads,
                                 ) {
                                     error!(
                                         "scheduler task {} for user {} failed: {}",
@@ -393,6 +400,7 @@ fn execute_due_task(
     user_store: &UserStore,
     index_store: &IndexStore,
     task_ref: &TaskRef,
+    running_threads: &Arc<Mutex<HashSet<String>>>,
 ) -> Result<(), BoxError> {
     let task_id = Uuid::parse_str(&task_ref.task_id)?;
     let user_paths = user_store.user_paths(&config.users_root, &task_ref.user_id);
@@ -412,7 +420,34 @@ fn execute_due_task(
         "scheduler executing task_id={} user_id={} kind={} status={}",
         task_ref.task_id, task_ref.user_id, kind_label, status_label
     );
-    let executed = scheduler.execute_task_by_id(task_id)?;
+    let mut thread_key: Option<String> = None;
+    if let Some(task) = scheduler.tasks().iter().find(|task| task.id == task_id) {
+        if let TaskKind::RunTask(run) = &task.kind {
+            let key = run.workspace_dir.to_string_lossy().into_owned();
+            let mut running = running_threads
+                .lock()
+                .expect("running thread lock poisoned");
+            if running.contains(&key) {
+                info!(
+                    "scheduler deferred run_task task_id={} user_id={} (thread busy)",
+                    task_ref.task_id, task_ref.user_id
+                );
+                return Ok(());
+            }
+            running.insert(key.clone());
+            thread_key = Some(key);
+        }
+    }
+
+    let executed = scheduler.execute_task_by_id(task_id);
+
+    if let Some(key) = thread_key {
+        let mut running = running_threads
+            .lock()
+            .expect("running thread lock poisoned");
+        running.remove(&key);
+    }
+    let executed = executed?;
     if executed {
         info!(
             "scheduler task completed task_id={} user_id={} status=success",
@@ -488,7 +523,7 @@ async fn postmark_inbound(
     let body_bytes = body.to_vec();
     tokio::task::spawn_blocking(move || {
         if let Err(err) =
-            process_payload(&config, &user_store, &index_store, &payload_clone, &body_bytes)
+            process_inbound_payload(&config, &user_store, &index_store, &payload_clone, &body_bytes)
         {
             error!("failed to process inbound payload: {err}");
         }
@@ -497,7 +532,7 @@ async fn postmark_inbound(
     (StatusCode::OK, Json(json!({"status": "accepted"})))
 }
 
-fn process_payload(
+pub fn process_inbound_payload(
     config: &ServiceConfig,
     user_store: &UserStore,
     index_store: &IndexStore,
@@ -520,14 +555,30 @@ fn process_payload(
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     user_store.ensure_user_dirs(&user_paths)?;
 
-    let workspace = create_workspace(&user_paths, &user.user_id, payload, raw_payload)?;
+    let thread_key = thread_key(payload, raw_payload);
+    let workspace = ensure_thread_workspace(&user_paths, &user.user_id, &thread_key)?;
+    let thread_state_path = default_thread_state_path(&workspace);
+    let message_id = payload
+        .header_message_id()
+        .or(payload.message_id.as_deref())
+        .map(|value| value.trim().to_string());
+    let thread_state =
+        bump_thread_state(&thread_state_path, &thread_key, message_id.clone())?;
+    append_inbound_payload(
+        &workspace,
+        payload,
+        raw_payload,
+        thread_state.last_email_seq,
+    )?;
     if let Err(err) = archive_inbound(&user_paths, payload, raw_payload) {
         error!("failed to archive inbound email: {}", err);
     }
     info!(
-        "workspace created at {} for user {}",
+        "workspace ready at {} for user {} thread={} epoch={}",
         workspace.display(),
-        user.user_id
+        user.user_id,
+        thread_key,
+        thread_state.epoch
     );
 
     let reply_target = payload
@@ -551,23 +602,30 @@ fn process_payload(
         codex_disabled: config.codex_disabled,
         reply_to: to_list.clone(),
         archive_root: Some(user_paths.mail_root.clone()),
+        thread_id: Some(thread_key.clone()),
+        thread_epoch: Some(thread_state.epoch),
+        thread_state_path: Some(thread_state_path.clone()),
     };
 
     let mut scheduler =
         Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+    if let Err(err) = cancel_pending_thread_tasks(&mut scheduler, &workspace, thread_state.epoch) {
+        warn!(
+            "failed to cancel pending thread tasks for {}: {}",
+            workspace.display(),
+            err
+        );
+    }
     let task_id =
         scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
     index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
-    let message_id = payload
-        .header_message_id()
-        .or(payload.message_id.as_deref())
-        .unwrap_or("");
     info!(
-        "scheduler tasks enqueued user_id={} task_id={} message_id={} workspace={}",
+        "scheduler tasks enqueued user_id={} task_id={} message_id={} workspace={} thread_epoch={}",
         user.user_id,
         task_id,
-        message_id,
-        workspace.display()
+        message_id.unwrap_or_else(|| "-".to_string()),
+        workspace.display(),
+        thread_state.epoch
     );
 
     Ok(())
@@ -709,21 +767,58 @@ fn is_blacklisted_address(address: &str) -> bool {
     )
 }
 
-fn create_workspace(
+fn thread_key(payload: &PostmarkInbound, raw_payload: &[u8]) -> String {
+    if let Some(value) = payload.header_value("References") {
+        if let Some(id) = extract_first_message_id(value) {
+            return id;
+        }
+    }
+    if let Some(value) = payload.header_value("In-Reply-To") {
+        if let Some(id) = extract_first_message_id(value) {
+            return id;
+        }
+    }
+    if let Some(id) = payload
+        .header_message_id()
+        .or(payload.message_id.as_deref())
+        .and_then(normalize_message_id)
+    {
+        return id;
+    }
+    format!("{:x}", md5::compute(raw_payload))
+}
+
+fn extract_first_message_id(value: &str) -> Option<String> {
+    for token in value.split(|ch| matches!(ch, ' ' | '\t' | '\n' | '\r' | ',' | ';')) {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(id) = normalize_message_id(trimmed) {
+            return Some(id);
+        }
+    }
+    None
+}
+
+fn thread_workspace_name(thread_key: &str) -> String {
+    let hash = format!("{:x}", md5::compute(thread_key.as_bytes()));
+    format!("thread_{}", hash)
+}
+
+fn ensure_thread_workspace(
     user_paths: &crate::user_store::UserPaths,
     user_id: &str,
-    payload: &PostmarkInbound,
-    raw_payload: &[u8],
+    thread_key: &str,
 ) -> Result<PathBuf, BoxError> {
     fs::create_dir_all(&user_paths.workspaces_root)?;
 
-    let fallback = format!("email_{}", Utc::now().timestamp());
-    let message_id = payload
-        .header_message_id()
-        .or(payload.message_id.as_deref())
-        .unwrap_or("");
-    let base = sanitize_token(message_id, &fallback);
-    let workspace = create_unique_dir(&user_paths.workspaces_root, &base)?;
+    let workspace_name = thread_workspace_name(thread_key);
+    let workspace = user_paths.workspaces_root.join(workspace_name);
+    let is_new = !workspace.exists();
+    if is_new {
+        fs::create_dir_all(&workspace)?;
+    }
 
     let incoming_email = workspace.join("incoming_email");
     let incoming_attachments = workspace.join("incoming_attachments");
@@ -735,23 +830,79 @@ fn create_workspace(
     fs::create_dir_all(&memory)?;
     fs::create_dir_all(&references)?;
 
-    if let Err(err) = crate::past_emails::hydrate_past_emails(
-        &user_paths.mail_root,
-        &references,
-        user_id,
-        None,
-    ) {
-        error!("failed to hydrate past_emails: {}", err);
+    if is_new || !references.join("past_emails").exists() {
+        if let Err(err) = crate::past_emails::hydrate_past_emails(
+            &user_paths.mail_root,
+            &references,
+            user_id,
+            None,
+        ) {
+            error!("failed to hydrate past_emails: {}", err);
+        }
     }
 
+    Ok(workspace)
+}
+
+fn append_inbound_payload(
+    workspace: &Path,
+    payload: &PostmarkInbound,
+    raw_payload: &[u8],
+    seq: u64,
+) -> Result<(), BoxError> {
+    let incoming_email = workspace.join("incoming_email");
+    let incoming_attachments = workspace.join("incoming_attachments");
+    let entries_email = incoming_email.join("entries");
+    let entries_attachments = incoming_attachments.join("entries");
+    fs::create_dir_all(&entries_email)?;
+    fs::create_dir_all(&entries_attachments)?;
+
+    let fallback = format!("email_{}", seq);
+    let message_id = payload
+        .header_message_id()
+        .or(payload.message_id.as_deref())
+        .unwrap_or("");
+    let base = sanitize_token(message_id, &fallback);
+    let entry_name = format!("{:04}_{}", seq, base);
+    let entry_email_dir = entries_email.join(&entry_name);
+    let entry_attachments_dir = entries_attachments.join(&entry_name);
+    fs::create_dir_all(&entry_email_dir)?;
+    fs::create_dir_all(&entry_attachments_dir)?;
+    write_inbound_payload(
+        payload,
+        raw_payload,
+        &entry_email_dir,
+        &entry_attachments_dir,
+    )?;
+
+    clear_dir_except(&incoming_attachments, &entries_attachments)?;
     write_inbound_payload(
         payload,
         raw_payload,
         &incoming_email,
         &incoming_attachments,
     )?;
+    Ok(())
+}
 
-    Ok(workspace)
+fn clear_dir_except(root: &Path, keep: &Path) -> Result<(), io::Error> {
+    if !root.exists() {
+        fs::create_dir_all(root)?;
+        return Ok(());
+    }
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path == keep {
+            continue;
+        }
+        if path.is_dir() {
+            fs::remove_dir_all(path)?;
+        } else {
+            fs::remove_file(path)?;
+        }
+    }
+    Ok(())
 }
 
 fn archive_inbound(
@@ -781,6 +932,34 @@ fn archive_inbound(
         &incoming_attachments,
     )?;
     Ok(())
+}
+
+fn cancel_pending_thread_tasks<E: crate::TaskExecutor>(
+    scheduler: &mut Scheduler<E>,
+    workspace: &Path,
+    current_epoch: u64,
+) -> Result<usize, SchedulerError> {
+    let thread_state_path = default_thread_state_path(workspace);
+    scheduler.disable_tasks_by(|task| {
+        if !task.enabled {
+            return false;
+        }
+        match &task.kind {
+            TaskKind::RunTask(run) => {
+                run.workspace_dir == workspace
+                    && run.thread_epoch.unwrap_or(0) < current_epoch
+            }
+            TaskKind::SendEmail(send) => {
+                let same_thread = send
+                    .thread_state_path
+                    .as_ref()
+                    .map(|path| path == &thread_state_path)
+                    .unwrap_or_else(|| send.html_path.starts_with(workspace));
+                same_thread && send.thread_epoch.unwrap_or(0) < current_epoch
+            }
+            _ => false,
+        }
+    })
 }
 
 fn write_inbound_payload(
@@ -931,7 +1110,7 @@ fn resolve_path(raw: String) -> Result<PathBuf, io::Error> {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct PostmarkInbound {
+pub struct PostmarkInbound {
     #[serde(rename = "From")]
     from: Option<String>,
     #[serde(rename = "To")]
@@ -1133,8 +1312,9 @@ mod tests {
 }"#;
         let inbound_payload: PostmarkInbound =
             serde_json::from_str(inbound_raw).expect("parse inbound");
+        let thread = thread_key(&inbound_payload, inbound_raw.as_bytes());
         let workspace =
-            create_workspace(&user_paths, "user123", &inbound_payload, inbound_raw.as_bytes())
+            ensure_thread_workspace(&user_paths, "user123", &thread)
                 .expect("create workspace");
 
         let past_root = workspace.join("references").join("past_emails");

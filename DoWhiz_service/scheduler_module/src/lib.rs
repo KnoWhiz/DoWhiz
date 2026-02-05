@@ -12,6 +12,9 @@ use std::time::Duration;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+pub(crate) mod thread_state;
+use crate::thread_state::{current_thread_epoch, default_thread_state_path, find_thread_state_path};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TaskKind {
@@ -34,6 +37,10 @@ pub struct SendEmailTask {
     pub references: Option<String>,
     #[serde(default)]
     pub archive_root: Option<PathBuf>,
+    #[serde(default)]
+    pub thread_epoch: Option<u64>,
+    #[serde(default)]
+    pub thread_state_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +58,12 @@ pub struct RunTaskTask {
     pub reply_to: Vec<String>,
     #[serde(default)]
     pub archive_root: Option<PathBuf>,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    pub thread_epoch: Option<u64>,
+    #[serde(default)]
+    pub thread_state_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +130,25 @@ impl TaskExecutor for ModuleExecutor {
     fn execute(&self, task: &TaskKind) -> Result<TaskExecution, SchedulerError> {
         match task {
             TaskKind::SendEmail(task) => {
+                if let Some(expected_epoch) = task.thread_epoch {
+                    let state_path = task
+                        .thread_state_path
+                        .clone()
+                        .or_else(|| task.html_path.parent().and_then(find_thread_state_path));
+                    if let Some(state_path) = state_path {
+                        if let Some(current_epoch) = current_thread_epoch(&state_path) {
+                            if current_epoch != expected_epoch {
+                                info!(
+                                    "skip stale send_email (expected epoch {}, current {}) for {}",
+                                    expected_epoch,
+                                    current_epoch,
+                                    task.html_path.display()
+                                );
+                                return Ok(TaskExecution::empty());
+                            }
+                        }
+                    }
+                }
                 let params = send_emails_module::SendEmailParams {
                     subject: task.subject.clone(),
                     html_path: task.html_path.clone(),
@@ -197,6 +229,24 @@ impl<E: TaskExecutor> Scheduler<E> {
 
     pub fn tasks(&self) -> &[ScheduledTask] {
         &self.tasks
+    }
+
+    pub fn disable_tasks_by<F>(&mut self, mut predicate: F) -> Result<usize, SchedulerError>
+    where
+        F: FnMut(&ScheduledTask) -> bool,
+    {
+        let mut disabled = 0usize;
+        for task in &mut self.tasks {
+            if !task.enabled {
+                continue;
+            }
+            if predicate(task) {
+                task.enabled = false;
+                self.store.update_task(task)?;
+                disabled += 1;
+            }
+        }
+        Ok(disabled)
     }
 
     pub fn add_cron_task(
@@ -323,6 +373,13 @@ impl<E: TaskExecutor> Scheduler<E> {
                     if let Some(err) = execution.follow_up_error.as_deref() {
                         warn!("scheduled tasks parse error: {}", err);
                     }
+                    if let Err(err) = snapshot_reply_draft(task) {
+                        warn!(
+                            "failed to snapshot reply draft for {}: {}",
+                            task.workspace_dir.display(),
+                            err
+                        );
+                    }
                     ingest_follow_up_tasks(self, task, &execution.follow_up_tasks);
                     if let Err(err) = schedule_auto_reply(self, task) {
                         warn!(
@@ -412,7 +469,9 @@ CREATE TABLE IF NOT EXISTS send_email_tasks (
     attachments_dir TEXT NOT NULL,
     in_reply_to TEXT,
     references_header TEXT,
-    archive_root TEXT
+    archive_root TEXT,
+    thread_epoch INTEGER,
+    thread_state_path TEXT
 );
 
 CREATE TABLE IF NOT EXISTS send_email_recipients (
@@ -432,7 +491,10 @@ CREATE TABLE IF NOT EXISTS run_task_tasks (
     model_name TEXT NOT NULL,
     codex_disabled INTEGER NOT NULL,
     reply_to TEXT NOT NULL,
-    archive_root TEXT
+    archive_root TEXT,
+    thread_id TEXT,
+    thread_epoch INTEGER,
+    thread_state_path TEXT
 );
 
 CREATE TABLE IF NOT EXISTS task_executions (
@@ -471,6 +533,18 @@ fn ensure_send_email_task_columns(conn: &Connection) -> Result<(), SchedulerErro
             [],
         )?;
     }
+    if !columns.contains("thread_epoch") {
+        conn.execute(
+            "ALTER TABLE send_email_tasks ADD COLUMN thread_epoch INTEGER",
+            [],
+        )?;
+    }
+    if !columns.contains("thread_state_path") {
+        conn.execute(
+            "ALTER TABLE send_email_tasks ADD COLUMN thread_state_path TEXT",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -485,6 +559,24 @@ fn ensure_run_task_task_columns(conn: &Connection) -> Result<(), SchedulerError>
     if !columns.contains("archive_root") {
         conn.execute(
             "ALTER TABLE run_task_tasks ADD COLUMN archive_root TEXT",
+            [],
+        )?;
+    }
+    if !columns.contains("thread_id") {
+        conn.execute(
+            "ALTER TABLE run_task_tasks ADD COLUMN thread_id TEXT",
+            [],
+        )?;
+    }
+    if !columns.contains("thread_epoch") {
+        conn.execute(
+            "ALTER TABLE run_task_tasks ADD COLUMN thread_epoch INTEGER",
+            [],
+        )?;
+    }
+    if !columns.contains("thread_state_path") {
+        conn.execute(
+            "ALTER TABLE run_task_tasks ADD COLUMN thread_state_path TEXT",
             [],
         )?;
     }
@@ -620,8 +712,8 @@ impl SqliteSchedulerStore {
         match &task.kind {
             TaskKind::SendEmail(send) => {
                 tx.execute(
-                    "INSERT INTO send_email_tasks (task_id, subject, html_path, attachments_dir, in_reply_to, references_header, archive_root)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    "INSERT INTO send_email_tasks (task_id, subject, html_path, attachments_dir, in_reply_to, references_header, archive_root, thread_epoch, thread_state_path)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     params![
                         task.id.to_string(),
                         send.subject.as_str(),
@@ -630,6 +722,10 @@ impl SqliteSchedulerStore {
                         send.in_reply_to.as_deref(),
                         send.references.as_deref(),
                         send.archive_root
+                            .as_ref()
+                            .map(|value| value.to_string_lossy().into_owned()),
+                        send.thread_epoch.map(|value| value as i64),
+                        send.thread_state_path
                             .as_ref()
                             .map(|value| value.to_string_lossy().into_owned()),
                     ],
@@ -655,8 +751,8 @@ impl SqliteSchedulerStore {
             }
             TaskKind::RunTask(run) => {
                 tx.execute(
-                    "INSERT INTO run_task_tasks (task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, codex_disabled, reply_to, archive_root)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    "INSERT INTO run_task_tasks (task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, codex_disabled, reply_to, archive_root, thread_id, thread_epoch, thread_state_path)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                     params![
                         task.id.to_string(),
                         run.workspace_dir.to_string_lossy().into_owned(),
@@ -668,6 +764,11 @@ impl SqliteSchedulerStore {
                         bool_to_int(run.codex_disabled),
                         join_recipients(&run.reply_to),
                         run.archive_root
+                            .as_ref()
+                            .map(|value| value.to_string_lossy().into_owned()),
+                        run.thread_id.as_deref(),
+                        run.thread_epoch.map(|value| value as i64),
+                        run.thread_state_path
                             .as_ref()
                             .map(|value| value.to_string_lossy().into_owned()),
                     ],
@@ -750,7 +851,7 @@ impl SqliteSchedulerStore {
     ) -> Result<SendEmailTask, SchedulerError> {
         let row = conn
             .query_row(
-                "SELECT subject, html_path, attachments_dir, in_reply_to, references_header, archive_root
+                "SELECT subject, html_path, attachments_dir, in_reply_to, references_header, archive_root, thread_epoch, thread_state_path
                  FROM send_email_tasks
                  WHERE task_id = ?1",
                 params![task_id],
@@ -762,11 +863,22 @@ impl SqliteSchedulerStore {
                         row.get::<_, Option<String>>(3)?,
                         row.get::<_, Option<String>>(4)?,
                         row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<i64>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
                     ))
                 },
             )
             .optional()?;
-        let (subject, html_path, attachments_dir, in_reply_to_raw, references_raw, archive_root) =
+        let (
+            subject,
+            html_path,
+            attachments_dir,
+            in_reply_to_raw,
+            references_raw,
+            archive_root,
+            thread_epoch_raw,
+            thread_state_path,
+        ) =
             row.ok_or_else(|| {
             SchedulerError::Storage(format!(
                 "missing send_email_tasks row for task {}",
@@ -806,6 +918,8 @@ impl SqliteSchedulerStore {
             in_reply_to: normalize_header_value(in_reply_to_raw),
             references: normalize_header_value(references_raw),
             archive_root: normalize_optional_path(archive_root),
+            thread_epoch: thread_epoch_raw.map(|value| value as u64),
+            thread_state_path: normalize_optional_path(thread_state_path),
         })
     }
 
@@ -816,7 +930,7 @@ impl SqliteSchedulerStore {
     ) -> Result<RunTaskTask, SchedulerError> {
         let row = conn
             .query_row(
-                "SELECT workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, codex_disabled, reply_to, archive_root
+                "SELECT workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, codex_disabled, reply_to, archive_root, thread_id, thread_epoch, thread_state_path
                  FROM run_task_tasks
                  WHERE task_id = ?1",
                 params![task_id],
@@ -831,6 +945,9 @@ impl SqliteSchedulerStore {
                         row.get::<_, i64>(6)?,
                         row.get::<_, String>(7)?,
                         row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, Option<i64>>(10)?,
+                        row.get::<_, Option<String>>(11)?,
                     ))
                 },
             )
@@ -845,6 +962,9 @@ impl SqliteSchedulerStore {
             codex_disabled,
             reply_to_raw,
             archive_root,
+            thread_id,
+            thread_epoch_raw,
+            thread_state_path,
         ) = row.ok_or_else(|| {
             SchedulerError::Storage(format!(
                 "missing run_task_tasks row for task {}",
@@ -862,6 +982,9 @@ impl SqliteSchedulerStore {
             codex_disabled: codex_disabled != 0,
             reply_to: split_recipients(&reply_to_raw),
             archive_root: normalize_optional_path(archive_root),
+            thread_id,
+            thread_epoch: thread_epoch_raw.map(|value| value as u64),
+            thread_state_path: normalize_optional_path(thread_state_path),
         })
     }
 
@@ -972,11 +1095,50 @@ fn insert_recipients(
     Ok(())
 }
 
+fn snapshot_reply_draft(task: &RunTaskTask) -> Result<(), SchedulerError> {
+    let draft_path = task.workspace_dir.join("reply_email_draft.html");
+    if !draft_path.exists() {
+        return Ok(());
+    }
+    let drafts_dir = task.workspace_dir.join("drafts");
+    fs::create_dir_all(&drafts_dir)?;
+    let timestamp = Utc::now().format("%Y%m%dT%H%M%S");
+    let filename = match task.thread_epoch {
+        Some(epoch) => format!("reply_email_draft_epoch_{epoch}_{timestamp}.html"),
+        None => format!("reply_email_draft_{timestamp}.html"),
+    };
+    let dest = drafts_dir.join(filename);
+    fs::copy(&draft_path, dest)?;
+    Ok(())
+}
+
+fn thread_epoch_matches(task: &RunTaskTask) -> bool {
+    let expected = match task.thread_epoch {
+        Some(value) => value,
+        None => return true,
+    };
+    let state_path = task
+        .thread_state_path
+        .clone()
+        .unwrap_or_else(|| default_thread_state_path(&task.workspace_dir));
+    match current_thread_epoch(&state_path) {
+        Some(current) => current == expected,
+        None => true,
+    }
+}
+
 fn ingest_follow_up_tasks<E: TaskExecutor>(
     scheduler: &mut Scheduler<E>,
     task: &RunTaskTask,
     requests: &[run_task_module::ScheduledTaskRequest],
 ) {
+    if !thread_epoch_matches(task) {
+        info!(
+            "skip follow-up scheduling for stale thread epoch in {}",
+            task.workspace_dir.display()
+        );
+        return;
+    }
     if requests.is_empty() {
         return;
     }
@@ -1008,6 +1170,13 @@ fn schedule_auto_reply<E: TaskExecutor>(
     scheduler: &mut Scheduler<E>,
     task: &RunTaskTask,
 ) -> Result<bool, SchedulerError> {
+    if !thread_epoch_matches(task) {
+        info!(
+            "skip auto reply for stale thread epoch in {}",
+            task.workspace_dir.display()
+        );
+        return Ok(false);
+    }
     if task.reply_to.is_empty() {
         return Ok(false);
     }
@@ -1033,6 +1202,8 @@ fn schedule_auto_reply<E: TaskExecutor>(
         in_reply_to: reply_context.in_reply_to,
         references: reply_context.references,
         archive_root: task.archive_root.clone(),
+        thread_epoch: task.thread_epoch,
+        thread_state_path: task.thread_state_path.clone(),
     };
 
     let task_id = scheduler.add_one_shot_in(
@@ -1118,6 +1289,8 @@ fn schedule_send_email<E: TaskExecutor>(
         in_reply_to: None,
         references: None,
         archive_root: task.archive_root.clone(),
+        thread_epoch: task.thread_epoch,
+        thread_state_path: task.thread_state_path.clone(),
     };
 
     if let Some(run_at_raw) = request.run_at.as_deref() {

@@ -504,9 +504,15 @@ Inputs (relative to workspace root):\n\
 - Reference dir: {reference}\n\
 \n\
 Task:\n\
-1) Read the incoming email files to understand what to reply to.\n\
+1) Read the incoming email files to understand what to reply to. The incoming email\n\
+   dir may include multiple message entries under entries/; read all email.txt files,\n\
+   plus the latest incoming_email/email.txt.\n\
+   If there are attachments for specific messages, they may live under\n\
+   incoming_attachments/entries/.\n\
 2) Use memory and reference material for context when helpful.\n\
 3) Write the reply as a full HTML email to reply_email_draft.html in the workspace root.\n\
+   You may use drafts/ as history for reference, but only write the final reply to\n\
+   reply_email_draft.html.\n\
 4) Place any files to attach in reply_email_attachments/ (create it if missing).\n\
 \n\
 Optional scheduling:\n\

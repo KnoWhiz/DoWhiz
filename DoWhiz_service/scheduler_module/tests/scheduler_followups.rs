@@ -51,6 +51,9 @@ fn run_task_followups_persist_to_sqlite() {
         codex_disabled: true,
         reply_to: Vec::new(),
         archive_root: None,
+        thread_id: None,
+        thread_epoch: None,
+        thread_state_path: None,
     };
 
     let mut scheduler =
