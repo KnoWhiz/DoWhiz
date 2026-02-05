@@ -13,28 +13,36 @@ function App() {
     setMounted(true);
   }, []);
 
+  const handleEmailClick = (email, subject, body) => {
+    const encodedSubject = encodeURIComponent(subject);
+    const encodedBody = encodeURIComponent(body);
+    window.location.href = `mailto:${email}?subject=${encodedSubject}&body=${encodedBody}`;
+  };
+
   return (
     <div className={`app-container ${mounted ? 'visible' : ''}`}>
       {/* Navigation */}
       <nav className="navbar">
         <div className="container nav-content">
-          <div className="logo">DoWhiz</div>
+          <a href="#" className="logo">Do<span className="text-gradient">Whiz</span></a>
           <div className="nav-links">
-            <a href="#features">Features</a>
-            <a href="#roles">Digital Workers</a>
-            <a href="#security">Security</a>
+            <a href="#roles" className="nav-btn">Digital Workers</a>
+            <a href="#features" className="nav-btn">Features</a>
+            <a href="#security" className="nav-btn">Security</a>
           </div>
           <div className="nav-actions">
             <div className="social-links">
-              <a href="https://github.com/KnoWhiz/DoWhiz" target="_blank" rel="noopener noreferrer" className="social-icon" aria-label="GitHub">
+              <a href="https://github.com/KnoWhiz/DoWhiz" target="_blank" rel="noopener noreferrer" className="btn-small" aria-label="GitHub">
                 <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
                 </svg>
+                GitHub
               </a>
-              <a href="https://discord.gg/7ucnweCKk8" target="_blank" rel="noopener noreferrer" className="social-icon" aria-label="Discord">
+              <a href="https://discord.gg/7ucnweCKk8" target="_blank" rel="noopener noreferrer" className="btn-small" aria-label="Discord">
                 <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
                 </svg>
+                Discord
               </a>
             </div>
             <a className="btn-small" href="mailto:admin@dowhiz.com">Contact Us</a>
@@ -61,25 +69,6 @@ function App() {
         </div>
       </section>
 
-      {/* Core Experience */}
-      <section id="features" className="section features-section">
-        <div className="container">
-          <h2 className="section-title">Core Experience</h2>
-          <div className="features-grid">
-            {[
-              { title: "Task via Email", desc: "Delegate tasks naturally by sending an email. No complex dashboards or new apps to master." },
-              { title: "Autonomous Tools", desc: "Agents intelligently select and utilize the right tools for each request without manual configuration." },
-              { title: "Direct Delivery", desc: "Completed work is delivered straight back to your inbox. Focus on results, not the process." }
-            ].map((item, idx) => (
-              <div key={idx} className="feature-card">
-                <h3>{item.title}</h3>
-                <p>{item.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Roles & Scenarios */}
       <section id="roles" className="section roles-section">
         <div className="container">
@@ -88,7 +77,7 @@ function App() {
             {/* Oliver */}
             <div
               className="role-card active-role clickable-card"
-              onClick={() => window.location.href = 'mailto:Oliver@DoWhiz.com'}
+              onClick={() => handleEmailClick('Oliver@DoWhiz.com', 'Task Request', 'Analyze the attached sales report and summarize key Q3 trends.')}
               title="Click to email Oliver"
             >
               <div className="role-header">
@@ -111,7 +100,7 @@ function App() {
             {/* Mini-Mouse */}
             <div
               className="role-card coming-soon clickable-card"
-              onClick={() => window.location.href = 'mailto:Mini-Mouse@DoWhiz.com'}
+              onClick={() => handleEmailClick('Mini-Mouse@DoWhiz.com', 'Creative Request', 'Draft a press release for our product launch based on these notes.')}
               title="Click to email Mini-Mouse"
             >
               <div className="role-header">
@@ -130,6 +119,25 @@ function App() {
                 <p>"Draft a press release for our product launch based on these notes."</p>
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Core Experience */}
+      <section id="features" className="section features-section">
+        <div className="container">
+          <h2 className="section-title">Core Experience</h2>
+          <div className="features-grid">
+            {[
+              { title: "Task via Email", desc: "Delegate tasks naturally by sending an email. No complex dashboards or new apps to master." },
+              { title: "Autonomous Tools", desc: "Agents intelligently select and utilize the right tools for each request without manual configuration." },
+              { title: "Direct Delivery", desc: "Completed work is delivered straight back to your inbox. Focus on results, not the process." }
+            ].map((item, idx) => (
+              <div key={idx} className="feature-card">
+                <h3>{item.title}</h3>
+                <p>{item.desc}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
