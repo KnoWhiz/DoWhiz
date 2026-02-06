@@ -158,7 +158,7 @@ fn send_payload_includes_recipients_and_attachments() -> Result<(), Box<dyn std:
         "From": "sender@example.com",
         "To": "to1@example.com, to2@example.com",
         "Cc": "cc@example.com",
-        "Bcc": "bcc@example.com",
+        "Bcc": "bcc@example.com, sender@example.com",
         "Subject": "Test subject",
         "TextBody": "Hello",
         "HtmlBody": "<p>Hello</p>",

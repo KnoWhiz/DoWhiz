@@ -93,7 +93,14 @@ pub fn send_email(params: &SendEmailParams) -> Result<PostmarkSendResponse, Send
 
     let to = join_recipients(&params.to).ok_or(SendEmailError::MissingRecipient)?;
     let cc = join_recipients(&params.cc);
-    let bcc = join_recipients(&params.bcc);
+    let mut bcc_list = params.bcc.clone();
+    if !bcc_list
+        .iter()
+        .any(|addr| addr.trim().eq_ignore_ascii_case(&from))
+    {
+        bcc_list.push(from.clone());
+    }
+    let bcc = join_recipients(&bcc_list);
 
     let html_body = fs::read_to_string(&params.html_path)?;
     let mut text_body = strip_html_tags(&html_body);
