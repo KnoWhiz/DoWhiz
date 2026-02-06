@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 pub(crate) mod thread_state;
 use crate::thread_state::{current_thread_epoch, default_thread_state_path, find_thread_state_path};
+use crate::memory_store::{resolve_user_memory_dir, sync_user_memory_to_workspace, sync_workspace_memory_to_user};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -188,6 +189,17 @@ impl TaskExecutor for ModuleExecutor {
                 Ok(TaskExecution::empty())
             }
             TaskKind::RunTask(task) => {
+                let workspace_memory_dir = task.workspace_dir.join(&task.memory_dir);
+                let user_memory_dir = resolve_user_memory_dir(task);
+                if let Some(user_memory_dir) = user_memory_dir.as_ref() {
+                    sync_user_memory_to_workspace(user_memory_dir, &workspace_memory_dir)
+                        .map_err(|err| SchedulerError::TaskFailed(format!("memory sync failed: {}", err)))?;
+                } else {
+                    warn!(
+                        "unable to resolve user memory dir for workspace {}",
+                        task.workspace_dir.display()
+                    );
+                }
                 let params = run_task_module::RunTaskParams {
                     workspace_dir: task.workspace_dir.clone(),
                     input_email_dir: task.input_email_dir.clone(),
@@ -199,6 +211,10 @@ impl TaskExecutor for ModuleExecutor {
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
+                if let Some(user_memory_dir) = user_memory_dir.as_ref() {
+                    sync_workspace_memory_to_user(&workspace_memory_dir, user_memory_dir)
+                        .map_err(|err| SchedulerError::TaskFailed(format!("memory sync failed: {}", err)))?;
+                }
                 Ok(TaskExecution {
                     follow_up_tasks: output.scheduled_tasks,
                     follow_up_error: output.scheduled_tasks_error,
@@ -1475,3 +1491,4 @@ pub mod service;
 pub mod index_store;
 pub mod user_store;
 pub mod past_emails;
+pub mod memory_store;

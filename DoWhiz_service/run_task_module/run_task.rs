@@ -179,11 +179,13 @@ fn run_codex_task(
 
     ensure_codex_config(&model_name, &azure_endpoint)?;
 
+    let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
     let prompt = build_prompt(
         request.input_email_dir,
         request.input_attachments_dir,
         request.memory_dir,
         request.reference_dir,
+        &memory_context,
     );
 
     let mut cmd = Command::new("codex");
@@ -492,7 +494,16 @@ fn build_prompt(
     input_attachments_dir: &Path,
     memory_dir: &Path,
     reference_dir: &Path,
+    memory_context: &str,
 ) -> String {
+    let memory_section = if memory_context.trim().is_empty() {
+        "Memory context (from memory/*.md):\n- (no memory files found)\n\n".to_string()
+    } else {
+        format!(
+            "Memory context (from memory/*.md):\n{memory_context}\n\n",
+            memory_context = memory_context.trim_end()
+        )
+    };
     format!(
         "You are Oliver, a digital assistant at DoWhiz.\n\
 You are running inside a workspace on disk. Use only files in this workspace.\n\
@@ -503,6 +514,7 @@ Inputs (relative to workspace root):\n\
 - Memory dir: {memory}\n\
 - Reference dir: {reference}\n\
 \n\
+{memory_section}\
 Task:\n\
 1) Read the incoming email files to understand what to reply to. The incoming email\n\
    dir may include multiple message entries under entries/; read all email.txt files,\n\
@@ -514,6 +526,17 @@ Task:\n\
    You may use drafts/ as history for reference, but only write the final reply to\n\
    reply_email_draft.html.\n\
 4) Place any files to attach in reply_email_attachments/ (create it if missing).\n\
+\n\
+Memory policy:\n\
+- Read all Markdown files under memory/ before starting; they are long-term, per-user memory.\n\
+- Persist durable facts only (identity, preferences, recurring tasks, projects, contacts,\n\
+  decisions, and working processes). Do not store transient email-specific details.\n\
+- Default file is memory/memo.md (Markdown).\n\
+- If memo.md exceeds 500 lines, split by info type into multiple files (for example:\n\
+  memo_profile.md, memo_preferences.md, memo_projects.md, memo_contacts.md,\n\
+  memo_decisions.md, memo_processes.md). Keep every file <= 500 lines.\n\
+- When split, replace memo.md with a short index or highlights so it stays <= 500 lines.\n\
+- Update memory files at the end if new durable info is learned; otherwise leave unchanged.\n\
 \n\
 Optional scheduling:\n\
 - If the user asks you to send a follow-up email later, create the follow-up draft HTML in the\n\
@@ -538,9 +561,41 @@ Rules:\n\
         input_attachments = input_attachments_dir.display(),
         memory = memory_dir.display(),
         reference = reference_dir.display(),
+        memory_section = memory_section,
         schedule_begin = SCHEDULED_TASKS_BEGIN,
         schedule_end = SCHEDULED_TASKS_END,
     )
+}
+
+fn load_memory_context(workspace_dir: &Path, memory_dir: &Path) -> Result<String, RunTaskError> {
+    let resolved = resolve_rel_dir(workspace_dir, memory_dir, "memory_dir")?;
+    let mut files: Vec<PathBuf> = Vec::new();
+    for entry in fs::read_dir(&resolved)? {
+        let entry = entry?;
+        if entry.file_type()?.is_file() && is_markdown_file(&entry.path()) {
+            files.push(entry.path());
+        }
+    }
+    files.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+
+    let mut sections = Vec::new();
+    for path in files {
+        let content = fs::read_to_string(&path)?;
+        let rel_path = path.strip_prefix(workspace_dir).unwrap_or(&path);
+        sections.push(format!(
+            "--- {path} ---\n{content}",
+            path = rel_path.display(),
+            content = content.trim_end()
+        ));
+    }
+    Ok(sections.join("\n\n"))
+}
+
+fn is_markdown_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown"))
+        .unwrap_or(false)
 }
 
 fn tail_string(input: &str, max_len: usize) -> String {
@@ -553,4 +608,47 @@ fn tail_string(input: &str, max_len: usize) -> String {
         start += 1;
     }
     trimmed[start..].to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn load_memory_context_sorts_and_includes_markdown() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        let memory_dir = workspace.join("memory");
+        fs::create_dir_all(&memory_dir).expect("memory dir");
+        fs::write(memory_dir.join("b.md"), "second").expect("b.md");
+        fs::write(memory_dir.join("a.md"), "first").expect("a.md");
+        fs::write(memory_dir.join("note.txt"), "ignore").expect("note.txt");
+
+        let context = load_memory_context(&workspace, Path::new("memory")).expect("context");
+
+        let first_idx = context.find("--- memory/a.md ---").expect("a.md marker");
+        let second_idx = context.find("--- memory/b.md ---").expect("b.md marker");
+        assert!(first_idx < second_idx, "expected a.md before b.md");
+        assert!(context.contains("first"));
+        assert!(context.contains("second"));
+        assert!(!context.contains("note.txt"));
+    }
+
+    #[test]
+    fn build_prompt_includes_memory_policy_and_section() {
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            "--- memory/memo.md ---\nHello",
+        );
+
+        assert!(prompt.contains("Memory context"));
+        assert!(prompt.contains("memory/memo.md"));
+        assert!(prompt.contains("Memory policy"));
+        assert!(prompt.contains("memo.md"));
+        assert!(prompt.contains("500 lines"));
+    }
 }

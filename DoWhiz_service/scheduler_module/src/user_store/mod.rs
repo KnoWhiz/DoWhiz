@@ -3,6 +3,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+use crate::memory_store::ensure_default_user_memo;
 
 #[derive(Debug)]
 pub struct UserStore {
@@ -134,6 +135,7 @@ impl UserStore {
         fs::create_dir_all(&paths.memory_dir)?;
         fs::create_dir_all(&paths.mail_root)?;
         fs::create_dir_all(&paths.workspaces_root)?;
+        ensure_default_user_memo(&paths.memory_dir)?;
         Ok(())
     }
 
