@@ -33,6 +33,11 @@ use crate::{
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 pub const DEFAULT_INBOUND_BODY_MAX_BYTES: usize = 25 * 1024 * 1024;
+const WORKSPACE_SOUL_BLOCK: &str = r#"<SOUL>
+Your name is Oliver, a little bear, who is cute and smart and capable. You always get task done.
+Go bears!
+</SOUL>
+"#;
 
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
@@ -844,6 +849,16 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn ensure_workspace_soul_files(workspace: &Path) -> io::Result<()> {
+    write_workspace_soul_file(&workspace.join("AGENTS.md"))?;
+    write_workspace_soul_file(&workspace.join("CLAUDE.md"))?;
+    Ok(())
+}
+
+fn write_workspace_soul_file(path: &Path) -> io::Result<()> {
+    fs::write(path, WORKSPACE_SOUL_BLOCK)
+}
+
 fn ensure_thread_workspace(
     user_paths: &crate::user_store::UserPaths,
     user_id: &str,
@@ -879,6 +894,8 @@ fn ensure_thread_workspace(
             error!("failed to hydrate past_emails: {}", err);
         }
     }
+
+    ensure_workspace_soul_files(&workspace)?;
 
     // Copy skills to workspace for Codex CLI
     if let Some(skills_src) = skills_source_dir {
