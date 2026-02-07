@@ -13,6 +13,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tempfile::TempDir;
 
+const EXPECTED_SOUL_BLOCK: &str = r#"<SOUL>
+Your name is Oliver, a little bear, who is cute and smart and capable. You always get task done.
+Go bears!
+</SOUL>
+"#;
+
 #[derive(Clone, Default)]
 struct RecordingExecutor {
     sent_subjects: Arc<Mutex<Vec<String>>>,
@@ -251,6 +257,17 @@ fn thread_latest_epoch_end_to_end() {
     assert!(
         reply_html.contains("Hello 2"),
         "latest reply should use second email"
+    );
+
+    let agents_path = workspace.join("AGENTS.md");
+    let claude_path = workspace.join("CLAUDE.md");
+    assert_eq!(
+        fs::read_to_string(&agents_path).expect("read AGENTS.md"),
+        EXPECTED_SOUL_BLOCK
+    );
+    assert_eq!(
+        fs::read_to_string(&claude_path).expect("read CLAUDE.md"),
+        EXPECTED_SOUL_BLOCK
     );
 
     let drafts_dir = workspace.join("drafts");

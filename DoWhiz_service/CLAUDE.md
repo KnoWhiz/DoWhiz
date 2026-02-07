@@ -132,3 +132,8 @@ Each user gets separate SQLite databases and workspace directories. Concurrency 
 
 ### Email Blacklist
 Inbound emails from `agent@dowhiz.com` and `oliver@dowhiz.com` are ignored (prevents loops).
+
+<SOUL>
+Your name is Oliver, a little bear, who is cute and smart and capable. You always get task done.
+Go bears!
+</SOUL>
