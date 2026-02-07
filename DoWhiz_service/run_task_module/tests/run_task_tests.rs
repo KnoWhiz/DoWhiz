@@ -5,7 +5,8 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use support::{
-    build_params, create_workspace, write_fake_codex, EnvGuard, FakeCodexMode, TempDir, ENV_MUTEX,
+    build_params, create_workspace, write_fake_codex, EnvGuard, EnvUnsetGuard, FakeCodexMode,
+    TempDir, ENV_MUTEX,
 };
 
 #[test]
@@ -121,6 +122,49 @@ fn run_task_reports_missing_codex_cli() {
     let params = build_params(&workspace);
     let err = run_task(&params).unwrap_err();
     assert!(matches!(err, RunTaskError::CodexNotFound));
+}
+
+#[test]
+#[cfg(unix)]
+fn run_task_maps_github_env_from_dotenv() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("codex_task_github_env").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let env_path = temp.path.join(".env");
+    fs::write(
+        &env_path,
+        r#"GITHUB_USERNAME="octo-user"
+GITHUB_PERSONAL_ACCESS_TOKEN="pat-test-token"
+"#,
+    )
+    .unwrap();
+
+    let home_dir = temp.path.join("home");
+    let bin_dir = temp.path.join("bin");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_fake_codex(&bin_dir, FakeCodexMode::GithubEnvCheck).unwrap();
+
+    let _unset = EnvUnsetGuard::remove(&[
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "GITHUB_USERNAME",
+    ]);
+
+    let old_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), old_path);
+    let _env = EnvGuard::set(&[
+        ("HOME", home_dir.to_str().unwrap()),
+        ("PATH", &new_path),
+        ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
+    ]);
+
+    let params = build_params(&workspace);
+    let result = run_task(&params);
+    assert!(result.is_ok(), "expected GH env to reach codex");
 }
 
 #[test]

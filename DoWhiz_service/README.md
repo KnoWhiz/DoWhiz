@@ -13,6 +13,7 @@ then schedules a SendEmail job and sends the reply via Postmark.
   - `POSTMARK_SERVER_TOKEN`
   - `OUTBOUND_FROM` (optional, defaults to `oliver@dowhiz.com`)
   - `AZURE_OPENAI_API_KEY_BACKUP` and `AZURE_OPENAI_ENDPOINT_BACKUP` (required when Codex is enabled)
+  - `GITHUB_USERNAME` + `GITHUB_PERSONAL_ACCESS_TOKEN` (optional; enables Codex/agent GitHub access via `GH_TOKEN`/`GITHUB_TOKEN` + git askpass)
 
 ### Install dependencies (Dockerfile parity)
 Linux (Debian/Ubuntu):

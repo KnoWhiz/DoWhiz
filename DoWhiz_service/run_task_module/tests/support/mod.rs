@@ -60,11 +60,40 @@ impl Drop for EnvGuard {
 }
 
 #[allow(dead_code)]
+pub struct EnvUnsetGuard {
+    saved: Vec<(String, Option<OsString>)>,
+}
+
+#[allow(dead_code)]
+impl EnvUnsetGuard {
+    pub fn remove(keys: &[&str]) -> Self {
+        let mut saved = Vec::with_capacity(keys.len());
+        for key in keys {
+            saved.push((key.to_string(), env::var_os(key)));
+            env::remove_var(key);
+        }
+        Self { saved }
+    }
+}
+
+impl Drop for EnvUnsetGuard {
+    fn drop(&mut self) {
+        for (key, value) in self.saved.drain(..) {
+            match value {
+                Some(prev) => env::set_var(&key, prev),
+                None => env::remove_var(&key),
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub enum FakeCodexMode {
     Success,
     NoOutput,
     Fail,
+    GithubEnvCheck,
 }
 
 #[cfg(unix)]
@@ -92,6 +121,29 @@ echo '{"type":"item.delta","item":{"type":"agent_message"},"delta":{"text":"ok"}
             r#"#!/bin/sh
 echo "simulated failure" >&2
 exit 2
+"#
+        }
+        FakeCodexMode::GithubEnvCheck => {
+            r#"#!/bin/sh
+set -e
+check_env() {
+  key="$1"
+  eval "value=\${$key}"
+  if [ -z "$value" ]; then
+    echo "missing $key" >&2
+    exit 3
+  fi
+}
+check_env "GH_TOKEN"
+check_env "GITHUB_TOKEN"
+check_env "GITHUB_USERNAME"
+if [ -z "$GIT_ASKPASS" ] || [ ! -x "$GIT_ASKPASS" ]; then
+  echo "missing GIT_ASKPASS" >&2
+  exit 3
+fi
+echo "<html><body>Test reply</body></html>" > reply_email_draft.html
+mkdir -p reply_email_attachments
+echo "attachment" > reply_email_attachments/attachment.txt
 "#
         }
     };
