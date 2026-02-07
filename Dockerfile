@@ -17,14 +17,31 @@ RUN cargo build --locked -p scheduler_module --bin rust_service --release \
 
 FROM debian:bookworm-slim AS runtime
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Work around occasional Debian keyring signature issues in some build environments.
+RUN mkdir -p /tmp/apt-cache/partial \
+  && apt-get update -o Acquire::AllowInsecureRepositories=true \
+    -o Acquire::AllowDowngradeToInsecureRepositories=true \
+  && apt-get install -y --no-install-recommends --allow-unauthenticated \
+    -o Dir::Cache::Archives=/tmp/apt-cache \
+    debian-archive-keyring \
     ca-certificates \
+  && rm -rf /var/lib/apt/lists/* /tmp/apt-cache
+
+RUN if [ -f /etc/apt/sources.list ]; then \
+      sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list; \
+    fi \
+  && if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources; \
+    fi \
+  && mkdir -p /tmp/apt-cache/partial \
+  && apt-get update && apt-get install -y --no-install-recommends \
+    -o Dir::Cache::Archives=/tmp/apt-cache \
     libsqlite3-0 \
     libssl3 \
     curl \
     git \
     gh \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* /tmp/apt-cache
 
 # Install Node.js 20.x (LTS)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \

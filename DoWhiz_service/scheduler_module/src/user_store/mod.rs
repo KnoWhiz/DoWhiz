@@ -1,9 +1,9 @@
+use crate::memory_store::ensure_default_user_memo;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
-use crate::memory_store::ensure_default_user_memo;
 
 #[derive(Debug)]
 pub struct UserStore {

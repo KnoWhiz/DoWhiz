@@ -51,8 +51,8 @@ fn main() -> Result<(), BoxError> {
         .or_else(|| env::var("POSTMARK_INBOUND_HOOK_URL").ok())
         .ok_or("missing --hook-url or POSTMARK_INBOUND_HOOK_URL")?;
 
-    let token = env::var("POSTMARK_SERVER_TOKEN")
-        .map_err(|_| "POSTMARK_SERVER_TOKEN must be set")?;
+    let token =
+        env::var("POSTMARK_SERVER_TOKEN").map_err(|_| "POSTMARK_SERVER_TOKEN must be set")?;
 
     let payload = json!({ "InboundHookUrl": hook_url });
     let client = reqwest::blocking::Client::builder()

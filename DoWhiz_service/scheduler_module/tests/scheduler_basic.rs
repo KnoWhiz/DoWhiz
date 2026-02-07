@@ -73,7 +73,10 @@ fn tick_sets_last_run_for_one_shot() {
         .iter()
         .find(|task| task.id == task_id)
         .expect("task not found");
-    assert!(task.last_run.is_some(), "last_run should be set after execution");
+    assert!(
+        task.last_run.is_some(),
+        "last_run should be set after execution"
+    );
 }
 
 #[test]

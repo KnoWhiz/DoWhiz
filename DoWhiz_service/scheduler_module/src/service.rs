@@ -27,7 +27,7 @@ use crate::index_store::{IndexStore, TaskRef};
 use crate::thread_state::{bump_thread_state, default_thread_state_path};
 use crate::user_store::{extract_emails, UserStore};
 use crate::{
-    ModuleExecutor, RunTaskTask, Schedule, Scheduler, ScheduledTask, SchedulerError, TaskKind,
+    ModuleExecutor, RunTaskTask, Schedule, ScheduledTask, Scheduler, SchedulerError, TaskKind,
 };
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -60,27 +60,30 @@ impl ServiceConfig {
             .and_then(|value| value.parse::<u16>().ok())
             .unwrap_or(9001);
 
-        let workspace_root = resolve_path(env::var("WORKSPACE_ROOT").unwrap_or_else(|_| {
-            ".workspace/run_task/workspaces".to_string()
-        }))?;
-        let scheduler_state_path = resolve_path(env::var("SCHEDULER_STATE_PATH").unwrap_or_else(
-            |_| ".workspace/run_task/state/tasks.db".to_string(),
-        ))?;
+        let workspace_root = resolve_path(
+            env::var("WORKSPACE_ROOT")
+                .unwrap_or_else(|_| ".workspace/run_task/workspaces".to_string()),
+        )?;
+        let scheduler_state_path = resolve_path(
+            env::var("SCHEDULER_STATE_PATH")
+                .unwrap_or_else(|_| ".workspace/run_task/state/tasks.db".to_string()),
+        )?;
         let processed_ids_path =
             resolve_path(env::var("PROCESSED_IDS_PATH").unwrap_or_else(|_| {
                 ".workspace/run_task/state/postmark_processed_ids.txt".to_string()
             }))?;
-        let users_root = resolve_path(env::var("USERS_ROOT").unwrap_or_else(|_| {
-            ".workspace/run_task/users".to_string()
-        }))?;
-        let users_db_path = resolve_path(env::var("USERS_DB_PATH").unwrap_or_else(|_| {
-            ".workspace/run_task/state/users.db".to_string()
-        }))?;
-        let task_index_path = resolve_path(env::var("TASK_INDEX_PATH").unwrap_or_else(|_| {
-            ".workspace/run_task/state/task_index.db".to_string()
-        }))?;
-        let codex_model =
-            env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string());
+        let users_root = resolve_path(
+            env::var("USERS_ROOT").unwrap_or_else(|_| ".workspace/run_task/users".to_string()),
+        )?;
+        let users_db_path = resolve_path(
+            env::var("USERS_DB_PATH")
+                .unwrap_or_else(|_| ".workspace/run_task/state/users.db".to_string()),
+        )?;
+        let task_index_path = resolve_path(
+            env::var("TASK_INDEX_PATH")
+                .unwrap_or_else(|_| ".workspace/run_task/state/task_index.db".to_string()),
+        )?;
+        let codex_model = env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string());
         let codex_disabled = env_flag("CODEX_DISABLED", false);
         let scheduler_poll_interval = env::var("SCHEDULER_POLL_INTERVAL_SECS")
             .ok()
@@ -141,7 +144,11 @@ enum ClaimResult {
 
 impl SchedulerClaims {
     fn try_claim(&mut self, task_ref: &TaskRef, user_limit: usize) -> ClaimResult {
-        let active = self.running_users.get(&task_ref.user_id).copied().unwrap_or(0);
+        let active = self
+            .running_users
+            .get(&task_ref.user_id)
+            .copied()
+            .unwrap_or(0);
         if active >= user_limit {
             return ClaimResult::UserBusy;
         }
@@ -253,10 +260,8 @@ pub async fn run_server(
                     Ok(task_refs) => {
                         let mut current_due_tasks = HashSet::with_capacity(task_refs.len());
                         for task_ref in &task_refs {
-                            current_due_tasks.insert(format!(
-                                "{}@{}",
-                                task_ref.task_id, task_ref.user_id
-                            ));
+                            current_due_tasks
+                                .insert(format!("{}@{}", task_ref.task_id, task_ref.user_id));
                         }
                         if current_due_tasks != last_due_tasks {
                             if !current_due_tasks.is_empty() {
@@ -267,18 +272,12 @@ pub async fn run_server(
                                     })
                                     .collect::<Vec<_>>()
                                     .join(", ");
-                                info!(
-                                    "scheduler found {} due task(s): {}",
-                                    task_refs.len(),
-                                    refs
-                                );
+                                info!("scheduler found {} due task(s): {}", task_refs.len(), refs);
                             }
                             last_due_tasks = current_due_tasks.clone();
                         }
-                        logged_user_busy
-                            .retain(|key| current_due_tasks.contains(key));
-                        logged_task_busy
-                            .retain(|key| current_due_tasks.contains(key));
+                        logged_user_busy.retain(|key| current_due_tasks.contains(key));
+                        logged_task_busy.retain(|key| current_due_tasks.contains(key));
                         if current_due_tasks.is_empty() {
                             last_capacity_deferral = None;
                         }
@@ -296,12 +295,10 @@ pub async fn run_server(
                                 break;
                             }
                             last_capacity_deferral = None;
-                            let task_key =
-                                format!("{}@{}", task_ref.task_id, task_ref.user_id);
+                            let task_key = format!("{}@{}", task_ref.task_id, task_ref.user_id);
                             let claim_result = {
-                                let mut claims = claims
-                                    .lock()
-                                    .unwrap_or_else(|poison| poison.into_inner());
+                                let mut claims =
+                                    claims.lock().unwrap_or_else(|poison| poison.into_inner());
                                 claims.try_claim(&task_ref, scheduler_user_max_concurrency)
                             };
                             match claim_result {
@@ -354,9 +351,8 @@ pub async fn run_server(
                                         task_ref.task_id, task_ref.user_id, err
                                     );
                                 }
-                                let mut claims = claims
-                                    .lock()
-                                    .unwrap_or_else(|poison| poison.into_inner());
+                                let mut claims =
+                                    claims.lock().unwrap_or_else(|poison| poison.into_inner());
                                 claims.release(&task_ref);
                                 limiter.release();
                             });
@@ -407,8 +403,7 @@ fn execute_due_task(
 ) -> Result<(), BoxError> {
     let task_id = Uuid::parse_str(&task_ref.task_id)?;
     let user_paths = user_store.user_paths(&config.users_root, &task_ref.user_id);
-    let mut scheduler =
-        Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+    let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
     let now = Utc::now();
     let summary = summarize_tasks(scheduler.tasks(), now);
     log_task_snapshot(&task_ref.user_id, "before_execute", &summary);
@@ -487,17 +482,11 @@ async fn health() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
 
-async fn postmark_inbound(
-    State(state): State<AppState>,
-    body: Bytes,
-) -> impl IntoResponse {
+async fn postmark_inbound(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
     let payload: PostmarkInbound = match serde_json::from_slice(&body) {
         Ok(payload) => payload,
         Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"status": "bad_json"})),
-            );
+            return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"})));
         }
     };
 
@@ -525,9 +514,13 @@ async fn postmark_inbound(
     let payload_clone = payload.clone();
     let body_bytes = body.to_vec();
     tokio::task::spawn_blocking(move || {
-        if let Err(err) =
-            process_inbound_payload(&config, &user_store, &index_store, &payload_clone, &body_bytes)
-        {
+        if let Err(err) = process_inbound_payload(
+            &config,
+            &user_store,
+            &index_store,
+            &payload_clone,
+            &body_bytes,
+        ) {
             error!("failed to process inbound payload: {err}");
         }
     });
@@ -570,8 +563,7 @@ pub fn process_inbound_payload(
         .header_message_id()
         .or(payload.message_id.as_deref())
         .map(|value| value.trim().to_string());
-    let thread_state =
-        bump_thread_state(&thread_state_path, &thread_key, message_id.clone())?;
+    let thread_state = bump_thread_state(&thread_state_path, &thread_key, message_id.clone())?;
     append_inbound_payload(
         &workspace,
         payload,
@@ -615,8 +607,7 @@ pub fn process_inbound_payload(
         thread_state_path: Some(thread_state_path.clone()),
     };
 
-    let mut scheduler =
-        Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+    let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
     if let Err(err) = cancel_pending_thread_tasks(&mut scheduler, &workspace, thread_state.epoch) {
         warn!(
             "failed to cancel pending thread tasks for {}: {}",
@@ -624,8 +615,7 @@ pub fn process_inbound_payload(
             err
         );
     }
-    let task_id =
-        scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
+    let task_id = scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
     index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
     info!(
         "scheduler tasks enqueued user_id={} task_id={} message_id={} workspace={} thread_epoch={}",
@@ -769,10 +759,7 @@ fn is_blacklisted_sender(sender: &str) -> bool {
 }
 
 fn is_blacklisted_address(address: &str) -> bool {
-    matches!(
-        address,
-        "agent@dowhiz.com" | "oliver@dowhiz.com"
-    )
+    matches!(address, "agent@dowhiz.com" | "oliver@dowhiz.com")
 }
 
 fn thread_key(payload: &PostmarkInbound, raw_payload: &[u8]) -> String {
@@ -926,12 +913,7 @@ fn append_inbound_payload(
     )?;
 
     clear_dir_except(&incoming_attachments, &entries_attachments)?;
-    write_inbound_payload(
-        payload,
-        raw_payload,
-        &incoming_email,
-        &incoming_attachments,
-    )?;
+    write_inbound_payload(payload, raw_payload, &incoming_email, &incoming_attachments)?;
     Ok(())
 }
 
@@ -975,12 +957,7 @@ fn archive_inbound(
     let incoming_attachments = mail_dir.join("incoming_attachments");
     fs::create_dir_all(&incoming_email)?;
     fs::create_dir_all(&incoming_attachments)?;
-    write_inbound_payload(
-        payload,
-        raw_payload,
-        &incoming_email,
-        &incoming_attachments,
-    )?;
+    write_inbound_payload(payload, raw_payload, &incoming_email, &incoming_attachments)?;
     Ok(())
 }
 
@@ -996,8 +973,7 @@ fn cancel_pending_thread_tasks<E: crate::TaskExecutor>(
         }
         match &task.kind {
             TaskKind::RunTask(run) => {
-                run.workspace_dir == workspace
-                    && run.thread_epoch.unwrap_or(0) < current_epoch
+                run.workspace_dir == workspace && run.thread_epoch.unwrap_or(0) < current_epoch
             }
             TaskKind::SendEmail(send) => {
                 let same_thread = send
@@ -1151,7 +1127,11 @@ fn env_flag(key: &str, default: bool) -> bool {
 
 fn repo_skills_source_dir() -> PathBuf {
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    if cwd.file_name().map(|name| name == "DoWhiz_service").unwrap_or(false) {
+    if cwd
+        .file_name()
+        .map(|name| name == "DoWhiz_service")
+        .unwrap_or(false)
+    {
         cwd.join("skills")
     } else {
         cwd.join("DoWhiz_service").join("skills")
@@ -1232,10 +1212,7 @@ struct PostmarkAttachment {
 fn extract_message_ids(payload: &PostmarkInbound, raw_payload: &[u8]) -> Vec<String> {
     let mut ids = Vec::new();
     let mut seen = HashSet::new();
-    if let Some(header_id) = payload
-        .header_message_id()
-        .and_then(normalize_message_id)
-    {
+    if let Some(header_id) = payload.header_message_id().and_then(normalize_message_id) {
         if seen.insert(header_id.clone()) {
             ids.push(header_id);
         }
@@ -1336,11 +1313,7 @@ mod tests {
         fs::create_dir_all(&user_paths.mail_root).expect("mail root");
         fs::create_dir_all(&user_paths.workspaces_root).expect("workspaces root");
 
-        let archive_dir = user_paths
-            .mail_root
-            .join("2026")
-            .join("02")
-            .join("msg_1");
+        let archive_dir = user_paths.mail_root.join("2026").join("02").join("msg_1");
         let incoming_email = archive_dir.join("incoming_email");
         let incoming_attachments = archive_dir.join("incoming_attachments");
         fs::create_dir_all(&incoming_email).expect("incoming_email");
@@ -1372,20 +1345,16 @@ mod tests {
         let inbound_payload: PostmarkInbound =
             serde_json::from_str(inbound_raw).expect("parse inbound");
         let thread = thread_key(&inbound_payload, inbound_raw.as_bytes());
-        let workspace =
-            ensure_thread_workspace(&user_paths, "user123", &thread, None)
-                .expect("create workspace");
+        let workspace = ensure_thread_workspace(&user_paths, "user123", &thread, None)
+            .expect("create workspace");
 
         let past_root = workspace.join("references").join("past_emails");
         let index_path = past_root.join("index.json");
         assert!(index_path.exists(), "index.json created");
 
         let index_data = fs::read_to_string(index_path).expect("read index");
-        let index_json: serde_json::Value =
-            serde_json::from_str(&index_data).expect("parse index");
-        let entries = index_json["entries"]
-            .as_array()
-            .expect("entries array");
+        let index_json: serde_json::Value = serde_json::from_str(&index_data).expect("parse index");
+        let entries = index_json["entries"].as_array().expect("entries array");
         assert_eq!(entries.len(), 1, "one archived entry");
         let entry_path = entries[0]["path"].as_str().expect("entry path");
         assert!(past_root.join(entry_path).join("incoming_email").exists());

@@ -33,10 +33,7 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
     fs::create_dir_all(&fake_bin_dir)?;
     write_fake_codex(&fake_bin_dir)?;
     let path_env = env::var("PATH").unwrap_or_default();
-    env::set_var(
-        "PATH",
-        format!("{}:{}", fake_bin_dir.display(), path_env),
-    );
+    env::set_var("PATH", format!("{}:{}", fake_bin_dir.display(), path_env));
 
     let workspace_root = temp.path().join("workspaces");
     let users_root = temp.path().join("users");
@@ -71,8 +68,7 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
             thread_state_path: None,
         };
 
-        let mut scheduler =
-            Scheduler::load(&paths.tasks_db_path, ModuleExecutor::default())?;
+        let mut scheduler = Scheduler::load(&paths.tasks_db_path, ModuleExecutor::default())?;
         scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
         index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
     }
@@ -181,8 +177,7 @@ fn wait_for_all_tasks_complete(
                 all_done = false;
                 break;
             }
-            let scheduler =
-                Scheduler::load(&paths.tasks_db_path, ModuleExecutor::default())?;
+            let scheduler = Scheduler::load(&paths.tasks_db_path, ModuleExecutor::default())?;
             if scheduler.tasks().is_empty()
                 || scheduler
                     .tasks()

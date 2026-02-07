@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use std::env;
 use std::fmt;
 use std::fs;
@@ -5,7 +6,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
-use serde::Deserialize;
 
 const CODEX_CONFIG_MARKER: &str = "# IMPORTANT: Use your Azure *deployment name* here";
 const CODEX_CONFIG_BLOCK_TEMPLATE: &str = r#"# IMPORTANT: Use your Azure *deployment name* here (e.g., "gpt-5.2-codex")
@@ -21,6 +21,8 @@ wire_api = "responses"
 "#;
 const SCHEDULED_TASKS_BEGIN: &str = "SCHEDULED_TASKS_JSON_BEGIN";
 const SCHEDULED_TASKS_END: &str = "SCHEDULED_TASKS_JSON_END";
+const SCHEDULER_ACTIONS_BEGIN: &str = "SCHEDULER_ACTIONS_JSON_BEGIN";
+const SCHEDULER_ACTIONS_END: &str = "SCHEDULER_ACTIONS_JSON_END";
 const GIT_ASKPASS_SCRIPT: &str = r#"#!/bin/sh
 case "$1" in
   *Username*)
@@ -75,6 +77,34 @@ pub enum ScheduledTaskRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum SchedulerActionRequest {
+    Cancel {
+        task_ids: Vec<String>,
+    },
+    Reschedule {
+        task_id: String,
+        schedule: ScheduleRequest,
+    },
+    CreateRunTask {
+        schedule: ScheduleRequest,
+        #[serde(default)]
+        model_name: Option<String>,
+        #[serde(default)]
+        codex_disabled: Option<bool>,
+        #[serde(default)]
+        reply_to: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ScheduleRequest {
+    Cron { expression: String },
+    OneShot { run_at: String },
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ScheduledSendEmailTask {
     pub subject: String,
     pub html_path: String,
@@ -97,6 +127,15 @@ enum ScheduledTasksBlock {
     Wrapper { tasks: Vec<ScheduledTaskRequest> },
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum SchedulerActionsBlock {
+    List(Vec<SchedulerActionRequest>),
+    Wrapper {
+        actions: Vec<SchedulerActionRequest>,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct RunTaskOutput {
     pub reply_html_path: PathBuf,
@@ -104,6 +143,8 @@ pub struct RunTaskOutput {
     pub codex_output: String,
     pub scheduled_tasks: Vec<ScheduledTaskRequest>,
     pub scheduled_tasks_error: Option<String>,
+    pub scheduler_actions: Vec<SchedulerActionRequest>,
+    pub scheduler_actions_error: Option<String>,
 }
 
 #[derive(Debug)]
@@ -115,23 +156,36 @@ struct GitHubAuthConfig {
 #[derive(Debug)]
 pub enum RunTaskError {
     Io(io::Error),
-    MissingEnv { key: &'static str },
+    MissingEnv {
+        key: &'static str,
+    },
     InvalidPath {
         label: &'static str,
         path: PathBuf,
         reason: &'static str,
     },
     CodexNotFound,
-    CodexFailed { status: Option<i32>, output: String },
-    OutputMissing { path: PathBuf },
+    CodexFailed {
+        status: Option<i32>,
+        output: String,
+    },
+    OutputMissing {
+        path: PathBuf,
+    },
 }
 
 impl fmt::Display for RunTaskError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             RunTaskError::Io(err) => write!(f, "I/O error: {}", err),
-            RunTaskError::MissingEnv { key } => write!(f, "Missing required environment variable: {}", key),
-            RunTaskError::InvalidPath { label, path, reason } => {
+            RunTaskError::MissingEnv { key } => {
+                write!(f, "Missing required environment variable: {}", key)
+            }
+            RunTaskError::InvalidPath {
+                label,
+                path,
+                reason,
+            } => {
                 write!(f, "Invalid {} path ({}): {}", label, path.display(), reason)
             }
             RunTaskError::CodexNotFound => write!(f, "Codex CLI not found on PATH."),
@@ -175,6 +229,8 @@ pub fn run_task(params: &RunTaskParams) -> Result<RunTaskOutput, RunTaskError> {
             codex_output: "codex disabled".to_string(),
             scheduled_tasks: Vec::new(),
             scheduled_tasks_error: None,
+            scheduler_actions: Vec::new(),
+            scheduler_actions_error: None,
         });
     }
 
@@ -189,15 +245,19 @@ fn run_codex_task(
     load_env_sources(request.workspace_dir)?;
     let github_auth = resolve_github_auth()?;
 
-    let api_key = env::var("AZURE_OPENAI_API_KEY_BACKUP")
-        .map_err(|_| RunTaskError::MissingEnv { key: "AZURE_OPENAI_API_KEY_BACKUP" })?;
+    let api_key =
+        env::var("AZURE_OPENAI_API_KEY_BACKUP").map_err(|_| RunTaskError::MissingEnv {
+            key: "AZURE_OPENAI_API_KEY_BACKUP",
+        })?;
     if api_key.trim().is_empty() {
         return Err(RunTaskError::MissingEnv {
             key: "AZURE_OPENAI_API_KEY_BACKUP",
         });
     }
-    let azure_endpoint = env::var("AZURE_OPENAI_ENDPOINT_BACKUP")
-        .map_err(|_| RunTaskError::MissingEnv { key: "AZURE_OPENAI_ENDPOINT_BACKUP" })?;
+    let azure_endpoint =
+        env::var("AZURE_OPENAI_ENDPOINT_BACKUP").map_err(|_| RunTaskError::MissingEnv {
+            key: "AZURE_OPENAI_ENDPOINT_BACKUP",
+        })?;
     if azure_endpoint.trim().is_empty() {
         return Err(RunTaskError::MissingEnv {
             key: "AZURE_OPENAI_ENDPOINT_BACKUP",
@@ -246,7 +306,9 @@ fn run_codex_task(
 
     let output = match cmd.output() {
         Ok(output) => output,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Err(RunTaskError::CodexNotFound),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            return Err(RunTaskError::CodexNotFound)
+        }
         Err(err) => return Err(RunTaskError::Io(err)),
     };
 
@@ -254,6 +316,7 @@ fn run_codex_task(
     combined_output.push_str(&String::from_utf8_lossy(&output.stdout));
     combined_output.push_str(&String::from_utf8_lossy(&output.stderr));
     let (scheduled_tasks, scheduled_tasks_error) = extract_scheduled_tasks(&combined_output);
+    let (scheduler_actions, scheduler_actions_error) = extract_scheduler_actions(&combined_output);
     let output_tail = tail_string(&combined_output, 2000);
 
     if !output.status.success() {
@@ -275,22 +338,30 @@ fn run_codex_task(
         codex_output: output_tail,
         scheduled_tasks,
         scheduled_tasks_error,
+        scheduler_actions,
+        scheduler_actions_error,
     })
 }
 
 fn prepare_workspace(request: &RunTaskRequest<'_>) -> Result<(PathBuf, PathBuf), RunTaskError> {
     ensure_workspace_dir(request.workspace_dir)?;
 
-    let _input_email_dir =
-        resolve_rel_dir(request.workspace_dir, request.input_email_dir, "input_email_dir")?;
+    let _input_email_dir = resolve_rel_dir(
+        request.workspace_dir,
+        request.input_email_dir,
+        "input_email_dir",
+    )?;
     let _input_attachments_dir = resolve_rel_dir(
         request.workspace_dir,
         request.input_attachments_dir,
         "input_attachments_dir",
     )?;
     let _memory_dir = resolve_rel_dir(request.workspace_dir, request.memory_dir, "memory_dir")?;
-    let _reference_dir =
-        resolve_rel_dir(request.workspace_dir, request.reference_dir, "reference_dir")?;
+    let _reference_dir = resolve_rel_dir(
+        request.workspace_dir,
+        request.reference_dir,
+        "reference_dir",
+    )?;
 
     let reply_html_path = request.workspace_dir.join("reply_email_draft.html");
     let reply_attachments_dir = request.workspace_dir.join("reply_email_attachments");
@@ -507,7 +578,11 @@ fn write_git_askpass_script() -> Result<PathBuf, RunTaskError> {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    path.push(format!("dowhiz-git-askpass-{}-{}", std::process::id(), nanos));
+    path.push(format!(
+        "dowhiz-git-askpass-{}-{}",
+        std::process::id(),
+        nanos
+    ));
     fs::write(&path, GIT_ASKPASS_SCRIPT)?;
     #[cfg(unix)]
     {
@@ -520,16 +595,13 @@ fn write_git_askpass_script() -> Result<PathBuf, RunTaskError> {
 }
 
 fn ensure_codex_config(model_name: &str, azure_endpoint: &str) -> Result<(), RunTaskError> {
-    let home = env::var("HOME")
-        .map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
+    let home = env::var("HOME").map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
     let config_path = PathBuf::from(home).join(".codex").join("config.toml");
-    let config_dir = config_path
-        .parent()
-        .ok_or(RunTaskError::InvalidPath {
-            label: "codex_config_dir",
-            path: config_path.clone(),
-            reason: "could not resolve config directory",
-        })?;
+    let config_dir = config_path.parent().ok_or(RunTaskError::InvalidPath {
+        label: "codex_config_dir",
+        path: config_path.clone(),
+        reason: "could not resolve config directory",
+    })?;
     fs::create_dir_all(config_dir)?;
 
     let endpoint = normalize_azure_endpoint(azure_endpoint);
@@ -559,9 +631,7 @@ fn normalize_azure_endpoint(endpoint: &str) -> String {
 
 fn update_config_block(existing: &str, block: &str) -> String {
     if let Some(marker_index) = existing.find(CODEX_CONFIG_MARKER) {
-        if let Some(block_end_index) =
-            existing[marker_index..].find("wire_api = \"responses\"")
-        {
+        if let Some(block_end_index) = existing[marker_index..].find("wire_api = \"responses\"") {
             let end_index = marker_index + block_end_index + "wire_api = \"responses\"".len();
             let end_line_index = existing[end_index..]
                 .find('\n')
@@ -588,9 +658,7 @@ fn update_config_block(existing: &str, block: &str) -> String {
     updated
 }
 
-fn extract_scheduled_tasks(
-    output: &str,
-) -> (Vec<ScheduledTaskRequest>, Option<String>) {
+fn extract_scheduled_tasks(output: &str) -> (Vec<ScheduledTaskRequest>, Option<String>) {
     let end = match output.rfind(SCHEDULED_TASKS_END) {
         Some(end) => end,
         None => return (Vec::new(), None),
@@ -625,6 +693,41 @@ fn extract_scheduled_tasks(
     }
 }
 
+fn extract_scheduler_actions(output: &str) -> (Vec<SchedulerActionRequest>, Option<String>) {
+    let end = match output.rfind(SCHEDULER_ACTIONS_END) {
+        Some(end) => end,
+        None => return (Vec::new(), None),
+    };
+    let start = match output[..end].rfind(SCHEDULER_ACTIONS_BEGIN) {
+        Some(start) => start + SCHEDULER_ACTIONS_BEGIN.len(),
+        None => {
+            return (
+                Vec::new(),
+                Some("missing scheduler actions start marker".to_string()),
+            )
+        }
+    };
+
+    let raw = output[start..end].trim();
+    if raw.is_empty() {
+        return (Vec::new(), None);
+    }
+
+    match serde_json::from_str::<SchedulerActionsBlock>(raw) {
+        Ok(parsed) => {
+            let actions = match parsed {
+                SchedulerActionsBlock::List(actions) => actions,
+                SchedulerActionsBlock::Wrapper { actions } => actions,
+            };
+            (actions, None)
+        }
+        Err(err) => (
+            Vec::new(),
+            Some(format!("failed to parse scheduler actions JSON: {}", err)),
+        ),
+    }
+}
+
 fn build_prompt(
     input_email_dir: &Path,
     input_attachments_dir: &Path,
@@ -641,62 +744,42 @@ fn build_prompt(
         )
     };
     format!(
-        "You are Oliver, a digital assistant at DoWhiz.\n\
-You are running inside a workspace on disk. Use only files in this workspace.\n\
-\n\
-Inputs (relative to workspace root):\n\
-- Incoming email dir: {input_email}\n\
-- Incoming attachments dir: {input_attachments}\n\
-- Memory dir: {memory}\n\
-- Reference dir: {reference}\n\
-\n\
-{memory_section}\
-Task:\n\
-1) Read the incoming email files to understand what to reply to. The incoming email\n\
-   dir may include multiple message entries under entries/; read all email.txt files,\n\
-   plus the latest incoming_email/email.txt.\n\
-   If there are attachments for specific messages, they may live under\n\
-   incoming_attachments/entries/.\n\
-2) Use memory and reference material for context when helpful.\n\
-3) Write the reply as a full HTML email to reply_email_draft.html in the workspace root.\n\
-   You may use drafts/ as history for reference, but only write the final reply to\n\
-   reply_email_draft.html.\n\
-4) Place any files to attach in reply_email_attachments/ (create it if missing).\n\
-\n\
-Memory policy:\n\
-- Read all Markdown files under memory/ before starting; they are long-term, per-user memory.\n\
-- Persist durable facts only (identity, preferences, recurring tasks, projects, contacts,\n\
-  decisions, and working processes). Do not store transient email-specific details.\n\
-- Default file is memory/memo.md (Markdown).\n\
-- If memo.md exceeds 500 lines, split by info type into multiple files (for example:\n\
-  memo_profile.md, memo_preferences.md, memo_projects.md, memo_contacts.md,\n\
-  memo_decisions.md, memo_processes.md). Keep every file <= 500 lines.\n\
-- When split, replace memo.md with a short index or highlights so it stays <= 500 lines.\n\
-- Update memory files at the end if new durable info is learned; otherwise leave unchanged.\n\
-\n\
-Optional scheduling:\n\
-- If the user asks you to send a follow-up email later, create the follow-up draft HTML in the\n\
-  workspace root and any attachment directory it needs.\n\
-- Then output a schedule block to stdout at the end of your response, exactly in this format:\n\
-  {schedule_begin}\n\
-  [{{\"type\":\"send_email\",\"delay_minutes\":15,\"subject\":\"Quick reminder\",\"html_path\":\"reminder_email_draft.html\",\"attachments_dir\":\"reminder_email_attachments\",\"to\":[\"you@example.com\"],\"cc\":[],\"bcc\":[]}}]\n\
-  {schedule_end}\n\
-- Use delay_minutes for \"N minutes later\" requests. Use run_at (RFC3339 UTC) only for specific\n\
-  times.\n\
-- If no follow-up is needed, output an empty array in the schedule block.\n\
-- Do not write scheduled_tasks.json or any other scheduling file.\n\
-\n\
-Rules:\n\
-- Do not modify input directories.\n\
-- You may create or modify other files and folders in the workspace as needed to complete the task.\n\
-  Prefer creating a work/ directory for clones, patches, and build artifacts.\n\
-- If attachments include version suffixes like _v1, _v2, use the highest version.\n\
-- Always write reply_email_draft.html and files under reply_email_attachments/.\n\
-- If scheduling follow-ups, you may also write the follow-up draft HTML and any attachment\n\
-  dirs referenced in the schedule block.\n\
-- Avoid interactive commands; use non-interactive flags for git/gh (for example, `gh pr create --title ... --body ...`).\n\
-- Keep the reply concise, friendly, and professional.\n\
-- If the request involves creating a pull request, complete the work and include the PR link in your reply.\n",
+        r#"You are Oliver, a digital assistant at DoWhiz. You are powerful, resilient, and helpful. Your task is to read incoming emails, understand the user's intent, finish the task, and draft appropriate email replies. You can also use memory and reference materials for context (already saved under current workspace). Always be cute, patient, friendly and helpful in your replies.
+
+You main goal is
+1. Most importantly, understand the task described in the incoming email and get the task done.
+2. After finishing the task (step one), make sure you write a proper HTML email draft in reply_email_draft.html in the workspace root. If there are files to attach, put them in reply_email_attachments/ and reference them in the email draft. Do not pretend the job has been done without actually doing it, and do not write the email draft until the task is done. If you are not sure about the task, send another email to ask for clarification (and if any, attach information about why did you fail to get the task done, what is the exact error you encountered).
+
+Inputs (relative to workspace root):
+- Incoming email dir: {input_email}
+- Incoming attachments dir: {input_attachments}
+- Memory dir (memory about the current user): {memory}
+- Reference dir (contain all past emails with the current user): {reference}
+
+Memory about the current user:
+```{memory_section}```
+
+Memory management and maintain policy:
+- Read all Markdown files under memory/ before starting; they are long-term, per-user memory.
+- Persist durable facts only (identity, preferences, recurring tasks, projects, contacts,
+  decisions, and working processes). Do not store transient email-specific details.
+- Default file is memory/memo.md (Markdown).
+- If memo.md exceeds 500 lines, split by info type into multiple files (for example:
+  memo_profile.md, memo_preferences.md, memo_projects.md, memo_contacts.md,
+  memo_decisions.md, memo_processes.md). Keep every file <= 500 lines.
+- When split, replace memo.md with a short index or highlights so it stays <= 500 lines.
+- Update memory files at the end if new durable info is learned; otherwise leave unchanged.
+
+Scheduling:
+- You can use the skill "scheduler_maintain" to create, cancel, or reschedule future tasks. You can either create a future task or schedule a future email sending.
+
+Rules:
+- Do not modify input directories. Any file editing requests should be done on the copied version of attachments and save into reply_email_attachments/ to be sent back to the user. Mark version updates as "_v2", "_v3", etc. in the filename.
+- You may create or modify other files and folders in the workspace as needed to complete the task.
+  Prefer creating a work/ directory for clones, patches, and build artifacts.
+- If attachments include version suffixes like _v1, _v2, the highest version should be the latest version.
+- Avoid interactive commands; use non-interactive flags for git/gh (for example, `gh pr create --title ... --body ...`).
+"#,
         input_email = input_email_dir.display(),
         input_attachments = input_attachments_dir.display(),
         memory = memory_dir.display(),
@@ -790,5 +873,41 @@ mod tests {
         assert!(prompt.contains("Memory policy"));
         assert!(prompt.contains("memo.md"));
         assert!(prompt.contains("500 lines"));
+    }
+
+    #[test]
+    fn extract_scheduler_actions_returns_empty_when_missing() {
+        let output = "no scheduler actions here";
+        let (actions, error) = extract_scheduler_actions(output);
+        assert!(actions.is_empty());
+        assert!(error.is_none());
+    }
+
+    #[test]
+    fn extract_scheduler_actions_parses_list() {
+        let output = format!(
+            "before\n{}\n[{{\"action\":\"cancel\",\"task_ids\":[\"a\",\"b\"]}}]\n{}\nafter",
+            SCHEDULER_ACTIONS_BEGIN, SCHEDULER_ACTIONS_END
+        );
+        let (actions, error) = extract_scheduler_actions(&output);
+        assert!(error.is_none());
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            SchedulerActionRequest::Cancel { task_ids } => {
+                assert_eq!(task_ids, &vec!["a".to_string(), "b".to_string()]);
+            }
+            other => panic!("unexpected action: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn extract_scheduler_actions_reports_invalid_json() {
+        let output = format!(
+            "{}\n[{{\"action\":\"cancel\",\"task_ids\"::}}]\n{}",
+            SCHEDULER_ACTIONS_BEGIN, SCHEDULER_ACTIONS_END
+        );
+        let (actions, error) = extract_scheduler_actions(&output);
+        assert!(actions.is_empty());
+        assert!(error.is_some());
     }
 }

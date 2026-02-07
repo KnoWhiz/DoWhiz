@@ -1,8 +1,10 @@
-use scheduler_module::service::{run_server, ServiceConfig};
-use scheduler_module::user_store::normalize_email;
-use scheduler_module::{Scheduler, ScheduledTask, SchedulerError, TaskExecution, TaskExecutor, TaskKind};
 use lettre::Transport;
 use rusqlite::OptionalExtension;
+use scheduler_module::service::{run_server, ServiceConfig};
+use scheduler_module::user_store::normalize_email;
+use scheduler_module::{
+    ScheduledTask, Scheduler, SchedulerError, TaskExecution, TaskExecutor, TaskKind,
+};
 use serde_json::{json, Value};
 use std::env;
 use std::fs;
@@ -130,7 +132,10 @@ fn poll_outbound(
         let payload: Value = serde_json::from_str(&body)?;
         if let Some(messages) = payload.get("Messages").and_then(|value| value.as_array()) {
             for message in messages {
-                let subject = message.get("Subject").and_then(|value| value.as_str()).unwrap_or("");
+                let subject = message
+                    .get("Subject")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("");
                 if subject.contains(subject_hint) {
                     return Ok(Some(message.clone()));
                 }
@@ -273,8 +278,8 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         .map_err(|_| "POSTMARK_SERVER_TOKEN must be set for live tests")?;
     let public_url = env::var("POSTMARK_INBOUND_HOOK_URL")
         .map_err(|_| "POSTMARK_INBOUND_HOOK_URL must be set (ngrok URL)")?;
-    let from_addr = env::var("POSTMARK_TEST_FROM")
-        .unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
+    let from_addr =
+        env::var("POSTMARK_TEST_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
 
     let server_info = postmark_request("GET", "https://api.postmarkapp.com/server", &token, None)?;
     let inbound_address = server_info
@@ -300,8 +305,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
     let state_dir = temp.path().join("state");
     let users_root = temp.path().join("users");
 
-    let test_host =
-        env::var("RUST_SERVICE_TEST_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let test_host = env::var("RUST_SERVICE_TEST_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port = env::var("RUST_SERVICE_TEST_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
@@ -339,7 +343,9 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
     });
 
     let base_url = public_url.trim_end_matches('/');
-    let base_url = base_url.strip_suffix("/postmark/inbound").unwrap_or(base_url);
+    let base_url = base_url
+        .strip_suffix("/postmark/inbound")
+        .unwrap_or(base_url);
     check_public_health(base_url, &test_host, port)?;
     let hook_url = format!("{}/postmark/inbound", base_url);
     println!("Setting Postmark inbound hook to {}", hook_url);

@@ -136,8 +136,8 @@ pub fn send_email(params: &SendEmailParams) -> Result<PostmarkSendResponse, Send
         attachments,
     };
 
-    let api_base =
-        env::var("POSTMARK_API_BASE_URL").unwrap_or_else(|_| "https://api.postmarkapp.com".to_string());
+    let api_base = env::var("POSTMARK_API_BASE_URL")
+        .unwrap_or_else(|_| "https://api.postmarkapp.com".to_string());
     let url = format!("{}/email", api_base.trim_end_matches('/'));
 
     let client = reqwest::blocking::Client::new();
@@ -154,8 +154,7 @@ pub fn send_email(params: &SendEmailParams) -> Result<PostmarkSendResponse, Send
     if !status.is_success() {
         return Err(SendEmailError::Postmark(format!(
             "status {}: {}",
-            status,
-            body
+            status, body
         )));
     }
 

@@ -109,7 +109,10 @@ fn poll_outbound(
         let payload: serde_json::Value = serde_json::from_str(&body)?;
         if let Some(messages) = payload.get("Messages").and_then(|value| value.as_array()) {
             for message in messages {
-                let subject = message.get("Subject").and_then(|value| value.as_str()).unwrap_or("");
+                let subject = message
+                    .get("Subject")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("");
                 if subject.contains(subject_hint) {
                     return Ok(Some(message.clone()));
                 }
@@ -241,10 +244,7 @@ fn live_postmark_delivery_with_attachments() -> Result<(), Box<dyn std::error::E
 
     let subject = unique_subject("MVP Rust Postmark live test");
 
-    let _env = EnvGuard::set(&[
-        ("POSTMARK_SERVER_TOKEN", &token),
-        ("OUTBOUND_FROM", &from),
-    ]);
+    let _env = EnvGuard::set(&[("POSTMARK_SERVER_TOKEN", &token), ("OUTBOUND_FROM", &from)]);
 
     let request = SendEmailParams {
         subject: subject.clone(),
@@ -301,7 +301,10 @@ fn send_email_requires_recipient() {
     };
 
     let err = send_email(&params).expect_err("expected missing recipient error");
-    assert!(matches!(err, send_emails_module::SendEmailError::MissingRecipient));
+    assert!(matches!(
+        err,
+        send_emails_module::SendEmailError::MissingRecipient
+    ));
 }
 
 #[test]

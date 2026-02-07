@@ -142,14 +142,15 @@ pub fn hydrate_past_emails(
             .map(|value| value.format("%Y-%m-%d").to_string())
             .unwrap_or_else(|| "unknown_date".to_string());
         let direction = direction.to_ascii_lowercase();
-        let message_id = normalize_message_id(message.payload.message_id.as_deref()).unwrap_or_else(|| {
-            let fallback = message
-                .root_dir
-                .file_name()
-                .map(|value| value.to_string_lossy().to_string())
-                .unwrap_or_else(|| "msg".to_string());
-            sanitize_token(&fallback, "msg")
-        });
+        let message_id = normalize_message_id(message.payload.message_id.as_deref())
+            .unwrap_or_else(|| {
+                let fallback = message
+                    .root_dir
+                    .file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "msg".to_string());
+                sanitize_token(&fallback, "msg")
+            });
         let base = build_past_email_dir_name(&date_prefix, &subject, &direction, &message_id);
         let entry_dir = create_unique_dir(&past_root, &base)?;
         let display_name = entry_dir
@@ -168,10 +169,7 @@ pub fn hydrate_past_emails(
             max_attachment_bytes,
         )?;
         let manifest_path = entry_dir.join("attachments_manifest.json");
-        fs::write(
-            &manifest_path,
-            serde_json::to_string_pretty(&manifest)?,
-        )?;
+        fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
 
         report.entries_written += 1;
         report.attachments_total += attachment_counts.total;
@@ -338,10 +336,7 @@ fn hydrate_attachments(
                 .iter()
                 .map(|item| {
                     let sanitized = sanitize_token(&item.name, "attachment");
-                    (
-                        sanitized,
-                        (item.name.clone(), item.content_type.clone()),
-                    )
+                    (sanitized, (item.name.clone(), item.content_type.clone()))
                 })
                 .collect::<HashMap<_, _>>()
         })
@@ -413,7 +408,10 @@ fn hydrate_attachments(
                 content_type,
                 size_bytes,
                 storage: "local".to_string(),
-                relative_path: Some(format!("incoming_attachments/{}", dest_path.file_name().unwrap().to_string_lossy())),
+                relative_path: Some(format!(
+                    "incoming_attachments/{}",
+                    dest_path.file_name().unwrap().to_string_lossy()
+                )),
                 azure_blob_url: None,
             });
         }

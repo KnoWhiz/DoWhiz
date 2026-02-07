@@ -1,5 +1,7 @@
 use run_task_module::{ScheduledSendEmailTask, ScheduledTaskRequest};
-use scheduler_module::{RunTaskTask, Scheduler, SchedulerError, TaskExecution, TaskExecutor, TaskKind};
+use scheduler_module::{
+    RunTaskTask, Scheduler, SchedulerError, TaskExecution, TaskExecutor, TaskKind,
+};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -25,6 +27,8 @@ impl TaskExecutor for FollowUpExecutor {
                 Ok(TaskExecution {
                     follow_up_tasks: vec![follow_up],
                     follow_up_error: None,
+                    scheduler_actions: Vec::new(),
+                    scheduler_actions_error: None,
                 })
             }
             _ => Ok(TaskExecution::default()),
@@ -65,8 +69,7 @@ fn run_task_followups_persist_to_sqlite() {
     scheduler.tick().expect("tick failed");
     assert_eq!(scheduler.tasks().len(), 2);
 
-    let reloaded =
-        Scheduler::load(&storage, FollowUpExecutor::default()).expect("reload failed");
+    let reloaded = Scheduler::load(&storage, FollowUpExecutor::default()).expect("reload failed");
     assert_eq!(reloaded.tasks().len(), 2);
 
     let send_task = reloaded

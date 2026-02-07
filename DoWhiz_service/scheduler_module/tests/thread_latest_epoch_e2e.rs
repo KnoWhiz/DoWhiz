@@ -56,6 +56,8 @@ impl TaskExecutor for RecordingExecutor {
                 Ok(TaskExecution {
                     follow_up_tasks: output.scheduled_tasks,
                     follow_up_error: output.scheduled_tasks_error,
+                    scheduler_actions: output.scheduler_actions,
+                    scheduler_actions_error: output.scheduler_actions_error,
                 })
             }
             TaskKind::SendEmail(send) => {
@@ -154,8 +156,7 @@ fn thread_latest_epoch_end_to_end() {
   "TextBody": "First message",
   "Headers": [{"Name": "Message-ID", "Value": "<msg-1@example.com>"}]
 }"#;
-    let payload_1: PostmarkInbound =
-        serde_json::from_str(inbound_raw_1).expect("parse inbound 1");
+    let payload_1: PostmarkInbound = serde_json::from_str(inbound_raw_1).expect("parse inbound 1");
     process_inbound_payload(
         &config,
         &user_store,
@@ -192,8 +193,7 @@ fn thread_latest_epoch_end_to_end() {
     {"Name": "References", "Value": "<msg-1@example.com>"}
   ]
 }"#;
-    let payload_2: PostmarkInbound =
-        serde_json::from_str(inbound_raw_2).expect("parse inbound 2");
+    let payload_2: PostmarkInbound = serde_json::from_str(inbound_raw_2).expect("parse inbound 2");
     process_inbound_payload(
         &config,
         &user_store,
@@ -233,8 +233,6 @@ fn thread_latest_epoch_end_to_end() {
     );
 
     let drafts_dir = workspace.join("drafts");
-    let drafts_count = fs::read_dir(drafts_dir)
-        .expect("drafts dir")
-        .count();
+    let drafts_count = fs::read_dir(drafts_dir).expect("drafts dir").count();
     assert!(drafts_count >= 2, "draft history should be preserved");
 }

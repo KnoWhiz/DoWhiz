@@ -47,10 +47,8 @@ fn parse_args() -> Result<Args, String> {
         }
     }
 
-    let archive_root =
-        archive_root.ok_or_else(|| "missing --archive-root".to_string())?;
-    let references_dir =
-        references_dir.ok_or_else(|| "missing --references-dir".to_string())?;
+    let archive_root = archive_root.ok_or_else(|| "missing --archive-root".to_string())?;
+    let references_dir = references_dir.ok_or_else(|| "missing --references-dir".to_string())?;
 
     Ok(Args {
         archive_root,
@@ -88,7 +86,9 @@ fn main() -> Result<(), BoxError> {
         }
     };
 
-    let max_bytes = args.max_attachment_mb.map(|mb| mb.saturating_mul(1024 * 1024));
+    let max_bytes = args
+        .max_attachment_mb
+        .map(|mb| mb.saturating_mul(1024 * 1024));
     let report = hydrate_past_emails(
         &args.archive_root,
         &args.references_dir,

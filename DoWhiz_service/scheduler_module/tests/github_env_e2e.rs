@@ -82,6 +82,8 @@ impl TaskExecutor for RecordingExecutor {
                 Ok(TaskExecution {
                     follow_up_tasks: output.scheduled_tasks,
                     follow_up_error: output.scheduled_tasks_error,
+                    scheduler_actions: output.scheduler_actions,
+                    scheduler_actions_error: output.scheduler_actions_error,
                 })
             }
             TaskKind::SendEmail(_) => Ok(TaskExecution::default()),

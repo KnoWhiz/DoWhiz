@@ -38,7 +38,10 @@ impl IndexStore {
     ) -> Result<(), IndexStoreError> {
         let mut conn = self.open()?;
         let tx = conn.transaction()?;
-        tx.execute("DELETE FROM task_index WHERE user_id = ?1", params![user_id])?;
+        tx.execute(
+            "DELETE FROM task_index WHERE user_id = ?1",
+            params![user_id],
+        )?;
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO task_index (task_id, user_id, next_run, enabled)
@@ -77,10 +80,9 @@ impl IndexStore {
              ORDER BY next_run
              LIMIT ?2",
         )?;
-        let rows = stmt.query_map(
-            params![format_datetime(&now), limit as i64],
-            |row| row.get::<_, String>(0),
-        )?;
+        let rows = stmt.query_map(params![format_datetime(&now), limit as i64], |row| {
+            row.get::<_, String>(0)
+        })?;
         let mut user_ids = Vec::new();
         for row in rows {
             user_ids.push(row?);
@@ -101,15 +103,12 @@ impl IndexStore {
              ORDER BY next_run
              LIMIT ?2",
         )?;
-        let rows = stmt.query_map(
-            params![format_datetime(&now), limit as i64],
-            |row| {
-                Ok(TaskRef {
-                    task_id: row.get::<_, String>(0)?,
-                    user_id: row.get::<_, String>(1)?,
-                })
-            },
-        )?;
+        let rows = stmt.query_map(params![format_datetime(&now), limit as i64], |row| {
+            Ok(TaskRef {
+                task_id: row.get::<_, String>(0)?,
+                user_id: row.get::<_, String>(1)?,
+            })
+        })?;
         let mut task_refs = Vec::new();
         for row in rows {
             task_refs.push(row?);

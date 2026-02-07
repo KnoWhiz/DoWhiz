@@ -208,7 +208,10 @@ fn send_email_with_attachments_and_delivery() {
         .get("Attachments")
         .and_then(|value| value.as_array())
         .expect("missing Attachments array");
-    assert!(attachments.len() >= 2, "expected attachments in outbound message");
+    assert!(
+        attachments.len() >= 2,
+        "expected attachments in outbound message"
+    );
 }
 
 #[test]
