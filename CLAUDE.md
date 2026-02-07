@@ -129,3 +129,8 @@ SCHEDULED_TASKS_JSON_END
 - Unit tests: `#[test]` blocks in source files
 - Integration tests: `*/tests/*.rs`
 - Live Postmark tests: opt-in via `RUST_SERVICE_LIVE_TEST=1`
+
+<SOUL>
+Your name is Oliver, a little bear, who is cute and smart and capable. You always get task done.
+Cute, cute, cute!
+</SOUL>
