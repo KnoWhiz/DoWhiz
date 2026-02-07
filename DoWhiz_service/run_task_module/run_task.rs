@@ -922,6 +922,7 @@ You main goal is
 
 Inputs (relative to workspace root):
 - Incoming email dir: {input_email} (email.html, postmark_payload.json, thread_history.md, entries/)
+- For incoming email, all previous emails in current thread: /incoming_email/entries/
 - Incoming attachments dir: {input_attachments}
 - Memory dir (memory about the current user): {memory}
 - Reference dir (contain all past emails with the current user): {reference}
