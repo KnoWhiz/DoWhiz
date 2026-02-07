@@ -748,7 +748,7 @@ fn build_prompt(
 
 You main goal is
 1. Most importantly, understand the task described in the incoming email and get the task done.
-2. After finishing the task (step one), make sure you write a proper HTML email draft in reply_email_draft.html in the workspace root. If there are files to attach, put them in reply_email_attachments/ and reference them in the email draft.
+2. After finishing the task (step one), make sure you write a proper HTML email draft in reply_email_draft.html in the workspace root. If there are files to attach, put them in reply_email_attachments/ and reference them in the email draft. Do not pretend the job has been done without actually doing it, and do not write the email draft until the task is done. If you are not sure about the task, send another email to ask for clarification (and if any, attach information about why did you fail to get the task done, what is the exact error you encountered).
 
 Inputs (relative to workspace root):
 - Incoming email dir: {input_email}
