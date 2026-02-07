@@ -1,0 +1,9669 @@
+# Number Management Master APIs
+
+- Source URL: https://developers.zoom.us/docs/api/number-management/ma/
+- Snapshot path: docs/api/number-management/ma
+- Generated (UTC): 2026-02-07T22:40:11.102491+00:00
+
+## Frontmatter
+
+```json
+{
+  "title": "Number Management Master APIs",
+  "keywords": "zoom, rest, api, number managment",
+  "description": "Number Management APIs are part of Zoom's API suite. They let developers manage and provision phone numbers in a Zoom Phone, Contact Center, or Meetings account programmatically. They also help businesses and service providers automate phone number operations at scale.",
+  "skipQualtrics": true
+}
+```
+
+## Content
+
+No MDX content found for this page.
+
+## OpenAPI
+
+```json
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Number Management",
+    "description": "Number Management APIs are part of Zoom's API suite. They let developers manage and provision phone numbers in a Zoom Phone, Contact Center, or Meetings account programmatically. They also help businesses and service providers automate phone number operations at scale.",
+    "termsOfService": "https://zoom.us/docs/en-us/zoom_api_license_and_tou.html",
+    "contact": {
+      "name": "Zoom Developers",
+      "url": "https://developer.zoom.us/"
+    },
+    "version": "2"
+  },
+  "externalDocs": {
+    "description": "Find out more about Swagger",
+    "url": "https://swagger.io"
+  },
+  "servers": [
+    {
+      "url": "https://api.zoom.us/v2"
+    }
+  ],
+  "paths": {
+    "/accounts/{accountId}/number_management/carrier/peering_numbers": {
+      "get": {
+        "tags": [
+          "Cloud Peering Provider Exchange"
+        ],
+        "summary": "List peering phone numbers for provider",
+        "description": "Returns phone numbers the carrier pushes to different customers.\n\n**Prerequisites** \n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_carrier_peering_numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "Listpeeringphonenumbersforprovider",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The total number of records returned from a single API call.",
+            "required": false,
+            "schema": {
+              "maximum": 300,
+              "type": "integer",
+              "format": "int32",
+              "example": 30,
+              "default": 30
+            }
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through a large set of results. A next page token is returned whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2"
+            }
+          },
+          {
+            "name": "phone_number",
+            "in": "query",
+            "description": "The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\n) format.\n\n\n*  If this parameter is not specified, API will return all the phone numbers from the partner. ",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "+18108001001"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**  \n Cloud peering numbers successfully returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through a large set of results. A next page token is returned whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "8X8xSdRVKHsabD6Im4tIPODq6GzDOvV5fO1"
+                    },
+                    "numbers": {
+                      "type": "array",
+                      "description": "The information about the phone numbers pushed by the carrier to different customers.",
+                      "items": {
+                        "required": [
+                          "assigned",
+                          "phone_number",
+                          "sip_trunk_name",
+                          "status"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "customer_account_name": {
+                            "type": "string",
+                            "description": "The customer's account name.",
+                            "example": "Some customer's account name"
+                          },
+                          "customer_account_number": {
+                            "type": "string",
+                            "description": "The customer's account number.",
+                            "example": "Some customer's account number"
+                          },
+                          "assigned": {
+                            "type": "boolean",
+                            "description": "Whether the phone number is assigned:\n* `false` &mdash; Unassigned.\n* `true` &mdash; Assigned.",
+                            "example": true
+                          },
+                          "billing_ref_id": {
+                            "type": "string",
+                            "description": "Partners can specify their billing reference ID, with the maximum length of 36 characters. \n*  Zoom will send back the specified billing_ref_id in the SIP Header X-TO-CARRIER-ACCOUNT for the outbound calls to the provider.",
+                            "example": "Some billing referenceId"
+                          },
+                          "phone_number": {
+                            "type": "string",
+                            "description": "The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164) format.",
+                            "example": "+18108001001"
+                          },
+                          "service_info": {
+                            "type": "string",
+                            "description": "Free form descriptive text of the service associated with the number. This description will be surfaced to Zoom customer viewing the phone number. Partners can include description highlighting the capabilities or limitations associated with the number. The maximum is 255 characters.",
+                            "example": "Some service info"
+                          },
+                          "sip_trunk_name": {
+                            "type": "string",
+                            "description": "This field is a unique name that Zoom assigns for a group of trunks established with the partner during the cloud peering infrastructure setup. A partner with global presence may have one or more SIP trunks to handle calls for phone numbers in different regions.Partner needs to specify the name of the SIP trunk associated with the specified phone number. All calls originating from this number will be routed through the specified SIP Trunk, and Zoom will expect to receive inbound calls through the same trunk.During failure scenarios, calls will be routed via alternate trunks within the same trunk group identified  by the `sip_trunk_name`.",
+                            "example": "test-carrier-sip-trunk"
+                          },
+                          "status": {
+                            "type": "boolean",
+                            "description": "Providers can set the status to indicate whether the phone number is active (true) or inactive (false).  Providers can use inactive (false) state to provision phone numbers that are still in the process of being ported in, and update the status to active (true) when the porting is complete.",
+                            "example": true
+                          }
+                        }
+                      }
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The total number of records returned for this API call.",
+                      "format": "int32",
+                      "example": 20
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1001` <br>\n Carrier not found <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ProviderPortal:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:list_carrier_peering_numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/peering_numbers": {
+      "get": {
+        "tags": [
+          "Cloud Peering Reseller"
+        ],
+        "summary": "List peering phone numbers",
+        "description": "Returns the details associated with a specific phone number, or all the phone numbers the partner previously provisioned for the Zoom customer account.\n\n**Prerequisites:** \n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license. \n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_peering_numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "listPeeringPhoneNumbers",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The total number of records returned from a single API call.",
+            "required": false,
+            "schema": {
+              "maximum": 300,
+              "type": "integer",
+              "format": "int32",
+              "example": 30
+            }
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2"
+            }
+          },
+          {
+            "name": "phone_number",
+            "in": "query",
+            "description": "The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\n) format.\n\n\n*  If this parameter is not specified, API will return all the phone numbers previously assigned to the Zoom customer account by the partner. ",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "+12097654882"
+            }
+          },
+          {
+            "name": "carrier_code",
+            "in": "query",
+            "description": "A unique code that Zoom provides to the partner at the time of establishing cloud peering infrastructure. This unique code is also tied to the developer `client ID` included as part of the token\n\nThis parameter is **required** if you do **not** use an OAuth token or the OAuth token does not contain the `clientId`.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "example": 8801
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**&lt;br&gt;Carrier peering numbers successfully returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "8X8xSdRVKHsabD6Im4tIPODq6GzDOvV5fO1"
+                    },
+                    "numbers": {
+                      "type": "array",
+                      "description": "The information about the carrier's phone numbers.",
+                      "items": {
+                        "required": [
+                          "allocated_product",
+                          "assigned",
+                          "phone_number",
+                          "sip_trunk_name",
+                          "status"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "assigned": {
+                            "type": "boolean",
+                            "description": "Whether the phone number is assigned:* `false` &mdash; Unassigned.* `true` &mdash; Assigned.",
+                            "example": true
+                          },
+                          "billing_ref_id": {
+                            "type": "string",
+                            "description": "Partners can specify their billing reference ID, with the maximum length of 36 characters. \n*  Zoom will send back the specified billing_ref_id in the SIP Header X-TO-CARRIER-ACCOUNT for the outbound calls to the provider.",
+                            "example": "Some billing referenceId"
+                          },
+                          "allocated_product": {
+                            "type": "string",
+                            "description": "Partners can allocate phone numbers for exclusive use by a specific Zoom Product (ZOOM_PHONE or ZOOM_CONTACT_CENTER). Partners can also make the Phone Numbers not specific to any product (UNALLOCATED), allowing Zoom customers to freely assign the numbers to any Zoom Product.",
+                            "example": "ZOOM_PHONE",
+                            "enum": [
+                              "UNALLOCATED",
+                              "ZOOM_PHONE",
+                              "ZOOM_CONTACT_CENTER"
+                            ]
+                          },
+                          "phone_number": {
+                            "type": "string",
+                            "description": "The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\n) format.\n",
+                            "example": "+18108001001"
+                          },
+                          "service_info": {
+                            "type": "string",
+                            "description": "Free form descriptive text of the service associated with the number. This description will be surfaced to Zoom customer viewing the phone number. Partners can include description highlighting the capabilities or limitations associated with the number. The maximum is 255 characters.",
+                            "example": "Inbound only number' or 'Metered charges apply"
+                          },
+                          "sip_trunk_name": {
+                            "type": "string",
+                            "description": "This field is a unique name that Zoom assigns for a group of trunks established with the partner during the cloud peering infrastructure setup. A partner with global presence may have one or more SIP trunks to handle calls for phone numbers in different regions.\nPartner needs to specify the name of the SIP trunk associated with the specified phone number. All calls originating from this number will be routed through the specified SIP Trunk, and Zoom will expect to receive inbound calls through the same trunk.\nDuring failure scenarios, calls will be routed via alternate trunks within the same trunk group identified  by the `sip_trunk_name`.",
+                            "example": "test-carrier-sip-trunk"
+                          },
+                          "status": {
+                            "type": "boolean",
+                            "description": "Providers can set the status to indicate whether the phone number is active (true) or inactive (false).  Providers can use inactive (false) state to provision phone numbers that are still in the process of being ported in, and update the status to active (true) when the porting is complete.",
+                            "example": true
+                          }
+                        }
+                      }
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The total number of records returned for this API call.",
+                      "format": "int64",
+                      "example": 20
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1001` <br>\n Carrier not found <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Read",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:list_peering_numbers:master"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "Cloud Peering Reseller"
+        ],
+        "summary": "Add peering phone numbers",
+        "description": "Allows provider exchange partners to add phone numbers to Zoom account. \n\n**Prerequisites** \n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:peering_number:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "addPeeringPhoneNumbers",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "allocated_product",
+                  "phone_numbers"
+                ],
+                "type": "object",
+                "properties": {
+                  "carrier_code": {
+                    "type": "integer",
+                    "description": "A unique code that Zoom provides to the partner at the time of establishing cloud peering infrastructure. This unique code is also tied to the developer `client ID` included as part of the token\n\nThis parameter is **required** if you do **not** use an OAuth token or the OAuth token does not contain the `clientId`.",
+                    "format": "int32",
+                    "example": 3456
+                  },
+                  "allocated_product": {
+                    "type": "string",
+                    "description": "Partners can allocate phone numbers for exclusive use by a specific Zoom Product (ZOOM_PHONE or ZOOM_CONTACT_CENTER). Partners can also make the phone numbers not specific to any product (UNALLOCATED), allowing Zoom customers to freely assign the numbers to any Zoom Product.",
+                    "example": "ZOOM_PHONE",
+                    "enum": [
+                      "UNALLOCATED",
+                      "ZOOM_PHONE",
+                      "ZOOM_CONTACT_CENTER"
+                    ]
+                  },
+                  "phone_numbers": {
+                    "type": "array",
+                    "description": "The information about the added phone numbers. The maximum value is 200.",
+                    "items": {
+                      "required": [
+                        "phone_number",
+                        "sip_trunk_name",
+                        "status"
+                      ],
+                      "type": "object",
+                      "properties": {
+                        "billing_ref_id": {
+                          "type": "string",
+                          "description": "The partner can specify their billing reference ID, with the maximum length of 36 characters. \n*  Zoom will send back the specified billing_ref_id in the SIP Header X-TO-CARRIER-ACCOUNT for the outbound calls to the provider.",
+                          "example": "Some billing referenceId"
+                        },
+                        "phone_number": {
+                          "type": "string",
+                          "description": "The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\n) format.\n",
+                          "example": "+12097654882"
+                        },
+                        "number_type": {
+                          "type": "string",
+                          "description": "This field enables you to specify if the number is a mobile number.",
+                          "example": "Mobile",
+                          "enum": [
+                            "Mobile"
+                          ]
+                        },
+                        "service_info": {
+                          "type": "string",
+                          "description": "The free form descriptive text of the service associated with the number. This description surfaces to the Zoom customer viewing the phone number. Partners can include description highlighting the capabilities or limitations associated with the number. The maximum is 255 characters.",
+                          "example": "'Inbound only number' or 'Metered charges apply"
+                        },
+                        "sip_trunk_name": {
+                          "type": "string",
+                          "description": "A unique name that Zoom assigns for a group of trunks established with the partner during the cloud peering infrastructure setup. A partner with global presence may have one or more SIP trunks to handle calls for phone numbers in different regions.\nPartner needs to specify the name of the SIP trunk associated with the specified phone number. All calls originating from this number will be routed through the specified SIP trunk, and Zoom will expect to receive inbound calls through the same Trunk.\nDuring failure scenarios, calls will be routed through alternate trunks within the same trunk group identified  by the `sip_trunk_name`.",
+                          "example": "first-markert-carrier-trunk"
+                        },
+                        "status": {
+                          "type": "boolean",
+                          "description": "Providers can set the status to indicate whether the phone number is active (true) or inactive (false).  Providers can use inactive (false) state to provision phone numbers that are still in the process of being ported in, and update the status to active (true) when the porting is complete.",
+                          "example": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "**HTTP Status Code:** `201` **Created**   Peering phone numbers successfully added. "
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  some data failed \n\n **Error Code:** `1000` <br>\n Some data failed.for example:\n[   \n  {\"phoneNumber\":\"+12098888111\",\"reason\":\"Invalid Sip Trunk\"},   \n  {\"phoneNumber\":\"+12090000011\",\"reason\":\"Invalid number\"}\n] <br>\n**Error Code:** `1001` <br>\n Carrier not found <br>\n**Error Code:** `1002` <br>\n Request data cannot be empty <br>\n**Error Code:** `1003` <br>\n Too many numbers, should less than 200 <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ContactCenterMgt:Edit",
+            "PbxAdmin:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:write:peering_number:master"
+          ]
+        }
+      },
+      "delete": {
+        "tags": [
+          "Cloud Peering Reseller"
+        ],
+        "summary": "Remove peering phone numbers",
+        "description": "Removes the phone number from the Zoom customer account. \n\nPartners can remove only the phone numbers they have previously added to Zoom account.\n\n**Prerequisites:** \n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license. \n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:delete:peering_number:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "deletePeeringPhoneNumbers",
+        "parameters": [
+          {
+            "name": "carrier_code",
+            "in": "query",
+            "description": "\nThis is unique code that Zoom provides to the partner at the time of establishing cloud peering infrastructure. This unique code is also tied to the developer `client ID` included as part of the token\n\nThis parameter is **required** if you do **not** use an OAuth token or the OAuth token does not contain the `clientId`.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "example": 8091
+            }
+          },
+          {
+            "name": "phone_numbers",
+            "in": "query",
+            "description": "The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\n) format.\n",
+            "required": true,
+            "schema": {
+              "maxItems": 200,
+              "type": "array",
+              "example": [
+                "+12097865343",
+                "+12097865211"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **Created**   Phone number successfully deleted. "
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  request failed \n\n **Error Code:** `1000` <br>\n Some data failed.\nfor example:\n[\n   {\"phoneNumber\":\"+12098888111\",\"reason\":\"Phone number does not exist\"},\n   {\"phoneNumber\":\"+12090000011\",\"reason\":\"Invalid number\"}\n] <br>\n**Error Code:** `1001` <br>\n Carrier not found <br>\n**Error Code:** `1002` <br>\n Request data cannot be empty <br>\n**Error Code:** `1003` <br>\n Too many numbers, should less than 200 <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ContactCenterMgt:Edit",
+            "PbxAdmin:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:delete:peering_number:master"
+          ]
+        }
+      },
+      "patch": {
+        "tags": [
+          "Cloud Peering Reseller"
+        ],
+        "summary": "Update peering phone numbers",
+        "description": "Allows partners to update the status or details associated with the phone numbers.\n\n**Prerequisites** \n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license. \n\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:peering_number:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "updatePeeringPhoneNumbers",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "phone_numbers"
+                ],
+                "type": "object",
+                "properties": {
+                  "carrier_code": {
+                    "type": "integer",
+                    "description": "\nA unique code that Zoom provides to the partner at the time of establishing cloud peering infrastructure. This unique code is also tied to the developer `client ID` included as part of the token\n\nThis parameter is **required** if you do **not** use an OAuth token or the OAuth token does not contain the `clientId`.",
+                    "format": "int32",
+                    "example": 3456
+                  },
+                  "allocated_product": {
+                    "type": "string",
+                    "description": "`allocated_product` can only be updated for numbers that were previously set to 'UNALLOCATED'.  To change `allocated_product` value for phone numbers previously allocated to ZOOM_PHONE or ZOOM_CONTACT_CENTER, partners need to remove and reinsert the numbers.",
+                    "example": "ZOOM_PHONE",
+                    "enum": [
+                      "UNALLOCATED",
+                      "ZOOM_PHONE",
+                      "ZOOM_CONTACT_CENTER"
+                    ]
+                  },
+                  "phone_numbers": {
+                    "maxItems": 200,
+                    "type": "array",
+                    "description": "The list of phone numbers and the corresponding details that need to be updated. The maximum value is 200.",
+                    "items": {
+                      "required": [
+                        "phone_number"
+                      ],
+                      "type": "object",
+                      "properties": {
+                        "billing_ref_id": {
+                          "type": "string",
+                          "description": "Partners can specify their billing reference ID, with the maximum length of 36 characters.\n*  Zoom will send back the specified billing_ref_id in the SIP Header X-TO-CARRIER-ACCOUNT for the outbound calls to the provider.",
+                          "example": "Some billing referenceId"
+                        },
+                        "phone_number": {
+                          "type": "string",
+                          "description": "The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\n) format.\n\n",
+                          "example": "+12097654882"
+                        },
+                        "service_info": {
+                          "type": "string",
+                          "description": "Free form descriptive text of the service associated with the number. This description will be surfaced to Zoom customer viewing the phone number. Partners can include description highlighting the capabilities or limitations associated with the number. The maximum is 255 characters.",
+                          "example": "Inbound only number' or 'Metered charges apply"
+                        },
+                        "sip_trunk_name": {
+                          "type": "string",
+                          "description": "A unique name that Zoom assigns for a group of trunks established with the partner during the cloud peering infrastructure setup. A partner with global presence may have one or more SIP trunks to handle calls for phone numbers in different regions.\nPartner needs to specify the name of the SIP trunk associated with the specified phone number. All calls originating from this number will be routed through the specified SIP Trunk, and Zoom will expect to receive inbound calls through the same trunk.\nDuring failure scenarios, calls will be routed via alternate trunks within the same trunk group identified  by the `sip_trunk_name`.",
+                          "example": "first-markert-carrier-trunk"
+                        },
+                        "status": {
+                          "type": "boolean",
+                          "description": "Providers can set the status to indicate whether the phone number is active (true) or inactive (false).  Providers can use inactive (false) state to provision phone numbers that are still in the process of being ported in, and update the status to active (true) when the porting is complete.",
+                          "example": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "**HTTP Status Code:** `200` **OK**Phone number successfully updated."
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  request failed \n\n **Error Code:** `1000` <br>\n Some data failed.for example:\n[   \n  {\"phoneNumber\":\"+12098888111\",\"reason\":\"Invalid Sip Trunk\"}, \n  {\"phoneNumber\":\"+12090000011\",\"reason\":\"Invalid number\"}\n] <br>\n**Error Code:** `1001` <br>\n Carrier not found <br>\n**Error Code:** `1002` <br>\n Request data cannot be empty <br>\n**Error Code:** `1003` <br>\n Too many numbers, should less than 200 <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ContactCenterMgt:Edit",
+            "PbxAdmin:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:update:peering_number:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/allocation": {
+      "patch": {
+        "tags": [
+          "Phone Numbers"
+        ],
+        "summary": "Allocate/Unallocate phone numbers",
+        "description": "Allocates or unallocates phone numbers for those with CPL routing.\n\n<p>Note: When allocating phone numbers, if there are any native numbers, they must belong to the same country or region, and have the same number plan.</p>\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `HEAVY`",
+        "operationId": "AllocateNumber",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "allocated_product",
+                  "numbers"
+                ],
+                "type": "object",
+                "properties": {
+                  "numbers": {
+                    "maxItems": 10,
+                    "type": "array",
+                    "description": "A list of phone numbers.",
+                    "items": {
+                      "type": "string",
+                      "description": "The phone number ID.",
+                      "example": "8nObzGKRTGxoNDZ5JIEHQ"
+                    }
+                  },
+                  "allocated_product": {
+                    "type": "string",
+                    "description": "The phone number's allocated product. Use the value UNALLOCATED to unallocate phone numbers.",
+                    "example": "ZOOM_PHONE",
+                    "enum": [
+                      "ZOOM_PHONE",
+                      "ZOOM_CONTACT_CENTER",
+                      "UNALLOCATED"
+                    ]
+                  },
+                  "site_id": {
+                    "type": "string",
+                    "description": "The site the numbers will be allocated for Zoom Phone.",
+                    "example": "8nObzGKRTGxoNDZ5JIEHQ"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": " The phone numbers have been allocated succeefully"
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  Invalid parameter or operation \n\n **Error Code:** `100002` <br>\n Phone number not found <br>\n**Error Code:** `200002` <br>\n Unable to switch products for the number <br>\n**Error Code:** `1002010` <br>\n The site does not exist <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  Lack of valid authentication \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Edit",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:write:numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/byoc_numbers": {
+      "post": {
+        "tags": [
+          "Phone Numbers"
+        ],
+        "summary": "Add BYOC phone numbers",
+        "description": "Adds BYOC (Bring Your Own Carrier) phone numbers to Zoom Phone.\n\n**Prerequisites:** \n* A Business or Enterprise plan \n* A Zoom Phone license\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:byoc_numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`",
+        "operationId": "AddBYOCPhoneNumber",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "allocated_product",
+                  "phone_numbers"
+                ],
+                "type": "object",
+                "properties": {
+                  "allocated_product": {
+                    "type": "string",
+                    "description": "The partners can allocate phone numbers for exclusive use by a specific Zoom Product (ZOOM_PHONE or ZOOM_CONTACT_CENTER).",
+                    "example": "ZOOM_PHONE",
+                    "enum": [
+                      "ZOOM_PHONE",
+                      "ZOOM_CONTACT_CENTER"
+                    ]
+                  },
+                  "country_iso": {
+                    "type": "string",
+                    "description": "The two-lettered country code (Alpha-2 code in ISO-3166 format). \r\n- When the input number is a local number, country_iso is required. \r\n- When the input number is a E164 number, `country_iso` is optional.",
+                    "example": "US"
+                  },
+                  "site_id": {
+                    "type": "string",
+                    "description": "The unique identifier of the site. This field is only required if you have enabled multiple sites in the account. See [Managing multiple sites](https://support.zoom.us/hc/en-us/articles/360020809672-Managing-multiple-sites) or [Adding a site](https://support.zoom.us/hc/en-us/articles/360020809672-Managing-multiple-sites#h_05c88e35-1593-491f-b1a8-b7139a75dc15) for details.\r\n- If add a zoom phone number, and multiple sites is  enabled, `site_id` is required",
+                    "example": "8f71O6rWT8KFUGQmJIFAdQ"
+                  },
+                  "phone_numbers": {
+                    "maxItems": 100,
+                    "type": "array",
+                    "description": "Whether a input local number or E164 number.",
+                    "items": {
+                      "type": "string",
+                      "example": "+8618251885564"
+                    }
+                  },
+                  "sip_group_id": {
+                    "type": "string",
+                    "description": "The SIP group ID.\r\n- If adding a Zoom Phone number, and BYOC SIP Group is optional, `sip_group_id` is required. It can input  ZOOM_PHONE or COMMON `sip_group_id`\r\n- If adding a Zoom Contact Center number, `sip_group_id` is required, and can input ZOOM_CONTACT_CENTER or COMMON `sip_group_id`. ",
+                    "example": "FLofRFDxSNiSd68iRZrZmg"
+                  },
+                  "enable_pci_pal": {
+                    "type": "boolean",
+                    "description": "- If you add a Zoom phone number and want to enable `enable_pci_pal`, you first need to enable Enable Compliance APIs in the Zoom Phone OP.\r\n- If you add a Zoom Contact Center number and want to enable `enable_pci_pal`, you first need to enable PCI SIP Integration in the Zoom Contact Center OP.",
+                    "example": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "**HTTP Status Code:** `201` **Created**   BYOC phone numbers successfully added. "
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1000` <br>\n Some data failed.for example: [ {\"phoneNumber\":\"+12098888111\",\"reason\":\"Phone Number format invalid\"}, {\"phoneNumber\":\"+12090000011\",\"reason\":\"Phone Number already exists\"} ] <br>\n**Error Code:** `1004` <br>\n BYOC Phone Numbers are not enabled for this account <br>\n**Error Code:** `1003_001` <br>\n Too many numbers, should less than 100,contact zoom support team for more numbers <br>\n**Error Code:** `100_001` <br>\n Sip Group not found <br>\n**Error Code:** `200_005` <br>\n Current sip group don't support PCIPal <br>\n**Error Code:** `1002_003` <br>\n Site cannot be empty in zoom phone <br>\n**Error Code:** `1002_010` <br>\n The site does not exist <br>\n"
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ContactCenterMgt:Edit",
+            "PbxAdmin:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:write:byoc_numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/numbers": {
+      "get": {
+        "tags": [
+          "Phone Numbers"
+        ],
+        "summary": "List phone numbers",
+        "description": "Returns a list of phone numbers in an account. See section <b>Information in the phone number table</b> of [Using Number Management for managing phone numbers](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0074457#h_60222313850311712763891581) for more details.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "listPhoneNumbers",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "maximum": 200,
+              "type": "integer",
+              "example": 30,
+              "default": 30
+            }
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "Fh98ehf98wehf9wehfhw"
+            }
+          },
+          {
+            "name": "allocated_product",
+            "in": "query",
+            "description": "The product associated with the allocated number.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "ZOOM_PHONE",
+              "enum": [
+                "UNALLOCATED",
+                "ZOOM_PHONE",
+                "ZOOM_CONTACT_CENTER"
+              ]
+            }
+          },
+          {
+            "name": "number_type",
+            "in": "query",
+            "description": "The type of phone number.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "Toll",
+              "enum": [
+                "Toll",
+                "TollFree",
+                "VirtualService",
+                "Mobile",
+                "SharedCost",
+                "National",
+                "ITFS"
+              ]
+            }
+          },
+          {
+            "name": "number_status",
+            "in": "query",
+            "description": "The status of phone number.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "Normal",
+              "enum": [
+                "Normal",
+                "Pending"
+              ]
+            }
+          },
+          {
+            "name": "number_source",
+            "in": "query",
+            "description": "The source of phone number.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "Zoom",
+              "enum": [
+                "Zoom",
+                "ZoomPorted",
+                "ZoomReserved",
+                "ThirdPartyNumber",
+                "BYOCCloud",
+                "BYOCPremises"
+              ]
+            }
+          },
+          {
+            "name": "site_id",
+            "in": "query",
+            "description": "The site ID for the Zoom phone number.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "assigned_to_type",
+            "in": "query",
+            "description": "The type of target assigned to the number.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "User",
+              "enum": [
+                "PhoneUnassigned",
+                "User",
+                "CallQueue",
+                "AutoReceptionist",
+                "CiscoPolycomRoom",
+                "SharedLineGroup",
+                "GroupCallPickup",
+                "CommonArea",
+                "EmergencyNumberPool",
+                "CompanyLocation",
+                "PersonalLocation",
+                "MeetingService",
+                "LocalSurvivability",
+                "LocalSurvivabilityEmergencyNumberPool",
+                "MicrosoftTeamsResourceAccount",
+                "DistributionGroup",
+                "ContactCenterUnassigned",
+                "DialInToVideoEngagements",
+                "DefaultSystemOutgoingSMS",
+                "DefaultAgentOutgoingSMS",
+                "DefaultCallerID",
+                "Voice",
+                "SMS"
+              ]
+            }
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "description": "This field allows you to search by phone number. Only prefix matching is available for search.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "1205"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The list of phone numbers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "xuWXDDeGFkx0dyRtuwQR3M9NWIoMVD9e0a2"
+                    },
+                    "page_size": {
+                      "type": "integer",
+                      "description": "The page size in use.",
+                      "example": 100
+                    },
+                    "numbers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "The unique identifier of the phone number.",
+                            "example": "iHE1MQAET2iV85MbfaQmwg"
+                          },
+                          "number": {
+                            "type": "string",
+                            "description": "The phone number in E.164 format.",
+                            "example": "+1203030333"
+                          },
+                          "allocated_product": {
+                            "type": "string",
+                            "description": "The product assigned to the phone number.",
+                            "example": "ZOOM_CONTACT_CENTER",
+                            "enum": [
+                              "UNALLOCATED",
+                              "ZOOM_PHONE",
+                              "ZOOM_CONTACT_CENTER"
+                            ]
+                          },
+                          "number_type": {
+                            "type": "string",
+                            "description": "The type of phone number.",
+                            "example": "Toll",
+                            "enum": [
+                              "Toll",
+                              "TollFree",
+                              "VirtualService",
+                              "Mobile",
+                              "SharedCost",
+                              "National",
+                              "ITFS"
+                            ]
+                          },
+                          "display_name": {
+                            "type": "string",
+                            "description": "The display name for the phone number in Zoom Phone.",
+                            "example": "Alice"
+                          },
+                          "caller_id_name": {
+                            "type": "string",
+                            "description": "The caller ID name for a Contact Center number.",
+                            "example": "Bob Company"
+                          },
+                          "carrier": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "integer",
+                                "description": "The carrier code.",
+                                "example": 2
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The name of the carrier.",
+                                "example": "Bandwidth"
+                              }
+                            },
+                            "description": "The carrier information for the Provider Exchange number."
+                          },
+                          "capability": {
+                            "type": "array",
+                            "description": "The capability of the phone number.  The value can be Incoming, Outgoing, Messaging, PCIPal, and `EmergencyCalls` or any combination of them.",
+                            "items": {
+                              "type": "string",
+                              "description": "The capability of the phone number",
+                              "example": "Incoming",
+                              "enum": [
+                                "Incoming",
+                                "Outgoing",
+                                "Messaging",
+                                "PCIPal",
+                                "EmergencyCalls"
+                              ]
+                            }
+                          },
+                          "source": {
+                            "type": "string",
+                            "description": "The source of phone number.",
+                            "example": "Zoom",
+                            "enum": [
+                              "Zoom",
+                              "ZoomPorted",
+                              "ZoomReserved",
+                              "ThirdPartyNumber",
+                              "BYOCCloud",
+                              "BYOCPremises"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "description": "The status of the number.",
+                            "example": "Pending",
+                            "enum": [
+                              "Normal",
+                              "Pending"
+                            ]
+                          },
+                          "emergency_address": {
+                            "type": "object",
+                            "properties": {
+                              "address_line1": {
+                                "type": "string",
+                                "description": "The house number and street name.",
+                                "example": "53 Rav Road"
+                              },
+                              "address_line2": {
+                                "type": "string",
+                                "description": "The information about the building, floor, unit, and so on.",
+                                "example": "Floor 1"
+                              },
+                              "city": {
+                                "type": "string",
+                                "description": "The city in the address.",
+                                "example": "San Jose"
+                              },
+                              "county": {
+                                "type": "string",
+                                "description": "The county of the address for the Ireland address.",
+                                "example": "CO. Cork"
+                              },
+                              "state_code": {
+                                "type": "string",
+                                "description": "The state ISO code of the address.",
+                                "example": "CA"
+                              },
+                              "country": {
+                                "type": "string",
+                                "description": "The two-lettered country code (Alpha-2 code in ISO-3166 format).",
+                                "example": "US"
+                              },
+                              "zip": {
+                                "type": "string",
+                                "description": "The zip or postal code.",
+                                "example": "95113"
+                              }
+                            },
+                            "description": "The emergency address to bind to the phone number."
+                          },
+                          "address_update_required": {
+                            "type": "boolean",
+                            "description": "The true value indicates the number's address need to be updated for BYOC Premise numbers.",
+                            "example": true
+                          },
+                          "emergency_address_update_time": {
+                            "type": "string",
+                            "description": "The updated timestamp of the number's address, in the format 'yyyy-MM-ddTHH:mm:ssZ'. It's used for Phone BYOC-Premises numbers.",
+                            "example": "2024-10-29T14:18:28Z"
+                          },
+                          "site": {
+                            "type": "object",
+                            "properties": {
+                              "site_id": {
+                                "type": "string",
+                                "description": "The site ID.",
+                                "example": "8f71O6rWT8KFUGQmJIFAdQ"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The site name.",
+                                "example": "Main Site"
+                              }
+                            },
+                            "description": "The site associated with the phone number."
+                          },
+                          "assigned_list": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "assigned_to_id": {
+                                  "type": "string",
+                                  "description": "In Zoom Phone, this value can represent the ID of the user, emergency number pool (where the ID is either `siteId` if multiple sites are enabled, or `accountId` if not), or company location, depending on the `assigned_to_type `field.\nIn Contact Center, this field also has different meanings\n2: number assigned to Dial-in to Video Engagements \n3: number assigned to Default System Outgoing SMS\n4: number assigned to Default Caller ID\n8: number assigned to Default Agent Outgoing SMS\nOther: number assigned for specific use case , such as flow, queue and so on.",
+                                  "example": "rYgfsrduSXWCxr94poMN5g"
+                                },
+                                "assgined_to_name": {
+                                  "type": "string",
+                                  "description": "The name of the user assigned with the number, emergency number pool, and company location.",
+                                  "example": "Alice Bob"
+                                },
+                                "assigned_to_type": {
+                                  "type": "string",
+                                  "description": "This field indicates to whom the phone number belongs.",
+                                  "example": "User",
+                                  "enum": [
+                                    "User",
+                                    "CallQueue",
+                                    "AutoReceptionist",
+                                    "CiscoPolycomRoom",
+                                    "SharedLineGroup",
+                                    "GroupCallPickup",
+                                    "CommonArea",
+                                    "EmergencyNumberPool",
+                                    "CompanyLocation",
+                                    "PersonalLocation",
+                                    "MeetingService",
+                                    "LocalSurvivability",
+                                    "LocalSurvivabilityEmergencyNumberPool",
+                                    "MicrosoftTeamsResourceAccount",
+                                    "DistributionGroup"
+                                  ]
+                                },
+                                "source_channel": {
+                                  "type": "string",
+                                  "description": "The channel of number that is only for Contact Center.",
+                                  "example": "Voice",
+                                  "enum": [
+                                    "Voice",
+                                    "SMS"
+                                  ]
+                                },
+                                "extension_number": {
+                                  "type": "string",
+                                  "description": "The extension number of an extension (e.g., user) for Zoom Phone",
+                                  "example": "6503"
+                                }
+                              }
+                            }
+                          },
+                          "sip_group": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "description": "The SIP group's ID.",
+                                "example": "vZWksdNbRkKTdzOth09skw"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The ID of the SIP group. See the **Creating SIP groups** section in [Creating a shared directory of external contacts](https://support.zoom.us/hc/en-us/articles/360037050092-Creating-a-shared-directory-of-external-contacts) for details.",
+                                "example": "SIP 01"
+                              }
+                            }
+                          },
+                          "location": {
+                            "type": "object",
+                            "properties": {
+                              "country": {
+                                "type": "string",
+                                "description": "The name of the country.",
+                                "example": "United States"
+                              },
+                              "city": {
+                                "type": "string",
+                                "description": "The phone number of the city location.",
+                                "example": "San Jose"
+                              },
+                              "state": {
+                                "type": "string",
+                                "description": "The state or province's name.",
+                                "example": "California"
+                              }
+                            },
+                            "description": "The phone number's area."
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `999` <br>\n Invalid value (e.g., allocated_product, number_type, number_soruce) <br>\n**Error Code:** `1002010` <br>\n The site does not exist <br>\n**Error Code:** `1003100` <br>\n The next page token is either invalid or has expired <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  Lack of valid authentication \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ContactCenterMgt:Edit",
+            "PbxAdmin:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:list_numbers:master"
+          ]
+        }
+      },
+      "delete": {
+        "tags": [
+          "Phone Numbers"
+        ],
+        "summary": "Delete phone numbers",
+        "description": "Deletes phone numbers.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:delete:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`",
+        "operationId": "DeleteNumbers",
+        "parameters": [
+          {
+            "name": "numbers",
+            "in": "query",
+            "description": "A list of phone numbers to be delete.",
+            "required": true,
+            "schema": {
+              "maxItems": 10,
+              "type": "array",
+              "example": [
+                "iHE1MQAET2iV85MbfaQmwg",
+                "vZWksdNbRkKTdzOth09skw"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The phone numbers have been deleted successfully."
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  Invalid parameter \n\n **Error Code:** `100002` <br>\n Phone number not found <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  Lack of valid authentication \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Edit",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:delete:numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/numbers/{phoneNumberId}": {
+      "get": {
+        "tags": [
+          "Phone Numbers"
+        ],
+        "summary": "Get a phone number",
+        "description": "Returns information about an account's phone number. \n\nFor more details, see the section <b>Information in the phone number table</b> in [Using Number Management for managing phone numbers](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0074457#h_60222313850311712763891581).\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "getPhoneNumber",
+        "parameters": [
+          {
+            "name": "phoneNumberId",
+            "in": "path",
+            "description": "The unique identifier of the phone number retrieved from the [List phone numbers](https://developers.zoom.us/docs/api/phone/#tag/carrier-reseller/GET/phone/carrier_reseller/numbers) API.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "iHE1MQAET2iV85MbfaQmwg"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The phone number details.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "The unique identifier of the phone number.",
+                      "example": "iHE1MQAET2iV85MbfaQmwg"
+                    },
+                    "number": {
+                      "type": "string",
+                      "description": "The phone number in E.164 format.",
+                      "example": "+1203030333"
+                    },
+                    "allocated_product": {
+                      "type": "string",
+                      "description": "The product assigned to the phone number.",
+                      "example": "ZOOM_CONTACT_CENTER",
+                      "enum": [
+                        "UNALLOCATED",
+                        "ZOOM_PHONE",
+                        "ZOOM_CONTACT_CENTER"
+                      ]
+                    },
+                    "number_type": {
+                      "type": "string",
+                      "description": "The type of the phone number.",
+                      "example": "Toll",
+                      "enum": [
+                        "Toll",
+                        "TollFree",
+                        "VirtualService",
+                        "Mobile",
+                        "SharedCost",
+                        "National",
+                        "ITFS"
+                      ]
+                    },
+                    "display_name": {
+                      "type": "string",
+                      "description": "The display name of the phone number for Zoom Phone numbers.",
+                      "example": "Alice"
+                    },
+                    "caller_id_name": {
+                      "type": "string",
+                      "description": "The caller ID name for the Contact Center numbers.",
+                      "example": "Bob Company"
+                    },
+                    "carrier": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer",
+                          "description": "The carrier code.",
+                          "example": 2
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "The name of the carrier.",
+                          "example": "Bandwidth"
+                        }
+                      },
+                      "description": "The carrier information for Provider Exchange numbers."
+                    },
+                    "capability": {
+                      "type": "array",
+                      "description": "The capability of the phone number. The value can be Incoming, Outgoing, Messaging, PCIPal and Emergency Calls or any combination of them.",
+                      "items": {
+                        "type": "string",
+                        "description": "The capability of the phone number.",
+                        "example": "Incoming",
+                        "enum": [
+                          "Incoming",
+                          "Outgoing",
+                          "Messaging",
+                          "PCIPal",
+                          "EmergencyCalls"
+                        ]
+                      }
+                    },
+                    "source": {
+                      "type": "string",
+                      "description": "The source of phone number.",
+                      "example": "Zoom",
+                      "enum": [
+                        "Zoom",
+                        "ZoomPorted",
+                        "ZoomReserved",
+                        "ThirdPartyNumber",
+                        "BYOCCloud",
+                        "BYOCPremises"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "The status of the number.",
+                      "example": "Pending",
+                      "enum": [
+                        "Normal",
+                        "Pending"
+                      ]
+                    },
+                    "emergency_address": {
+                      "type": "object",
+                      "properties": {
+                        "address_line1": {
+                          "type": "string",
+                          "description": "The house number and street name.",
+                          "example": "53 Rav Road"
+                        },
+                        "address_line2": {
+                          "type": "string",
+                          "description": "The field lists the building, floor, unit, and so on.",
+                          "example": "Floor 1"
+                        },
+                        "city": {
+                          "type": "string",
+                          "description": "The city of the address.",
+                          "example": "San Jose"
+                        },
+                        "county": {
+                          "type": "string",
+                          "description": "The county of the address, applicable for an Ireland address",
+                          "example": "CO. Cork"
+                        },
+                        "state_code": {
+                          "type": "string",
+                          "description": "The state ISO code of the address.",
+                          "example": "CA"
+                        },
+                        "country": {
+                          "type": "string",
+                          "description": "The two-lettered country code (Alpha-2 code in ISO-3166 format)",
+                          "example": "US"
+                        },
+                        "zip": {
+                          "type": "string",
+                          "description": "The zip or postal code.",
+                          "example": "95113"
+                        }
+                      },
+                      "description": "The emergency address bind to the phone number."
+                    },
+                    "address_update_required": {
+                      "type": "boolean",
+                      "description": "The true value indicates the number's address need to be updated, applicable for BYOC Premise numbers.",
+                      "example": true
+                    },
+                    "emergency_address_update_time": {
+                      "type": "string",
+                      "description": "The updated timestamp of the number's address, in the format 'yyyy-MM-ddTHH:mm:ssZ'. It's used for Phone BYOC-Premises numbers. ",
+                      "example": "2024-10-29T14:18:28Z"
+                    },
+                    "site": {
+                      "type": "object",
+                      "properties": {
+                        "site_id": {
+                          "type": "string",
+                          "description": "The site ID.",
+                          "example": "8f71O6rWT8KFUGQmJIFAdQ"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "The name of the site.",
+                          "example": "Main Site"
+                        }
+                      },
+                      "description": "The site associated with the phone number."
+                    },
+                    "assigned_list": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "assigned_to_id": {
+                            "type": "string",
+                            "description": "In Zoom Phone, this value can represent the ID of the user, emergency number pool (where the ID is either `siteId` if multiple sites are enabled, or `accountId` if not), or company location, depending on the `assigned_to_type` field.\nIn Contact Center, this field also has different meanings.\n2: Number assigned to Dial-in to Video Engagements \n3: number assigned to Default System Outgoing SMS\n4: number assigned to Default Caller ID\n8: number assigned to Default Agent Outgoing SMS\nOther: number assigned for specific use case , such as flow, queue.",
+                            "example": "rYgfsrduSXWCxr94poMN5g"
+                          },
+                          "assgined_to_name": {
+                            "type": "string",
+                            "description": "The name of the user to whom the number, emergency number pool, and company location are assigned.",
+                            "example": "Alice Bob"
+                          },
+                          "assigned_to_type": {
+                            "type": "string",
+                            "description": "This field indicates to whom the phone number belongs.",
+                            "example": "User",
+                            "enum": [
+                              "User",
+                              "CallQueue",
+                              "AutoReceptionist",
+                              "CiscoPolycomRoom",
+                              "SharedLineGroup",
+                              "GroupCallPickup",
+                              "CommonArea",
+                              "EmergencyNumberPool",
+                              "CompanyLocation",
+                              "PersonalLocation",
+                              "MeetingService",
+                              "LocalSurvivability",
+                              "LocalSurvivabilityEmergencyNumberPool",
+                              "MicrosoftTeamsResourceAccount",
+                              "DistributionGroup"
+                            ]
+                          },
+                          "source_channel": {
+                            "type": "string",
+                            "description": "The channel of number. (Only for Contact Center)",
+                            "example": "Voice",
+                            "enum": [
+                              "Voice",
+                              "SMS"
+                            ]
+                          },
+                          "extension_number": {
+                            "type": "string",
+                            "description": "The extension number of an extension. (e.g., user). This field is applicable for Zoom Phone.",
+                            "example": "6503"
+                          },
+                          "meeting_id": {
+                            "type": "string",
+                            "description": "The meeting ID for Phone meeting service.",
+                            "example": "964 3020 9491"
+                          },
+                          "greeting": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "description": "The audio prompt file ID. If the audio was removed from the user's audio library, it will be marked with a prefix, `removed_vWby3OZaQlS1nAdmEAqgwA` for example. You can use this audio ID to get the audio information in the [Get an audio item](https://marketplace.zoom.us/docs/api-reference/phone/methods#tag/Audio-Library/operation/GetAudioItem) API.",
+                                "example": "vWby3OZaQlS1nAdmEAqgwA"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The audio file name of the greeting prompt. ",
+                                "example": "hotspot.wav"
+                              }
+                            },
+                            "description": "This field applicable for meeting service."
+                          },
+                          "on_hold_music": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "description": "The audio prompt file ID. If the audio is no longer in the user's audio library, it will be marked with a prefix, `removed_vWby3OZaQlS1nAdmEAqgwA` for example. You can use this audio ID to get the audio information in the [Get an audio item](https://marketplace.zoom.us/docs/api-reference/phone/methods#tag/Audio-Library/operation/GetAudioItem) API.",
+                                "example": "vWby3OZaQlS1nAdmEAqgwA"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The audio file name of the on hold music prompt. ",
+                                "example": "music.wav"
+                              }
+                            },
+                            "description": "This field applicable for the meeting service."
+                          },
+                          "display_number": {
+                            "type": "string",
+                            "description": "The displayed phone number in meeting invitations and emails for the meeting service.",
+                            "example": "+1 360 209 5623"
+                          },
+                          "label": {
+                            "type": "string",
+                            "description": "This label appends to the number in parentheses, and appears in meeting invitations and the Zoom client for the meeting service.",
+                            "example": "xxx"
+                          }
+                        }
+                      }
+                    },
+                    "sip_group": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "The ID of the SIP group. For details, see the **Creating SIP groups** section in [Creating a shared directory of external contacts](https://support.zoom.us/hc/en-us/articles/360037050092-Creating-a-shared-directory-of-external-contacts).",
+                          "example": "vZWksdNbRkKTdzOth09skw"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "The SIP group display name",
+                          "example": "Sip 01"
+                        }
+                      }
+                    },
+                    "location": {
+                      "type": "object",
+                      "properties": {
+                        "country": {
+                          "type": "string",
+                          "description": "The name of the country.",
+                          "example": "United States"
+                        },
+                        "city": {
+                          "type": "string",
+                          "description": "The phone number's city location.",
+                          "example": "San Jose"
+                        },
+                        "state": {
+                          "type": "string",
+                          "description": "The state or province name.",
+                          "example": "California"
+                        }
+                      },
+                      "description": "The phone number area."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  Lack of valid authentication \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  The phone number not found \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ContactCenterMgt:Edit",
+            "PbxAdmin:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:numbers:master"
+          ]
+        }
+      },
+      "patch": {
+        "tags": [
+          "Phone Numbers"
+        ],
+        "summary": "Update a phone number",
+        "description": "Updates a phone number's information.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "updatePhoneNumberDetail",
+        "parameters": [
+          {
+            "name": "phoneNumberId",
+            "in": "path",
+            "description": "The unique identifier for the phone number retrieved from the List Phone Numbers API.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tDiG8cmnQmCaMRqbZ730Cw"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "display_name": {
+                    "type": "string",
+                    "description": "Zoom Phone numbers use a phone number display name with a limit of 32 characters or fewer.",
+                    "example": "Bob"
+                  },
+                  "caller_id_name": {
+                    "type": "string",
+                    "description": "The caller ID name has 15 characters or fewer, and should have at least one alpha character. The Contact Center supports only US/CA Virtual Service numbers.",
+                    "example": "Alice"
+                  },
+                  "confirm_address_update": {
+                    "type": "boolean",
+                    "description": "Whether to confirm the emergency address update for Zoom Phone BYOC Premises numbers.",
+                    "example": true
+                  },
+                  "sip_group_id": {
+                    "type": "string",
+                    "description": "This field retrieves the SIP group ID from the List Sip Group API for use with BYOC Premise phone numbers.",
+                    "example": "ybFTE3KXRIC7vJ8kOdmjWg"
+                  },
+                  "capability": {
+                    "type": "object",
+                    "properties": {
+                      "incoming": {
+                        "type": "boolean",
+                        "description": "A value of true enables the capability. A value of false disables it.",
+                        "example": true
+                      },
+                      "outgoing": {
+                        "type": "boolean",
+                        "description": "A value of true enables the capability. A value of false disables it.",
+                        "example": false
+                      }
+                    },
+                    "description": "Applicable for Zoom Phone numbers."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Succeed to update the phone number"
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  Invalid parameter or operation \n\n **Error Code:** `999` <br>\n Invalid Field <br>\n**Error Code:** `100001` <br>\n Sip Group not found <br>\n**Error Code:** `200001` <br>\n The capability cannot be updated <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  Lack of valid authentication \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  Phone number not found \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Edit",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:update:numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/plan": {
+      "get": {
+        "tags": [
+          "Phone Plan"
+        ],
+        "summary": "List phone number plan information",
+        "description": "Retrieves an account's  phone number plan information, phone number usage, and availability.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:numbers_plan:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "Listphonenumberplaninformation",
+        "parameters": [
+          {
+            "name": "product",
+            "in": "query",
+            "description": "The product (e.g., ZOOM_PHONE).",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "ZOOM_PHONE",
+              "enum": [
+                "ZOOM_PHONE",
+                "ZOOM_CONTACT_CENTER"
+              ]
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "maximum": 200,
+              "type": "integer",
+              "example": 30,
+              "default": 30
+            }
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "zi4JE9iWsGMZ92F9xhnlcZRxl2Fh47qio02"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The phone number plan usage information.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "zi4JE9iWsGMZ92F9xhnlcZRxl2Fh47qio02"
+                    },
+                    "page_size": {
+                      "type": "integer",
+                      "description": "The page size in use.",
+                      "example": 100
+                    },
+                    "plans": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "assigned": {
+                            "type": "integer",
+                            "description": "The total number of phone number plans.",
+                            "example": 10
+                          },
+                          "available": {
+                            "type": "integer",
+                            "description": "The remaining number of phone number plans to assign.",
+                            "example": 10
+                          },
+                          "subscribed": {
+                            "type": "integer",
+                            "description": "The total number of phone number plan subscriptions bought.",
+                            "example": 20
+                          },
+                          "name": {
+                            "type": "string",
+                            "description": "The name of the phone number plan.",
+                            "example": "US/CA Included Phone Numbers"
+                          },
+                          "is_unlimited": {
+                            "type": "boolean",
+                            "description": "If the plan is unlimited, the value is true; any other value indicates a limited plan.",
+                            "example": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `999` <br>\n Invalid param (product) <br>\n**Error Code:** `1002006` <br>\n product cannot be empty <br>\n**Error Code:** `1003100` <br>\n The next page token is either invalid or has expired <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  Lack of valid authentication \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Read",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:numbers_plan:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sms_campaigns": {
+      "get": {
+        "tags": [
+          "SMS Campaigns"
+        ],
+        "summary": "List SMS campaigns",
+        "description": "Returns a list of all SMS campaigns in a Zoom account.\n\n\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_sms_campaigns:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "listAccountSMSCampaigns",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "maximum": 300,
+              "type": "integer",
+              "example": 30,
+              "default": 30
+            }
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**  \n \nSMS campaign listed successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "bkOcmnm6mn6ioYAi10BcgRiEL38WzAo6jP2"
+                    },
+                    "page_size": {
+                      "type": "integer",
+                      "description": "The number of records returned within a single API call.",
+                      "example": 30
+                    },
+                    "sms_campaigns": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sms_campaign_id": {
+                            "type": "string",
+                            "description": "The campaign's ID.",
+                            "example": "C-BlVwSdjvS3WXk5gzfIQFfQ"
+                          },
+                          "display_name": {
+                            "type": "string",
+                            "description": "The display name for the SMS campaign.",
+                            "example": "Test SMS Campaign"
+                          },
+                          "status": {
+                            "type": "string",
+                            "description": "The status of the SMS campaign.",
+                            "example": "active",
+                            "enum": [
+                              "active",
+                              "expired",
+                              "pending",
+                              "declined"
+                            ]
+                          },
+                          "brand": {
+                            "type": "object",
+                            "properties": {
+                              "brand_id": {
+                                "type": "string",
+                                "description": "The brand's ID.",
+                                "example": "B-c3AN66d_Q4mrQFNUaW-G2w"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The brand's name.",
+                                "example": "Test Campaign"
+                              }
+                            },
+                            "description": "The business information from Zoom account."
+                          }
+                        }
+                      }
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The total number of records returned.",
+                      "example": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n "
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:list_sms_campaigns:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sms_campaigns/{smsCampaignId}": {
+      "get": {
+        "tags": [
+          "SMS Campaigns"
+        ],
+        "summary": "Get an SMS campaign",
+        "description": "Returns a specific SMS campaign.\n\n**Prerequisites** \n* A Pro or higher account plan \n* A Zoom Phone license\n\n\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:sms_campaign:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "GetSMSCampaign",
+        "parameters": [
+          {
+            "name": "smsCampaignId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**  \n \nSMS campaign details retrieved successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sms_campaign_id": {
+                      "type": "string",
+                      "description": "The campaign's ID.",
+                      "example": "C-BlVwSdjvS3WXk5gzfIQFfQ"
+                    },
+                    "display_name": {
+                      "type": "string",
+                      "description": "The display name for the SMS campaign.",
+                      "example": "Test SMS Campaign"
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "The status of the SMS campaign. Returns `--` if the campaign is in an exception status.",
+                      "example": "active",
+                      "enum": [
+                        "active",
+                        "expired",
+                        "pending",
+                        "declined"
+                      ]
+                    },
+                    "service_type": {
+                      "type": "string",
+                      "description": "Which service the campaign supports.",
+                      "example": "zoomPhone",
+                      "enum": [
+                        "zoomPhone",
+                        "contactCenter"
+                      ]
+                    },
+                    "brand": {
+                      "type": "object",
+                      "properties": {
+                        "brand_id": {
+                          "type": "string",
+                          "description": "The brand's ID.",
+                          "example": "B-c3AN66d_Q4mrQFNUaW-G2w"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "The brand's name.",
+                          "example": "Test Campaign"
+                        }
+                      },
+                      "description": "The business information from Zoom account."
+                    },
+                    "phone_numbers": {
+                      "type": "array",
+                      "description": "The assigned phone numbers.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "phone_number_id": {
+                            "type": "string",
+                            "description": "The phone number's ID.",
+                            "example": "iHE1MQAET2iV85MbfaQmwg"
+                          },
+                          "number": {
+                            "type": "string",
+                            "description": "The phone number that is assigned to the SMS campaign.",
+                            "example": "+18887193005"
+                          }
+                        }
+                      }
+                    },
+                    "response_to_opt_in": {
+                      "type": "string",
+                      "description": "Automatic reply text message after receiving opt in message.",
+                      "example": "ZOOM: Thank you for opting in for our texting notifications. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, Reply with STOP. Reply with HELP for more information."
+                    },
+                    "response_to_opt_out": {
+                      "type": "string",
+                      "description": "Automatic reply text message after receiving opt out message.",
+                      "example": "You are unsubscribed to texts from ZOOM. No more messages will be sent."
+                    },
+                    "response_to_help": {
+                      "type": "string",
+                      "description": "Automatic reply text message after receiving help message.",
+                      "example": "ZOOM: You can get more assistance by visiting https://zoom.us/. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n "
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  Invalid campaign ID. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:sms_campaign:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sms_campaigns/{smsCampaignId}/phone_numbers": {
+      "post": {
+        "tags": [
+          "SMS Campaigns"
+        ],
+        "summary": "Assign a phone number to SMS campaign",
+        "description": "[Assigns a phone number to the SMS campaign](https://support.zoom.us/hc/en-us/articles/5016496738445-SMS-MMS-10DLC-Compliance-for-Zoom-Phone-and-Zoom-Contact-Center#h_01FYVVQM1WMW5JD48YNY3J581B).\n\n**Prerequisites** \n* A Business or Enterprise account \n* A Zoom Phone license\n\n\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "assignCampaignPhoneNumbers",
+        "parameters": [
+          {
+            "name": "smsCampaignId",
+            "in": "path",
+            "description": "The unique identifier of the campaign to which the phone number will be assigned.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "C-BlVwSdjvS3WXk5gzfIQFfQ"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The phone number ID in the request body.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "contact_number",
+                  "loa_authorizing_person",
+                  "phone_number_ids",
+                  "title"
+                ],
+                "type": "object",
+                "properties": {
+                  "phone_number_ids": {
+                    "maxItems": 200,
+                    "type": "array",
+                    "description": "The maximum value is 200.",
+                    "items": {
+                      "type": "string",
+                      "example": "0kB2qDoSRMqzJti7VmNTIA"
+                    }
+                  },
+                  "loa_authorizing_person": {
+                    "type": "string",
+                    "description": "The name of the employee issuing the letter of authorization required to port in SMS capabilities on the numbers.",
+                    "example": "Alex Carter"
+                  },
+                  "contact_number": {
+                    "type": "string",
+                    "description": "The contact phone number of the employee issuing the letter of authorization required to port in SMS capabilities on the numbers.",
+                    "example": "+12090000000"
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "The job title of the person authorizing and signing the leave of absence.",
+                    "example": "Zoom Engineer"
+                  },
+                  "contact_emails": {
+                    "type": "string",
+                    "description": "The contact email of the employee issuing the letter of authorization required to port in SMS capabilities on the numbers.",
+                    "example": "alex.carter@zoom.us"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "**HTTP Status Code:** `201`   \n \nPhone numbers assigned successfully. \n"
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1003004` <br>\n Insufficient campaign capacity. <br>\n**Error Code:** `1003` <br>\n Too many numbers, should less than 200 <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  Invalid campaign ID. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Edit",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:update:numbers:master"
+          ]
+        }
+      },
+      "delete": {
+        "tags": [
+          "SMS Campaigns"
+        ],
+        "summary": "Unassign phone number from SMS campaign",
+        "description": "[Unassigns a phone number from an SMS campaign](https://support.zoom.us/hc/en-us/articles/5016496738445-SMS-MMS-10DLC-Compliance-for-Zoom-Phone-and-Zoom-Contact-Center#h_01FYVVSPVM8MZN4Y9EW5690QHH).\n\n\n**Prerequisites:** \n* A Business or Enterprise account \n* A Zoom Phone license \n* The campaign must have been previously assigned a Zoom Phone number\n\n\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "unassignCampaignPhoneNumber",
+        "parameters": [
+          {
+            "name": "smsCampaignId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "phone_number_ids",
+            "in": "query",
+            "description": "A list of phone numbers to unassign from the SMS campaign.",
+            "required": true,
+            "schema": {
+              "maxItems": 200,
+              "type": "array",
+              "example": [
+                "iHE1MQAET2iV85MbfaQmwg",
+                "vZWksdNbRkKTdzOth09skw"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "**HTTP Status Code:** `204`\nThe phone number has been unassigned successfully."
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1003` <br>\n Too many numbers, should less than 200 <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  Invalid campaign ID. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Edit",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:update:numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sms_consent": {
+      "get": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "List SMS consent policies",
+        "description": "Returns a paginated list of SMS consent policies for the account.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:sms_consent:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`",
+        "operationId": "ListSMSConsents",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "maximum": 300,
+              "minimum": 1,
+              "type": "integer",
+              "example": 30
+            },
+            "example": 30
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token is used to paginate through large result sets. A next page token will be returned whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**  \n \nSMS consent policies retrieved successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "page_size": {
+                      "type": "integer",
+                      "description": "The number of records returned within a single API call.",
+                      "example": 30
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The total number of records found.",
+                      "format": "int64",
+                      "example": 33
+                    },
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token is used to paginate through large result sets. A next page token will be returned whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "bkOcmnm6mn6ioYAi10BcgRiEL38WzAo6jP2"
+                    },
+                    "sms_consent": {
+                      "type": "array",
+                      "description": "List of SMS consent policies.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "consent_id": {
+                            "type": "string",
+                            "description": "The consent policy's ID.",
+                            "example": "C-91H30r6xTCCpt8nNFSuhWA"
+                          },
+                          "consent_name": {
+                            "type": "string",
+                            "description": "The name of the SMS consent policy.",
+                            "example": "ZPconsent"
+                          },
+                          "description": {
+                            "type": "string",
+                            "description": "The description of the SMS consent policy.",
+                            "example": "This consent will be used by our employees to schedule events, provide reminders and support to our customers."
+                          },
+                          "account_id": {
+                            "type": "string",
+                            "description": "The account ID that owns the consent policy.",
+                            "example": "KGzOF3hCTamb_Xx-bXbgqA"
+                          },
+                          "in_out_bound": {
+                            "type": "object",
+                            "properties": {
+                              "opt_in_message": {
+                                "type": "object",
+                                "properties": {
+                                  "prompt": {
+                                    "type": "string",
+                                    "description": "The prompt message sent to users to opt-in for SMS messages.",
+                                    "example": "Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information."
+                                  },
+                                  "keywords": {
+                                    "type": "array",
+                                    "description": "The keywords that trigger the opt-in action.",
+                                    "example": [
+                                      "START",
+                                      "keyword"
+                                    ],
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "confirmation_message": {
+                                    "type": "string",
+                                    "description": "The confirmation message sent after a successful opt-in.",
+                                    "example": "You're subscribed!"
+                                  }
+                                },
+                                "description": "The message configuration for opt-in"
+                              },
+                              "opt_out_message": {
+                                "type": "object",
+                                "properties": {
+                                  "message": {
+                                    "type": "string",
+                                    "description": "The message sent to users when they opt-out.",
+                                    "example": "You are unsubscribed to texts from ZOOM. No more messages will be sent."
+                                  },
+                                  "keywords": {
+                                    "type": "array",
+                                    "description": "The keywords that trigger the opt-out action.",
+                                    "example": [
+                                      "Stop",
+                                      "keyword"
+                                    ],
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "description": "The message configuration for opt-out"
+                              },
+                              "help_message": {
+                                "type": "object",
+                                "properties": {
+                                  "message": {
+                                    "type": "string",
+                                    "description": "The help message sent to users when they request help.",
+                                    "example": "ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website."
+                                  },
+                                  "keywords": {
+                                    "type": "array",
+                                    "description": "The keywords that trigger the help message.",
+                                    "example": [
+                                      "HELP",
+                                      "keyword"
+                                    ],
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "description": "The message configuration for help"
+                              },
+                              "disclaimer": {
+                                "type": "object",
+                                "properties": {
+                                  "message": {
+                                    "type": "string",
+                                    "description": "The disclaimer message text.",
+                                    "example": "disclaimer"
+                                  },
+                                  "enable": {
+                                    "type": "boolean",
+                                    "description": "Whether the disclaimer is enabled.",
+                                    "example": true
+                                  }
+                                },
+                                "description": "The message configuration for disclaimer"
+                              }
+                            },
+                            "description": "The message configuration for opt-in, opt-out, help, and disclaimer messages."
+                          },
+                          "status": {
+                            "type": "boolean",
+                            "description": "The status of the consent policy. `true` indicates active, `false` indicates inactive.",
+                            "example": true
+                          },
+                          "create_time": {
+                            "type": "string",
+                            "description": "The time when the consent policy was created.",
+                            "format": "date-time",
+                            "example": "2024-06-01T08:55:38Z"
+                          },
+                          "modify_time": {
+                            "type": "string",
+                            "description": "The time when the consent policy was last modified.",
+                            "format": "date-time",
+                            "example": "2025-09-19T11:20:59Z"
+                          },
+                          "used_number": {
+                            "type": "integer",
+                            "description": "The number of phone numbers currently assigned to this consent policy.",
+                            "format": "int64",
+                            "example": 48
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:sms_consent:master"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "Create an SMS consent policy",
+        "description": "Creates a new SMS consent management policy to define opt-in, opt-out, and help message configurations for SMS communications.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:sms_consent:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "CreateSMSConsent",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "consent_name",
+                  "in_out_bound",
+                  "status"
+                ],
+                "type": "object",
+                "properties": {
+                  "consent_name": {
+                    "maxLength": 255,
+                    "type": "string",
+                    "description": "The SMS consent policy's name.",
+                    "example": "ZPconsent"
+                  },
+                  "description": {
+                    "maxLength": 4096,
+                    "type": "string",
+                    "description": "The SMS consent policy's description.",
+                    "example": "This consent will be used by our employees to schedule events, and provide reminders and support to our customers."
+                  },
+                  "in_out_bound": {
+                    "required": [
+                      "disclaimer",
+                      "help_message",
+                      "opt_in_message",
+                      "opt_out_message"
+                    ],
+                    "type": "object",
+                    "properties": {
+                      "opt_in_message": {
+                        "required": [
+                          "confirmation_message",
+                          "keywords",
+                          "prompt"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "prompt": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The prompt message sent to users to opt-in for SMS messages.",
+                            "example": "Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information."
+                          },
+                          "keywords": {
+                            "type": "array",
+                            "description": "The keywords that trigger the opt-in action.",
+                            "example": [
+                              "START",
+                              "keyword"
+                            ],
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "confirmation_message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The confirmation message sent after a successful opt-in.",
+                            "example": "You're subscribed!"
+                          }
+                        },
+                        "description": "The opt-in message configuration."
+                      },
+                      "opt_out_message": {
+                        "required": [
+                          "keywords",
+                          "message"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The message sent to users when they opt out.",
+                            "example": "You are unsubscribed to texts from ZOOM. No more messages will be sent."
+                          },
+                          "keywords": {
+                            "type": "array",
+                            "description": "The keywords that trigger the opt out action.",
+                            "example": [
+                              "Stop",
+                              "keyword"
+                            ],
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "description": "The opt out message configuration."
+                      },
+                      "help_message": {
+                        "required": [
+                          "keywords",
+                          "message"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The help message sent to users when they request help.",
+                            "example": "ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website."
+                          },
+                          "keywords": {
+                            "type": "array",
+                            "description": "The keywords that trigger the help message.",
+                            "example": [
+                              "HELP",
+                              "keyword"
+                            ],
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "description": "The help message configuration."
+                      },
+                      "disclaimer": {
+                        "required": [
+                          "enable",
+                          "message"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The disclaimer message text.",
+                            "example": "disclaimer"
+                          },
+                          "enable": {
+                            "type": "boolean",
+                            "description": "Whether the disclaimer is enabled.",
+                            "example": true
+                          }
+                        },
+                        "description": "The disclaimer message configuration."
+                      }
+                    },
+                    "description": "The message configuration for opt-in, opt-out, help, and disclaimer messages."
+                  },
+                  "status": {
+                    "type": "boolean",
+                    "description": "The status of the consent policy. `true` indicates active, `false` indicates inactive.",
+                    "example": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "**HTTP Status Code:** `201` **Created**  \n \nSMS consent policy created successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "consent_id": {
+                      "type": "string",
+                      "description": "The consent policy's ID.",
+                      "example": "C-91H30r6xTCCpt8nNFSuhWA"
+                    },
+                    "consent_name": {
+                      "type": "string",
+                      "description": "The SMS consent policy's name.",
+                      "example": "ZPconsent"
+                    },
+                    "description": {
+                      "type": "string",
+                      "description": "The SMS consent policy's description.",
+                      "example": "This consent will be used by our employees to schedule events, provide reminders and support to our customers."
+                    },
+                    "user_id": {
+                      "type": "string",
+                      "description": "The ID of the user who created the consent policy.",
+                      "example": "0GVPDRXiSAaDb73-e2tW0A"
+                    },
+                    "account_id": {
+                      "type": "string",
+                      "description": "The account ID that owns the consent policy.",
+                      "example": "KGzOF3hCTamb_Xx-bXbgqA"
+                    },
+                    "in_out_bound": {
+                      "type": "object",
+                      "properties": {
+                        "opt_in_message": {
+                          "type": "object",
+                          "properties": {
+                            "prompt": {
+                              "type": "string",
+                              "description": "The prompt message sent to users to opt in for SMS messages.",
+                              "example": "Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information."
+                            },
+                            "keywords": {
+                              "type": "array",
+                              "description": "The keywords that trigger the opt in action.",
+                              "example": [
+                                "START",
+                                "keyword"
+                              ],
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "confirmation_message": {
+                              "type": "string",
+                              "description": "The confirmation message sent after a successful opt in.",
+                              "example": "You're subscribed!"
+                            }
+                          }
+                        },
+                        "opt_out_message": {
+                          "type": "object",
+                          "properties": {
+                            "message": {
+                              "type": "string",
+                              "description": "The message sent to users when they opt out.",
+                              "example": "You are unsubscribed to texts from ZOOM. No more messages will be sent."
+                            },
+                            "keywords": {
+                              "type": "array",
+                              "description": "The keywords that trigger the opt-out action.",
+                              "example": [
+                                "Stop",
+                                "keyword"
+                              ],
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "help_message": {
+                          "type": "object",
+                          "properties": {
+                            "message": {
+                              "type": "string",
+                              "description": "The help message sent to users when they request help.",
+                              "example": "ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website."
+                            },
+                            "keywords": {
+                              "type": "array",
+                              "description": "The keywords that trigger the help message.",
+                              "example": [
+                                "HELP",
+                                "keyword"
+                              ],
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "disclaimer": {
+                          "type": "object",
+                          "properties": {
+                            "message": {
+                              "type": "string",
+                              "description": "The disclaimer message text.",
+                              "example": "disclaimer"
+                            },
+                            "enable": {
+                              "type": "boolean",
+                              "description": "Whether the disclaimer is enabled.",
+                              "example": true
+                            }
+                          }
+                        }
+                      },
+                      "description": "The message configuration for opt-in, opt-out, help, and disclaimer messages."
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "The consent policy's status. `true` indicates active, `false` indicates inactive.",
+                      "example": true
+                    },
+                    "capacity": {
+                      "type": "integer",
+                      "description": "The maximum number of phone numbers that can be assigned to this consent policy.",
+                      "format": "int64",
+                      "example": 999
+                    },
+                    "create_time": {
+                      "type": "string",
+                      "description": "The time when the consent policy was created.",
+                      "format": "date-time",
+                      "example": "2024-06-01T08:55:38Z"
+                    },
+                    "modify_time": {
+                      "type": "string",
+                      "description": "The time when the consent policy was last modified.",
+                      "format": "date-time",
+                      "example": "2025-09-19T11:20:59Z"
+                    },
+                    "used_number": {
+                      "type": "integer",
+                      "description": "The number of phone numbers currently assigned to this consent policy.",
+                      "format": "int64",
+                      "example": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `999` <br>\n Invalid field. <br>\n**Error Code:** `1002` <br>\n The request body format does not match, please refer to the document <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:write:sms_consent:master"
+          ]
+        }
+      },
+      "delete": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "Delete SMS consent policies",
+        "description": "Deletes one or more SMS consent policies.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:delete:sms_consent:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`",
+        "operationId": "DeleteSMSConsents",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "consent_ids"
+                ],
+                "type": "object",
+                "properties": {
+                  "consent_ids": {
+                    "minItems": 1,
+                    "type": "array",
+                    "description": "The list of consent policy IDs to delete.",
+                    "example": [
+                      "-6QPOIFtSU-wjt2Kl2TUng",
+                      "-72t1AufQ5mqjg44xzfcCQ"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "**HTTP Status Code:** `204` **No Content**  \n \nSMS consent policies deleted successfully."
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `999` <br>\n Invalid field. <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:delete:sms_consent:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sms_consent/{consentId}": {
+      "get": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "Get an SMS consent policy",
+        "description": "Returns a specific SMS consent policy by ID.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:sms_consent:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "GetSMSConsent",
+        "parameters": [
+          {
+            "name": "consentId",
+            "in": "path",
+            "description": "The consent policy's ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "fnzfuEgUT0OrmZeJBUyWrQ"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**  \n \nSMS consent policy details retrieved successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "consent_id": {
+                      "type": "string",
+                      "description": "The consent policy's ID.",
+                      "example": "C-91H30r6xTCCpt8nNFSuhWA"
+                    },
+                    "consent_name": {
+                      "type": "string",
+                      "description": "The name of the SMS consent policy.",
+                      "example": "ZPconsent"
+                    },
+                    "description": {
+                      "type": "string",
+                      "description": "The description of the SMS consent policy.",
+                      "example": "This consent will be used by our employees to schedule events, provide reminders and support to our customers."
+                    },
+                    "user_id": {
+                      "type": "string",
+                      "description": "The ID of the user who created the consent policy.",
+                      "example": "0GVPDRXiSAaDb73-e2tW0A"
+                    },
+                    "account_id": {
+                      "type": "string",
+                      "description": "The account ID that owns the consent policy.",
+                      "example": "KGzOF3hCTamb_Xx-bXbgqA"
+                    },
+                    "in_out_bound": {
+                      "type": "object",
+                      "properties": {
+                        "opt_in_message": {
+                          "type": "object",
+                          "properties": {
+                            "prompt": {
+                              "type": "string",
+                              "description": "The prompt message sent to users to opt-in for SMS messages.",
+                              "example": "Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information."
+                            },
+                            "keywords": {
+                              "type": "array",
+                              "description": "The keywords that trigger the opt-in action.",
+                              "example": [
+                                "START",
+                                "keyword"
+                              ],
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "confirmation_message": {
+                              "type": "string",
+                              "description": "The confirmation message sent after a successful opt-in.",
+                              "example": "You're subscribed!"
+                            }
+                          },
+                          "description": "The message configuration for opt-in"
+                        },
+                        "opt_out_message": {
+                          "type": "object",
+                          "properties": {
+                            "message": {
+                              "type": "string",
+                              "description": "The message sent to users when they opt-out.",
+                              "example": "You are unsubscribed to texts from ZOOM. No more messages will be sent."
+                            },
+                            "keywords": {
+                              "type": "array",
+                              "description": "The keywords that trigger the opt-out action.",
+                              "example": [
+                                "Stop",
+                                "keyword"
+                              ],
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "description": "The message configuration for opt-out"
+                        },
+                        "help_message": {
+                          "type": "object",
+                          "properties": {
+                            "message": {
+                              "type": "string",
+                              "description": "The help message sent to users when they request help.",
+                              "example": "ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website."
+                            },
+                            "keywords": {
+                              "type": "array",
+                              "description": "The keywords that trigger the help message.",
+                              "example": [
+                                "HELP",
+                                "keyword"
+                              ],
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "description": "The message configuration for help"
+                        },
+                        "disclaimer": {
+                          "type": "object",
+                          "properties": {
+                            "message": {
+                              "type": "string",
+                              "description": "The disclaimer message text.",
+                              "example": "disclaimer"
+                            },
+                            "enable": {
+                              "type": "boolean",
+                              "description": "Whether the disclaimer is enabled.",
+                              "example": true
+                            }
+                          },
+                          "description": "The message configuration for disclaimer"
+                        }
+                      },
+                      "description": "The message configuration for opt-in, opt-out, help, and disclaimer messages."
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "The status of the consent policy. `true` indicates active, `false` indicates inactive.",
+                      "example": true
+                    },
+                    "capacity": {
+                      "type": "integer",
+                      "description": "The maximum number of phone numbers that can be assigned to this consent policy.",
+                      "format": "int64",
+                      "example": 999
+                    },
+                    "create_time": {
+                      "type": "string",
+                      "description": "The time when the consent policy was created.",
+                      "format": "date-time",
+                      "example": "2024-06-01T08:55:38Z"
+                    },
+                    "modify_time": {
+                      "type": "string",
+                      "description": "The time when the consent policy was last modified.",
+                      "format": "date-time",
+                      "example": "2025-09-19T11:20:59Z"
+                    },
+                    "used_number": {
+                      "type": "integer",
+                      "description": "The number of phone numbers currently assigned to this consent policy.",
+                      "format": "int64",
+                      "example": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  \n\n **Error Code:** `1002013` <br>\n The consent does not exist. <br>\n"
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:sms_consent:master"
+          ]
+        }
+      },
+      "patch": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "Update an SMS consent policy",
+        "description": "Update an existing SMS consent policy. Only provided fields will be updated.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:sms_consent:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "UpdateSMSConsent",
+        "parameters": [
+          {
+            "name": "consentId",
+            "in": "path",
+            "description": "The consent policy's ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "fnzfuEgUT0OrmZeJBUyWrQ"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "consent_name": {
+                    "maxLength": 255,
+                    "type": "string",
+                    "description": "The SMS consent policy's name.",
+                    "example": "ZPconsent Updated"
+                  },
+                  "description": {
+                    "maxLength": 4096,
+                    "type": "string",
+                    "description": "The SMS consent policy's description.",
+                    "example": "Updated description for the consent policy."
+                  },
+                  "in_out_bound": {
+                    "type": "object",
+                    "properties": {
+                      "opt_in_message": {
+                        "type": "object",
+                        "properties": {
+                          "prompt": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The prompt message sent to users to opt-in for SMS messages.",
+                            "example": "Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information."
+                          },
+                          "keywords": {
+                            "type": "array",
+                            "description": "The keywords that trigger the opt-in action.",
+                            "example": [
+                              "START",
+                              "keyword"
+                            ],
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "confirmation_message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The confirmation message sent after a successful opt-in.",
+                            "example": "You're subscribed!"
+                          }
+                        },
+                        "description": "The opt-in message configuration."
+                      },
+                      "opt_out_message": {
+                        "type": "object",
+                        "properties": {
+                          "message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The message sent to users when they opt out.",
+                            "example": "You are unsubscribed to texts from ZOOM. No more messages will be sent."
+                          },
+                          "keywords": {
+                            "type": "array",
+                            "description": "The keywords that trigger the opt out action.",
+                            "example": [
+                              "Stop",
+                              "keyword"
+                            ],
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "description": "The opt out message configuration."
+                      },
+                      "help_message": {
+                        "type": "object",
+                        "properties": {
+                          "message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The help message sent to users when they request help.",
+                            "example": "ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website."
+                          },
+                          "keywords": {
+                            "type": "array",
+                            "description": "The keywords that trigger the help message.",
+                            "example": [
+                              "HELP",
+                              "keyword"
+                            ],
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "description": "The help message configuration."
+                      },
+                      "disclaimer": {
+                        "type": "object",
+                        "properties": {
+                          "message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The disclaimer message text.",
+                            "example": "disclaimer"
+                          },
+                          "enable": {
+                            "type": "boolean",
+                            "description": "Whether the disclaimer is enabled.",
+                            "example": true
+                          }
+                        },
+                        "description": "The disclaimer message configuration."
+                      }
+                    },
+                    "description": "The message configuration for opt-in, opt-out, help, and disclaimer messages."
+                  },
+                  "status": {
+                    "type": "boolean",
+                    "description": "The consent policy's status. `true` indicates active, `false` indicates inactive.",
+                    "example": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "**HTTP Status Code:** `204` **No Content**  \n \nSMS consent policy updated successfully."
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `999` <br>\n Invalid field. <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  \n\n **Error Code:** `1002013` <br>\n The consent does not exist. <br>\n"
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:update:sms_consent:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sms_consent/{consentId}/phone_numbers": {
+      "get": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "List phone numbers assigned to SMS consent policy",
+        "description": "Returns a paginated list of phone numbers assigned to a specific SMS consent policy.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:sms_consent:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`",
+        "operationId": "ListConsentPhoneNumbers",
+        "parameters": [
+          {
+            "name": "consentId",
+            "in": "path",
+            "description": "The consent policy's ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "fnzfuEgUT0OrmZeJBUyWrQ"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "maximum": 300,
+              "minimum": 1,
+              "type": "integer",
+              "example": 30
+            },
+            "example": 30
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "Use the next page token to paginate through large result sets. A next page token is returned whenever the set of available results exceeds the current page size. This token's expiration period is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**  \n \nPhone numbers retrieved successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "page_size": {
+                      "type": "integer",
+                      "description": "The number of records returned within a single API call.",
+                      "example": 30
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The total number of records found.",
+                      "format": "int64",
+                      "example": 33
+                    },
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "Use the next page token to paginate through large result sets. A next page token is returned whenever the set of available results exceeds the current page size. This token's expiration period is 15 minutes.",
+                      "example": "bkOcmnm6mn6ioYAi10BcgRiEL38WzAo6jP2"
+                    },
+                    "sms_consent_number": {
+                      "type": "array",
+                      "description": "List of phone numbers assigned to the consent policy.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "phone_number_id": {
+                            "type": "string",
+                            "description": "The phone number's ID.",
+                            "example": "-6QPOIFtSU-wjt2Kl2TUng"
+                          },
+                          "phone_number": {
+                            "type": "string",
+                            "description": "The phone number assigned to the consent policy.",
+                            "example": "+12095805275"
+                          },
+                          "account_id": {
+                            "type": "string",
+                            "description": "The account ID that owns the phone number.",
+                            "example": "KGzOF3hCTamb_Xx-bXbgqA"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  \n\n **Error Code:** `1002013` <br>\n The consent does not exist. <br>\n"
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:sms_consent:master"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "Assign phone numbers to SMS consent policy",
+        "description": "Assigns one or more phone numbers to an SMS consent policy.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`",
+        "operationId": "AssignPhoneNumbersToConsent",
+        "parameters": [
+          {
+            "name": "consentId",
+            "in": "path",
+            "description": "The consent policy's ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "fnzfuEgUT0OrmZeJBUyWrQ"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "phone_number_ids"
+                ],
+                "type": "object",
+                "properties": {
+                  "phone_number_ids": {
+                    "maxItems": 200,
+                    "minItems": 1,
+                    "type": "array",
+                    "description": "The list of phone number IDs to assign to the consent policy.",
+                    "example": [
+                      "-6QPOIFtSU-wjt2Kl2TUng",
+                      "-72t1AufQ5mqjg44xzfcCQ"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "**HTTP Status Code:** `201` **Created**  \n \nPhone numbers assigned successfully."
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1003` <br>\n Too many numbers, should less than 200 <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  \n\n **Error Code:** `1002013` <br>\n The consent does not exist. <br>\n"
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:write:numbers:master"
+          ]
+        }
+      },
+      "delete": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "Unassign phone numbers from SMS consent policy",
+        "description": "Unassigns one or more phone numbers from an SMS consent policy.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:delete:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`",
+        "operationId": "UnassignPhoneNumbersFromConsent",
+        "parameters": [
+          {
+            "name": "consentId",
+            "in": "path",
+            "description": "The consent policy's ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "fnzfuEgUT0OrmZeJBUyWrQ"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "phone_number_ids"
+                ],
+                "type": "object",
+                "properties": {
+                  "phone_number_ids": {
+                    "maxItems": 200,
+                    "minItems": 1,
+                    "type": "array",
+                    "description": "The list of phone number IDs to unassign from the consent policy.",
+                    "example": [
+                      "-6QPOIFtSU-wjt2Kl2TUng",
+                      "-72t1AufQ5mqjg44xzfcCQ"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "**HTTP Status Code:** `204` **No Content**  \n \nPhone numbers unassigned successfully."
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1003` <br>\n Too many numbers, should less than 200 <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  \n\n **Error Code:** `1002013` <br>\n The consent does not exist. <br>\n"
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:delete:numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/ported_numbers/orders": {
+      "get": {
+        "tags": [
+          "Setting"
+        ],
+        "summary": "List ported numbers",
+        "description": "Returns a list of ported numbers in a Zoom account.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_ported_numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "Listportednumbers",
+        "parameters": [
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through large result sets. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "example": 30
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**\n\nPorted Phone numbers listed successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through large result sets. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "R4aF9Oj0fVM2hhezJTEmSKaBSkfesDwGy42"
+                    },
+                    "page_size": {
+                      "type": "integer",
+                      "description": "The number of records returned within a single API call.",
+                      "example": 30
+                    },
+                    "ported_numbers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "numbers": {
+                            "type": "array",
+                            "description": "The ported numbers.",
+                            "items": {
+                              "type": "string",
+                              "example": "+12058945752"
+                            }
+                          },
+                          "order_id": {
+                            "type": "string",
+                            "description": "The ported numbers' order ID.",
+                            "example": "2021080307332974349"
+                          },
+                          "replacing_numbers": {
+                            "type": "array",
+                            "description": "The ported numbers' replacement numbers.",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "source_number": {
+                                  "type": "string",
+                                  "description": "The source number.",
+                                  "example": "+12058945752"
+                                },
+                                "target_number": {
+                                  "type": "string",
+                                  "description": "The replaced number.",
+                                  "example": "+12058945755"
+                                }
+                              }
+                            }
+                          },
+                          "status": {
+                            "type": "string",
+                            "description": "The ported numbers' status.",
+                            "example": "Canceled",
+                            "enum": [
+                              "Not_Submitted",
+                              "Waiting",
+                              "Processing",
+                              "Successfully",
+                              "Rejected",
+                              "Canceled",
+                              "FOC"
+                            ]
+                          },
+                          "submission_date_time": {
+                            "type": "string",
+                            "description": "The time ported numbers were submitted (format: 'yyyy-MM-ddThh:dd:ssZ').",
+                            "example": "2021-08-03T07:33:29Z"
+                          }
+                        }
+                      }
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The total number of records returned.",
+                      "example": 2
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n "
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Read",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:list_ported_numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/ported_numbers/orders/{orderId}": {
+      "get": {
+        "tags": [
+          "Setting"
+        ],
+        "summary": "Get ported numbers details",
+        "description": "Returns the details on the ported numbers by specifying `order_id`. \n\n **Prerequisites** \n * A Pro or higher account plan \n * A Zoom phone license\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:ported_number:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "Getportednumbersdetails",
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "description": "The order ID of the ported numbers. This ID can be retrieved from the List Ported Numbers API.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "2021080307332974349"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**\n\nPorted numbers details retrieved successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "contact_emails": {
+                      "type": "string",
+                      "description": "The contact emails of transferring numbers.",
+                      "example": "example@163.com"
+                    },
+                    "contact_number": {
+                      "type": "string",
+                      "description": "The contact numbers for transferring numbers.",
+                      "example": "2058945753"
+                    },
+                    "isp": {
+                      "type": "string",
+                      "description": "The ported numbers' ISP.",
+                      "example": "Twilio International"
+                    },
+                    "numbers": {
+                      "type": "array",
+                      "description": "The ported numbers.",
+                      "items": {
+                        "type": "string",
+                        "example": "+12058945752"
+                      }
+                    },
+                    "order_id": {
+                      "type": "string",
+                      "description": "The ported numbers' order ID.",
+                      "example": "2021080307332974349"
+                    },
+                    "original_billing_info": {
+                      "type": "object",
+                      "properties": {
+                        "account_number": {
+                          "type": "string",
+                          "example": "111223"
+                        },
+                        "address": {
+                          "type": "object",
+                          "properties": {
+                            "city": {
+                              "type": "string",
+                              "example": "San Jose"
+                            },
+                            "country": {
+                              "type": "string",
+                              "example": "US"
+                            },
+                            "house_number": {
+                              "type": "string",
+                              "example": "55"
+                            },
+                            "state_code": {
+                              "type": "string",
+                              "example": "CA"
+                            },
+                            "street_name": {
+                              "type": "string",
+                              "example": "ALMADEN BLVD"
+                            },
+                            "zip": {
+                              "type": "string",
+                              "example": "95113"
+                            }
+                          }
+                        },
+                        "authorizing_person": {
+                          "type": "string",
+                          "example": "zz"
+                        },
+                        "billing_telephone_number": {
+                          "type": "string",
+                          "example": "2058945751"
+                        },
+                        "company": {
+                          "type": "string",
+                          "example": "zm"
+                        },
+                        "customer_requested_date": {
+                          "type": "string",
+                          "example": "2021-08-06"
+                        },
+                        "pin": {
+                          "type": "string",
+                          "example": "111223"
+                        }
+                      },
+                      "description": "The ported numbers' original billing info."
+                    },
+                    "printed_name": {
+                      "type": "string",
+                      "description": "The printed names on transferring numbers.",
+                      "example": "Jiang"
+                    },
+                    "replacing_numbers": {
+                      "type": "array",
+                      "description": "The ported numbers' replacement numbers.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "source_number": {
+                            "type": "string",
+                            "description": "The source number.",
+                            "example": "+12058945752"
+                          },
+                          "target_number": {
+                            "type": "string",
+                            "description": "The replaced number.",
+                            "example": "+12058945755"
+                          }
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "The ported numbers' status.",
+                      "example": "Canceled",
+                      "enum": [
+                        "Not_Submitted",
+                        "Waiting",
+                        "Processing",
+                        "Successfully",
+                        "Rejected",
+                        "Canceled",
+                        "FOC"
+                      ]
+                    },
+                    "submission_date_time": {
+                      "type": "string",
+                      "description": "The time ported numbers were submitted (format: 'yyyy-MM-ddThh:dd:ssZ').",
+                      "example": "2021-08-03T07:33:29Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `400` <br>\n Port in order does not exist <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Read",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:ported_number:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sip_groups": {
+      "get": {
+        "tags": [
+          "Setting"
+        ],
+        "summary": "List SIP groups",
+        "description": "Returns a list of SIP (Session Initiation Protocol) groups.\n\n**Prerequisites** \n* Pro or a higher account with Zoom Phone license\n* Account owner or admin permissions\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_sip_groups:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "ListSIPgroups",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "example": 30
+            }
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "Fh98ehf98wehf9wehwqk"
+            }
+          },
+          {
+            "name": "allocated_product",
+            "in": "query",
+            "description": "The phone number's allocated product.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "ZOOM_PHONE",
+              "enum": [
+                "ZOOM_PHONE",
+                "ZOOM_CONTACT_CENTER"
+              ]
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200`\n\nSIP groups successfully listed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "IXIhcpJWscHfISSKTcdl2QpSMLyRE38zH92"
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The number of records returned with a single API call.",
+                      "example": 88
+                    },
+                    "sip_groups": {
+                      "maxItems": 300,
+                      "type": "array",
+                      "description": "The SIP group information.",
+                      "items": {
+                        "required": [
+                          "display_name",
+                          "sip_group_id"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "description": {
+                            "type": "string",
+                            "description": "The SIP group's description.",
+                            "example": "test SIP group"
+                          },
+                          "display_name": {
+                            "type": "string",
+                            "description": "The SIP group's display name.",
+                            "example": "RRRR"
+                          },
+                          "sip_group_id": {
+                            "type": "string",
+                            "description": "The SIP group's ID.",
+                            "example": "8MhK7ea4Q4ihIQ4TD_g0kw"
+                          },
+                          "send_sip_group_name": {
+                            "type": "boolean",
+                            "description": "Whether the SIP group's name is sent in the SIP header.",
+                            "example": false
+                          },
+                          "sip_trunk": {
+                            "required": [
+                              "name",
+                              "sip_trunk_id"
+                            ],
+                            "type": "object",
+                            "properties": {
+                              "sip_trunk_id": {
+                                "type": "string",
+                                "description": "The SIP trunk's  ID.",
+                                "example": "VWQU-veBQnm08EtBkUGnbw"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The SIP trunk group's name.",
+                                "example": "TESTAPI01"
+                              },
+                              "type": {
+                                "type": "string",
+                                "description": "The types of SIP trunks",
+                                "example": "BYOC",
+                                "enum": [
+                                  "BYOC",
+                                  "BYOP"
+                                ]
+                              }
+                            },
+                            "description": "The SIP trunk group."
+                          },
+                          "source_system": {
+                            "type": "string",
+                            "description": "The source of BYOC SIP group.",
+                            "example": "ZOOM_PHONE",
+                            "enum": [
+                              "ZOOM_PHONE",
+                              "ZOOM_CONTACT_CENTER",
+                              "COMMON"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1002_006` <br>\n product cannot be empty <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ContactCenterMgt:Edit",
+            "PbxAdmin:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:list_sip_groups:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sip_trunks": {
+      "get": {
+        "tags": [
+          "Setting"
+        ],
+        "summary": "List BYOC SIP trunks",
+        "description": "Returns a list of an account's assigned BYOC (Bring Your Own Carrier) SIP (Session Initiation Protocol) trunks.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_sip_trunks:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "ListBYOCSIPtrunks",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "example": 30
+            }
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "Fh98ehf98wehf9wehlgz"
+            }
+          },
+          {
+            "name": "allocated_product",
+            "in": "query",
+            "description": "The phone number's allocated product\r\n",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "ZOOM_PHONE",
+              "enum": [
+                "ZOOM_PHONE",
+                "ZOOM_CONTACT_CENTER"
+              ]
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Codes**: `200`\n\nOK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "byoc_sip_trunk": {
+                      "maxItems": 300,
+                      "type": "array",
+                      "items": {
+                        "required": [
+                          "name",
+                          "sip_trunk_id"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "carrier": {
+                            "type": "string",
+                            "description": "The name of the carrier.",
+                            "example": "Bandwidth"
+                          },
+                          "carrier_account": {
+                            "type": "string",
+                            "description": "The account associated to the carrier.",
+                            "example": "123123131313"
+                          },
+                          "sip_trunk_id": {
+                            "type": "string",
+                            "description": "The unique SIP Trunk ID.",
+                            "example": "fVA-LsQhQAC2fTS7NiccFA"
+                          },
+                          "name": {
+                            "type": "string",
+                            "description": "The display name of the SIP Trunk.",
+                            "example": "TestSipTrunk"
+                          },
+                          "region": {
+                            "type": "string",
+                            "description": "The region of the carrier.",
+                            "example": "newqa01sipjp01"
+                          },
+                          "sbc_label": {
+                            "type": "string",
+                            "description": "The Session Border Controller (SBC) routing label.",
+                            "example": "Test"
+                          },
+                          "source_system": {
+                            "type": "string",
+                            "description": "The source of BYOC SIP Trunk",
+                            "example": "COMMON",
+                            "enum": [
+                              "COMMON",
+                              "ZOOM_PHONE",
+                              "ZOOM_CONTACT_CENTER"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through a large set of results. It returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "Ds6anZEv59aLMmTSrfF4wmHYCMiYXMWhRQ2"
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The number of records returned within a single API call. The default is **30**, and the maximum is **100**.",
+                      "example": 30,
+                      "default": 30
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1002_006` <br>\n product cannot be empty <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Read",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:list_sip_trunks:master"
+          ]
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "openapi_authorization": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}
+```
+
+## Downloads
+
+### master.json
+```json
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Number Management",
+    "description": "Number Management APIs are part of Zoom's API suite. They let developers manage and provision phone numbers in a Zoom Phone, Contact Center, or Meetings account programmatically. They also help businesses and service providers automate phone number operations at scale.",
+    "termsOfService": "https://zoom.us/docs/en-us/zoom_api_license_and_tou.html",
+    "contact": {
+      "name": "Zoom Developers",
+      "url": "https://developer.zoom.us/"
+    },
+    "version": "2"
+  },
+  "externalDocs": {
+    "description": "Find out more about Swagger",
+    "url": "https://swagger.io"
+  },
+  "servers": [
+    {
+      "url": "https://api.zoom.us/v2"
+    }
+  ],
+  "paths": {
+    "/accounts/{accountId}/number_management/carrier/peering_numbers": {
+      "get": {
+        "tags": [
+          "Cloud Peering Provider Exchange"
+        ],
+        "summary": "List peering phone numbers for provider",
+        "description": "Returns phone numbers the carrier pushes to different customers.\n\n**Prerequisites** \n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_carrier_peering_numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "Listpeeringphonenumbersforprovider",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The total number of records returned from a single API call.",
+            "required": false,
+            "schema": {
+              "maximum": 300,
+              "type": "integer",
+              "format": "int32",
+              "example": 30,
+              "default": 30
+            }
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through a large set of results. A next page token is returned whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2"
+            }
+          },
+          {
+            "name": "phone_number",
+            "in": "query",
+            "description": "The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\n) format.\n\n\n*  If this parameter is not specified, API will return all the phone numbers from the partner. ",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "+18108001001"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**  \n Cloud peering numbers successfully returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through a large set of results. A next page token is returned whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "8X8xSdRVKHsabD6Im4tIPODq6GzDOvV5fO1"
+                    },
+                    "numbers": {
+                      "type": "array",
+                      "description": "The information about the phone numbers pushed by the carrier to different customers.",
+                      "items": {
+                        "required": [
+                          "assigned",
+                          "phone_number",
+                          "sip_trunk_name",
+                          "status"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "customer_account_name": {
+                            "type": "string",
+                            "description": "The customer's account name.",
+                            "example": "Some customer's account name"
+                          },
+                          "customer_account_number": {
+                            "type": "string",
+                            "description": "The customer's account number.",
+                            "example": "Some customer's account number"
+                          },
+                          "assigned": {
+                            "type": "boolean",
+                            "description": "Whether the phone number is assigned:\n* `false` &mdash; Unassigned.\n* `true` &mdash; Assigned.",
+                            "example": true
+                          },
+                          "billing_ref_id": {
+                            "type": "string",
+                            "description": "Partners can specify their billing reference ID, with the maximum length of 36 characters. \n*  Zoom will send back the specified billing_ref_id in the SIP Header X-TO-CARRIER-ACCOUNT for the outbound calls to the provider.",
+                            "example": "Some billing referenceId"
+                          },
+                          "phone_number": {
+                            "type": "string",
+                            "description": "The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164) format.",
+                            "example": "+18108001001"
+                          },
+                          "service_info": {
+                            "type": "string",
+                            "description": "Free form descriptive text of the service associated with the number. This description will be surfaced to Zoom customer viewing the phone number. Partners can include description highlighting the capabilities or limitations associated with the number. The maximum is 255 characters.",
+                            "example": "Some service info"
+                          },
+                          "sip_trunk_name": {
+                            "type": "string",
+                            "description": "This field is a unique name that Zoom assigns for a group of trunks established with the partner during the cloud peering infrastructure setup. A partner with global presence may have one or more SIP trunks to handle calls for phone numbers in different regions.Partner needs to specify the name of the SIP trunk associated with the specified phone number. All calls originating from this number will be routed through the specified SIP Trunk, and Zoom will expect to receive inbound calls through the same trunk.During failure scenarios, calls will be routed via alternate trunks within the same trunk group identified  by the `sip_trunk_name`.",
+                            "example": "test-carrier-sip-trunk"
+                          },
+                          "status": {
+                            "type": "boolean",
+                            "description": "Providers can set the status to indicate whether the phone number is active (true) or inactive (false).  Providers can use inactive (false) state to provision phone numbers that are still in the process of being ported in, and update the status to active (true) when the porting is complete.",
+                            "example": true
+                          }
+                        }
+                      }
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The total number of records returned for this API call.",
+                      "format": "int32",
+                      "example": 20
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1001` <br>\n Carrier not found <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:read:master",
+              "number_management:read:list_carrier_peering_numbers:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ProviderPortal:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:list_carrier_peering_numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/peering_numbers": {
+      "get": {
+        "tags": [
+          "Cloud Peering Reseller"
+        ],
+        "summary": "List peering phone numbers",
+        "description": "Returns the details associated with a specific phone number, or all the phone numbers the partner previously provisioned for the Zoom customer account.\n\n**Prerequisites:** \n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license. \n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_peering_numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "listPeeringPhoneNumbers",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The total number of records returned from a single API call.",
+            "required": false,
+            "schema": {
+              "maximum": 300,
+              "type": "integer",
+              "format": "int32",
+              "example": 30
+            }
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2"
+            }
+          },
+          {
+            "name": "phone_number",
+            "in": "query",
+            "description": "The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\n) format.\n\n\n*  If this parameter is not specified, API will return all the phone numbers previously assigned to the Zoom customer account by the partner. ",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "+12097654882"
+            }
+          },
+          {
+            "name": "carrier_code",
+            "in": "query",
+            "description": "A unique code that Zoom provides to the partner at the time of establishing cloud peering infrastructure. This unique code is also tied to the developer `client ID` included as part of the token\n\nThis parameter is **required** if you do **not** use an OAuth token or the OAuth token does not contain the `clientId`.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "example": 8801
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**&lt;br&gt;Carrier peering numbers successfully returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "8X8xSdRVKHsabD6Im4tIPODq6GzDOvV5fO1"
+                    },
+                    "numbers": {
+                      "type": "array",
+                      "description": "The information about the carrier's phone numbers.",
+                      "items": {
+                        "required": [
+                          "allocated_product",
+                          "assigned",
+                          "phone_number",
+                          "sip_trunk_name",
+                          "status"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "assigned": {
+                            "type": "boolean",
+                            "description": "Whether the phone number is assigned:* `false` &mdash; Unassigned.* `true` &mdash; Assigned.",
+                            "example": true
+                          },
+                          "billing_ref_id": {
+                            "type": "string",
+                            "description": "Partners can specify their billing reference ID, with the maximum length of 36 characters. \n*  Zoom will send back the specified billing_ref_id in the SIP Header X-TO-CARRIER-ACCOUNT for the outbound calls to the provider.",
+                            "example": "Some billing referenceId"
+                          },
+                          "allocated_product": {
+                            "type": "string",
+                            "description": "Partners can allocate phone numbers for exclusive use by a specific Zoom Product (ZOOM_PHONE or ZOOM_CONTACT_CENTER). Partners can also make the Phone Numbers not specific to any product (UNALLOCATED), allowing Zoom customers to freely assign the numbers to any Zoom Product.",
+                            "example": "ZOOM_PHONE",
+                            "enum": [
+                              "UNALLOCATED",
+                              "ZOOM_PHONE",
+                              "ZOOM_CONTACT_CENTER"
+                            ]
+                          },
+                          "phone_number": {
+                            "type": "string",
+                            "description": "The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\n) format.\n",
+                            "example": "+18108001001"
+                          },
+                          "service_info": {
+                            "type": "string",
+                            "description": "Free form descriptive text of the service associated with the number. This description will be surfaced to Zoom customer viewing the phone number. Partners can include description highlighting the capabilities or limitations associated with the number. The maximum is 255 characters.",
+                            "example": "Inbound only number' or 'Metered charges apply"
+                          },
+                          "sip_trunk_name": {
+                            "type": "string",
+                            "description": "This field is a unique name that Zoom assigns for a group of trunks established with the partner during the cloud peering infrastructure setup. A partner with global presence may have one or more SIP trunks to handle calls for phone numbers in different regions.\nPartner needs to specify the name of the SIP trunk associated with the specified phone number. All calls originating from this number will be routed through the specified SIP Trunk, and Zoom will expect to receive inbound calls through the same trunk.\nDuring failure scenarios, calls will be routed via alternate trunks within the same trunk group identified  by the `sip_trunk_name`.",
+                            "example": "test-carrier-sip-trunk"
+                          },
+                          "status": {
+                            "type": "boolean",
+                            "description": "Providers can set the status to indicate whether the phone number is active (true) or inactive (false).  Providers can use inactive (false) state to provision phone numbers that are still in the process of being ported in, and update the status to active (true) when the porting is complete.",
+                            "example": true
+                          }
+                        }
+                      }
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The total number of records returned for this API call.",
+                      "format": "int64",
+                      "example": 20
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1001` <br>\n Carrier not found <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:read:master",
+              "number_management:read:list_peering_numbers:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Read",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:list_peering_numbers:master"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "Cloud Peering Reseller"
+        ],
+        "summary": "Add peering phone numbers",
+        "description": "Allows provider exchange partners to add phone numbers to Zoom account. \n\n**Prerequisites** \n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:peering_number:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "addPeeringPhoneNumbers",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "allocated_product",
+                  "phone_numbers"
+                ],
+                "type": "object",
+                "properties": {
+                  "carrier_code": {
+                    "type": "integer",
+                    "description": "A unique code that Zoom provides to the partner at the time of establishing cloud peering infrastructure. This unique code is also tied to the developer `client ID` included as part of the token\n\nThis parameter is **required** if you do **not** use an OAuth token or the OAuth token does not contain the `clientId`.",
+                    "format": "int32",
+                    "example": 3456
+                  },
+                  "allocated_product": {
+                    "type": "string",
+                    "description": "Partners can allocate phone numbers for exclusive use by a specific Zoom Product (ZOOM_PHONE or ZOOM_CONTACT_CENTER). Partners can also make the phone numbers not specific to any product (UNALLOCATED), allowing Zoom customers to freely assign the numbers to any Zoom Product.",
+                    "example": "ZOOM_PHONE",
+                    "enum": [
+                      "UNALLOCATED",
+                      "ZOOM_PHONE",
+                      "ZOOM_CONTACT_CENTER"
+                    ]
+                  },
+                  "phone_numbers": {
+                    "type": "array",
+                    "description": "The information about the added phone numbers. The maximum value is 200.",
+                    "items": {
+                      "required": [
+                        "phone_number",
+                        "sip_trunk_name",
+                        "status"
+                      ],
+                      "type": "object",
+                      "properties": {
+                        "billing_ref_id": {
+                          "type": "string",
+                          "description": "The partner can specify their billing reference ID, with the maximum length of 36 characters. \n*  Zoom will send back the specified billing_ref_id in the SIP Header X-TO-CARRIER-ACCOUNT for the outbound calls to the provider.",
+                          "example": "Some billing referenceId"
+                        },
+                        "phone_number": {
+                          "type": "string",
+                          "description": "The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\n) format.\n",
+                          "example": "+12097654882"
+                        },
+                        "number_type": {
+                          "type": "string",
+                          "description": "This field enables you to specify if the number is a mobile number.",
+                          "example": "Mobile",
+                          "enum": [
+                            "Mobile"
+                          ]
+                        },
+                        "service_info": {
+                          "type": "string",
+                          "description": "The free form descriptive text of the service associated with the number. This description surfaces to the Zoom customer viewing the phone number. Partners can include description highlighting the capabilities or limitations associated with the number. The maximum is 255 characters.",
+                          "example": "'Inbound only number' or 'Metered charges apply"
+                        },
+                        "sip_trunk_name": {
+                          "type": "string",
+                          "description": "A unique name that Zoom assigns for a group of trunks established with the partner during the cloud peering infrastructure setup. A partner with global presence may have one or more SIP trunks to handle calls for phone numbers in different regions.\nPartner needs to specify the name of the SIP trunk associated with the specified phone number. All calls originating from this number will be routed through the specified SIP trunk, and Zoom will expect to receive inbound calls through the same Trunk.\nDuring failure scenarios, calls will be routed through alternate trunks within the same trunk group identified  by the `sip_trunk_name`.",
+                          "example": "first-markert-carrier-trunk"
+                        },
+                        "status": {
+                          "type": "boolean",
+                          "description": "Providers can set the status to indicate whether the phone number is active (true) or inactive (false).  Providers can use inactive (false) state to provision phone numbers that are still in the process of being ported in, and update the status to active (true) when the porting is complete.",
+                          "example": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "**HTTP Status Code:** `201` **Created**   Peering phone numbers successfully added. "
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  some data failed \n\n **Error Code:** `1000` <br>\n Some data failed.for example:\n[   \n  {\"phoneNumber\":\"+12098888111\",\"reason\":\"Invalid Sip Trunk\"},   \n  {\"phoneNumber\":\"+12090000011\",\"reason\":\"Invalid number\"}\n] <br>\n**Error Code:** `1001` <br>\n Carrier not found <br>\n**Error Code:** `1002` <br>\n Request data cannot be empty <br>\n**Error Code:** `1003` <br>\n Too many numbers, should less than 200 <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:write:master",
+              "number_management:write:peering_number:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ContactCenterMgt:Edit",
+            "PbxAdmin:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:write:peering_number:master"
+          ]
+        }
+      },
+      "delete": {
+        "tags": [
+          "Cloud Peering Reseller"
+        ],
+        "summary": "Remove peering phone numbers",
+        "description": "Removes the phone number from the Zoom customer account. \n\nPartners can remove only the phone numbers they have previously added to Zoom account.\n\n**Prerequisites:** \n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license. \n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:delete:peering_number:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "deletePeeringPhoneNumbers",
+        "parameters": [
+          {
+            "name": "carrier_code",
+            "in": "query",
+            "description": "\nThis is unique code that Zoom provides to the partner at the time of establishing cloud peering infrastructure. This unique code is also tied to the developer `client ID` included as part of the token\n\nThis parameter is **required** if you do **not** use an OAuth token or the OAuth token does not contain the `clientId`.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "example": 8091
+            }
+          },
+          {
+            "name": "phone_numbers",
+            "in": "query",
+            "description": "The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\n) format.\n",
+            "required": true,
+            "schema": {
+              "maxItems": 200,
+              "type": "array",
+              "example": [
+                "+12097865343",
+                "+12097865211"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **Created**   Phone number successfully deleted. "
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  request failed \n\n **Error Code:** `1000` <br>\n Some data failed.\nfor example:\n[\n   {\"phoneNumber\":\"+12098888111\",\"reason\":\"Phone number does not exist\"},\n   {\"phoneNumber\":\"+12090000011\",\"reason\":\"Invalid number\"}\n] <br>\n**Error Code:** `1001` <br>\n Carrier not found <br>\n**Error Code:** `1002` <br>\n Request data cannot be empty <br>\n**Error Code:** `1003` <br>\n Too many numbers, should less than 200 <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:write:master",
+              "number_management:delete:peering_number:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ContactCenterMgt:Edit",
+            "PbxAdmin:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:delete:peering_number:master"
+          ]
+        }
+      },
+      "patch": {
+        "tags": [
+          "Cloud Peering Reseller"
+        ],
+        "summary": "Update peering phone numbers",
+        "description": "Allows partners to update the status or details associated with the phone numbers.\n\n**Prerequisites** \n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license. \n\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:peering_number:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "updatePeeringPhoneNumbers",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "phone_numbers"
+                ],
+                "type": "object",
+                "properties": {
+                  "carrier_code": {
+                    "type": "integer",
+                    "description": "\nA unique code that Zoom provides to the partner at the time of establishing cloud peering infrastructure. This unique code is also tied to the developer `client ID` included as part of the token\n\nThis parameter is **required** if you do **not** use an OAuth token or the OAuth token does not contain the `clientId`.",
+                    "format": "int32",
+                    "example": 3456
+                  },
+                  "allocated_product": {
+                    "type": "string",
+                    "description": "`allocated_product` can only be updated for numbers that were previously set to 'UNALLOCATED'.  To change `allocated_product` value for phone numbers previously allocated to ZOOM_PHONE or ZOOM_CONTACT_CENTER, partners need to remove and reinsert the numbers.",
+                    "example": "ZOOM_PHONE",
+                    "enum": [
+                      "UNALLOCATED",
+                      "ZOOM_PHONE",
+                      "ZOOM_CONTACT_CENTER"
+                    ]
+                  },
+                  "phone_numbers": {
+                    "maxItems": 200,
+                    "type": "array",
+                    "description": "The list of phone numbers and the corresponding details that need to be updated. The maximum value is 200.",
+                    "items": {
+                      "required": [
+                        "phone_number"
+                      ],
+                      "type": "object",
+                      "properties": {
+                        "billing_ref_id": {
+                          "type": "string",
+                          "description": "Partners can specify their billing reference ID, with the maximum length of 36 characters.\n*  Zoom will send back the specified billing_ref_id in the SIP Header X-TO-CARRIER-ACCOUNT for the outbound calls to the provider.",
+                          "example": "Some billing referenceId"
+                        },
+                        "phone_number": {
+                          "type": "string",
+                          "description": "The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\n) format.\n\n",
+                          "example": "+12097654882"
+                        },
+                        "service_info": {
+                          "type": "string",
+                          "description": "Free form descriptive text of the service associated with the number. This description will be surfaced to Zoom customer viewing the phone number. Partners can include description highlighting the capabilities or limitations associated with the number. The maximum is 255 characters.",
+                          "example": "Inbound only number' or 'Metered charges apply"
+                        },
+                        "sip_trunk_name": {
+                          "type": "string",
+                          "description": "A unique name that Zoom assigns for a group of trunks established with the partner during the cloud peering infrastructure setup. A partner with global presence may have one or more SIP trunks to handle calls for phone numbers in different regions.\nPartner needs to specify the name of the SIP trunk associated with the specified phone number. All calls originating from this number will be routed through the specified SIP Trunk, and Zoom will expect to receive inbound calls through the same trunk.\nDuring failure scenarios, calls will be routed via alternate trunks within the same trunk group identified  by the `sip_trunk_name`.",
+                          "example": "first-markert-carrier-trunk"
+                        },
+                        "status": {
+                          "type": "boolean",
+                          "description": "Providers can set the status to indicate whether the phone number is active (true) or inactive (false).  Providers can use inactive (false) state to provision phone numbers that are still in the process of being ported in, and update the status to active (true) when the porting is complete.",
+                          "example": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "**HTTP Status Code:** `200` **OK**Phone number successfully updated."
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  request failed \n\n **Error Code:** `1000` <br>\n Some data failed.for example:\n[   \n  {\"phoneNumber\":\"+12098888111\",\"reason\":\"Invalid Sip Trunk\"}, \n  {\"phoneNumber\":\"+12090000011\",\"reason\":\"Invalid number\"}\n] <br>\n**Error Code:** `1001` <br>\n Carrier not found <br>\n**Error Code:** `1002` <br>\n Request data cannot be empty <br>\n**Error Code:** `1003` <br>\n Too many numbers, should less than 200 <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:write:master",
+              "number_management:update:peering_number:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ContactCenterMgt:Edit",
+            "PbxAdmin:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:update:peering_number:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/allocation": {
+      "patch": {
+        "tags": [
+          "Phone Numbers"
+        ],
+        "summary": "Allocate/Unallocate phone numbers",
+        "description": "Allocates or unallocates phone numbers for those with CPL routing.\n\n<p>Note: When allocating phone numbers, if there are any native numbers, they must belong to the same country or region, and have the same number plan.</p>\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `HEAVY`",
+        "operationId": "AllocateNumber",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "allocated_product",
+                  "numbers"
+                ],
+                "type": "object",
+                "properties": {
+                  "numbers": {
+                    "maxItems": 10,
+                    "type": "array",
+                    "description": "A list of phone numbers.",
+                    "items": {
+                      "type": "string",
+                      "description": "The phone number ID.",
+                      "example": "8nObzGKRTGxoNDZ5JIEHQ"
+                    }
+                  },
+                  "allocated_product": {
+                    "type": "string",
+                    "description": "The phone number's allocated product. Use the value UNALLOCATED to unallocate phone numbers.",
+                    "example": "ZOOM_PHONE",
+                    "enum": [
+                      "ZOOM_PHONE",
+                      "ZOOM_CONTACT_CENTER",
+                      "UNALLOCATED"
+                    ]
+                  },
+                  "site_id": {
+                    "type": "string",
+                    "description": "The site the numbers will be allocated for Zoom Phone.",
+                    "example": "8nObzGKRTGxoNDZ5JIEHQ"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": " The phone numbers have been allocated succeefully"
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  Invalid parameter or operation \n\n **Error Code:** `100002` <br>\n Phone number not found <br>\n**Error Code:** `200002` <br>\n Unable to switch products for the number <br>\n**Error Code:** `1002010` <br>\n The site does not exist <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  Lack of valid authentication \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:write:master",
+              "number_management:write:numbers:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Edit",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:write:numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/byoc_numbers": {
+      "post": {
+        "tags": [
+          "Phone Numbers"
+        ],
+        "summary": "Add BYOC phone numbers",
+        "description": "Adds BYOC (Bring Your Own Carrier) phone numbers to Zoom Phone.\n\n**Prerequisites:** \n* A Business or Enterprise plan \n* A Zoom Phone license\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:byoc_numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`",
+        "operationId": "AddBYOCPhoneNumber",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "allocated_product",
+                  "phone_numbers"
+                ],
+                "type": "object",
+                "properties": {
+                  "allocated_product": {
+                    "type": "string",
+                    "description": "The partners can allocate phone numbers for exclusive use by a specific Zoom Product (ZOOM_PHONE or ZOOM_CONTACT_CENTER).",
+                    "example": "ZOOM_PHONE",
+                    "enum": [
+                      "ZOOM_PHONE",
+                      "ZOOM_CONTACT_CENTER"
+                    ]
+                  },
+                  "country_iso": {
+                    "type": "string",
+                    "description": "The two-lettered country code (Alpha-2 code in ISO-3166 format). \r\n- When the input number is a local number, country_iso is required. \r\n- When the input number is a E164 number, `country_iso` is optional.",
+                    "example": "US"
+                  },
+                  "site_id": {
+                    "type": "string",
+                    "description": "The unique identifier of the site. This field is only required if you have enabled multiple sites in the account. See [Managing multiple sites](https://support.zoom.us/hc/en-us/articles/360020809672-Managing-multiple-sites) or [Adding a site](https://support.zoom.us/hc/en-us/articles/360020809672-Managing-multiple-sites#h_05c88e35-1593-491f-b1a8-b7139a75dc15) for details.\r\n- If add a zoom phone number, and multiple sites is  enabled, `site_id` is required",
+                    "example": "8f71O6rWT8KFUGQmJIFAdQ"
+                  },
+                  "phone_numbers": {
+                    "maxItems": 100,
+                    "type": "array",
+                    "description": "Whether a input local number or E164 number.",
+                    "items": {
+                      "type": "string",
+                      "example": "+8618251885564"
+                    }
+                  },
+                  "sip_group_id": {
+                    "type": "string",
+                    "description": "The SIP group ID.\r\n- If adding a Zoom Phone number, and BYOC SIP Group is optional, `sip_group_id` is required. It can input  ZOOM_PHONE or COMMON `sip_group_id`\r\n- If adding a Zoom Contact Center number, `sip_group_id` is required, and can input ZOOM_CONTACT_CENTER or COMMON `sip_group_id`. ",
+                    "example": "FLofRFDxSNiSd68iRZrZmg"
+                  },
+                  "enable_pci_pal": {
+                    "type": "boolean",
+                    "description": "- If you add a Zoom phone number and want to enable `enable_pci_pal`, you first need to enable Enable Compliance APIs in the Zoom Phone OP.\r\n- If you add a Zoom Contact Center number and want to enable `enable_pci_pal`, you first need to enable PCI SIP Integration in the Zoom Contact Center OP.",
+                    "example": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "**HTTP Status Code:** `201` **Created**   BYOC phone numbers successfully added. "
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1000` <br>\n Some data failed.for example: [ {\"phoneNumber\":\"+12098888111\",\"reason\":\"Phone Number format invalid\"}, {\"phoneNumber\":\"+12090000011\",\"reason\":\"Phone Number already exists\"} ] <br>\n**Error Code:** `1004` <br>\n BYOC Phone Numbers are not enabled for this account <br>\n**Error Code:** `1003_001` <br>\n Too many numbers, should less than 100,contact zoom support team for more numbers <br>\n**Error Code:** `100_001` <br>\n Sip Group not found <br>\n**Error Code:** `200_005` <br>\n Current sip group don't support PCIPal <br>\n**Error Code:** `1002_003` <br>\n Site cannot be empty in zoom phone <br>\n**Error Code:** `1002_010` <br>\n The site does not exist <br>\n"
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:write:master",
+              "number_management:write:byoc_numbers:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ContactCenterMgt:Edit",
+            "PbxAdmin:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:write:byoc_numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/numbers": {
+      "get": {
+        "tags": [
+          "Phone Numbers"
+        ],
+        "summary": "List phone numbers",
+        "description": "Returns a list of phone numbers in an account. See section <b>Information in the phone number table</b> of [Using Number Management for managing phone numbers](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0074457#h_60222313850311712763891581) for more details.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "listPhoneNumbers",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "maximum": 200,
+              "type": "integer",
+              "example": 30,
+              "default": 30
+            }
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "Fh98ehf98wehf9wehfhw"
+            }
+          },
+          {
+            "name": "allocated_product",
+            "in": "query",
+            "description": "The product associated with the allocated number.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "ZOOM_PHONE",
+              "enum": [
+                "UNALLOCATED",
+                "ZOOM_PHONE",
+                "ZOOM_CONTACT_CENTER"
+              ]
+            }
+          },
+          {
+            "name": "number_type",
+            "in": "query",
+            "description": "The type of phone number.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "Toll",
+              "enum": [
+                "Toll",
+                "TollFree",
+                "VirtualService",
+                "Mobile",
+                "SharedCost",
+                "National",
+                "ITFS"
+              ]
+            }
+          },
+          {
+            "name": "number_status",
+            "in": "query",
+            "description": "The status of phone number.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "Normal",
+              "enum": [
+                "Normal",
+                "Pending"
+              ]
+            }
+          },
+          {
+            "name": "number_source",
+            "in": "query",
+            "description": "The source of phone number.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "Zoom",
+              "enum": [
+                "Zoom",
+                "ZoomPorted",
+                "ZoomReserved",
+                "ThirdPartyNumber",
+                "BYOCCloud",
+                "BYOCPremises"
+              ]
+            }
+          },
+          {
+            "name": "site_id",
+            "in": "query",
+            "description": "The site ID for the Zoom phone number.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "assigned_to_type",
+            "in": "query",
+            "description": "The type of target assigned to the number.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "User",
+              "enum": [
+                "PhoneUnassigned",
+                "User",
+                "CallQueue",
+                "AutoReceptionist",
+                "CiscoPolycomRoom",
+                "SharedLineGroup",
+                "GroupCallPickup",
+                "CommonArea",
+                "EmergencyNumberPool",
+                "CompanyLocation",
+                "PersonalLocation",
+                "MeetingService",
+                "LocalSurvivability",
+                "LocalSurvivabilityEmergencyNumberPool",
+                "MicrosoftTeamsResourceAccount",
+                "DistributionGroup",
+                "ContactCenterUnassigned",
+                "DialInToVideoEngagements",
+                "DefaultSystemOutgoingSMS",
+                "DefaultAgentOutgoingSMS",
+                "DefaultCallerID",
+                "Voice",
+                "SMS"
+              ]
+            }
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "description": "This field allows you to search by phone number. Only prefix matching is available for search.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "1205"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The list of phone numbers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "xuWXDDeGFkx0dyRtuwQR3M9NWIoMVD9e0a2"
+                    },
+                    "page_size": {
+                      "type": "integer",
+                      "description": "The page size in use.",
+                      "example": 100
+                    },
+                    "numbers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "The unique identifier of the phone number.",
+                            "example": "iHE1MQAET2iV85MbfaQmwg"
+                          },
+                          "number": {
+                            "type": "string",
+                            "description": "The phone number in E.164 format.",
+                            "example": "+1203030333"
+                          },
+                          "allocated_product": {
+                            "type": "string",
+                            "description": "The product assigned to the phone number.",
+                            "example": "ZOOM_CONTACT_CENTER",
+                            "enum": [
+                              "UNALLOCATED",
+                              "ZOOM_PHONE",
+                              "ZOOM_CONTACT_CENTER"
+                            ]
+                          },
+                          "number_type": {
+                            "type": "string",
+                            "description": "The type of phone number.",
+                            "example": "Toll",
+                            "enum": [
+                              "Toll",
+                              "TollFree",
+                              "VirtualService",
+                              "Mobile",
+                              "SharedCost",
+                              "National",
+                              "ITFS"
+                            ]
+                          },
+                          "display_name": {
+                            "type": "string",
+                            "description": "The display name for the phone number in Zoom Phone.",
+                            "example": "Alice"
+                          },
+                          "caller_id_name": {
+                            "type": "string",
+                            "description": "The caller ID name for a Contact Center number.",
+                            "example": "Bob Company"
+                          },
+                          "carrier": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "integer",
+                                "description": "The carrier code.",
+                                "example": 2
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The name of the carrier.",
+                                "example": "Bandwidth"
+                              }
+                            },
+                            "description": "The carrier information for the Provider Exchange number."
+                          },
+                          "capability": {
+                            "type": "array",
+                            "description": "The capability of the phone number.  The value can be Incoming, Outgoing, Messaging, PCIPal, and `EmergencyCalls` or any combination of them.",
+                            "items": {
+                              "type": "string",
+                              "description": "The capability of the phone number",
+                              "example": "Incoming",
+                              "enum": [
+                                "Incoming",
+                                "Outgoing",
+                                "Messaging",
+                                "PCIPal",
+                                "EmergencyCalls"
+                              ]
+                            }
+                          },
+                          "source": {
+                            "type": "string",
+                            "description": "The source of phone number.",
+                            "example": "Zoom",
+                            "enum": [
+                              "Zoom",
+                              "ZoomPorted",
+                              "ZoomReserved",
+                              "ThirdPartyNumber",
+                              "BYOCCloud",
+                              "BYOCPremises"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "description": "The status of the number.",
+                            "example": "Pending",
+                            "enum": [
+                              "Normal",
+                              "Pending"
+                            ]
+                          },
+                          "emergency_address": {
+                            "type": "object",
+                            "properties": {
+                              "address_line1": {
+                                "type": "string",
+                                "description": "The house number and street name.",
+                                "example": "53 Rav Road"
+                              },
+                              "address_line2": {
+                                "type": "string",
+                                "description": "The information about the building, floor, unit, and so on.",
+                                "example": "Floor 1"
+                              },
+                              "city": {
+                                "type": "string",
+                                "description": "The city in the address.",
+                                "example": "San Jose"
+                              },
+                              "county": {
+                                "type": "string",
+                                "description": "The county of the address for the Ireland address.",
+                                "example": "CO. Cork"
+                              },
+                              "state_code": {
+                                "type": "string",
+                                "description": "The state ISO code of the address.",
+                                "example": "CA"
+                              },
+                              "country": {
+                                "type": "string",
+                                "description": "The two-lettered country code (Alpha-2 code in ISO-3166 format).",
+                                "example": "US"
+                              },
+                              "zip": {
+                                "type": "string",
+                                "description": "The zip or postal code.",
+                                "example": "95113"
+                              }
+                            },
+                            "description": "The emergency address to bind to the phone number."
+                          },
+                          "address_update_required": {
+                            "type": "boolean",
+                            "description": "The true value indicates the number's address need to be updated for BYOC Premise numbers.",
+                            "example": true
+                          },
+                          "emergency_address_update_time": {
+                            "type": "string",
+                            "description": "The updated timestamp of the number's address, in the format 'yyyy-MM-ddTHH:mm:ssZ'. It's used for Phone BYOC-Premises numbers.",
+                            "example": "2024-10-29T14:18:28Z"
+                          },
+                          "site": {
+                            "type": "object",
+                            "properties": {
+                              "site_id": {
+                                "type": "string",
+                                "description": "The site ID.",
+                                "example": "8f71O6rWT8KFUGQmJIFAdQ"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The site name.",
+                                "example": "Main Site"
+                              }
+                            },
+                            "description": "The site associated with the phone number."
+                          },
+                          "assigned_list": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "assigned_to_id": {
+                                  "type": "string",
+                                  "description": "In Zoom Phone, this value can represent the ID of the user, emergency number pool (where the ID is either `siteId` if multiple sites are enabled, or `accountId` if not), or company location, depending on the `assigned_to_type `field.\nIn Contact Center, this field also has different meanings\n2: number assigned to Dial-in to Video Engagements \n3: number assigned to Default System Outgoing SMS\n4: number assigned to Default Caller ID\n8: number assigned to Default Agent Outgoing SMS\nOther: number assigned for specific use case , such as flow, queue and so on.",
+                                  "example": "rYgfsrduSXWCxr94poMN5g"
+                                },
+                                "assgined_to_name": {
+                                  "type": "string",
+                                  "description": "The name of the user assigned with the number, emergency number pool, and company location.",
+                                  "example": "Alice Bob"
+                                },
+                                "assigned_to_type": {
+                                  "type": "string",
+                                  "description": "This field indicates to whom the phone number belongs.",
+                                  "example": "User",
+                                  "enum": [
+                                    "User",
+                                    "CallQueue",
+                                    "AutoReceptionist",
+                                    "CiscoPolycomRoom",
+                                    "SharedLineGroup",
+                                    "GroupCallPickup",
+                                    "CommonArea",
+                                    "EmergencyNumberPool",
+                                    "CompanyLocation",
+                                    "PersonalLocation",
+                                    "MeetingService",
+                                    "LocalSurvivability",
+                                    "LocalSurvivabilityEmergencyNumberPool",
+                                    "MicrosoftTeamsResourceAccount",
+                                    "DistributionGroup"
+                                  ]
+                                },
+                                "source_channel": {
+                                  "type": "string",
+                                  "description": "The channel of number that is only for Contact Center.",
+                                  "example": "Voice",
+                                  "enum": [
+                                    "Voice",
+                                    "SMS"
+                                  ]
+                                },
+                                "extension_number": {
+                                  "type": "string",
+                                  "description": "The extension number of an extension (e.g., user) for Zoom Phone",
+                                  "example": "6503"
+                                }
+                              }
+                            }
+                          },
+                          "sip_group": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "description": "The SIP group's ID.",
+                                "example": "vZWksdNbRkKTdzOth09skw"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The ID of the SIP group. See the **Creating SIP groups** section in [Creating a shared directory of external contacts](https://support.zoom.us/hc/en-us/articles/360037050092-Creating-a-shared-directory-of-external-contacts) for details.",
+                                "example": "SIP 01"
+                              }
+                            }
+                          },
+                          "location": {
+                            "type": "object",
+                            "properties": {
+                              "country": {
+                                "type": "string",
+                                "description": "The name of the country.",
+                                "example": "United States"
+                              },
+                              "city": {
+                                "type": "string",
+                                "description": "The phone number of the city location.",
+                                "example": "San Jose"
+                              },
+                              "state": {
+                                "type": "string",
+                                "description": "The state or province's name.",
+                                "example": "California"
+                              }
+                            },
+                            "description": "The phone number's area."
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `999` <br>\n Invalid value (e.g., allocated_product, number_type, number_soruce) <br>\n**Error Code:** `1002010` <br>\n The site does not exist <br>\n**Error Code:** `1003100` <br>\n The next page token is either invalid or has expired <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  Lack of valid authentication \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:read:master",
+              "number_management:read:list_numbers:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ContactCenterMgt:Edit",
+            "PbxAdmin:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:list_numbers:master"
+          ]
+        }
+      },
+      "delete": {
+        "tags": [
+          "Phone Numbers"
+        ],
+        "summary": "Delete phone numbers",
+        "description": "Deletes phone numbers.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:delete:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`",
+        "operationId": "DeleteNumbers",
+        "parameters": [
+          {
+            "name": "numbers",
+            "in": "query",
+            "description": "A list of phone numbers to be delete.",
+            "required": true,
+            "schema": {
+              "maxItems": 10,
+              "type": "array",
+              "example": [
+                "iHE1MQAET2iV85MbfaQmwg",
+                "vZWksdNbRkKTdzOth09skw"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The phone numbers have been deleted successfully."
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  Invalid parameter \n\n **Error Code:** `100002` <br>\n Phone number not found <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  Lack of valid authentication \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:write:master",
+              "number_management:delete:numbers:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Edit",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:delete:numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/numbers/{phoneNumberId}": {
+      "get": {
+        "tags": [
+          "Phone Numbers"
+        ],
+        "summary": "Get a phone number",
+        "description": "Returns information about an account's phone number. \n\nFor more details, see the section <b>Information in the phone number table</b> in [Using Number Management for managing phone numbers](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0074457#h_60222313850311712763891581).\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "getPhoneNumber",
+        "parameters": [
+          {
+            "name": "phoneNumberId",
+            "in": "path",
+            "description": "The unique identifier of the phone number retrieved from the [List phone numbers](https://developers.zoom.us/docs/api/phone/#tag/carrier-reseller/GET/phone/carrier_reseller/numbers) API.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "iHE1MQAET2iV85MbfaQmwg"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The phone number details.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "The unique identifier of the phone number.",
+                      "example": "iHE1MQAET2iV85MbfaQmwg"
+                    },
+                    "number": {
+                      "type": "string",
+                      "description": "The phone number in E.164 format.",
+                      "example": "+1203030333"
+                    },
+                    "allocated_product": {
+                      "type": "string",
+                      "description": "The product assigned to the phone number.",
+                      "example": "ZOOM_CONTACT_CENTER",
+                      "enum": [
+                        "UNALLOCATED",
+                        "ZOOM_PHONE",
+                        "ZOOM_CONTACT_CENTER"
+                      ]
+                    },
+                    "number_type": {
+                      "type": "string",
+                      "description": "The type of the phone number.",
+                      "example": "Toll",
+                      "enum": [
+                        "Toll",
+                        "TollFree",
+                        "VirtualService",
+                        "Mobile",
+                        "SharedCost",
+                        "National",
+                        "ITFS"
+                      ]
+                    },
+                    "display_name": {
+                      "type": "string",
+                      "description": "The display name of the phone number for Zoom Phone numbers.",
+                      "example": "Alice"
+                    },
+                    "caller_id_name": {
+                      "type": "string",
+                      "description": "The caller ID name for the Contact Center numbers.",
+                      "example": "Bob Company"
+                    },
+                    "carrier": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer",
+                          "description": "The carrier code.",
+                          "example": 2
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "The name of the carrier.",
+                          "example": "Bandwidth"
+                        }
+                      },
+                      "description": "The carrier information for Provider Exchange numbers."
+                    },
+                    "capability": {
+                      "type": "array",
+                      "description": "The capability of the phone number. The value can be Incoming, Outgoing, Messaging, PCIPal and Emergency Calls or any combination of them.",
+                      "items": {
+                        "type": "string",
+                        "description": "The capability of the phone number.",
+                        "example": "Incoming",
+                        "enum": [
+                          "Incoming",
+                          "Outgoing",
+                          "Messaging",
+                          "PCIPal",
+                          "EmergencyCalls"
+                        ]
+                      }
+                    },
+                    "source": {
+                      "type": "string",
+                      "description": "The source of phone number.",
+                      "example": "Zoom",
+                      "enum": [
+                        "Zoom",
+                        "ZoomPorted",
+                        "ZoomReserved",
+                        "ThirdPartyNumber",
+                        "BYOCCloud",
+                        "BYOCPremises"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "The status of the number.",
+                      "example": "Pending",
+                      "enum": [
+                        "Normal",
+                        "Pending"
+                      ]
+                    },
+                    "emergency_address": {
+                      "type": "object",
+                      "properties": {
+                        "address_line1": {
+                          "type": "string",
+                          "description": "The house number and street name.",
+                          "example": "53 Rav Road"
+                        },
+                        "address_line2": {
+                          "type": "string",
+                          "description": "The field lists the building, floor, unit, and so on.",
+                          "example": "Floor 1"
+                        },
+                        "city": {
+                          "type": "string",
+                          "description": "The city of the address.",
+                          "example": "San Jose"
+                        },
+                        "county": {
+                          "type": "string",
+                          "description": "The county of the address, applicable for an Ireland address",
+                          "example": "CO. Cork"
+                        },
+                        "state_code": {
+                          "type": "string",
+                          "description": "The state ISO code of the address.",
+                          "example": "CA"
+                        },
+                        "country": {
+                          "type": "string",
+                          "description": "The two-lettered country code (Alpha-2 code in ISO-3166 format)",
+                          "example": "US"
+                        },
+                        "zip": {
+                          "type": "string",
+                          "description": "The zip or postal code.",
+                          "example": "95113"
+                        }
+                      },
+                      "description": "The emergency address bind to the phone number."
+                    },
+                    "address_update_required": {
+                      "type": "boolean",
+                      "description": "The true value indicates the number's address need to be updated, applicable for BYOC Premise numbers.",
+                      "example": true
+                    },
+                    "emergency_address_update_time": {
+                      "type": "string",
+                      "description": "The updated timestamp of the number's address, in the format 'yyyy-MM-ddTHH:mm:ssZ'. It's used for Phone BYOC-Premises numbers. ",
+                      "example": "2024-10-29T14:18:28Z"
+                    },
+                    "site": {
+                      "type": "object",
+                      "properties": {
+                        "site_id": {
+                          "type": "string",
+                          "description": "The site ID.",
+                          "example": "8f71O6rWT8KFUGQmJIFAdQ"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "The name of the site.",
+                          "example": "Main Site"
+                        }
+                      },
+                      "description": "The site associated with the phone number."
+                    },
+                    "assigned_list": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "assigned_to_id": {
+                            "type": "string",
+                            "description": "In Zoom Phone, this value can represent the ID of the user, emergency number pool (where the ID is either `siteId` if multiple sites are enabled, or `accountId` if not), or company location, depending on the `assigned_to_type` field.\nIn Contact Center, this field also has different meanings.\n2: Number assigned to Dial-in to Video Engagements \n3: number assigned to Default System Outgoing SMS\n4: number assigned to Default Caller ID\n8: number assigned to Default Agent Outgoing SMS\nOther: number assigned for specific use case , such as flow, queue.",
+                            "example": "rYgfsrduSXWCxr94poMN5g"
+                          },
+                          "assgined_to_name": {
+                            "type": "string",
+                            "description": "The name of the user to whom the number, emergency number pool, and company location are assigned.",
+                            "example": "Alice Bob"
+                          },
+                          "assigned_to_type": {
+                            "type": "string",
+                            "description": "This field indicates to whom the phone number belongs.",
+                            "example": "User",
+                            "enum": [
+                              "User",
+                              "CallQueue",
+                              "AutoReceptionist",
+                              "CiscoPolycomRoom",
+                              "SharedLineGroup",
+                              "GroupCallPickup",
+                              "CommonArea",
+                              "EmergencyNumberPool",
+                              "CompanyLocation",
+                              "PersonalLocation",
+                              "MeetingService",
+                              "LocalSurvivability",
+                              "LocalSurvivabilityEmergencyNumberPool",
+                              "MicrosoftTeamsResourceAccount",
+                              "DistributionGroup"
+                            ]
+                          },
+                          "source_channel": {
+                            "type": "string",
+                            "description": "The channel of number. (Only for Contact Center)",
+                            "example": "Voice",
+                            "enum": [
+                              "Voice",
+                              "SMS"
+                            ]
+                          },
+                          "extension_number": {
+                            "type": "string",
+                            "description": "The extension number of an extension. (e.g., user). This field is applicable for Zoom Phone.",
+                            "example": "6503"
+                          },
+                          "meeting_id": {
+                            "type": "string",
+                            "description": "The meeting ID for Phone meeting service.",
+                            "example": "964 3020 9491"
+                          },
+                          "greeting": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "description": "The audio prompt file ID. If the audio was removed from the user's audio library, it will be marked with a prefix, `removed_vWby3OZaQlS1nAdmEAqgwA` for example. You can use this audio ID to get the audio information in the [Get an audio item](https://marketplace.zoom.us/docs/api-reference/phone/methods#tag/Audio-Library/operation/GetAudioItem) API.",
+                                "example": "vWby3OZaQlS1nAdmEAqgwA"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The audio file name of the greeting prompt. ",
+                                "example": "hotspot.wav"
+                              }
+                            },
+                            "description": "This field applicable for meeting service."
+                          },
+                          "on_hold_music": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "description": "The audio prompt file ID. If the audio is no longer in the user's audio library, it will be marked with a prefix, `removed_vWby3OZaQlS1nAdmEAqgwA` for example. You can use this audio ID to get the audio information in the [Get an audio item](https://marketplace.zoom.us/docs/api-reference/phone/methods#tag/Audio-Library/operation/GetAudioItem) API.",
+                                "example": "vWby3OZaQlS1nAdmEAqgwA"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The audio file name of the on hold music prompt. ",
+                                "example": "music.wav"
+                              }
+                            },
+                            "description": "This field applicable for the meeting service."
+                          },
+                          "display_number": {
+                            "type": "string",
+                            "description": "The displayed phone number in meeting invitations and emails for the meeting service.",
+                            "example": "+1 360 209 5623"
+                          },
+                          "label": {
+                            "type": "string",
+                            "description": "This label appends to the number in parentheses, and appears in meeting invitations and the Zoom client for the meeting service.",
+                            "example": "xxx"
+                          }
+                        }
+                      }
+                    },
+                    "sip_group": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "The ID of the SIP group. For details, see the **Creating SIP groups** section in [Creating a shared directory of external contacts](https://support.zoom.us/hc/en-us/articles/360037050092-Creating-a-shared-directory-of-external-contacts).",
+                          "example": "vZWksdNbRkKTdzOth09skw"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "The SIP group display name",
+                          "example": "Sip 01"
+                        }
+                      }
+                    },
+                    "location": {
+                      "type": "object",
+                      "properties": {
+                        "country": {
+                          "type": "string",
+                          "description": "The name of the country.",
+                          "example": "United States"
+                        },
+                        "city": {
+                          "type": "string",
+                          "description": "The phone number's city location.",
+                          "example": "San Jose"
+                        },
+                        "state": {
+                          "type": "string",
+                          "description": "The state or province name.",
+                          "example": "California"
+                        }
+                      },
+                      "description": "The phone number area."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  Lack of valid authentication \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  The phone number not found \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:read:master",
+              "number_management:read:numbers:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ContactCenterMgt:Edit",
+            "PbxAdmin:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:numbers:master"
+          ]
+        }
+      },
+      "patch": {
+        "tags": [
+          "Phone Numbers"
+        ],
+        "summary": "Update a phone number",
+        "description": "Updates a phone number's information.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "updatePhoneNumberDetail",
+        "parameters": [
+          {
+            "name": "phoneNumberId",
+            "in": "path",
+            "description": "The unique identifier for the phone number retrieved from the List Phone Numbers API.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "tDiG8cmnQmCaMRqbZ730Cw"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "display_name": {
+                    "type": "string",
+                    "description": "Zoom Phone numbers use a phone number display name with a limit of 32 characters or fewer.",
+                    "example": "Bob"
+                  },
+                  "caller_id_name": {
+                    "type": "string",
+                    "description": "The caller ID name has 15 characters or fewer, and should have at least one alpha character. The Contact Center supports only US/CA Virtual Service numbers.",
+                    "example": "Alice"
+                  },
+                  "confirm_address_update": {
+                    "type": "boolean",
+                    "description": "Whether to confirm the emergency address update for Zoom Phone BYOC Premises numbers.",
+                    "example": true
+                  },
+                  "sip_group_id": {
+                    "type": "string",
+                    "description": "This field retrieves the SIP group ID from the List Sip Group API for use with BYOC Premise phone numbers.",
+                    "example": "ybFTE3KXRIC7vJ8kOdmjWg"
+                  },
+                  "capability": {
+                    "type": "object",
+                    "properties": {
+                      "incoming": {
+                        "type": "boolean",
+                        "description": "A value of true enables the capability. A value of false disables it.",
+                        "example": true
+                      },
+                      "outgoing": {
+                        "type": "boolean",
+                        "description": "A value of true enables the capability. A value of false disables it.",
+                        "example": false
+                      }
+                    },
+                    "description": "Applicable for Zoom Phone numbers."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Succeed to update the phone number"
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  Invalid parameter or operation \n\n **Error Code:** `999` <br>\n Invalid Field <br>\n**Error Code:** `100001` <br>\n Sip Group not found <br>\n**Error Code:** `200001` <br>\n The capability cannot be updated <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  Lack of valid authentication \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  Phone number not found \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:write:master",
+              "number_management:update:numbers:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Edit",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:update:numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/plan": {
+      "get": {
+        "tags": [
+          "Phone Plan"
+        ],
+        "summary": "List phone number plan information",
+        "description": "Retrieves an account's  phone number plan information, phone number usage, and availability.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:numbers_plan:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "Listphonenumberplaninformation",
+        "parameters": [
+          {
+            "name": "product",
+            "in": "query",
+            "description": "The product (e.g., ZOOM_PHONE).",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "ZOOM_PHONE",
+              "enum": [
+                "ZOOM_PHONE",
+                "ZOOM_CONTACT_CENTER"
+              ]
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "maximum": 200,
+              "type": "integer",
+              "example": 30,
+              "default": 30
+            }
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "zi4JE9iWsGMZ92F9xhnlcZRxl2Fh47qio02"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The phone number plan usage information.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "zi4JE9iWsGMZ92F9xhnlcZRxl2Fh47qio02"
+                    },
+                    "page_size": {
+                      "type": "integer",
+                      "description": "The page size in use.",
+                      "example": 100
+                    },
+                    "plans": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "assigned": {
+                            "type": "integer",
+                            "description": "The total number of phone number plans.",
+                            "example": 10
+                          },
+                          "available": {
+                            "type": "integer",
+                            "description": "The remaining number of phone number plans to assign.",
+                            "example": 10
+                          },
+                          "subscribed": {
+                            "type": "integer",
+                            "description": "The total number of phone number plan subscriptions bought.",
+                            "example": 20
+                          },
+                          "name": {
+                            "type": "string",
+                            "description": "The name of the phone number plan.",
+                            "example": "US/CA Included Phone Numbers"
+                          },
+                          "is_unlimited": {
+                            "type": "boolean",
+                            "description": "If the plan is unlimited, the value is true; any other value indicates a limited plan.",
+                            "example": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `999` <br>\n Invalid param (product) <br>\n**Error Code:** `1002006` <br>\n product cannot be empty <br>\n**Error Code:** `1003100` <br>\n The next page token is either invalid or has expired <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  Lack of valid authentication \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:read:master",
+              "number_management:read:numbers_plan:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Read",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:numbers_plan:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sms_campaigns": {
+      "get": {
+        "tags": [
+          "SMS Campaigns"
+        ],
+        "summary": "List SMS campaigns",
+        "description": "Returns a list of all SMS campaigns in a Zoom account.\n\n\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_sms_campaigns:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "listAccountSMSCampaigns",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "maximum": 300,
+              "type": "integer",
+              "example": 30,
+              "default": 30
+            }
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**  \n \nSMS campaign listed successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "bkOcmnm6mn6ioYAi10BcgRiEL38WzAo6jP2"
+                    },
+                    "page_size": {
+                      "type": "integer",
+                      "description": "The number of records returned within a single API call.",
+                      "example": 30
+                    },
+                    "sms_campaigns": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sms_campaign_id": {
+                            "type": "string",
+                            "description": "The campaign's ID.",
+                            "example": "C-BlVwSdjvS3WXk5gzfIQFfQ"
+                          },
+                          "display_name": {
+                            "type": "string",
+                            "description": "The display name for the SMS campaign.",
+                            "example": "Test SMS Campaign"
+                          },
+                          "status": {
+                            "type": "string",
+                            "description": "The status of the SMS campaign.",
+                            "example": "active",
+                            "enum": [
+                              "active",
+                              "expired",
+                              "pending",
+                              "declined"
+                            ]
+                          },
+                          "brand": {
+                            "type": "object",
+                            "properties": {
+                              "brand_id": {
+                                "type": "string",
+                                "description": "The brand's ID.",
+                                "example": "B-c3AN66d_Q4mrQFNUaW-G2w"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The brand's name.",
+                                "example": "Test Campaign"
+                              }
+                            },
+                            "description": "The business information from Zoom account."
+                          }
+                        }
+                      }
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The total number of records returned.",
+                      "example": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n "
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:read:master",
+              "number_management:read:list_sms_campaigns:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:list_sms_campaigns:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sms_campaigns/{smsCampaignId}": {
+      "get": {
+        "tags": [
+          "SMS Campaigns"
+        ],
+        "summary": "Get an SMS campaign",
+        "description": "Returns a specific SMS campaign.\n\n**Prerequisites** \n* A Pro or higher account plan \n* A Zoom Phone license\n\n\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:sms_campaign:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "GetSMSCampaign",
+        "parameters": [
+          {
+            "name": "smsCampaignId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**  \n \nSMS campaign details retrieved successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sms_campaign_id": {
+                      "type": "string",
+                      "description": "The campaign's ID.",
+                      "example": "C-BlVwSdjvS3WXk5gzfIQFfQ"
+                    },
+                    "display_name": {
+                      "type": "string",
+                      "description": "The display name for the SMS campaign.",
+                      "example": "Test SMS Campaign"
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "The status of the SMS campaign. Returns `--` if the campaign is in an exception status.",
+                      "example": "active",
+                      "enum": [
+                        "active",
+                        "expired",
+                        "pending",
+                        "declined"
+                      ]
+                    },
+                    "service_type": {
+                      "type": "string",
+                      "description": "Which service the campaign supports.",
+                      "example": "zoomPhone",
+                      "enum": [
+                        "zoomPhone",
+                        "contactCenter"
+                      ]
+                    },
+                    "brand": {
+                      "type": "object",
+                      "properties": {
+                        "brand_id": {
+                          "type": "string",
+                          "description": "The brand's ID.",
+                          "example": "B-c3AN66d_Q4mrQFNUaW-G2w"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "The brand's name.",
+                          "example": "Test Campaign"
+                        }
+                      },
+                      "description": "The business information from Zoom account."
+                    },
+                    "phone_numbers": {
+                      "type": "array",
+                      "description": "The assigned phone numbers.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "phone_number_id": {
+                            "type": "string",
+                            "description": "The phone number's ID.",
+                            "example": "iHE1MQAET2iV85MbfaQmwg"
+                          },
+                          "number": {
+                            "type": "string",
+                            "description": "The phone number that is assigned to the SMS campaign.",
+                            "example": "+18887193005"
+                          }
+                        }
+                      }
+                    },
+                    "response_to_opt_in": {
+                      "type": "string",
+                      "description": "Automatic reply text message after receiving opt in message.",
+                      "example": "ZOOM: Thank you for opting in for our texting notifications. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, Reply with STOP. Reply with HELP for more information."
+                    },
+                    "response_to_opt_out": {
+                      "type": "string",
+                      "description": "Automatic reply text message after receiving opt out message.",
+                      "example": "You are unsubscribed to texts from ZOOM. No more messages will be sent."
+                    },
+                    "response_to_help": {
+                      "type": "string",
+                      "description": "Automatic reply text message after receiving help message.",
+                      "example": "ZOOM: You can get more assistance by visiting https://zoom.us/. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n "
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  Invalid campaign ID. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:read:master",
+              "number_management:read:sms_campaign:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:sms_campaign:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sms_campaigns/{smsCampaignId}/phone_numbers": {
+      "post": {
+        "tags": [
+          "SMS Campaigns"
+        ],
+        "summary": "Assign a phone number to SMS campaign",
+        "description": "[Assigns a phone number to the SMS campaign](https://support.zoom.us/hc/en-us/articles/5016496738445-SMS-MMS-10DLC-Compliance-for-Zoom-Phone-and-Zoom-Contact-Center#h_01FYVVQM1WMW5JD48YNY3J581B).\n\n**Prerequisites** \n* A Business or Enterprise account \n* A Zoom Phone license\n\n\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "assignCampaignPhoneNumbers",
+        "parameters": [
+          {
+            "name": "smsCampaignId",
+            "in": "path",
+            "description": "The unique identifier of the campaign to which the phone number will be assigned.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "C-BlVwSdjvS3WXk5gzfIQFfQ"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The phone number ID in the request body.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "contact_number",
+                  "loa_authorizing_person",
+                  "phone_number_ids",
+                  "title"
+                ],
+                "type": "object",
+                "properties": {
+                  "phone_number_ids": {
+                    "maxItems": 200,
+                    "type": "array",
+                    "description": "The maximum value is 200.",
+                    "items": {
+                      "type": "string",
+                      "example": "0kB2qDoSRMqzJti7VmNTIA"
+                    }
+                  },
+                  "loa_authorizing_person": {
+                    "type": "string",
+                    "description": "The name of the employee issuing the letter of authorization required to port in SMS capabilities on the numbers.",
+                    "example": "Alex Carter"
+                  },
+                  "contact_number": {
+                    "type": "string",
+                    "description": "The contact phone number of the employee issuing the letter of authorization required to port in SMS capabilities on the numbers.",
+                    "example": "+12090000000"
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "The job title of the person authorizing and signing the leave of absence.",
+                    "example": "Zoom Engineer"
+                  },
+                  "contact_emails": {
+                    "type": "string",
+                    "description": "The contact email of the employee issuing the letter of authorization required to port in SMS capabilities on the numbers.",
+                    "example": "alex.carter@zoom.us"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "**HTTP Status Code:** `201`   \n \nPhone numbers assigned successfully. \n"
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1003004` <br>\n Insufficient campaign capacity. <br>\n**Error Code:** `1003` <br>\n Too many numbers, should less than 200 <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  Invalid campaign ID. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:write:master",
+              "number_management:update:numbers:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Edit",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:update:numbers:master"
+          ]
+        }
+      },
+      "delete": {
+        "tags": [
+          "SMS Campaigns"
+        ],
+        "summary": "Unassign phone number from SMS campaign",
+        "description": "[Unassigns a phone number from an SMS campaign](https://support.zoom.us/hc/en-us/articles/5016496738445-SMS-MMS-10DLC-Compliance-for-Zoom-Phone-and-Zoom-Contact-Center#h_01FYVVSPVM8MZN4Y9EW5690QHH).\n\n\n**Prerequisites:** \n* A Business or Enterprise account \n* A Zoom Phone license \n* The campaign must have been previously assigned a Zoom Phone number\n\n\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "unassignCampaignPhoneNumber",
+        "parameters": [
+          {
+            "name": "smsCampaignId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "phone_number_ids",
+            "in": "query",
+            "description": "A list of phone numbers to unassign from the SMS campaign.",
+            "required": true,
+            "schema": {
+              "maxItems": 200,
+              "type": "array",
+              "example": [
+                "iHE1MQAET2iV85MbfaQmwg",
+                "vZWksdNbRkKTdzOth09skw"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "**HTTP Status Code:** `204`\nThe phone number has been unassigned successfully."
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1003` <br>\n Too many numbers, should less than 200 <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  Invalid campaign ID. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:write:master",
+              "number_management:update:numbers:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Edit",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:update:numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sms_consent": {
+      "get": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "List SMS consent policies",
+        "description": "Returns a paginated list of SMS consent policies for the account.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:sms_consent:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`",
+        "operationId": "ListSMSConsents",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "maximum": 300,
+              "minimum": 1,
+              "type": "integer",
+              "example": 30
+            },
+            "example": 30
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token is used to paginate through large result sets. A next page token will be returned whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**  \n \nSMS consent policies retrieved successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "page_size": {
+                      "type": "integer",
+                      "description": "The number of records returned within a single API call.",
+                      "example": 30
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The total number of records found.",
+                      "format": "int64",
+                      "example": 33
+                    },
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token is used to paginate through large result sets. A next page token will be returned whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "bkOcmnm6mn6ioYAi10BcgRiEL38WzAo6jP2"
+                    },
+                    "sms_consent": {
+                      "type": "array",
+                      "description": "List of SMS consent policies.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "consent_id": {
+                            "type": "string",
+                            "description": "The consent policy's ID.",
+                            "example": "C-91H30r6xTCCpt8nNFSuhWA"
+                          },
+                          "consent_name": {
+                            "type": "string",
+                            "description": "The name of the SMS consent policy.",
+                            "example": "ZPconsent"
+                          },
+                          "description": {
+                            "type": "string",
+                            "description": "The description of the SMS consent policy.",
+                            "example": "This consent will be used by our employees to schedule events, provide reminders and support to our customers."
+                          },
+                          "account_id": {
+                            "type": "string",
+                            "description": "The account ID that owns the consent policy.",
+                            "example": "KGzOF3hCTamb_Xx-bXbgqA"
+                          },
+                          "in_out_bound": {
+                            "type": "object",
+                            "properties": {
+                              "opt_in_message": {
+                                "type": "object",
+                                "properties": {
+                                  "prompt": {
+                                    "type": "string",
+                                    "description": "The prompt message sent to users to opt-in for SMS messages.",
+                                    "example": "Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information."
+                                  },
+                                  "keywords": {
+                                    "type": "array",
+                                    "description": "The keywords that trigger the opt-in action.",
+                                    "example": [
+                                      "START",
+                                      "keyword"
+                                    ],
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "confirmation_message": {
+                                    "type": "string",
+                                    "description": "The confirmation message sent after a successful opt-in.",
+                                    "example": "You're subscribed!"
+                                  }
+                                },
+                                "description": "The message configuration for opt-in"
+                              },
+                              "opt_out_message": {
+                                "type": "object",
+                                "properties": {
+                                  "message": {
+                                    "type": "string",
+                                    "description": "The message sent to users when they opt-out.",
+                                    "example": "You are unsubscribed to texts from ZOOM. No more messages will be sent."
+                                  },
+                                  "keywords": {
+                                    "type": "array",
+                                    "description": "The keywords that trigger the opt-out action.",
+                                    "example": [
+                                      "Stop",
+                                      "keyword"
+                                    ],
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "description": "The message configuration for opt-out"
+                              },
+                              "help_message": {
+                                "type": "object",
+                                "properties": {
+                                  "message": {
+                                    "type": "string",
+                                    "description": "The help message sent to users when they request help.",
+                                    "example": "ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website."
+                                  },
+                                  "keywords": {
+                                    "type": "array",
+                                    "description": "The keywords that trigger the help message.",
+                                    "example": [
+                                      "HELP",
+                                      "keyword"
+                                    ],
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "description": "The message configuration for help"
+                              },
+                              "disclaimer": {
+                                "type": "object",
+                                "properties": {
+                                  "message": {
+                                    "type": "string",
+                                    "description": "The disclaimer message text.",
+                                    "example": "disclaimer"
+                                  },
+                                  "enable": {
+                                    "type": "boolean",
+                                    "description": "Whether the disclaimer is enabled.",
+                                    "example": true
+                                  }
+                                },
+                                "description": "The message configuration for disclaimer"
+                              }
+                            },
+                            "description": "The message configuration for opt-in, opt-out, help, and disclaimer messages."
+                          },
+                          "status": {
+                            "type": "boolean",
+                            "description": "The status of the consent policy. `true` indicates active, `false` indicates inactive.",
+                            "example": true
+                          },
+                          "create_time": {
+                            "type": "string",
+                            "description": "The time when the consent policy was created.",
+                            "format": "date-time",
+                            "example": "2024-06-01T08:55:38Z"
+                          },
+                          "modify_time": {
+                            "type": "string",
+                            "description": "The time when the consent policy was last modified.",
+                            "format": "date-time",
+                            "example": "2025-09-19T11:20:59Z"
+                          },
+                          "used_number": {
+                            "type": "integer",
+                            "description": "The number of phone numbers currently assigned to this consent policy.",
+                            "format": "int64",
+                            "example": 48
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:read:master",
+              "number_management:read:sms_consent:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:sms_consent:master"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "Create an SMS consent policy",
+        "description": "Creates a new SMS consent management policy to define opt-in, opt-out, and help message configurations for SMS communications.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:sms_consent:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "CreateSMSConsent",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "consent_name",
+                  "in_out_bound",
+                  "status"
+                ],
+                "type": "object",
+                "properties": {
+                  "consent_name": {
+                    "maxLength": 255,
+                    "type": "string",
+                    "description": "The SMS consent policy's name.",
+                    "example": "ZPconsent"
+                  },
+                  "description": {
+                    "maxLength": 4096,
+                    "type": "string",
+                    "description": "The SMS consent policy's description.",
+                    "example": "This consent will be used by our employees to schedule events, and provide reminders and support to our customers."
+                  },
+                  "in_out_bound": {
+                    "required": [
+                      "disclaimer",
+                      "help_message",
+                      "opt_in_message",
+                      "opt_out_message"
+                    ],
+                    "type": "object",
+                    "properties": {
+                      "opt_in_message": {
+                        "required": [
+                          "confirmation_message",
+                          "keywords",
+                          "prompt"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "prompt": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The prompt message sent to users to opt-in for SMS messages.",
+                            "example": "Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information."
+                          },
+                          "keywords": {
+                            "type": "array",
+                            "description": "The keywords that trigger the opt-in action.",
+                            "example": [
+                              "START",
+                              "keyword"
+                            ],
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "confirmation_message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The confirmation message sent after a successful opt-in.",
+                            "example": "You're subscribed!"
+                          }
+                        },
+                        "description": "The opt-in message configuration."
+                      },
+                      "opt_out_message": {
+                        "required": [
+                          "keywords",
+                          "message"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The message sent to users when they opt out.",
+                            "example": "You are unsubscribed to texts from ZOOM. No more messages will be sent."
+                          },
+                          "keywords": {
+                            "type": "array",
+                            "description": "The keywords that trigger the opt out action.",
+                            "example": [
+                              "Stop",
+                              "keyword"
+                            ],
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "description": "The opt out message configuration."
+                      },
+                      "help_message": {
+                        "required": [
+                          "keywords",
+                          "message"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The help message sent to users when they request help.",
+                            "example": "ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website."
+                          },
+                          "keywords": {
+                            "type": "array",
+                            "description": "The keywords that trigger the help message.",
+                            "example": [
+                              "HELP",
+                              "keyword"
+                            ],
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "description": "The help message configuration."
+                      },
+                      "disclaimer": {
+                        "required": [
+                          "enable",
+                          "message"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The disclaimer message text.",
+                            "example": "disclaimer"
+                          },
+                          "enable": {
+                            "type": "boolean",
+                            "description": "Whether the disclaimer is enabled.",
+                            "example": true
+                          }
+                        },
+                        "description": "The disclaimer message configuration."
+                      }
+                    },
+                    "description": "The message configuration for opt-in, opt-out, help, and disclaimer messages."
+                  },
+                  "status": {
+                    "type": "boolean",
+                    "description": "The status of the consent policy. `true` indicates active, `false` indicates inactive.",
+                    "example": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "**HTTP Status Code:** `201` **Created**  \n \nSMS consent policy created successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "consent_id": {
+                      "type": "string",
+                      "description": "The consent policy's ID.",
+                      "example": "C-91H30r6xTCCpt8nNFSuhWA"
+                    },
+                    "consent_name": {
+                      "type": "string",
+                      "description": "The SMS consent policy's name.",
+                      "example": "ZPconsent"
+                    },
+                    "description": {
+                      "type": "string",
+                      "description": "The SMS consent policy's description.",
+                      "example": "This consent will be used by our employees to schedule events, provide reminders and support to our customers."
+                    },
+                    "user_id": {
+                      "type": "string",
+                      "description": "The ID of the user who created the consent policy.",
+                      "example": "0GVPDRXiSAaDb73-e2tW0A"
+                    },
+                    "account_id": {
+                      "type": "string",
+                      "description": "The account ID that owns the consent policy.",
+                      "example": "KGzOF3hCTamb_Xx-bXbgqA"
+                    },
+                    "in_out_bound": {
+                      "type": "object",
+                      "properties": {
+                        "opt_in_message": {
+                          "type": "object",
+                          "properties": {
+                            "prompt": {
+                              "type": "string",
+                              "description": "The prompt message sent to users to opt in for SMS messages.",
+                              "example": "Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information."
+                            },
+                            "keywords": {
+                              "type": "array",
+                              "description": "The keywords that trigger the opt in action.",
+                              "example": [
+                                "START",
+                                "keyword"
+                              ],
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "confirmation_message": {
+                              "type": "string",
+                              "description": "The confirmation message sent after a successful opt in.",
+                              "example": "You're subscribed!"
+                            }
+                          }
+                        },
+                        "opt_out_message": {
+                          "type": "object",
+                          "properties": {
+                            "message": {
+                              "type": "string",
+                              "description": "The message sent to users when they opt out.",
+                              "example": "You are unsubscribed to texts from ZOOM. No more messages will be sent."
+                            },
+                            "keywords": {
+                              "type": "array",
+                              "description": "The keywords that trigger the opt-out action.",
+                              "example": [
+                                "Stop",
+                                "keyword"
+                              ],
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "help_message": {
+                          "type": "object",
+                          "properties": {
+                            "message": {
+                              "type": "string",
+                              "description": "The help message sent to users when they request help.",
+                              "example": "ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website."
+                            },
+                            "keywords": {
+                              "type": "array",
+                              "description": "The keywords that trigger the help message.",
+                              "example": [
+                                "HELP",
+                                "keyword"
+                              ],
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "disclaimer": {
+                          "type": "object",
+                          "properties": {
+                            "message": {
+                              "type": "string",
+                              "description": "The disclaimer message text.",
+                              "example": "disclaimer"
+                            },
+                            "enable": {
+                              "type": "boolean",
+                              "description": "Whether the disclaimer is enabled.",
+                              "example": true
+                            }
+                          }
+                        }
+                      },
+                      "description": "The message configuration for opt-in, opt-out, help, and disclaimer messages."
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "The consent policy's status. `true` indicates active, `false` indicates inactive.",
+                      "example": true
+                    },
+                    "capacity": {
+                      "type": "integer",
+                      "description": "The maximum number of phone numbers that can be assigned to this consent policy.",
+                      "format": "int64",
+                      "example": 999
+                    },
+                    "create_time": {
+                      "type": "string",
+                      "description": "The time when the consent policy was created.",
+                      "format": "date-time",
+                      "example": "2024-06-01T08:55:38Z"
+                    },
+                    "modify_time": {
+                      "type": "string",
+                      "description": "The time when the consent policy was last modified.",
+                      "format": "date-time",
+                      "example": "2025-09-19T11:20:59Z"
+                    },
+                    "used_number": {
+                      "type": "integer",
+                      "description": "The number of phone numbers currently assigned to this consent policy.",
+                      "format": "int64",
+                      "example": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `999` <br>\n Invalid field. <br>\n**Error Code:** `1002` <br>\n The request body format does not match, please refer to the document <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:write:master",
+              "number_management:write:sms_consent:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:write:sms_consent:master"
+          ]
+        }
+      },
+      "delete": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "Delete SMS consent policies",
+        "description": "Deletes one or more SMS consent policies.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:delete:sms_consent:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`",
+        "operationId": "DeleteSMSConsents",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "consent_ids"
+                ],
+                "type": "object",
+                "properties": {
+                  "consent_ids": {
+                    "minItems": 1,
+                    "type": "array",
+                    "description": "The list of consent policy IDs to delete.",
+                    "example": [
+                      "-6QPOIFtSU-wjt2Kl2TUng",
+                      "-72t1AufQ5mqjg44xzfcCQ"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "**HTTP Status Code:** `204` **No Content**  \n \nSMS consent policies deleted successfully."
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `999` <br>\n Invalid field. <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:write:master",
+              "number_management:delete:sms_consent:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:delete:sms_consent:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sms_consent/{consentId}": {
+      "get": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "Get an SMS consent policy",
+        "description": "Returns a specific SMS consent policy by ID.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:sms_consent:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "GetSMSConsent",
+        "parameters": [
+          {
+            "name": "consentId",
+            "in": "path",
+            "description": "The consent policy's ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "fnzfuEgUT0OrmZeJBUyWrQ"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**  \n \nSMS consent policy details retrieved successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "consent_id": {
+                      "type": "string",
+                      "description": "The consent policy's ID.",
+                      "example": "C-91H30r6xTCCpt8nNFSuhWA"
+                    },
+                    "consent_name": {
+                      "type": "string",
+                      "description": "The name of the SMS consent policy.",
+                      "example": "ZPconsent"
+                    },
+                    "description": {
+                      "type": "string",
+                      "description": "The description of the SMS consent policy.",
+                      "example": "This consent will be used by our employees to schedule events, provide reminders and support to our customers."
+                    },
+                    "user_id": {
+                      "type": "string",
+                      "description": "The ID of the user who created the consent policy.",
+                      "example": "0GVPDRXiSAaDb73-e2tW0A"
+                    },
+                    "account_id": {
+                      "type": "string",
+                      "description": "The account ID that owns the consent policy.",
+                      "example": "KGzOF3hCTamb_Xx-bXbgqA"
+                    },
+                    "in_out_bound": {
+                      "type": "object",
+                      "properties": {
+                        "opt_in_message": {
+                          "type": "object",
+                          "properties": {
+                            "prompt": {
+                              "type": "string",
+                              "description": "The prompt message sent to users to opt-in for SMS messages.",
+                              "example": "Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information."
+                            },
+                            "keywords": {
+                              "type": "array",
+                              "description": "The keywords that trigger the opt-in action.",
+                              "example": [
+                                "START",
+                                "keyword"
+                              ],
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "confirmation_message": {
+                              "type": "string",
+                              "description": "The confirmation message sent after a successful opt-in.",
+                              "example": "You're subscribed!"
+                            }
+                          },
+                          "description": "The message configuration for opt-in"
+                        },
+                        "opt_out_message": {
+                          "type": "object",
+                          "properties": {
+                            "message": {
+                              "type": "string",
+                              "description": "The message sent to users when they opt-out.",
+                              "example": "You are unsubscribed to texts from ZOOM. No more messages will be sent."
+                            },
+                            "keywords": {
+                              "type": "array",
+                              "description": "The keywords that trigger the opt-out action.",
+                              "example": [
+                                "Stop",
+                                "keyword"
+                              ],
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "description": "The message configuration for opt-out"
+                        },
+                        "help_message": {
+                          "type": "object",
+                          "properties": {
+                            "message": {
+                              "type": "string",
+                              "description": "The help message sent to users when they request help.",
+                              "example": "ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website."
+                            },
+                            "keywords": {
+                              "type": "array",
+                              "description": "The keywords that trigger the help message.",
+                              "example": [
+                                "HELP",
+                                "keyword"
+                              ],
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "description": "The message configuration for help"
+                        },
+                        "disclaimer": {
+                          "type": "object",
+                          "properties": {
+                            "message": {
+                              "type": "string",
+                              "description": "The disclaimer message text.",
+                              "example": "disclaimer"
+                            },
+                            "enable": {
+                              "type": "boolean",
+                              "description": "Whether the disclaimer is enabled.",
+                              "example": true
+                            }
+                          },
+                          "description": "The message configuration for disclaimer"
+                        }
+                      },
+                      "description": "The message configuration for opt-in, opt-out, help, and disclaimer messages."
+                    },
+                    "status": {
+                      "type": "boolean",
+                      "description": "The status of the consent policy. `true` indicates active, `false` indicates inactive.",
+                      "example": true
+                    },
+                    "capacity": {
+                      "type": "integer",
+                      "description": "The maximum number of phone numbers that can be assigned to this consent policy.",
+                      "format": "int64",
+                      "example": 999
+                    },
+                    "create_time": {
+                      "type": "string",
+                      "description": "The time when the consent policy was created.",
+                      "format": "date-time",
+                      "example": "2024-06-01T08:55:38Z"
+                    },
+                    "modify_time": {
+                      "type": "string",
+                      "description": "The time when the consent policy was last modified.",
+                      "format": "date-time",
+                      "example": "2025-09-19T11:20:59Z"
+                    },
+                    "used_number": {
+                      "type": "integer",
+                      "description": "The number of phone numbers currently assigned to this consent policy.",
+                      "format": "int64",
+                      "example": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  \n\n **Error Code:** `1002013` <br>\n The consent does not exist. <br>\n"
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:read:master",
+              "number_management:read:sms_consent:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:sms_consent:master"
+          ]
+        }
+      },
+      "patch": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "Update an SMS consent policy",
+        "description": "Update an existing SMS consent policy. Only provided fields will be updated.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:sms_consent:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "UpdateSMSConsent",
+        "parameters": [
+          {
+            "name": "consentId",
+            "in": "path",
+            "description": "The consent policy's ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "fnzfuEgUT0OrmZeJBUyWrQ"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "consent_name": {
+                    "maxLength": 255,
+                    "type": "string",
+                    "description": "The SMS consent policy's name.",
+                    "example": "ZPconsent Updated"
+                  },
+                  "description": {
+                    "maxLength": 4096,
+                    "type": "string",
+                    "description": "The SMS consent policy's description.",
+                    "example": "Updated description for the consent policy."
+                  },
+                  "in_out_bound": {
+                    "type": "object",
+                    "properties": {
+                      "opt_in_message": {
+                        "type": "object",
+                        "properties": {
+                          "prompt": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The prompt message sent to users to opt-in for SMS messages.",
+                            "example": "Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information."
+                          },
+                          "keywords": {
+                            "type": "array",
+                            "description": "The keywords that trigger the opt-in action.",
+                            "example": [
+                              "START",
+                              "keyword"
+                            ],
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "confirmation_message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The confirmation message sent after a successful opt-in.",
+                            "example": "You're subscribed!"
+                          }
+                        },
+                        "description": "The opt-in message configuration."
+                      },
+                      "opt_out_message": {
+                        "type": "object",
+                        "properties": {
+                          "message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The message sent to users when they opt out.",
+                            "example": "You are unsubscribed to texts from ZOOM. No more messages will be sent."
+                          },
+                          "keywords": {
+                            "type": "array",
+                            "description": "The keywords that trigger the opt out action.",
+                            "example": [
+                              "Stop",
+                              "keyword"
+                            ],
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "description": "The opt out message configuration."
+                      },
+                      "help_message": {
+                        "type": "object",
+                        "properties": {
+                          "message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The help message sent to users when they request help.",
+                            "example": "ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website."
+                          },
+                          "keywords": {
+                            "type": "array",
+                            "description": "The keywords that trigger the help message.",
+                            "example": [
+                              "HELP",
+                              "keyword"
+                            ],
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "description": "The help message configuration."
+                      },
+                      "disclaimer": {
+                        "type": "object",
+                        "properties": {
+                          "message": {
+                            "maxLength": 500,
+                            "type": "string",
+                            "description": "The disclaimer message text.",
+                            "example": "disclaimer"
+                          },
+                          "enable": {
+                            "type": "boolean",
+                            "description": "Whether the disclaimer is enabled.",
+                            "example": true
+                          }
+                        },
+                        "description": "The disclaimer message configuration."
+                      }
+                    },
+                    "description": "The message configuration for opt-in, opt-out, help, and disclaimer messages."
+                  },
+                  "status": {
+                    "type": "boolean",
+                    "description": "The consent policy's status. `true` indicates active, `false` indicates inactive.",
+                    "example": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "**HTTP Status Code:** `204` **No Content**  \n \nSMS consent policy updated successfully."
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `999` <br>\n Invalid field. <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  \n\n **Error Code:** `1002013` <br>\n The consent does not exist. <br>\n"
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:write:master",
+              "number_management:update:sms_consent:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:update:sms_consent:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sms_consent/{consentId}/phone_numbers": {
+      "get": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "List phone numbers assigned to SMS consent policy",
+        "description": "Returns a paginated list of phone numbers assigned to a specific SMS consent policy.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:sms_consent:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`",
+        "operationId": "ListConsentPhoneNumbers",
+        "parameters": [
+          {
+            "name": "consentId",
+            "in": "path",
+            "description": "The consent policy's ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "fnzfuEgUT0OrmZeJBUyWrQ"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "maximum": 300,
+              "minimum": 1,
+              "type": "integer",
+              "example": 30
+            },
+            "example": 30
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "Use the next page token to paginate through large result sets. A next page token is returned whenever the set of available results exceeds the current page size. This token's expiration period is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**  \n \nPhone numbers retrieved successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "page_size": {
+                      "type": "integer",
+                      "description": "The number of records returned within a single API call.",
+                      "example": 30
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The total number of records found.",
+                      "format": "int64",
+                      "example": 33
+                    },
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "Use the next page token to paginate through large result sets. A next page token is returned whenever the set of available results exceeds the current page size. This token's expiration period is 15 minutes.",
+                      "example": "bkOcmnm6mn6ioYAi10BcgRiEL38WzAo6jP2"
+                    },
+                    "sms_consent_number": {
+                      "type": "array",
+                      "description": "List of phone numbers assigned to the consent policy.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "phone_number_id": {
+                            "type": "string",
+                            "description": "The phone number's ID.",
+                            "example": "-6QPOIFtSU-wjt2Kl2TUng"
+                          },
+                          "phone_number": {
+                            "type": "string",
+                            "description": "The phone number assigned to the consent policy.",
+                            "example": "+12095805275"
+                          },
+                          "account_id": {
+                            "type": "string",
+                            "description": "The account ID that owns the phone number.",
+                            "example": "KGzOF3hCTamb_Xx-bXbgqA"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  \n\n **Error Code:** `1002013` <br>\n The consent does not exist. <br>\n"
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:read:master",
+              "number_management:read:sms_consent:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "SmsCampaigns:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:sms_consent:master"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "Assign phone numbers to SMS consent policy",
+        "description": "Assigns one or more phone numbers to an SMS consent policy.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`",
+        "operationId": "AssignPhoneNumbersToConsent",
+        "parameters": [
+          {
+            "name": "consentId",
+            "in": "path",
+            "description": "The consent policy's ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "fnzfuEgUT0OrmZeJBUyWrQ"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "phone_number_ids"
+                ],
+                "type": "object",
+                "properties": {
+                  "phone_number_ids": {
+                    "maxItems": 200,
+                    "minItems": 1,
+                    "type": "array",
+                    "description": "The list of phone number IDs to assign to the consent policy.",
+                    "example": [
+                      "-6QPOIFtSU-wjt2Kl2TUng",
+                      "-72t1AufQ5mqjg44xzfcCQ"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "**HTTP Status Code:** `201` **Created**  \n \nPhone numbers assigned successfully."
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1003` <br>\n Too many numbers, should less than 200 <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  \n\n **Error Code:** `1002013` <br>\n The consent does not exist. <br>\n"
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:write:master",
+              "number_management:write:numbers:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:write:numbers:master"
+          ]
+        }
+      },
+      "delete": {
+        "tags": [
+          "SMS Consent"
+        ],
+        "summary": "Unassign phone numbers from SMS consent policy",
+        "description": "Unassigns one or more phone numbers from an SMS consent policy.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:delete:numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`",
+        "operationId": "UnassignPhoneNumbersFromConsent",
+        "parameters": [
+          {
+            "name": "consentId",
+            "in": "path",
+            "description": "The consent policy's ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "fnzfuEgUT0OrmZeJBUyWrQ"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "phone_number_ids"
+                ],
+                "type": "object",
+                "properties": {
+                  "phone_number_ids": {
+                    "maxItems": 200,
+                    "minItems": 1,
+                    "type": "array",
+                    "description": "The list of phone number IDs to unassign from the consent policy.",
+                    "example": [
+                      "-6QPOIFtSU-wjt2Kl2TUng",
+                      "-72t1AufQ5mqjg44xzfcCQ"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "**HTTP Status Code:** `204` **No Content**  \n \nPhone numbers unassigned successfully."
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1003` <br>\n Too many numbers, should less than 200 <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "404": {
+            "description": "**HTTP Status Code:** `404` <br>\n Not Found  \n\n **Error Code:** `1002013` <br>\n The consent does not exist. <br>\n"
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:write:master",
+              "number_management:delete:numbers:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:write:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:delete:numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/ported_numbers/orders": {
+      "get": {
+        "tags": [
+          "Setting"
+        ],
+        "summary": "List ported numbers",
+        "description": "Returns a list of ported numbers in a Zoom account.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_ported_numbers:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "Listportednumbers",
+        "parameters": [
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through large result sets. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "example": 30
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**\n\nPorted Phone numbers listed successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through large result sets. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "R4aF9Oj0fVM2hhezJTEmSKaBSkfesDwGy42"
+                    },
+                    "page_size": {
+                      "type": "integer",
+                      "description": "The number of records returned within a single API call.",
+                      "example": 30
+                    },
+                    "ported_numbers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "numbers": {
+                            "type": "array",
+                            "description": "The ported numbers.",
+                            "items": {
+                              "type": "string",
+                              "example": "+12058945752"
+                            }
+                          },
+                          "order_id": {
+                            "type": "string",
+                            "description": "The ported numbers' order ID.",
+                            "example": "2021080307332974349"
+                          },
+                          "replacing_numbers": {
+                            "type": "array",
+                            "description": "The ported numbers' replacement numbers.",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "source_number": {
+                                  "type": "string",
+                                  "description": "The source number.",
+                                  "example": "+12058945752"
+                                },
+                                "target_number": {
+                                  "type": "string",
+                                  "description": "The replaced number.",
+                                  "example": "+12058945755"
+                                }
+                              }
+                            }
+                          },
+                          "status": {
+                            "type": "string",
+                            "description": "The ported numbers' status.",
+                            "example": "Canceled",
+                            "enum": [
+                              "Not_Submitted",
+                              "Waiting",
+                              "Processing",
+                              "Successfully",
+                              "Rejected",
+                              "Canceled",
+                              "FOC"
+                            ]
+                          },
+                          "submission_date_time": {
+                            "type": "string",
+                            "description": "The time ported numbers were submitted (format: 'yyyy-MM-ddThh:dd:ssZ').",
+                            "example": "2021-08-03T07:33:29Z"
+                          }
+                        }
+                      }
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The total number of records returned.",
+                      "example": 2
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n "
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:read:master",
+              "number_management:read:list_ported_numbers:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Read",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:list_ported_numbers:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/ported_numbers/orders/{orderId}": {
+      "get": {
+        "tags": [
+          "Setting"
+        ],
+        "summary": "Get ported numbers details",
+        "description": "Returns the details on the ported numbers by specifying `order_id`. \n\n **Prerequisites** \n * A Pro or higher account plan \n * A Zoom phone license\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:ported_number:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "Getportednumbersdetails",
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "description": "The order ID of the ported numbers. This ID can be retrieved from the List Ported Numbers API.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "2021080307332974349"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200` **OK**\n\nPorted numbers details retrieved successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "contact_emails": {
+                      "type": "string",
+                      "description": "The contact emails of transferring numbers.",
+                      "example": "example@163.com"
+                    },
+                    "contact_number": {
+                      "type": "string",
+                      "description": "The contact numbers for transferring numbers.",
+                      "example": "2058945753"
+                    },
+                    "isp": {
+                      "type": "string",
+                      "description": "The ported numbers' ISP.",
+                      "example": "Twilio International"
+                    },
+                    "numbers": {
+                      "type": "array",
+                      "description": "The ported numbers.",
+                      "items": {
+                        "type": "string",
+                        "example": "+12058945752"
+                      }
+                    },
+                    "order_id": {
+                      "type": "string",
+                      "description": "The ported numbers' order ID.",
+                      "example": "2021080307332974349"
+                    },
+                    "original_billing_info": {
+                      "type": "object",
+                      "properties": {
+                        "account_number": {
+                          "type": "string",
+                          "example": "111223"
+                        },
+                        "address": {
+                          "type": "object",
+                          "properties": {
+                            "city": {
+                              "type": "string",
+                              "example": "San Jose"
+                            },
+                            "country": {
+                              "type": "string",
+                              "example": "US"
+                            },
+                            "house_number": {
+                              "type": "string",
+                              "example": "55"
+                            },
+                            "state_code": {
+                              "type": "string",
+                              "example": "CA"
+                            },
+                            "street_name": {
+                              "type": "string",
+                              "example": "ALMADEN BLVD"
+                            },
+                            "zip": {
+                              "type": "string",
+                              "example": "95113"
+                            }
+                          }
+                        },
+                        "authorizing_person": {
+                          "type": "string",
+                          "example": "zz"
+                        },
+                        "billing_telephone_number": {
+                          "type": "string",
+                          "example": "2058945751"
+                        },
+                        "company": {
+                          "type": "string",
+                          "example": "zm"
+                        },
+                        "customer_requested_date": {
+                          "type": "string",
+                          "example": "2021-08-06"
+                        },
+                        "pin": {
+                          "type": "string",
+                          "example": "111223"
+                        }
+                      },
+                      "description": "The ported numbers' original billing info."
+                    },
+                    "printed_name": {
+                      "type": "string",
+                      "description": "The printed names on transferring numbers.",
+                      "example": "Jiang"
+                    },
+                    "replacing_numbers": {
+                      "type": "array",
+                      "description": "The ported numbers' replacement numbers.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "source_number": {
+                            "type": "string",
+                            "description": "The source number.",
+                            "example": "+12058945752"
+                          },
+                          "target_number": {
+                            "type": "string",
+                            "description": "The replaced number.",
+                            "example": "+12058945755"
+                          }
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "The ported numbers' status.",
+                      "example": "Canceled",
+                      "enum": [
+                        "Not_Submitted",
+                        "Waiting",
+                        "Processing",
+                        "Successfully",
+                        "Rejected",
+                        "Canceled",
+                        "FOC"
+                      ]
+                    },
+                    "submission_date_time": {
+                      "type": "string",
+                      "description": "The time ported numbers were submitted (format: 'yyyy-MM-ddThh:dd:ssZ').",
+                      "example": "2021-08-03T07:33:29Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `400` <br>\n Port in order does not exist <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:read:master",
+              "number_management:read:ported_number:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Read",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:ported_number:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sip_groups": {
+      "get": {
+        "tags": [
+          "Setting"
+        ],
+        "summary": "List SIP groups",
+        "description": "Returns a list of SIP (Session Initiation Protocol) groups.\n\n**Prerequisites** \n* Pro or a higher account with Zoom Phone license\n* Account owner or admin permissions\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_sip_groups:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "ListSIPgroups",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "example": 30
+            }
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "Fh98ehf98wehf9wehwqk"
+            }
+          },
+          {
+            "name": "allocated_product",
+            "in": "query",
+            "description": "The phone number's allocated product.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "ZOOM_PHONE",
+              "enum": [
+                "ZOOM_PHONE",
+                "ZOOM_CONTACT_CENTER"
+              ]
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Code:** `200`\n\nSIP groups successfully listed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "IXIhcpJWscHfISSKTcdl2QpSMLyRE38zH92"
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The number of records returned with a single API call.",
+                      "example": 88
+                    },
+                    "sip_groups": {
+                      "maxItems": 300,
+                      "type": "array",
+                      "description": "The SIP group information.",
+                      "items": {
+                        "required": [
+                          "display_name",
+                          "sip_group_id"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "description": {
+                            "type": "string",
+                            "description": "The SIP group's description.",
+                            "example": "test SIP group"
+                          },
+                          "display_name": {
+                            "type": "string",
+                            "description": "The SIP group's display name.",
+                            "example": "RRRR"
+                          },
+                          "sip_group_id": {
+                            "type": "string",
+                            "description": "The SIP group's ID.",
+                            "example": "8MhK7ea4Q4ihIQ4TD_g0kw"
+                          },
+                          "send_sip_group_name": {
+                            "type": "boolean",
+                            "description": "Whether the SIP group's name is sent in the SIP header.",
+                            "example": false
+                          },
+                          "sip_trunk": {
+                            "required": [
+                              "name",
+                              "sip_trunk_id"
+                            ],
+                            "type": "object",
+                            "properties": {
+                              "sip_trunk_id": {
+                                "type": "string",
+                                "description": "The SIP trunk's  ID.",
+                                "example": "VWQU-veBQnm08EtBkUGnbw"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The SIP trunk group's name.",
+                                "example": "TESTAPI01"
+                              },
+                              "type": {
+                                "type": "string",
+                                "description": "The types of SIP trunks",
+                                "example": "BYOC",
+                                "enum": [
+                                  "BYOC",
+                                  "BYOP"
+                                ]
+                              }
+                            },
+                            "description": "The SIP trunk group."
+                          },
+                          "source_system": {
+                            "type": "string",
+                            "description": "The source of BYOC SIP group.",
+                            "example": "ZOOM_PHONE",
+                            "enum": [
+                              "ZOOM_PHONE",
+                              "ZOOM_CONTACT_CENTER",
+                              "COMMON"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1002_006` <br>\n product cannot be empty <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:read:master",
+              "number_management:read:list_sip_groups:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "ContactCenterMgt:Edit",
+            "PbxAdmin:Read"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:list_sip_groups:master"
+          ]
+        }
+      }
+    },
+    "/accounts/{accountId}/number_management/sip_trunks": {
+      "get": {
+        "tags": [
+          "Setting"
+        ],
+        "summary": "List BYOC SIP trunks",
+        "description": "Returns a list of an account's assigned BYOC (Bring Your Own Carrier) SIP (Session Initiation Protocol) trunks.\n\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\n\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_sip_trunks:master`\n\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`",
+        "operationId": "ListBYOCSIPtrunks",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "The number of records returned within a single API call.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "example": 30
+            }
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "description": "The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "Fh98ehf98wehf9wehlgz"
+            }
+          },
+          {
+            "name": "allocated_product",
+            "in": "query",
+            "description": "The phone number's allocated product\r\n",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "ZOOM_PHONE",
+              "enum": [
+                "ZOOM_PHONE",
+                "ZOOM_CONTACT_CENTER"
+              ]
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Unique identifier of the account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "TQTvjT52Tmi_wrhASNNOEw"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "**HTTP Status Codes**: `200`\n\nOK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "byoc_sip_trunk": {
+                      "maxItems": 300,
+                      "type": "array",
+                      "items": {
+                        "required": [
+                          "name",
+                          "sip_trunk_id"
+                        ],
+                        "type": "object",
+                        "properties": {
+                          "carrier": {
+                            "type": "string",
+                            "description": "The name of the carrier.",
+                            "example": "Bandwidth"
+                          },
+                          "carrier_account": {
+                            "type": "string",
+                            "description": "The account associated to the carrier.",
+                            "example": "123123131313"
+                          },
+                          "sip_trunk_id": {
+                            "type": "string",
+                            "description": "The unique SIP Trunk ID.",
+                            "example": "fVA-LsQhQAC2fTS7NiccFA"
+                          },
+                          "name": {
+                            "type": "string",
+                            "description": "The display name of the SIP Trunk.",
+                            "example": "TestSipTrunk"
+                          },
+                          "region": {
+                            "type": "string",
+                            "description": "The region of the carrier.",
+                            "example": "newqa01sipjp01"
+                          },
+                          "sbc_label": {
+                            "type": "string",
+                            "description": "The Session Border Controller (SBC) routing label.",
+                            "example": "Test"
+                          },
+                          "source_system": {
+                            "type": "string",
+                            "description": "The source of BYOC SIP Trunk",
+                            "example": "COMMON",
+                            "enum": [
+                              "COMMON",
+                              "ZOOM_PHONE",
+                              "ZOOM_CONTACT_CENTER"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "next_page_token": {
+                      "type": "string",
+                      "description": "The next page token paginates through a large set of results. It returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.",
+                      "example": "Ds6anZEv59aLMmTSrfF4wmHYCMiYXMWhRQ2"
+                    },
+                    "total_records": {
+                      "type": "integer",
+                      "description": "The number of records returned within a single API call. The default is **30**, and the maximum is **100**.",
+                      "example": 30,
+                      "default": 30
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "**HTTP Status Code:** `400` <br>\n Bad Request  \n\n **Error Code:** `1002_006` <br>\n product cannot be empty <br>\n"
+          },
+          "401": {
+            "description": "**HTTP Status Code:** `401` <br>\n Unauthorized  \n\n "
+          },
+          "403": {
+            "description": "**HTTP Status Code:** `403` <br>\n Forbidden  You do not have permission. \n\n "
+          },
+          "429": {
+            "description": "**HTTP Status Code:** `429` <br>\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \n\n "
+          }
+        },
+        "security": [
+          {
+            "openapi_oauth": [
+              "number_management_numbers:read:master",
+              "number_management:read:list_sip_trunks:master"
+            ],
+            "openapi_authorization": []
+          }
+        ],
+        "x-extensions": {
+          "x-permissions": [
+            "PbxAdmin:Read",
+            "ContactCenterMgt:Edit"
+          ],
+          "x-macro-scopes": [
+            "number_management_numbers:read:master"
+          ],
+          "x-granular-scopes": [
+            "number_management:read:list_sip_trunks:master"
+          ]
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "openapi_authorization": {
+        "type": "apiKey",
+        "name": "Authorization",
+        "in": "header"
+      },
+      "openapi_oauth": {
+        "type": "oauth2",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "/",
+            "tokenUrl": "",
+            "refreshUrl": "",
+            "scopes": {
+              "number_management_numbers:read:master": "number_management_numbers:read:master",
+              "number_management:read:list_carrier_peering_numbers:master": "number_management:read:list_carrier_peering_numbers:master",
+              "number_management:read:list_peering_numbers:master": "number_management:read:list_peering_numbers:master",
+              "number_management_numbers:write:master": "number_management_numbers:write:master",
+              "number_management:delete:peering_number:master": "number_management:delete:peering_number:master",
+              "number_management:write:peering_number:master": "number_management:write:peering_number:master",
+              "number_management:update:peering_number:master": "number_management:update:peering_number:master",
+              "number_management:write:numbers:master": "number_management:write:numbers:master",
+              "number_management:write:byoc_numbers:master": "number_management:write:byoc_numbers:master",
+              "number_management:read:list_numbers:master": "number_management:read:list_numbers:master",
+              "number_management:delete:numbers:master": "number_management:delete:numbers:master",
+              "number_management:read:numbers:master": "number_management:read:numbers:master",
+              "number_management:update:numbers:master": "number_management:update:numbers:master",
+              "number_management:read:numbers_plan:master": "number_management:read:numbers_plan:master",
+              "number_management:read:list_sms_campaigns:master": "number_management:read:list_sms_campaigns:master",
+              "number_management:read:sms_campaign:master": "number_management:read:sms_campaign:master",
+              "number_management:delete:sms_consent:master": "number_management:delete:sms_consent:master",
+              "number_management:read:sms_consent:master": "number_management:read:sms_consent:master",
+              "number_management:write:sms_consent:master": "number_management:write:sms_consent:master",
+              "number_management:update:sms_consent:master": "number_management:update:sms_consent:master",
+              "number_management:read:list_ported_numbers:master": "number_management:read:list_ported_numbers:master",
+              "number_management:read:ported_number:master": "number_management:read:ported_number:master",
+              "number_management:read:list_sip_groups:master": "number_management:read:list_sip_groups:master",
+              "number_management:read:list_sip_trunks:master": "number_management:read:list_sip_trunks:master"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+
+## Metadata
+
+```json
+{
+  "params": {
+    "slug": [
+      "number-management",
+      "ma"
+    ]
+  },
+  "downloadPath": "/api-hub/number-management/ma/master.json",
+  "apiOptions": {
+    "events": true,
+    "methods": true,
+    "ma": true
+  },
+  "productMeta": {
+    "specType": "oas",
+    "slug": "/docs/api/rest/reference/number-management/ma",
+    "title": "Cloud Peering - Reseller",
+    "description": "",
+    "keywords": "zoom, rest, api, number managment",
+    "params": {
+      "productName": "Number Management",
+      "maFlag": true
+    },
+    "zoapEndpoint": "docJsonByFixVersion",
+    "productDisplayTitle": "Number Management",
+    "scalarSlug": "/docs/api/number-management/ma",
+    "alertPath": "./content/docs/_includes/api/new-api-docs-alert.mdx",
+    "svgname": "number-management"
+  },
+  "frontmatter": {
+    "title": "Number Management Master APIs",
+    "keywords": "zoom, rest, api, number managment",
+    "description": "Number Management APIs are part of Zoom's API suite. They let developers manage and provision phone numbers in a Zoom Phone, Contact Center, or Meetings account programmatically. They also help businesses and service providers automate phone number operations at scale.",
+    "skipQualtrics": true
+  },
+  "isScalarApiRef": true
+}
+```
+
+## Raw Next.js page data
+
+```json
+{
+  "pageProps": {
+    "params": {
+      "slug": [
+        "number-management",
+        "ma"
+      ]
+    },
+    "downloadPath": "/api-hub/number-management/ma/master.json",
+    "apiOptions": {
+      "events": true,
+      "methods": true,
+      "ma": true
+    },
+    "productMeta": {
+      "specType": "oas",
+      "slug": "/docs/api/rest/reference/number-management/ma",
+      "title": "Cloud Peering - Reseller",
+      "description": "",
+      "keywords": "zoom, rest, api, number managment",
+      "params": {
+        "productName": "Number Management",
+        "maFlag": true
+      },
+      "zoapEndpoint": "docJsonByFixVersion",
+      "productDisplayTitle": "Number Management",
+      "scalarSlug": "/docs/api/number-management/ma",
+      "alertPath": "./content/docs/_includes/api/new-api-docs-alert.mdx",
+      "svgname": "number-management"
+    },
+    "spec": "{\"openapi\":\"3.0.0\",\"info\":{\"title\":\"Number Management\",\"description\":\"Number Management APIs are part of Zoom's API suite. They let developers manage and provision phone numbers in a Zoom Phone, Contact Center, or Meetings account programmatically. They also help businesses and service providers automate phone number operations at scale.\",\"termsOfService\":\"https://zoom.us/docs/en-us/zoom_api_license_and_tou.html\",\"contact\":{\"name\":\"Zoom Developers\",\"url\":\"https://developer.zoom.us/\"},\"version\":\"2\"},\"externalDocs\":{\"description\":\"Find out more about Swagger\",\"url\":\"https://swagger.io\"},\"servers\":[{\"url\":\"https://api.zoom.us/v2\"}],\"paths\":{\"/accounts/{accountId}/number_management/carrier/peering_numbers\":{\"get\":{\"tags\":[\"Cloud Peering Provider Exchange\"],\"summary\":\"List peering phone numbers for provider\",\"description\":\"Returns phone numbers the carrier pushes to different customers.\\n\\n**Prerequisites** \\n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_carrier_peering_numbers:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"Listpeeringphonenumbersforprovider\",\"parameters\":[{\"name\":\"page_size\",\"in\":\"query\",\"description\":\"The total number of records returned from a single API call.\",\"required\":false,\"schema\":{\"maximum\":300,\"type\":\"integer\",\"format\":\"int32\",\"example\":30,\"default\":30}},{\"name\":\"next_page_token\",\"in\":\"query\",\"description\":\"The next page token paginates through a large set of results. A next page token is returned whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2\"}},{\"name\":\"phone_number\",\"in\":\"query\",\"description\":\"The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\\n) format.\\n\\n\\n*  If this parameter is not specified, API will return all the phone numbers from the partner. \",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"+18108001001\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"**HTTP Status Code:** `200` **OK**  \\n Cloud peering numbers successfully returned.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"next_page_token\":{\"type\":\"string\",\"description\":\"The next page token paginates through a large set of results. A next page token is returned whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"example\":\"8X8xSdRVKHsabD6Im4tIPODq6GzDOvV5fO1\"},\"numbers\":{\"type\":\"array\",\"description\":\"The information about the phone numbers pushed by the carrier to different customers.\",\"items\":{\"required\":[\"assigned\",\"phone_number\",\"sip_trunk_name\",\"status\"],\"type\":\"object\",\"properties\":{\"customer_account_name\":{\"type\":\"string\",\"description\":\"The customer's account name.\",\"example\":\"Some customer's account name\"},\"customer_account_number\":{\"type\":\"string\",\"description\":\"The customer's account number.\",\"example\":\"Some customer's account number\"},\"assigned\":{\"type\":\"boolean\",\"description\":\"Whether the phone number is assigned:\\n* `false` &mdash; Unassigned.\\n* `true` &mdash; Assigned.\",\"example\":true},\"billing_ref_id\":{\"type\":\"string\",\"description\":\"Partners can specify their billing reference ID, with the maximum length of 36 characters. \\n*  Zoom will send back the specified billing_ref_id in the SIP Header X-TO-CARRIER-ACCOUNT for the outbound calls to the provider.\",\"example\":\"Some billing referenceId\"},\"phone_number\":{\"type\":\"string\",\"description\":\"The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164) format.\",\"example\":\"+18108001001\"},\"service_info\":{\"type\":\"string\",\"description\":\"Free form descriptive text of the service associated with the number. This description will be surfaced to Zoom customer viewing the phone number. Partners can include description highlighting the capabilities or limitations associated with the number. The maximum is 255 characters.\",\"example\":\"Some service info\"},\"sip_trunk_name\":{\"type\":\"string\",\"description\":\"This field is a unique name that Zoom assigns for a group of trunks established with the partner during the cloud peering infrastructure setup. A partner with global presence may have one or more SIP trunks to handle calls for phone numbers in different regions.Partner needs to specify the name of the SIP trunk associated with the specified phone number. All calls originating from this number will be routed through the specified SIP Trunk, and Zoom will expect to receive inbound calls through the same trunk.During failure scenarios, calls will be routed via alternate trunks within the same trunk group identified  by the `sip_trunk_name`.\",\"example\":\"test-carrier-sip-trunk\"},\"status\":{\"type\":\"boolean\",\"description\":\"Providers can set the status to indicate whether the phone number is active (true) or inactive (false).  Providers can use inactive (false) state to provision phone numbers that are still in the process of being ported in, and update the status to active (true) when the porting is complete.\",\"example\":true}}}},\"total_records\":{\"type\":\"integer\",\"description\":\"The total number of records returned for this API call.\",\"format\":\"int32\",\"example\":20}}}}}},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `1001` <br>\\n Carrier not found <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"ProviderPortal:Read\"],\"x-macro-scopes\":[\"number_management_numbers:read:master\"],\"x-granular-scopes\":[\"number_management:read:list_carrier_peering_numbers:master\"]}}},\"/accounts/{accountId}/number_management/peering_numbers\":{\"get\":{\"tags\":[\"Cloud Peering Reseller\"],\"summary\":\"List peering phone numbers\",\"description\":\"Returns the details associated with a specific phone number, or all the phone numbers the partner previously provisioned for the Zoom customer account.\\n\\n**Prerequisites:** \\n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license. \\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_peering_numbers:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"listPeeringPhoneNumbers\",\"parameters\":[{\"name\":\"page_size\",\"in\":\"query\",\"description\":\"The total number of records returned from a single API call.\",\"required\":false,\"schema\":{\"maximum\":300,\"type\":\"integer\",\"format\":\"int32\",\"example\":30}},{\"name\":\"next_page_token\",\"in\":\"query\",\"description\":\"The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2\"}},{\"name\":\"phone_number\",\"in\":\"query\",\"description\":\"The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\\n) format.\\n\\n\\n*  If this parameter is not specified, API will return all the phone numbers previously assigned to the Zoom customer account by the partner. \",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"+12097654882\"}},{\"name\":\"carrier_code\",\"in\":\"query\",\"description\":\"A unique code that Zoom provides to the partner at the time of establishing cloud peering infrastructure. This unique code is also tied to the developer `client ID` included as part of the token\\n\\nThis parameter is **required** if you do **not** use an OAuth token or the OAuth token does not contain the `clientId`.\",\"required\":false,\"schema\":{\"type\":\"integer\",\"format\":\"int32\",\"example\":8801}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"**HTTP Status Code:** `200` **OK**&lt;br&gt;Carrier peering numbers successfully returned.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"next_page_token\":{\"type\":\"string\",\"description\":\"The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"example\":\"8X8xSdRVKHsabD6Im4tIPODq6GzDOvV5fO1\"},\"numbers\":{\"type\":\"array\",\"description\":\"The information about the carrier's phone numbers.\",\"items\":{\"required\":[\"allocated_product\",\"assigned\",\"phone_number\",\"sip_trunk_name\",\"status\"],\"type\":\"object\",\"properties\":{\"assigned\":{\"type\":\"boolean\",\"description\":\"Whether the phone number is assigned:* `false` &mdash; Unassigned.* `true` &mdash; Assigned.\",\"example\":true},\"billing_ref_id\":{\"type\":\"string\",\"description\":\"Partners can specify their billing reference ID, with the maximum length of 36 characters. \\n*  Zoom will send back the specified billing_ref_id in the SIP Header X-TO-CARRIER-ACCOUNT for the outbound calls to the provider.\",\"example\":\"Some billing referenceId\"},\"allocated_product\":{\"type\":\"string\",\"description\":\"Partners can allocate phone numbers for exclusive use by a specific Zoom Product (ZOOM_PHONE or ZOOM_CONTACT_CENTER). Partners can also make the Phone Numbers not specific to any product (UNALLOCATED), allowing Zoom customers to freely assign the numbers to any Zoom Product.\",\"example\":\"ZOOM_PHONE\",\"enum\":[\"UNALLOCATED\",\"ZOOM_PHONE\",\"ZOOM_CONTACT_CENTER\"]},\"phone_number\":{\"type\":\"string\",\"description\":\"The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\\n) format.\\n\",\"example\":\"+18108001001\"},\"service_info\":{\"type\":\"string\",\"description\":\"Free form descriptive text of the service associated with the number. This description will be surfaced to Zoom customer viewing the phone number. Partners can include description highlighting the capabilities or limitations associated with the number. The maximum is 255 characters.\",\"example\":\"Inbound only number' or 'Metered charges apply\"},\"sip_trunk_name\":{\"type\":\"string\",\"description\":\"This field is a unique name that Zoom assigns for a group of trunks established with the partner during the cloud peering infrastructure setup. A partner with global presence may have one or more SIP trunks to handle calls for phone numbers in different regions.\\nPartner needs to specify the name of the SIP trunk associated with the specified phone number. All calls originating from this number will be routed through the specified SIP Trunk, and Zoom will expect to receive inbound calls through the same trunk.\\nDuring failure scenarios, calls will be routed via alternate trunks within the same trunk group identified  by the `sip_trunk_name`.\",\"example\":\"test-carrier-sip-trunk\"},\"status\":{\"type\":\"boolean\",\"description\":\"Providers can set the status to indicate whether the phone number is active (true) or inactive (false).  Providers can use inactive (false) state to provision phone numbers that are still in the process of being ported in, and update the status to active (true) when the porting is complete.\",\"example\":true}}}},\"total_records\":{\"type\":\"integer\",\"description\":\"The total number of records returned for this API call.\",\"format\":\"int64\",\"example\":20}}}}}},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `1001` <br>\\n Carrier not found <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"PbxAdmin:Read\",\"ContactCenterMgt:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:read:master\"],\"x-granular-scopes\":[\"number_management:read:list_peering_numbers:master\"]}},\"post\":{\"tags\":[\"Cloud Peering Reseller\"],\"summary\":\"Add peering phone numbers\",\"description\":\"Allows provider exchange partners to add phone numbers to Zoom account. \\n\\n**Prerequisites** \\n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:peering_number:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"addPeeringPhoneNumbers\",\"parameters\":[{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"required\":[\"allocated_product\",\"phone_numbers\"],\"type\":\"object\",\"properties\":{\"carrier_code\":{\"type\":\"integer\",\"description\":\"A unique code that Zoom provides to the partner at the time of establishing cloud peering infrastructure. This unique code is also tied to the developer `client ID` included as part of the token\\n\\nThis parameter is **required** if you do **not** use an OAuth token or the OAuth token does not contain the `clientId`.\",\"format\":\"int32\",\"example\":3456},\"allocated_product\":{\"type\":\"string\",\"description\":\"Partners can allocate phone numbers for exclusive use by a specific Zoom Product (ZOOM_PHONE or ZOOM_CONTACT_CENTER). Partners can also make the phone numbers not specific to any product (UNALLOCATED), allowing Zoom customers to freely assign the numbers to any Zoom Product.\",\"example\":\"ZOOM_PHONE\",\"enum\":[\"UNALLOCATED\",\"ZOOM_PHONE\",\"ZOOM_CONTACT_CENTER\"]},\"phone_numbers\":{\"type\":\"array\",\"description\":\"The information about the added phone numbers. The maximum value is 200.\",\"items\":{\"required\":[\"phone_number\",\"sip_trunk_name\",\"status\"],\"type\":\"object\",\"properties\":{\"billing_ref_id\":{\"type\":\"string\",\"description\":\"The partner can specify their billing reference ID, with the maximum length of 36 characters. \\n*  Zoom will send back the specified billing_ref_id in the SIP Header X-TO-CARRIER-ACCOUNT for the outbound calls to the provider.\",\"example\":\"Some billing referenceId\"},\"phone_number\":{\"type\":\"string\",\"description\":\"The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\\n) format.\\n\",\"example\":\"+12097654882\"},\"number_type\":{\"type\":\"string\",\"description\":\"This field enables you to specify if the number is a mobile number.\",\"example\":\"Mobile\",\"enum\":[\"Mobile\"]},\"service_info\":{\"type\":\"string\",\"description\":\"The free form descriptive text of the service associated with the number. This description surfaces to the Zoom customer viewing the phone number. Partners can include description highlighting the capabilities or limitations associated with the number. The maximum is 255 characters.\",\"example\":\"'Inbound only number' or 'Metered charges apply\"},\"sip_trunk_name\":{\"type\":\"string\",\"description\":\"A unique name that Zoom assigns for a group of trunks established with the partner during the cloud peering infrastructure setup. A partner with global presence may have one or more SIP trunks to handle calls for phone numbers in different regions.\\nPartner needs to specify the name of the SIP trunk associated with the specified phone number. All calls originating from this number will be routed through the specified SIP trunk, and Zoom will expect to receive inbound calls through the same Trunk.\\nDuring failure scenarios, calls will be routed through alternate trunks within the same trunk group identified  by the `sip_trunk_name`.\",\"example\":\"first-markert-carrier-trunk\"},\"status\":{\"type\":\"boolean\",\"description\":\"Providers can set the status to indicate whether the phone number is active (true) or inactive (false).  Providers can use inactive (false) state to provision phone numbers that are still in the process of being ported in, and update the status to active (true) when the porting is complete.\",\"example\":true}}}}}}}}},\"responses\":{\"201\":{\"description\":\"**HTTP Status Code:** `201` **Created**   Peering phone numbers successfully added. \"},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  some data failed \\n\\n **Error Code:** `1000` <br>\\n Some data failed.for example:\\n[   \\n  {\\\"phoneNumber\\\":\\\"+12098888111\\\",\\\"reason\\\":\\\"Invalid Sip Trunk\\\"},   \\n  {\\\"phoneNumber\\\":\\\"+12090000011\\\",\\\"reason\\\":\\\"Invalid number\\\"}\\n] <br>\\n**Error Code:** `1001` <br>\\n Carrier not found <br>\\n**Error Code:** `1002` <br>\\n Request data cannot be empty <br>\\n**Error Code:** `1003` <br>\\n Too many numbers, should less than 200 <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"ContactCenterMgt:Edit\",\"PbxAdmin:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:write:master\"],\"x-granular-scopes\":[\"number_management:write:peering_number:master\"]}},\"delete\":{\"tags\":[\"Cloud Peering Reseller\"],\"summary\":\"Remove peering phone numbers\",\"description\":\"Removes the phone number from the Zoom customer account. \\n\\nPartners can remove only the phone numbers they have previously added to Zoom account.\\n\\n**Prerequisites:** \\n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license. \\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:delete:peering_number:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"deletePeeringPhoneNumbers\",\"parameters\":[{\"name\":\"carrier_code\",\"in\":\"query\",\"description\":\"\\nThis is unique code that Zoom provides to the partner at the time of establishing cloud peering infrastructure. This unique code is also tied to the developer `client ID` included as part of the token\\n\\nThis parameter is **required** if you do **not** use an OAuth token or the OAuth token does not contain the `clientId`.\",\"required\":false,\"schema\":{\"type\":\"integer\",\"format\":\"int32\",\"example\":8091}},{\"name\":\"phone_numbers\",\"in\":\"query\",\"description\":\"The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\\n) format.\\n\",\"required\":true,\"schema\":{\"maxItems\":200,\"type\":\"array\",\"example\":[\"+12097865343\",\"+12097865211\"],\"items\":{\"type\":\"string\"}}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"**HTTP Status Code:** `200` **Created**   Phone number successfully deleted. \"},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  request failed \\n\\n **Error Code:** `1000` <br>\\n Some data failed.\\nfor example:\\n[\\n   {\\\"phoneNumber\\\":\\\"+12098888111\\\",\\\"reason\\\":\\\"Phone number does not exist\\\"},\\n   {\\\"phoneNumber\\\":\\\"+12090000011\\\",\\\"reason\\\":\\\"Invalid number\\\"}\\n] <br>\\n**Error Code:** `1001` <br>\\n Carrier not found <br>\\n**Error Code:** `1002` <br>\\n Request data cannot be empty <br>\\n**Error Code:** `1003` <br>\\n Too many numbers, should less than 200 <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"ContactCenterMgt:Edit\",\"PbxAdmin:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:write:master\"],\"x-granular-scopes\":[\"number_management:delete:peering_number:master\"]}},\"patch\":{\"tags\":[\"Cloud Peering Reseller\"],\"summary\":\"Update peering phone numbers\",\"description\":\"Allows partners to update the status or details associated with the phone numbers.\\n\\n**Prerequisites** \\n* [Enable Number Management](https://zoom.us/cpw/page/phoneNumbers#/number-list)\\n* Developer is a provider exchange partner, with the cloud peering infrastructure established with Zoom.\\n* Zoom account needs to have a Zoom Phone license or a Zoom Contact Center license. \\n\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:peering_number:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"updatePeeringPhoneNumbers\",\"parameters\":[{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"required\":[\"phone_numbers\"],\"type\":\"object\",\"properties\":{\"carrier_code\":{\"type\":\"integer\",\"description\":\"\\nA unique code that Zoom provides to the partner at the time of establishing cloud peering infrastructure. This unique code is also tied to the developer `client ID` included as part of the token\\n\\nThis parameter is **required** if you do **not** use an OAuth token or the OAuth token does not contain the `clientId`.\",\"format\":\"int32\",\"example\":3456},\"allocated_product\":{\"type\":\"string\",\"description\":\"`allocated_product` can only be updated for numbers that were previously set to 'UNALLOCATED'.  To change `allocated_product` value for phone numbers previously allocated to ZOOM_PHONE or ZOOM_CONTACT_CENTER, partners need to remove and reinsert the numbers.\",\"example\":\"ZOOM_PHONE\",\"enum\":[\"UNALLOCATED\",\"ZOOM_PHONE\",\"ZOOM_CONTACT_CENTER\"]},\"phone_numbers\":{\"maxItems\":200,\"type\":\"array\",\"description\":\"The list of phone numbers and the corresponding details that need to be updated. The maximum value is 200.\",\"items\":{\"required\":[\"phone_number\"],\"type\":\"object\",\"properties\":{\"billing_ref_id\":{\"type\":\"string\",\"description\":\"Partners can specify their billing reference ID, with the maximum length of 36 characters.\\n*  Zoom will send back the specified billing_ref_id in the SIP Header X-TO-CARRIER-ACCOUNT for the outbound calls to the provider.\",\"example\":\"Some billing referenceId\"},\"phone_number\":{\"type\":\"string\",\"description\":\"The phone number the partner provides in [E.164](https://en.wikipedia.org/wiki/E.164\\n) format.\\n\\n\",\"example\":\"+12097654882\"},\"service_info\":{\"type\":\"string\",\"description\":\"Free form descriptive text of the service associated with the number. This description will be surfaced to Zoom customer viewing the phone number. Partners can include description highlighting the capabilities or limitations associated with the number. The maximum is 255 characters.\",\"example\":\"Inbound only number' or 'Metered charges apply\"},\"sip_trunk_name\":{\"type\":\"string\",\"description\":\"A unique name that Zoom assigns for a group of trunks established with the partner during the cloud peering infrastructure setup. A partner with global presence may have one or more SIP trunks to handle calls for phone numbers in different regions.\\nPartner needs to specify the name of the SIP trunk associated with the specified phone number. All calls originating from this number will be routed through the specified SIP Trunk, and Zoom will expect to receive inbound calls through the same trunk.\\nDuring failure scenarios, calls will be routed via alternate trunks within the same trunk group identified  by the `sip_trunk_name`.\",\"example\":\"first-markert-carrier-trunk\"},\"status\":{\"type\":\"boolean\",\"description\":\"Providers can set the status to indicate whether the phone number is active (true) or inactive (false).  Providers can use inactive (false) state to provision phone numbers that are still in the process of being ported in, and update the status to active (true) when the porting is complete.\",\"example\":true}}}}}}}}},\"responses\":{\"204\":{\"description\":\"**HTTP Status Code:** `200` **OK**Phone number successfully updated.\"},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  request failed \\n\\n **Error Code:** `1000` <br>\\n Some data failed.for example:\\n[   \\n  {\\\"phoneNumber\\\":\\\"+12098888111\\\",\\\"reason\\\":\\\"Invalid Sip Trunk\\\"}, \\n  {\\\"phoneNumber\\\":\\\"+12090000011\\\",\\\"reason\\\":\\\"Invalid number\\\"}\\n] <br>\\n**Error Code:** `1001` <br>\\n Carrier not found <br>\\n**Error Code:** `1002` <br>\\n Request data cannot be empty <br>\\n**Error Code:** `1003` <br>\\n Too many numbers, should less than 200 <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"ContactCenterMgt:Edit\",\"PbxAdmin:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:write:master\"],\"x-granular-scopes\":[\"number_management:update:peering_number:master\"]}}},\"/accounts/{accountId}/number_management/allocation\":{\"patch\":{\"tags\":[\"Phone Numbers\"],\"summary\":\"Allocate/Unallocate phone numbers\",\"description\":\"Allocates or unallocates phone numbers for those with CPL routing.\\n\\n<p>Note: When allocating phone numbers, if there are any native numbers, they must belong to the same country or region, and have the same number plan.</p>\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:numbers:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `HEAVY`\",\"operationId\":\"AllocateNumber\",\"parameters\":[{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"required\":[\"allocated_product\",\"numbers\"],\"type\":\"object\",\"properties\":{\"numbers\":{\"maxItems\":10,\"type\":\"array\",\"description\":\"A list of phone numbers.\",\"items\":{\"type\":\"string\",\"description\":\"The phone number ID.\",\"example\":\"8nObzGKRTGxoNDZ5JIEHQ\"}},\"allocated_product\":{\"type\":\"string\",\"description\":\"The phone number's allocated product. Use the value UNALLOCATED to unallocate phone numbers.\",\"example\":\"ZOOM_PHONE\",\"enum\":[\"ZOOM_PHONE\",\"ZOOM_CONTACT_CENTER\",\"UNALLOCATED\"]},\"site_id\":{\"type\":\"string\",\"description\":\"The site the numbers will be allocated for Zoom Phone.\",\"example\":\"8nObzGKRTGxoNDZ5JIEHQ\"}}}}}},\"responses\":{\"204\":{\"description\":\" The phone numbers have been allocated succeefully\"},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  Invalid parameter or operation \\n\\n **Error Code:** `100002` <br>\\n Phone number not found <br>\\n**Error Code:** `200002` <br>\\n Unable to switch products for the number <br>\\n**Error Code:** `1002010` <br>\\n The site does not exist <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  Lack of valid authentication \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"PbxAdmin:Edit\",\"ContactCenterMgt:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:write:master\"],\"x-granular-scopes\":[\"number_management:write:numbers:master\"]}}},\"/accounts/{accountId}/number_management/byoc_numbers\":{\"post\":{\"tags\":[\"Phone Numbers\"],\"summary\":\"Add BYOC phone numbers\",\"description\":\"Adds BYOC (Bring Your Own Carrier) phone numbers to Zoom Phone.\\n\\n**Prerequisites:** \\n* A Business or Enterprise plan \\n* A Zoom Phone license\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:byoc_numbers:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`\",\"operationId\":\"AddBYOCPhoneNumber\",\"parameters\":[{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"required\":[\"allocated_product\",\"phone_numbers\"],\"type\":\"object\",\"properties\":{\"allocated_product\":{\"type\":\"string\",\"description\":\"The partners can allocate phone numbers for exclusive use by a specific Zoom Product (ZOOM_PHONE or ZOOM_CONTACT_CENTER).\",\"example\":\"ZOOM_PHONE\",\"enum\":[\"ZOOM_PHONE\",\"ZOOM_CONTACT_CENTER\"]},\"country_iso\":{\"type\":\"string\",\"description\":\"The two-lettered country code (Alpha-2 code in ISO-3166 format). \\r\\n- When the input number is a local number, country_iso is required. \\r\\n- When the input number is a E164 number, `country_iso` is optional.\",\"example\":\"US\"},\"site_id\":{\"type\":\"string\",\"description\":\"The unique identifier of the site. This field is only required if you have enabled multiple sites in the account. See [Managing multiple sites](https://support.zoom.us/hc/en-us/articles/360020809672-Managing-multiple-sites) or [Adding a site](https://support.zoom.us/hc/en-us/articles/360020809672-Managing-multiple-sites#h_05c88e35-1593-491f-b1a8-b7139a75dc15) for details.\\r\\n- If add a zoom phone number, and multiple sites is  enabled, `site_id` is required\",\"example\":\"8f71O6rWT8KFUGQmJIFAdQ\"},\"phone_numbers\":{\"maxItems\":100,\"type\":\"array\",\"description\":\"Whether a input local number or E164 number.\",\"items\":{\"type\":\"string\",\"example\":\"+8618251885564\"}},\"sip_group_id\":{\"type\":\"string\",\"description\":\"The SIP group ID.\\r\\n- If adding a Zoom Phone number, and BYOC SIP Group is optional, `sip_group_id` is required. It can input  ZOOM_PHONE or COMMON `sip_group_id`\\r\\n- If adding a Zoom Contact Center number, `sip_group_id` is required, and can input ZOOM_CONTACT_CENTER or COMMON `sip_group_id`. \",\"example\":\"FLofRFDxSNiSd68iRZrZmg\"},\"enable_pci_pal\":{\"type\":\"boolean\",\"description\":\"- If you add a Zoom phone number and want to enable `enable_pci_pal`, you first need to enable Enable Compliance APIs in the Zoom Phone OP.\\r\\n- If you add a Zoom Contact Center number and want to enable `enable_pci_pal`, you first need to enable PCI SIP Integration in the Zoom Contact Center OP.\",\"example\":true}}}}}},\"responses\":{\"201\":{\"description\":\"**HTTP Status Code:** `201` **Created**   BYOC phone numbers successfully added. \"},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `1000` <br>\\n Some data failed.for example: [ {\\\"phoneNumber\\\":\\\"+12098888111\\\",\\\"reason\\\":\\\"Phone Number format invalid\\\"}, {\\\"phoneNumber\\\":\\\"+12090000011\\\",\\\"reason\\\":\\\"Phone Number already exists\\\"} ] <br>\\n**Error Code:** `1004` <br>\\n BYOC Phone Numbers are not enabled for this account <br>\\n**Error Code:** `1003_001` <br>\\n Too many numbers, should less than 100,contact zoom support team for more numbers <br>\\n**Error Code:** `100_001` <br>\\n Sip Group not found <br>\\n**Error Code:** `200_005` <br>\\n Current sip group don't support PCIPal <br>\\n**Error Code:** `1002_003` <br>\\n Site cannot be empty in zoom phone <br>\\n**Error Code:** `1002_010` <br>\\n The site does not exist <br>\\n\"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"ContactCenterMgt:Edit\",\"PbxAdmin:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:write:master\"],\"x-granular-scopes\":[\"number_management:write:byoc_numbers:master\"]}}},\"/accounts/{accountId}/number_management/numbers\":{\"get\":{\"tags\":[\"Phone Numbers\"],\"summary\":\"List phone numbers\",\"description\":\"Returns a list of phone numbers in an account. See section <b>Information in the phone number table</b> of [Using Number Management for managing phone numbers](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0074457#h_60222313850311712763891581) for more details.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_numbers:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"listPhoneNumbers\",\"parameters\":[{\"name\":\"page_size\",\"in\":\"query\",\"description\":\"The number of records returned within a single API call.\",\"required\":false,\"schema\":{\"maximum\":200,\"type\":\"integer\",\"example\":30,\"default\":30}},{\"name\":\"next_page_token\",\"in\":\"query\",\"description\":\"The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"Fh98ehf98wehf9wehfhw\"}},{\"name\":\"allocated_product\",\"in\":\"query\",\"description\":\"The product associated with the allocated number.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"ZOOM_PHONE\",\"enum\":[\"UNALLOCATED\",\"ZOOM_PHONE\",\"ZOOM_CONTACT_CENTER\"]}},{\"name\":\"number_type\",\"in\":\"query\",\"description\":\"The type of phone number.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"Toll\",\"enum\":[\"Toll\",\"TollFree\",\"VirtualService\",\"Mobile\",\"SharedCost\",\"National\",\"ITFS\"]}},{\"name\":\"number_status\",\"in\":\"query\",\"description\":\"The status of phone number.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"Normal\",\"enum\":[\"Normal\",\"Pending\"]}},{\"name\":\"number_source\",\"in\":\"query\",\"description\":\"The source of phone number.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"Zoom\",\"enum\":[\"Zoom\",\"ZoomPorted\",\"ZoomReserved\",\"ThirdPartyNumber\",\"BYOCCloud\",\"BYOCPremises\"]}},{\"name\":\"site_id\",\"in\":\"query\",\"description\":\"The site ID for the Zoom phone number.\",\"required\":false,\"schema\":{\"type\":\"string\"}},{\"name\":\"assigned_to_type\",\"in\":\"query\",\"description\":\"The type of target assigned to the number.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"User\",\"enum\":[\"PhoneUnassigned\",\"User\",\"CallQueue\",\"AutoReceptionist\",\"CiscoPolycomRoom\",\"SharedLineGroup\",\"GroupCallPickup\",\"CommonArea\",\"EmergencyNumberPool\",\"CompanyLocation\",\"PersonalLocation\",\"MeetingService\",\"LocalSurvivability\",\"LocalSurvivabilityEmergencyNumberPool\",\"MicrosoftTeamsResourceAccount\",\"DistributionGroup\",\"ContactCenterUnassigned\",\"DialInToVideoEngagements\",\"DefaultSystemOutgoingSMS\",\"DefaultAgentOutgoingSMS\",\"DefaultCallerID\",\"Voice\",\"SMS\"]}},{\"name\":\"keyword\",\"in\":\"query\",\"description\":\"This field allows you to search by phone number. Only prefix matching is available for search.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"1205\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"The list of phone numbers.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"next_page_token\":{\"type\":\"string\",\"description\":\"The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"example\":\"xuWXDDeGFkx0dyRtuwQR3M9NWIoMVD9e0a2\"},\"page_size\":{\"type\":\"integer\",\"description\":\"The page size in use.\",\"example\":100},\"numbers\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\",\"description\":\"The unique identifier of the phone number.\",\"example\":\"iHE1MQAET2iV85MbfaQmwg\"},\"number\":{\"type\":\"string\",\"description\":\"The phone number in E.164 format.\",\"example\":\"+1203030333\"},\"allocated_product\":{\"type\":\"string\",\"description\":\"The product assigned to the phone number.\",\"example\":\"ZOOM_CONTACT_CENTER\",\"enum\":[\"UNALLOCATED\",\"ZOOM_PHONE\",\"ZOOM_CONTACT_CENTER\"]},\"number_type\":{\"type\":\"string\",\"description\":\"The type of phone number.\",\"example\":\"Toll\",\"enum\":[\"Toll\",\"TollFree\",\"VirtualService\",\"Mobile\",\"SharedCost\",\"National\",\"ITFS\"]},\"display_name\":{\"type\":\"string\",\"description\":\"The display name for the phone number in Zoom Phone.\",\"example\":\"Alice\"},\"caller_id_name\":{\"type\":\"string\",\"description\":\"The caller ID name for a Contact Center number.\",\"example\":\"Bob Company\"},\"carrier\":{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"integer\",\"description\":\"The carrier code.\",\"example\":2},\"name\":{\"type\":\"string\",\"description\":\"The name of the carrier.\",\"example\":\"Bandwidth\"}},\"description\":\"The carrier information for the Provider Exchange number.\"},\"capability\":{\"type\":\"array\",\"description\":\"The capability of the phone number.  The value can be Incoming, Outgoing, Messaging, PCIPal, and `EmergencyCalls` or any combination of them.\",\"items\":{\"type\":\"string\",\"description\":\"The capability of the phone number\",\"example\":\"Incoming\",\"enum\":[\"Incoming\",\"Outgoing\",\"Messaging\",\"PCIPal\",\"EmergencyCalls\"]}},\"source\":{\"type\":\"string\",\"description\":\"The source of phone number.\",\"example\":\"Zoom\",\"enum\":[\"Zoom\",\"ZoomPorted\",\"ZoomReserved\",\"ThirdPartyNumber\",\"BYOCCloud\",\"BYOCPremises\"]},\"status\":{\"type\":\"string\",\"description\":\"The status of the number.\",\"example\":\"Pending\",\"enum\":[\"Normal\",\"Pending\"]},\"emergency_address\":{\"type\":\"object\",\"properties\":{\"address_line1\":{\"type\":\"string\",\"description\":\"The house number and street name.\",\"example\":\"53 Rav Road\"},\"address_line2\":{\"type\":\"string\",\"description\":\"The information about the building, floor, unit, and so on.\",\"example\":\"Floor 1\"},\"city\":{\"type\":\"string\",\"description\":\"The city in the address.\",\"example\":\"San Jose\"},\"county\":{\"type\":\"string\",\"description\":\"The county of the address for the Ireland address.\",\"example\":\"CO. Cork\"},\"state_code\":{\"type\":\"string\",\"description\":\"The state ISO code of the address.\",\"example\":\"CA\"},\"country\":{\"type\":\"string\",\"description\":\"The two-lettered country code (Alpha-2 code in ISO-3166 format).\",\"example\":\"US\"},\"zip\":{\"type\":\"string\",\"description\":\"The zip or postal code.\",\"example\":\"95113\"}},\"description\":\"The emergency address to bind to the phone number.\"},\"address_update_required\":{\"type\":\"boolean\",\"description\":\"The true value indicates the number's address need to be updated for BYOC Premise numbers.\",\"example\":true},\"emergency_address_update_time\":{\"type\":\"string\",\"description\":\"The updated timestamp of the number's address, in the format 'yyyy-MM-ddTHH:mm:ssZ'. It's used for Phone BYOC-Premises numbers.\",\"example\":\"2024-10-29T14:18:28Z\"},\"site\":{\"type\":\"object\",\"properties\":{\"site_id\":{\"type\":\"string\",\"description\":\"The site ID.\",\"example\":\"8f71O6rWT8KFUGQmJIFAdQ\"},\"name\":{\"type\":\"string\",\"description\":\"The site name.\",\"example\":\"Main Site\"}},\"description\":\"The site associated with the phone number.\"},\"assigned_list\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"assigned_to_id\":{\"type\":\"string\",\"description\":\"In Zoom Phone, this value can represent the ID of the user, emergency number pool (where the ID is either `siteId` if multiple sites are enabled, or `accountId` if not), or company location, depending on the `assigned_to_type `field.\\nIn Contact Center, this field also has different meanings\\n2: number assigned to Dial-in to Video Engagements \\n3: number assigned to Default System Outgoing SMS\\n4: number assigned to Default Caller ID\\n8: number assigned to Default Agent Outgoing SMS\\nOther: number assigned for specific use case , such as flow, queue and so on.\",\"example\":\"rYgfsrduSXWCxr94poMN5g\"},\"assgined_to_name\":{\"type\":\"string\",\"description\":\"The name of the user assigned with the number, emergency number pool, and company location.\",\"example\":\"Alice Bob\"},\"assigned_to_type\":{\"type\":\"string\",\"description\":\"This field indicates to whom the phone number belongs.\",\"example\":\"User\",\"enum\":[\"User\",\"CallQueue\",\"AutoReceptionist\",\"CiscoPolycomRoom\",\"SharedLineGroup\",\"GroupCallPickup\",\"CommonArea\",\"EmergencyNumberPool\",\"CompanyLocation\",\"PersonalLocation\",\"MeetingService\",\"LocalSurvivability\",\"LocalSurvivabilityEmergencyNumberPool\",\"MicrosoftTeamsResourceAccount\",\"DistributionGroup\"]},\"source_channel\":{\"type\":\"string\",\"description\":\"The channel of number that is only for Contact Center.\",\"example\":\"Voice\",\"enum\":[\"Voice\",\"SMS\"]},\"extension_number\":{\"type\":\"string\",\"description\":\"The extension number of an extension (e.g., user) for Zoom Phone\",\"example\":\"6503\"}}}},\"sip_group\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\",\"description\":\"The SIP group's ID.\",\"example\":\"vZWksdNbRkKTdzOth09skw\"},\"name\":{\"type\":\"string\",\"description\":\"The ID of the SIP group. See the **Creating SIP groups** section in [Creating a shared directory of external contacts](https://support.zoom.us/hc/en-us/articles/360037050092-Creating-a-shared-directory-of-external-contacts) for details.\",\"example\":\"SIP 01\"}}},\"location\":{\"type\":\"object\",\"properties\":{\"country\":{\"type\":\"string\",\"description\":\"The name of the country.\",\"example\":\"United States\"},\"city\":{\"type\":\"string\",\"description\":\"The phone number of the city location.\",\"example\":\"San Jose\"},\"state\":{\"type\":\"string\",\"description\":\"The state or province's name.\",\"example\":\"California\"}},\"description\":\"The phone number's area.\"}}}}}}}}},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `999` <br>\\n Invalid value (e.g., allocated_product, number_type, number_soruce) <br>\\n**Error Code:** `1002010` <br>\\n The site does not exist <br>\\n**Error Code:** `1003100` <br>\\n The next page token is either invalid or has expired <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  Lack of valid authentication \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"ContactCenterMgt:Edit\",\"PbxAdmin:Read\"],\"x-macro-scopes\":[\"number_management_numbers:read:master\"],\"x-granular-scopes\":[\"number_management:read:list_numbers:master\"]}},\"delete\":{\"tags\":[\"Phone Numbers\"],\"summary\":\"Delete phone numbers\",\"description\":\"Deletes phone numbers.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:delete:numbers:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`\",\"operationId\":\"DeleteNumbers\",\"parameters\":[{\"name\":\"numbers\",\"in\":\"query\",\"description\":\"A list of phone numbers to be delete.\",\"required\":true,\"schema\":{\"maxItems\":10,\"type\":\"array\",\"example\":[\"iHE1MQAET2iV85MbfaQmwg\",\"vZWksdNbRkKTdzOth09skw\"],\"items\":{\"type\":\"string\"}}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"204\":{\"description\":\"The phone numbers have been deleted successfully.\"},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  Invalid parameter \\n\\n **Error Code:** `100002` <br>\\n Phone number not found <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  Lack of valid authentication \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"PbxAdmin:Edit\",\"ContactCenterMgt:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:write:master\"],\"x-granular-scopes\":[\"number_management:delete:numbers:master\"]}}},\"/accounts/{accountId}/number_management/numbers/{phoneNumberId}\":{\"get\":{\"tags\":[\"Phone Numbers\"],\"summary\":\"Get a phone number\",\"description\":\"Returns information about an account's phone number. \\n\\nFor more details, see the section <b>Information in the phone number table</b> in [Using Number Management for managing phone numbers](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0074457#h_60222313850311712763891581).\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:numbers:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"getPhoneNumber\",\"parameters\":[{\"name\":\"phoneNumberId\",\"in\":\"path\",\"description\":\"The unique identifier of the phone number retrieved from the [List phone numbers](https://developers.zoom.us/docs/api/phone/#tag/carrier-reseller/GET/phone/carrier_reseller/numbers) API.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"iHE1MQAET2iV85MbfaQmwg\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"The phone number details.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\",\"description\":\"The unique identifier of the phone number.\",\"example\":\"iHE1MQAET2iV85MbfaQmwg\"},\"number\":{\"type\":\"string\",\"description\":\"The phone number in E.164 format.\",\"example\":\"+1203030333\"},\"allocated_product\":{\"type\":\"string\",\"description\":\"The product assigned to the phone number.\",\"example\":\"ZOOM_CONTACT_CENTER\",\"enum\":[\"UNALLOCATED\",\"ZOOM_PHONE\",\"ZOOM_CONTACT_CENTER\"]},\"number_type\":{\"type\":\"string\",\"description\":\"The type of the phone number.\",\"example\":\"Toll\",\"enum\":[\"Toll\",\"TollFree\",\"VirtualService\",\"Mobile\",\"SharedCost\",\"National\",\"ITFS\"]},\"display_name\":{\"type\":\"string\",\"description\":\"The display name of the phone number for Zoom Phone numbers.\",\"example\":\"Alice\"},\"caller_id_name\":{\"type\":\"string\",\"description\":\"The caller ID name for the Contact Center numbers.\",\"example\":\"Bob Company\"},\"carrier\":{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"integer\",\"description\":\"The carrier code.\",\"example\":2},\"name\":{\"type\":\"string\",\"description\":\"The name of the carrier.\",\"example\":\"Bandwidth\"}},\"description\":\"The carrier information for Provider Exchange numbers.\"},\"capability\":{\"type\":\"array\",\"description\":\"The capability of the phone number. The value can be Incoming, Outgoing, Messaging, PCIPal and Emergency Calls or any combination of them.\",\"items\":{\"type\":\"string\",\"description\":\"The capability of the phone number.\",\"example\":\"Incoming\",\"enum\":[\"Incoming\",\"Outgoing\",\"Messaging\",\"PCIPal\",\"EmergencyCalls\"]}},\"source\":{\"type\":\"string\",\"description\":\"The source of phone number.\",\"example\":\"Zoom\",\"enum\":[\"Zoom\",\"ZoomPorted\",\"ZoomReserved\",\"ThirdPartyNumber\",\"BYOCCloud\",\"BYOCPremises\"]},\"status\":{\"type\":\"string\",\"description\":\"The status of the number.\",\"example\":\"Pending\",\"enum\":[\"Normal\",\"Pending\"]},\"emergency_address\":{\"type\":\"object\",\"properties\":{\"address_line1\":{\"type\":\"string\",\"description\":\"The house number and street name.\",\"example\":\"53 Rav Road\"},\"address_line2\":{\"type\":\"string\",\"description\":\"The field lists the building, floor, unit, and so on.\",\"example\":\"Floor 1\"},\"city\":{\"type\":\"string\",\"description\":\"The city of the address.\",\"example\":\"San Jose\"},\"county\":{\"type\":\"string\",\"description\":\"The county of the address, applicable for an Ireland address\",\"example\":\"CO. Cork\"},\"state_code\":{\"type\":\"string\",\"description\":\"The state ISO code of the address.\",\"example\":\"CA\"},\"country\":{\"type\":\"string\",\"description\":\"The two-lettered country code (Alpha-2 code in ISO-3166 format)\",\"example\":\"US\"},\"zip\":{\"type\":\"string\",\"description\":\"The zip or postal code.\",\"example\":\"95113\"}},\"description\":\"The emergency address bind to the phone number.\"},\"address_update_required\":{\"type\":\"boolean\",\"description\":\"The true value indicates the number's address need to be updated, applicable for BYOC Premise numbers.\",\"example\":true},\"emergency_address_update_time\":{\"type\":\"string\",\"description\":\"The updated timestamp of the number's address, in the format 'yyyy-MM-ddTHH:mm:ssZ'. It's used for Phone BYOC-Premises numbers. \",\"example\":\"2024-10-29T14:18:28Z\"},\"site\":{\"type\":\"object\",\"properties\":{\"site_id\":{\"type\":\"string\",\"description\":\"The site ID.\",\"example\":\"8f71O6rWT8KFUGQmJIFAdQ\"},\"name\":{\"type\":\"string\",\"description\":\"The name of the site.\",\"example\":\"Main Site\"}},\"description\":\"The site associated with the phone number.\"},\"assigned_list\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"assigned_to_id\":{\"type\":\"string\",\"description\":\"In Zoom Phone, this value can represent the ID of the user, emergency number pool (where the ID is either `siteId` if multiple sites are enabled, or `accountId` if not), or company location, depending on the `assigned_to_type` field.\\nIn Contact Center, this field also has different meanings.\\n2: Number assigned to Dial-in to Video Engagements \\n3: number assigned to Default System Outgoing SMS\\n4: number assigned to Default Caller ID\\n8: number assigned to Default Agent Outgoing SMS\\nOther: number assigned for specific use case , such as flow, queue.\",\"example\":\"rYgfsrduSXWCxr94poMN5g\"},\"assgined_to_name\":{\"type\":\"string\",\"description\":\"The name of the user to whom the number, emergency number pool, and company location are assigned.\",\"example\":\"Alice Bob\"},\"assigned_to_type\":{\"type\":\"string\",\"description\":\"This field indicates to whom the phone number belongs.\",\"example\":\"User\",\"enum\":[\"User\",\"CallQueue\",\"AutoReceptionist\",\"CiscoPolycomRoom\",\"SharedLineGroup\",\"GroupCallPickup\",\"CommonArea\",\"EmergencyNumberPool\",\"CompanyLocation\",\"PersonalLocation\",\"MeetingService\",\"LocalSurvivability\",\"LocalSurvivabilityEmergencyNumberPool\",\"MicrosoftTeamsResourceAccount\",\"DistributionGroup\"]},\"source_channel\":{\"type\":\"string\",\"description\":\"The channel of number. (Only for Contact Center)\",\"example\":\"Voice\",\"enum\":[\"Voice\",\"SMS\"]},\"extension_number\":{\"type\":\"string\",\"description\":\"The extension number of an extension. (e.g., user). This field is applicable for Zoom Phone.\",\"example\":\"6503\"},\"meeting_id\":{\"type\":\"string\",\"description\":\"The meeting ID for Phone meeting service.\",\"example\":\"964 3020 9491\"},\"greeting\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\",\"description\":\"The audio prompt file ID. If the audio was removed from the user's audio library, it will be marked with a prefix, `removed_vWby3OZaQlS1nAdmEAqgwA` for example. You can use this audio ID to get the audio information in the [Get an audio item](https://marketplace.zoom.us/docs/api-reference/phone/methods#tag/Audio-Library/operation/GetAudioItem) API.\",\"example\":\"vWby3OZaQlS1nAdmEAqgwA\"},\"name\":{\"type\":\"string\",\"description\":\"The audio file name of the greeting prompt. \",\"example\":\"hotspot.wav\"}},\"description\":\"This field applicable for meeting service.\"},\"on_hold_music\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\",\"description\":\"The audio prompt file ID. If the audio is no longer in the user's audio library, it will be marked with a prefix, `removed_vWby3OZaQlS1nAdmEAqgwA` for example. You can use this audio ID to get the audio information in the [Get an audio item](https://marketplace.zoom.us/docs/api-reference/phone/methods#tag/Audio-Library/operation/GetAudioItem) API.\",\"example\":\"vWby3OZaQlS1nAdmEAqgwA\"},\"name\":{\"type\":\"string\",\"description\":\"The audio file name of the on hold music prompt. \",\"example\":\"music.wav\"}},\"description\":\"This field applicable for the meeting service.\"},\"display_number\":{\"type\":\"string\",\"description\":\"The displayed phone number in meeting invitations and emails for the meeting service.\",\"example\":\"+1 360 209 5623\"},\"label\":{\"type\":\"string\",\"description\":\"This label appends to the number in parentheses, and appears in meeting invitations and the Zoom client for the meeting service.\",\"example\":\"xxx\"}}}},\"sip_group\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\",\"description\":\"The ID of the SIP group. For details, see the **Creating SIP groups** section in [Creating a shared directory of external contacts](https://support.zoom.us/hc/en-us/articles/360037050092-Creating-a-shared-directory-of-external-contacts).\",\"example\":\"vZWksdNbRkKTdzOth09skw\"},\"name\":{\"type\":\"string\",\"description\":\"The SIP group display name\",\"example\":\"Sip 01\"}}},\"location\":{\"type\":\"object\",\"properties\":{\"country\":{\"type\":\"string\",\"description\":\"The name of the country.\",\"example\":\"United States\"},\"city\":{\"type\":\"string\",\"description\":\"The phone number's city location.\",\"example\":\"San Jose\"},\"state\":{\"type\":\"string\",\"description\":\"The state or province name.\",\"example\":\"California\"}},\"description\":\"The phone number area.\"}}}}}},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  Lack of valid authentication \\n\\n \"},\"404\":{\"description\":\"**HTTP Status Code:** `404` <br>\\n Not Found  The phone number not found \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"ContactCenterMgt:Edit\",\"PbxAdmin:Read\"],\"x-macro-scopes\":[\"number_management_numbers:read:master\"],\"x-granular-scopes\":[\"number_management:read:numbers:master\"]}},\"patch\":{\"tags\":[\"Phone Numbers\"],\"summary\":\"Update a phone number\",\"description\":\"Updates a phone number's information.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:numbers:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"updatePhoneNumberDetail\",\"parameters\":[{\"name\":\"phoneNumberId\",\"in\":\"path\",\"description\":\"The unique identifier for the phone number retrieved from the List Phone Numbers API.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"tDiG8cmnQmCaMRqbZ730Cw\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"display_name\":{\"type\":\"string\",\"description\":\"Zoom Phone numbers use a phone number display name with a limit of 32 characters or fewer.\",\"example\":\"Bob\"},\"caller_id_name\":{\"type\":\"string\",\"description\":\"The caller ID name has 15 characters or fewer, and should have at least one alpha character. The Contact Center supports only US/CA Virtual Service numbers.\",\"example\":\"Alice\"},\"confirm_address_update\":{\"type\":\"boolean\",\"description\":\"Whether to confirm the emergency address update for Zoom Phone BYOC Premises numbers.\",\"example\":true},\"sip_group_id\":{\"type\":\"string\",\"description\":\"This field retrieves the SIP group ID from the List Sip Group API for use with BYOC Premise phone numbers.\",\"example\":\"ybFTE3KXRIC7vJ8kOdmjWg\"},\"capability\":{\"type\":\"object\",\"properties\":{\"incoming\":{\"type\":\"boolean\",\"description\":\"A value of true enables the capability. A value of false disables it.\",\"example\":true},\"outgoing\":{\"type\":\"boolean\",\"description\":\"A value of true enables the capability. A value of false disables it.\",\"example\":false}},\"description\":\"Applicable for Zoom Phone numbers.\"}}}}}},\"responses\":{\"204\":{\"description\":\"Succeed to update the phone number\"},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  Invalid parameter or operation \\n\\n **Error Code:** `999` <br>\\n Invalid Field <br>\\n**Error Code:** `100001` <br>\\n Sip Group not found <br>\\n**Error Code:** `200001` <br>\\n The capability cannot be updated <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  Lack of valid authentication \\n\\n \"},\"404\":{\"description\":\"**HTTP Status Code:** `404` <br>\\n Not Found  Phone number not found \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"PbxAdmin:Edit\",\"ContactCenterMgt:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:write:master\"],\"x-granular-scopes\":[\"number_management:update:numbers:master\"]}}},\"/accounts/{accountId}/number_management/plan\":{\"get\":{\"tags\":[\"Phone Plan\"],\"summary\":\"List phone number plan information\",\"description\":\"Retrieves an account's  phone number plan information, phone number usage, and availability.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:numbers_plan:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"Listphonenumberplaninformation\",\"parameters\":[{\"name\":\"product\",\"in\":\"query\",\"description\":\"The product (e.g., ZOOM_PHONE).\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"ZOOM_PHONE\",\"enum\":[\"ZOOM_PHONE\",\"ZOOM_CONTACT_CENTER\"]}},{\"name\":\"page_size\",\"in\":\"query\",\"description\":\"The number of records returned within a single API call.\",\"required\":false,\"schema\":{\"maximum\":200,\"type\":\"integer\",\"example\":30,\"default\":30}},{\"name\":\"next_page_token\",\"in\":\"query\",\"description\":\"The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"zi4JE9iWsGMZ92F9xhnlcZRxl2Fh47qio02\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"The phone number plan usage information.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"next_page_token\":{\"type\":\"string\",\"description\":\"The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"example\":\"zi4JE9iWsGMZ92F9xhnlcZRxl2Fh47qio02\"},\"page_size\":{\"type\":\"integer\",\"description\":\"The page size in use.\",\"example\":100},\"plans\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"assigned\":{\"type\":\"integer\",\"description\":\"The total number of phone number plans.\",\"example\":10},\"available\":{\"type\":\"integer\",\"description\":\"The remaining number of phone number plans to assign.\",\"example\":10},\"subscribed\":{\"type\":\"integer\",\"description\":\"The total number of phone number plan subscriptions bought.\",\"example\":20},\"name\":{\"type\":\"string\",\"description\":\"The name of the phone number plan.\",\"example\":\"US/CA Included Phone Numbers\"},\"is_unlimited\":{\"type\":\"boolean\",\"description\":\"If the plan is unlimited, the value is true; any other value indicates a limited plan.\",\"example\":true}}}}}}}}},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `999` <br>\\n Invalid param (product) <br>\\n**Error Code:** `1002006` <br>\\n product cannot be empty <br>\\n**Error Code:** `1003100` <br>\\n The next page token is either invalid or has expired <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  Lack of valid authentication \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"PbxAdmin:Read\",\"ContactCenterMgt:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:read:master\"],\"x-granular-scopes\":[\"number_management:read:numbers_plan:master\"]}}},\"/accounts/{accountId}/number_management/sms_campaigns\":{\"get\":{\"tags\":[\"SMS Campaigns\"],\"summary\":\"List SMS campaigns\",\"description\":\"Returns a list of all SMS campaigns in a Zoom account.\\n\\n\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_sms_campaigns:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"listAccountSMSCampaigns\",\"parameters\":[{\"name\":\"page_size\",\"in\":\"query\",\"description\":\"The number of records returned within a single API call.\",\"required\":false,\"schema\":{\"maximum\":300,\"type\":\"integer\",\"example\":30,\"default\":30}},{\"name\":\"next_page_token\",\"in\":\"query\",\"description\":\"The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"**HTTP Status Code:** `200` **OK**  \\n \\nSMS campaign listed successfully.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"next_page_token\":{\"type\":\"string\",\"description\":\"The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"example\":\"bkOcmnm6mn6ioYAi10BcgRiEL38WzAo6jP2\"},\"page_size\":{\"type\":\"integer\",\"description\":\"The number of records returned within a single API call.\",\"example\":30},\"sms_campaigns\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"sms_campaign_id\":{\"type\":\"string\",\"description\":\"The campaign's ID.\",\"example\":\"C-BlVwSdjvS3WXk5gzfIQFfQ\"},\"display_name\":{\"type\":\"string\",\"description\":\"The display name for the SMS campaign.\",\"example\":\"Test SMS Campaign\"},\"status\":{\"type\":\"string\",\"description\":\"The status of the SMS campaign.\",\"example\":\"active\",\"enum\":[\"active\",\"expired\",\"pending\",\"declined\"]},\"brand\":{\"type\":\"object\",\"properties\":{\"brand_id\":{\"type\":\"string\",\"description\":\"The brand's ID.\",\"example\":\"B-c3AN66d_Q4mrQFNUaW-G2w\"},\"name\":{\"type\":\"string\",\"description\":\"The brand's name.\",\"example\":\"Test Campaign\"}},\"description\":\"The business information from Zoom account.\"}}}},\"total_records\":{\"type\":\"integer\",\"description\":\"The total number of records returned.\",\"example\":1}}}}}},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n \"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"SmsCampaigns:Read\"],\"x-macro-scopes\":[\"number_management_numbers:read:master\"],\"x-granular-scopes\":[\"number_management:read:list_sms_campaigns:master\"]}}},\"/accounts/{accountId}/number_management/sms_campaigns/{smsCampaignId}\":{\"get\":{\"tags\":[\"SMS Campaigns\"],\"summary\":\"Get an SMS campaign\",\"description\":\"Returns a specific SMS campaign.\\n\\n**Prerequisites** \\n* A Pro or higher account plan \\n* A Zoom Phone license\\n\\n\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:sms_campaign:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"GetSMSCampaign\",\"parameters\":[{\"name\":\"smsCampaignId\",\"in\":\"path\",\"required\":true,\"schema\":{\"type\":\"string\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"**HTTP Status Code:** `200` **OK**  \\n \\nSMS campaign details retrieved successfully.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"sms_campaign_id\":{\"type\":\"string\",\"description\":\"The campaign's ID.\",\"example\":\"C-BlVwSdjvS3WXk5gzfIQFfQ\"},\"display_name\":{\"type\":\"string\",\"description\":\"The display name for the SMS campaign.\",\"example\":\"Test SMS Campaign\"},\"status\":{\"type\":\"string\",\"description\":\"The status of the SMS campaign. Returns `--` if the campaign is in an exception status.\",\"example\":\"active\",\"enum\":[\"active\",\"expired\",\"pending\",\"declined\"]},\"service_type\":{\"type\":\"string\",\"description\":\"Which service the campaign supports.\",\"example\":\"zoomPhone\",\"enum\":[\"zoomPhone\",\"contactCenter\"]},\"brand\":{\"type\":\"object\",\"properties\":{\"brand_id\":{\"type\":\"string\",\"description\":\"The brand's ID.\",\"example\":\"B-c3AN66d_Q4mrQFNUaW-G2w\"},\"name\":{\"type\":\"string\",\"description\":\"The brand's name.\",\"example\":\"Test Campaign\"}},\"description\":\"The business information from Zoom account.\"},\"phone_numbers\":{\"type\":\"array\",\"description\":\"The assigned phone numbers.\",\"items\":{\"type\":\"object\",\"properties\":{\"phone_number_id\":{\"type\":\"string\",\"description\":\"The phone number's ID.\",\"example\":\"iHE1MQAET2iV85MbfaQmwg\"},\"number\":{\"type\":\"string\",\"description\":\"The phone number that is assigned to the SMS campaign.\",\"example\":\"+18887193005\"}}}},\"response_to_opt_in\":{\"type\":\"string\",\"description\":\"Automatic reply text message after receiving opt in message.\",\"example\":\"ZOOM: Thank you for opting in for our texting notifications. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, Reply with STOP. Reply with HELP for more information.\"},\"response_to_opt_out\":{\"type\":\"string\",\"description\":\"Automatic reply text message after receiving opt out message.\",\"example\":\"You are unsubscribed to texts from ZOOM. No more messages will be sent.\"},\"response_to_help\":{\"type\":\"string\",\"description\":\"Automatic reply text message after receiving help message.\",\"example\":\"ZOOM: You can get more assistance by visiting https://zoom.us/. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website.\"}}}}}},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n \"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"404\":{\"description\":\"**HTTP Status Code:** `404` <br>\\n Not Found  Invalid campaign ID. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"SmsCampaigns:Read\"],\"x-macro-scopes\":[\"number_management_numbers:read:master\"],\"x-granular-scopes\":[\"number_management:read:sms_campaign:master\"]}}},\"/accounts/{accountId}/number_management/sms_campaigns/{smsCampaignId}/phone_numbers\":{\"post\":{\"tags\":[\"SMS Campaigns\"],\"summary\":\"Assign a phone number to SMS campaign\",\"description\":\"[Assigns a phone number to the SMS campaign](https://support.zoom.us/hc/en-us/articles/5016496738445-SMS-MMS-10DLC-Compliance-for-Zoom-Phone-and-Zoom-Contact-Center#h_01FYVVQM1WMW5JD48YNY3J581B).\\n\\n**Prerequisites** \\n* A Business or Enterprise account \\n* A Zoom Phone license\\n\\n\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:numbers:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"assignCampaignPhoneNumbers\",\"parameters\":[{\"name\":\"smsCampaignId\",\"in\":\"path\",\"description\":\"The unique identifier of the campaign to which the phone number will be assigned.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"C-BlVwSdjvS3WXk5gzfIQFfQ\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"requestBody\":{\"description\":\"The phone number ID in the request body.\",\"content\":{\"application/json\":{\"schema\":{\"required\":[\"contact_number\",\"loa_authorizing_person\",\"phone_number_ids\",\"title\"],\"type\":\"object\",\"properties\":{\"phone_number_ids\":{\"maxItems\":200,\"type\":\"array\",\"description\":\"The maximum value is 200.\",\"items\":{\"type\":\"string\",\"example\":\"0kB2qDoSRMqzJti7VmNTIA\"}},\"loa_authorizing_person\":{\"type\":\"string\",\"description\":\"The name of the employee issuing the letter of authorization required to port in SMS capabilities on the numbers.\",\"example\":\"Alex Carter\"},\"contact_number\":{\"type\":\"string\",\"description\":\"The contact phone number of the employee issuing the letter of authorization required to port in SMS capabilities on the numbers.\",\"example\":\"+12090000000\"},\"title\":{\"type\":\"string\",\"description\":\"The job title of the person authorizing and signing the leave of absence.\",\"example\":\"Zoom Engineer\"},\"contact_emails\":{\"type\":\"string\",\"description\":\"The contact email of the employee issuing the letter of authorization required to port in SMS capabilities on the numbers.\",\"example\":\"alex.carter@zoom.us\"}}}}}},\"responses\":{\"204\":{\"description\":\"**HTTP Status Code:** `201`   \\n \\nPhone numbers assigned successfully. \\n\"},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `1003004` <br>\\n Insufficient campaign capacity. <br>\\n**Error Code:** `1003` <br>\\n Too many numbers, should less than 200 <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"404\":{\"description\":\"**HTTP Status Code:** `404` <br>\\n Not Found  Invalid campaign ID. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"PbxAdmin:Edit\",\"ContactCenterMgt:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:write:master\"],\"x-granular-scopes\":[\"number_management:update:numbers:master\"]}},\"delete\":{\"tags\":[\"SMS Campaigns\"],\"summary\":\"Unassign phone number from SMS campaign\",\"description\":\"[Unassigns a phone number from an SMS campaign](https://support.zoom.us/hc/en-us/articles/5016496738445-SMS-MMS-10DLC-Compliance-for-Zoom-Phone-and-Zoom-Contact-Center#h_01FYVVSPVM8MZN4Y9EW5690QHH).\\n\\n\\n**Prerequisites:** \\n* A Business or Enterprise account \\n* A Zoom Phone license \\n* The campaign must have been previously assigned a Zoom Phone number\\n\\n\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:numbers:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"unassignCampaignPhoneNumber\",\"parameters\":[{\"name\":\"smsCampaignId\",\"in\":\"path\",\"required\":true,\"schema\":{\"type\":\"string\"}},{\"name\":\"phone_number_ids\",\"in\":\"query\",\"description\":\"A list of phone numbers to unassign from the SMS campaign.\",\"required\":true,\"schema\":{\"maxItems\":200,\"type\":\"array\",\"example\":[\"iHE1MQAET2iV85MbfaQmwg\",\"vZWksdNbRkKTdzOth09skw\"],\"items\":{\"type\":\"string\"}}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"204\":{\"description\":\"**HTTP Status Code:** `204`\\nThe phone number has been unassigned successfully.\"},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `1003` <br>\\n Too many numbers, should less than 200 <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"404\":{\"description\":\"**HTTP Status Code:** `404` <br>\\n Not Found  Invalid campaign ID. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"PbxAdmin:Edit\",\"ContactCenterMgt:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:write:master\"],\"x-granular-scopes\":[\"number_management:update:numbers:master\"]}}},\"/accounts/{accountId}/number_management/sms_consent\":{\"get\":{\"tags\":[\"SMS Consent\"],\"summary\":\"List SMS consent policies\",\"description\":\"Returns a paginated list of SMS consent policies for the account.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:sms_consent:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`\",\"operationId\":\"ListSMSConsents\",\"parameters\":[{\"name\":\"page_size\",\"in\":\"query\",\"description\":\"The number of records returned within a single API call.\",\"required\":false,\"schema\":{\"maximum\":300,\"minimum\":1,\"type\":\"integer\",\"example\":30},\"example\":30},{\"name\":\"next_page_token\",\"in\":\"query\",\"description\":\"The next page token is used to paginate through large result sets. A next page token will be returned whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"**HTTP Status Code:** `200` **OK**  \\n \\nSMS consent policies retrieved successfully.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"page_size\":{\"type\":\"integer\",\"description\":\"The number of records returned within a single API call.\",\"example\":30},\"total_records\":{\"type\":\"integer\",\"description\":\"The total number of records found.\",\"format\":\"int64\",\"example\":33},\"next_page_token\":{\"type\":\"string\",\"description\":\"The next page token is used to paginate through large result sets. A next page token will be returned whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"example\":\"bkOcmnm6mn6ioYAi10BcgRiEL38WzAo6jP2\"},\"sms_consent\":{\"type\":\"array\",\"description\":\"List of SMS consent policies.\",\"items\":{\"type\":\"object\",\"properties\":{\"consent_id\":{\"type\":\"string\",\"description\":\"The consent policy's ID.\",\"example\":\"C-91H30r6xTCCpt8nNFSuhWA\"},\"consent_name\":{\"type\":\"string\",\"description\":\"The name of the SMS consent policy.\",\"example\":\"ZPconsent\"},\"description\":{\"type\":\"string\",\"description\":\"The description of the SMS consent policy.\",\"example\":\"This consent will be used by our employees to schedule events, provide reminders and support to our customers.\"},\"account_id\":{\"type\":\"string\",\"description\":\"The account ID that owns the consent policy.\",\"example\":\"KGzOF3hCTamb_Xx-bXbgqA\"},\"in_out_bound\":{\"type\":\"object\",\"properties\":{\"opt_in_message\":{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\",\"description\":\"The prompt message sent to users to opt-in for SMS messages.\",\"example\":\"Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the opt-in action.\",\"example\":[\"START\",\"keyword\"],\"items\":{\"type\":\"string\"}},\"confirmation_message\":{\"type\":\"string\",\"description\":\"The confirmation message sent after a successful opt-in.\",\"example\":\"You're subscribed!\"}},\"description\":\"The message configuration for opt-in\"},\"opt_out_message\":{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\",\"description\":\"The message sent to users when they opt-out.\",\"example\":\"You are unsubscribed to texts from ZOOM. No more messages will be sent.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the opt-out action.\",\"example\":[\"Stop\",\"keyword\"],\"items\":{\"type\":\"string\"}}},\"description\":\"The message configuration for opt-out\"},\"help_message\":{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\",\"description\":\"The help message sent to users when they request help.\",\"example\":\"ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the help message.\",\"example\":[\"HELP\",\"keyword\"],\"items\":{\"type\":\"string\"}}},\"description\":\"The message configuration for help\"},\"disclaimer\":{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\",\"description\":\"The disclaimer message text.\",\"example\":\"disclaimer\"},\"enable\":{\"type\":\"boolean\",\"description\":\"Whether the disclaimer is enabled.\",\"example\":true}},\"description\":\"The message configuration for disclaimer\"}},\"description\":\"The message configuration for opt-in, opt-out, help, and disclaimer messages.\"},\"status\":{\"type\":\"boolean\",\"description\":\"The status of the consent policy. `true` indicates active, `false` indicates inactive.\",\"example\":true},\"create_time\":{\"type\":\"string\",\"description\":\"The time when the consent policy was created.\",\"format\":\"date-time\",\"example\":\"2024-06-01T08:55:38Z\"},\"modify_time\":{\"type\":\"string\",\"description\":\"The time when the consent policy was last modified.\",\"format\":\"date-time\",\"example\":\"2025-09-19T11:20:59Z\"},\"used_number\":{\"type\":\"integer\",\"description\":\"The number of phone numbers currently assigned to this consent policy.\",\"format\":\"int64\",\"example\":48}}}}}}}}},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"SmsCampaigns:Read\"],\"x-macro-scopes\":[\"number_management_numbers:read:master\"],\"x-granular-scopes\":[\"number_management:read:sms_consent:master\"]}},\"post\":{\"tags\":[\"SMS Consent\"],\"summary\":\"Create an SMS consent policy\",\"description\":\"Creates a new SMS consent management policy to define opt-in, opt-out, and help message configurations for SMS communications.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:sms_consent:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"CreateSMSConsent\",\"parameters\":[{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"required\":[\"consent_name\",\"in_out_bound\",\"status\"],\"type\":\"object\",\"properties\":{\"consent_name\":{\"maxLength\":255,\"type\":\"string\",\"description\":\"The SMS consent policy's name.\",\"example\":\"ZPconsent\"},\"description\":{\"maxLength\":4096,\"type\":\"string\",\"description\":\"The SMS consent policy's description.\",\"example\":\"This consent will be used by our employees to schedule events, and provide reminders and support to our customers.\"},\"in_out_bound\":{\"required\":[\"disclaimer\",\"help_message\",\"opt_in_message\",\"opt_out_message\"],\"type\":\"object\",\"properties\":{\"opt_in_message\":{\"required\":[\"confirmation_message\",\"keywords\",\"prompt\"],\"type\":\"object\",\"properties\":{\"prompt\":{\"maxLength\":500,\"type\":\"string\",\"description\":\"The prompt message sent to users to opt-in for SMS messages.\",\"example\":\"Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the opt-in action.\",\"example\":[\"START\",\"keyword\"],\"items\":{\"type\":\"string\"}},\"confirmation_message\":{\"maxLength\":500,\"type\":\"string\",\"description\":\"The confirmation message sent after a successful opt-in.\",\"example\":\"You're subscribed!\"}},\"description\":\"The opt-in message configuration.\"},\"opt_out_message\":{\"required\":[\"keywords\",\"message\"],\"type\":\"object\",\"properties\":{\"message\":{\"maxLength\":500,\"type\":\"string\",\"description\":\"The message sent to users when they opt out.\",\"example\":\"You are unsubscribed to texts from ZOOM. No more messages will be sent.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the opt out action.\",\"example\":[\"Stop\",\"keyword\"],\"items\":{\"type\":\"string\"}}},\"description\":\"The opt out message configuration.\"},\"help_message\":{\"required\":[\"keywords\",\"message\"],\"type\":\"object\",\"properties\":{\"message\":{\"maxLength\":500,\"type\":\"string\",\"description\":\"The help message sent to users when they request help.\",\"example\":\"ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the help message.\",\"example\":[\"HELP\",\"keyword\"],\"items\":{\"type\":\"string\"}}},\"description\":\"The help message configuration.\"},\"disclaimer\":{\"required\":[\"enable\",\"message\"],\"type\":\"object\",\"properties\":{\"message\":{\"maxLength\":500,\"type\":\"string\",\"description\":\"The disclaimer message text.\",\"example\":\"disclaimer\"},\"enable\":{\"type\":\"boolean\",\"description\":\"Whether the disclaimer is enabled.\",\"example\":true}},\"description\":\"The disclaimer message configuration.\"}},\"description\":\"The message configuration for opt-in, opt-out, help, and disclaimer messages.\"},\"status\":{\"type\":\"boolean\",\"description\":\"The status of the consent policy. `true` indicates active, `false` indicates inactive.\",\"example\":true}}}}}},\"responses\":{\"201\":{\"description\":\"**HTTP Status Code:** `201` **Created**  \\n \\nSMS consent policy created successfully.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"consent_id\":{\"type\":\"string\",\"description\":\"The consent policy's ID.\",\"example\":\"C-91H30r6xTCCpt8nNFSuhWA\"},\"consent_name\":{\"type\":\"string\",\"description\":\"The SMS consent policy's name.\",\"example\":\"ZPconsent\"},\"description\":{\"type\":\"string\",\"description\":\"The SMS consent policy's description.\",\"example\":\"This consent will be used by our employees to schedule events, provide reminders and support to our customers.\"},\"user_id\":{\"type\":\"string\",\"description\":\"The ID of the user who created the consent policy.\",\"example\":\"0GVPDRXiSAaDb73-e2tW0A\"},\"account_id\":{\"type\":\"string\",\"description\":\"The account ID that owns the consent policy.\",\"example\":\"KGzOF3hCTamb_Xx-bXbgqA\"},\"in_out_bound\":{\"type\":\"object\",\"properties\":{\"opt_in_message\":{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\",\"description\":\"The prompt message sent to users to opt in for SMS messages.\",\"example\":\"Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the opt in action.\",\"example\":[\"START\",\"keyword\"],\"items\":{\"type\":\"string\"}},\"confirmation_message\":{\"type\":\"string\",\"description\":\"The confirmation message sent after a successful opt in.\",\"example\":\"You're subscribed!\"}}},\"opt_out_message\":{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\",\"description\":\"The message sent to users when they opt out.\",\"example\":\"You are unsubscribed to texts from ZOOM. No more messages will be sent.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the opt-out action.\",\"example\":[\"Stop\",\"keyword\"],\"items\":{\"type\":\"string\"}}}},\"help_message\":{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\",\"description\":\"The help message sent to users when they request help.\",\"example\":\"ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the help message.\",\"example\":[\"HELP\",\"keyword\"],\"items\":{\"type\":\"string\"}}}},\"disclaimer\":{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\",\"description\":\"The disclaimer message text.\",\"example\":\"disclaimer\"},\"enable\":{\"type\":\"boolean\",\"description\":\"Whether the disclaimer is enabled.\",\"example\":true}}}},\"description\":\"The message configuration for opt-in, opt-out, help, and disclaimer messages.\"},\"status\":{\"type\":\"boolean\",\"description\":\"The consent policy's status. `true` indicates active, `false` indicates inactive.\",\"example\":true},\"capacity\":{\"type\":\"integer\",\"description\":\"The maximum number of phone numbers that can be assigned to this consent policy.\",\"format\":\"int64\",\"example\":999},\"create_time\":{\"type\":\"string\",\"description\":\"The time when the consent policy was created.\",\"format\":\"date-time\",\"example\":\"2024-06-01T08:55:38Z\"},\"modify_time\":{\"type\":\"string\",\"description\":\"The time when the consent policy was last modified.\",\"format\":\"date-time\",\"example\":\"2025-09-19T11:20:59Z\"},\"used_number\":{\"type\":\"integer\",\"description\":\"The number of phone numbers currently assigned to this consent policy.\",\"format\":\"int64\",\"example\":0}}}}}},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `999` <br>\\n Invalid field. <br>\\n**Error Code:** `1002` <br>\\n The request body format does not match, please refer to the document <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"SmsCampaigns:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:write:master\"],\"x-granular-scopes\":[\"number_management:write:sms_consent:master\"]}},\"delete\":{\"tags\":[\"SMS Consent\"],\"summary\":\"Delete SMS consent policies\",\"description\":\"Deletes one or more SMS consent policies.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:delete:sms_consent:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`\",\"operationId\":\"DeleteSMSConsents\",\"parameters\":[{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"required\":[\"consent_ids\"],\"type\":\"object\",\"properties\":{\"consent_ids\":{\"minItems\":1,\"type\":\"array\",\"description\":\"The list of consent policy IDs to delete.\",\"example\":[\"-6QPOIFtSU-wjt2Kl2TUng\",\"-72t1AufQ5mqjg44xzfcCQ\"],\"items\":{\"type\":\"string\"}}}}}}},\"responses\":{\"204\":{\"description\":\"**HTTP Status Code:** `204` **No Content**  \\n \\nSMS consent policies deleted successfully.\"},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `999` <br>\\n Invalid field. <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"SmsCampaigns:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:write:master\"],\"x-granular-scopes\":[\"number_management:delete:sms_consent:master\"]}}},\"/accounts/{accountId}/number_management/sms_consent/{consentId}\":{\"get\":{\"tags\":[\"SMS Consent\"],\"summary\":\"Get an SMS consent policy\",\"description\":\"Returns a specific SMS consent policy by ID.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:sms_consent:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"GetSMSConsent\",\"parameters\":[{\"name\":\"consentId\",\"in\":\"path\",\"description\":\"The consent policy's ID.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"fnzfuEgUT0OrmZeJBUyWrQ\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"**HTTP Status Code:** `200` **OK**  \\n \\nSMS consent policy details retrieved successfully.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"consent_id\":{\"type\":\"string\",\"description\":\"The consent policy's ID.\",\"example\":\"C-91H30r6xTCCpt8nNFSuhWA\"},\"consent_name\":{\"type\":\"string\",\"description\":\"The name of the SMS consent policy.\",\"example\":\"ZPconsent\"},\"description\":{\"type\":\"string\",\"description\":\"The description of the SMS consent policy.\",\"example\":\"This consent will be used by our employees to schedule events, provide reminders and support to our customers.\"},\"user_id\":{\"type\":\"string\",\"description\":\"The ID of the user who created the consent policy.\",\"example\":\"0GVPDRXiSAaDb73-e2tW0A\"},\"account_id\":{\"type\":\"string\",\"description\":\"The account ID that owns the consent policy.\",\"example\":\"KGzOF3hCTamb_Xx-bXbgqA\"},\"in_out_bound\":{\"type\":\"object\",\"properties\":{\"opt_in_message\":{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\",\"description\":\"The prompt message sent to users to opt-in for SMS messages.\",\"example\":\"Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the opt-in action.\",\"example\":[\"START\",\"keyword\"],\"items\":{\"type\":\"string\"}},\"confirmation_message\":{\"type\":\"string\",\"description\":\"The confirmation message sent after a successful opt-in.\",\"example\":\"You're subscribed!\"}},\"description\":\"The message configuration for opt-in\"},\"opt_out_message\":{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\",\"description\":\"The message sent to users when they opt-out.\",\"example\":\"You are unsubscribed to texts from ZOOM. No more messages will be sent.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the opt-out action.\",\"example\":[\"Stop\",\"keyword\"],\"items\":{\"type\":\"string\"}}},\"description\":\"The message configuration for opt-out\"},\"help_message\":{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\",\"description\":\"The help message sent to users when they request help.\",\"example\":\"ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the help message.\",\"example\":[\"HELP\",\"keyword\"],\"items\":{\"type\":\"string\"}}},\"description\":\"The message configuration for help\"},\"disclaimer\":{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\",\"description\":\"The disclaimer message text.\",\"example\":\"disclaimer\"},\"enable\":{\"type\":\"boolean\",\"description\":\"Whether the disclaimer is enabled.\",\"example\":true}},\"description\":\"The message configuration for disclaimer\"}},\"description\":\"The message configuration for opt-in, opt-out, help, and disclaimer messages.\"},\"status\":{\"type\":\"boolean\",\"description\":\"The status of the consent policy. `true` indicates active, `false` indicates inactive.\",\"example\":true},\"capacity\":{\"type\":\"integer\",\"description\":\"The maximum number of phone numbers that can be assigned to this consent policy.\",\"format\":\"int64\",\"example\":999},\"create_time\":{\"type\":\"string\",\"description\":\"The time when the consent policy was created.\",\"format\":\"date-time\",\"example\":\"2024-06-01T08:55:38Z\"},\"modify_time\":{\"type\":\"string\",\"description\":\"The time when the consent policy was last modified.\",\"format\":\"date-time\",\"example\":\"2025-09-19T11:20:59Z\"},\"used_number\":{\"type\":\"integer\",\"description\":\"The number of phone numbers currently assigned to this consent policy.\",\"format\":\"int64\",\"example\":0}}}}}},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"404\":{\"description\":\"**HTTP Status Code:** `404` <br>\\n Not Found  \\n\\n **Error Code:** `1002013` <br>\\n The consent does not exist. <br>\\n\"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"SmsCampaigns:Read\"],\"x-macro-scopes\":[\"number_management_numbers:read:master\"],\"x-granular-scopes\":[\"number_management:read:sms_consent:master\"]}},\"patch\":{\"tags\":[\"SMS Consent\"],\"summary\":\"Update an SMS consent policy\",\"description\":\"Update an existing SMS consent policy. Only provided fields will be updated.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:update:sms_consent:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"UpdateSMSConsent\",\"parameters\":[{\"name\":\"consentId\",\"in\":\"path\",\"description\":\"The consent policy's ID.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"fnzfuEgUT0OrmZeJBUyWrQ\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"consent_name\":{\"maxLength\":255,\"type\":\"string\",\"description\":\"The SMS consent policy's name.\",\"example\":\"ZPconsent Updated\"},\"description\":{\"maxLength\":4096,\"type\":\"string\",\"description\":\"The SMS consent policy's description.\",\"example\":\"Updated description for the consent policy.\"},\"in_out_bound\":{\"type\":\"object\",\"properties\":{\"opt_in_message\":{\"type\":\"object\",\"properties\":{\"prompt\":{\"maxLength\":500,\"type\":\"string\",\"description\":\"The prompt message sent to users to opt-in for SMS messages.\",\"example\":\"Text START to receive text messages from ZOOM. Message frequency may vary. Message and Data Rates may apply. To end messaging from us, reply with STOP. Reply with HELP for more information.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the opt-in action.\",\"example\":[\"START\",\"keyword\"],\"items\":{\"type\":\"string\"}},\"confirmation_message\":{\"maxLength\":500,\"type\":\"string\",\"description\":\"The confirmation message sent after a successful opt-in.\",\"example\":\"You're subscribed!\"}},\"description\":\"The opt-in message configuration.\"},\"opt_out_message\":{\"type\":\"object\",\"properties\":{\"message\":{\"maxLength\":500,\"type\":\"string\",\"description\":\"The message sent to users when they opt out.\",\"example\":\"You are unsubscribed to texts from ZOOM. No more messages will be sent.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the opt out action.\",\"example\":[\"Stop\",\"keyword\"],\"items\":{\"type\":\"string\"}}},\"description\":\"The opt out message configuration.\"},\"help_message\":{\"type\":\"object\",\"properties\":{\"message\":{\"maxLength\":500,\"type\":\"string\",\"description\":\"The help message sent to users when they request help.\",\"example\":\"ZOOM: You can get more assistance by visiting https://zoom.us. Text STOP to stop receiving messages from us. You can also text START to start receiving messages from us again. You can also refer to our privacy policy on our website.\"},\"keywords\":{\"type\":\"array\",\"description\":\"The keywords that trigger the help message.\",\"example\":[\"HELP\",\"keyword\"],\"items\":{\"type\":\"string\"}}},\"description\":\"The help message configuration.\"},\"disclaimer\":{\"type\":\"object\",\"properties\":{\"message\":{\"maxLength\":500,\"type\":\"string\",\"description\":\"The disclaimer message text.\",\"example\":\"disclaimer\"},\"enable\":{\"type\":\"boolean\",\"description\":\"Whether the disclaimer is enabled.\",\"example\":true}},\"description\":\"The disclaimer message configuration.\"}},\"description\":\"The message configuration for opt-in, opt-out, help, and disclaimer messages.\"},\"status\":{\"type\":\"boolean\",\"description\":\"The consent policy's status. `true` indicates active, `false` indicates inactive.\",\"example\":true}}}}}},\"responses\":{\"204\":{\"description\":\"**HTTP Status Code:** `204` **No Content**  \\n \\nSMS consent policy updated successfully.\"},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `999` <br>\\n Invalid field. <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"404\":{\"description\":\"**HTTP Status Code:** `404` <br>\\n Not Found  \\n\\n **Error Code:** `1002013` <br>\\n The consent does not exist. <br>\\n\"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"SmsCampaigns:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:write:master\"],\"x-granular-scopes\":[\"number_management:update:sms_consent:master\"]}}},\"/accounts/{accountId}/number_management/sms_consent/{consentId}/phone_numbers\":{\"get\":{\"tags\":[\"SMS Consent\"],\"summary\":\"List phone numbers assigned to SMS consent policy\",\"description\":\"Returns a paginated list of phone numbers assigned to a specific SMS consent policy.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:sms_consent:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`\",\"operationId\":\"ListConsentPhoneNumbers\",\"parameters\":[{\"name\":\"consentId\",\"in\":\"path\",\"description\":\"The consent policy's ID.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"fnzfuEgUT0OrmZeJBUyWrQ\"}},{\"name\":\"page_size\",\"in\":\"query\",\"description\":\"The number of records returned within a single API call.\",\"required\":false,\"schema\":{\"maximum\":300,\"minimum\":1,\"type\":\"integer\",\"example\":30},\"example\":30},{\"name\":\"next_page_token\",\"in\":\"query\",\"description\":\"Use the next page token to paginate through large result sets. A next page token is returned whenever the set of available results exceeds the current page size. This token's expiration period is 15 minutes.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"**HTTP Status Code:** `200` **OK**  \\n \\nPhone numbers retrieved successfully.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"page_size\":{\"type\":\"integer\",\"description\":\"The number of records returned within a single API call.\",\"example\":30},\"total_records\":{\"type\":\"integer\",\"description\":\"The total number of records found.\",\"format\":\"int64\",\"example\":33},\"next_page_token\":{\"type\":\"string\",\"description\":\"Use the next page token to paginate through large result sets. A next page token is returned whenever the set of available results exceeds the current page size. This token's expiration period is 15 minutes.\",\"example\":\"bkOcmnm6mn6ioYAi10BcgRiEL38WzAo6jP2\"},\"sms_consent_number\":{\"type\":\"array\",\"description\":\"List of phone numbers assigned to the consent policy.\",\"items\":{\"type\":\"object\",\"properties\":{\"phone_number_id\":{\"type\":\"string\",\"description\":\"The phone number's ID.\",\"example\":\"-6QPOIFtSU-wjt2Kl2TUng\"},\"phone_number\":{\"type\":\"string\",\"description\":\"The phone number assigned to the consent policy.\",\"example\":\"+12095805275\"},\"account_id\":{\"type\":\"string\",\"description\":\"The account ID that owns the phone number.\",\"example\":\"KGzOF3hCTamb_Xx-bXbgqA\"}}}}}}}}},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"404\":{\"description\":\"**HTTP Status Code:** `404` <br>\\n Not Found  \\n\\n **Error Code:** `1002013` <br>\\n The consent does not exist. <br>\\n\"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"SmsCampaigns:Read\"],\"x-macro-scopes\":[\"number_management_numbers:read:master\"],\"x-granular-scopes\":[\"number_management:read:sms_consent:master\"]}},\"post\":{\"tags\":[\"SMS Consent\"],\"summary\":\"Assign phone numbers to SMS consent policy\",\"description\":\"Assigns one or more phone numbers to an SMS consent policy.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:write:numbers:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`\",\"operationId\":\"AssignPhoneNumbersToConsent\",\"parameters\":[{\"name\":\"consentId\",\"in\":\"path\",\"description\":\"The consent policy's ID.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"fnzfuEgUT0OrmZeJBUyWrQ\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"required\":[\"phone_number_ids\"],\"type\":\"object\",\"properties\":{\"phone_number_ids\":{\"maxItems\":200,\"minItems\":1,\"type\":\"array\",\"description\":\"The list of phone number IDs to assign to the consent policy.\",\"example\":[\"-6QPOIFtSU-wjt2Kl2TUng\",\"-72t1AufQ5mqjg44xzfcCQ\"],\"items\":{\"type\":\"string\"}}}}}}},\"responses\":{\"201\":{\"description\":\"**HTTP Status Code:** `201` **Created**  \\n \\nPhone numbers assigned successfully.\"},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `1003` <br>\\n Too many numbers, should less than 200 <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"404\":{\"description\":\"**HTTP Status Code:** `404` <br>\\n Not Found  \\n\\n **Error Code:** `1002013` <br>\\n The consent does not exist. <br>\\n\"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"PbxAdmin:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:write:master\"],\"x-granular-scopes\":[\"number_management:write:numbers:master\"]}},\"delete\":{\"tags\":[\"SMS Consent\"],\"summary\":\"Unassign phone numbers from SMS consent policy\",\"description\":\"Unassigns one or more phone numbers from an SMS consent policy.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:write:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:delete:numbers:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `MEDIUM`\",\"operationId\":\"UnassignPhoneNumbersFromConsent\",\"parameters\":[{\"name\":\"consentId\",\"in\":\"path\",\"description\":\"The consent policy's ID.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"fnzfuEgUT0OrmZeJBUyWrQ\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"required\":[\"phone_number_ids\"],\"type\":\"object\",\"properties\":{\"phone_number_ids\":{\"maxItems\":200,\"minItems\":1,\"type\":\"array\",\"description\":\"The list of phone number IDs to unassign from the consent policy.\",\"example\":[\"-6QPOIFtSU-wjt2Kl2TUng\",\"-72t1AufQ5mqjg44xzfcCQ\"],\"items\":{\"type\":\"string\"}}}}}}},\"responses\":{\"204\":{\"description\":\"**HTTP Status Code:** `204` **No Content**  \\n \\nPhone numbers unassigned successfully.\"},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `1003` <br>\\n Too many numbers, should less than 200 <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"404\":{\"description\":\"**HTTP Status Code:** `404` <br>\\n Not Found  \\n\\n **Error Code:** `1002013` <br>\\n The consent does not exist. <br>\\n\"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"PbxAdmin:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:write:master\"],\"x-granular-scopes\":[\"number_management:delete:numbers:master\"]}}},\"/accounts/{accountId}/number_management/ported_numbers/orders\":{\"get\":{\"tags\":[\"Setting\"],\"summary\":\"List ported numbers\",\"description\":\"Returns a list of ported numbers in a Zoom account.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_ported_numbers:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"Listportednumbers\",\"parameters\":[{\"name\":\"next_page_token\",\"in\":\"query\",\"description\":\"The next page token paginates through large result sets. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"BJLYC6PABbAHdjwSkGVQeeR6B1juwHqj3G2\"}},{\"name\":\"page_size\",\"in\":\"query\",\"description\":\"The number of records returned within a single API call.\",\"required\":false,\"schema\":{\"type\":\"integer\",\"example\":30}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"**HTTP Status Code:** `200` **OK**\\n\\nPorted Phone numbers listed successfully.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"next_page_token\":{\"type\":\"string\",\"description\":\"The next page token paginates through large result sets. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"example\":\"R4aF9Oj0fVM2hhezJTEmSKaBSkfesDwGy42\"},\"page_size\":{\"type\":\"integer\",\"description\":\"The number of records returned within a single API call.\",\"example\":30},\"ported_numbers\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"numbers\":{\"type\":\"array\",\"description\":\"The ported numbers.\",\"items\":{\"type\":\"string\",\"example\":\"+12058945752\"}},\"order_id\":{\"type\":\"string\",\"description\":\"The ported numbers' order ID.\",\"example\":\"2021080307332974349\"},\"replacing_numbers\":{\"type\":\"array\",\"description\":\"The ported numbers' replacement numbers.\",\"items\":{\"type\":\"object\",\"properties\":{\"source_number\":{\"type\":\"string\",\"description\":\"The source number.\",\"example\":\"+12058945752\"},\"target_number\":{\"type\":\"string\",\"description\":\"The replaced number.\",\"example\":\"+12058945755\"}}}},\"status\":{\"type\":\"string\",\"description\":\"The ported numbers' status.\",\"example\":\"Canceled\",\"enum\":[\"Not_Submitted\",\"Waiting\",\"Processing\",\"Successfully\",\"Rejected\",\"Canceled\",\"FOC\"]},\"submission_date_time\":{\"type\":\"string\",\"description\":\"The time ported numbers were submitted (format: 'yyyy-MM-ddThh:dd:ssZ').\",\"example\":\"2021-08-03T07:33:29Z\"}}}},\"total_records\":{\"type\":\"integer\",\"description\":\"The total number of records returned.\",\"example\":2}}}}}},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n \"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"PbxAdmin:Read\",\"ContactCenterMgt:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:read:master\"],\"x-granular-scopes\":[\"number_management:read:list_ported_numbers:master\"]}}},\"/accounts/{accountId}/number_management/ported_numbers/orders/{orderId}\":{\"get\":{\"tags\":[\"Setting\"],\"summary\":\"Get ported numbers details\",\"description\":\"Returns the details on the ported numbers by specifying `order_id`. \\n\\n **Prerequisites** \\n * A Pro or higher account plan \\n * A Zoom phone license\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:ported_number:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"Getportednumbersdetails\",\"parameters\":[{\"name\":\"orderId\",\"in\":\"path\",\"description\":\"The order ID of the ported numbers. This ID can be retrieved from the List Ported Numbers API.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"2021080307332974349\"}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"**HTTP Status Code:** `200` **OK**\\n\\nPorted numbers details retrieved successfully.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"contact_emails\":{\"type\":\"string\",\"description\":\"The contact emails of transferring numbers.\",\"example\":\"example@163.com\"},\"contact_number\":{\"type\":\"string\",\"description\":\"The contact numbers for transferring numbers.\",\"example\":\"2058945753\"},\"isp\":{\"type\":\"string\",\"description\":\"The ported numbers' ISP.\",\"example\":\"Twilio International\"},\"numbers\":{\"type\":\"array\",\"description\":\"The ported numbers.\",\"items\":{\"type\":\"string\",\"example\":\"+12058945752\"}},\"order_id\":{\"type\":\"string\",\"description\":\"The ported numbers' order ID.\",\"example\":\"2021080307332974349\"},\"original_billing_info\":{\"type\":\"object\",\"properties\":{\"account_number\":{\"type\":\"string\",\"example\":\"111223\"},\"address\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\",\"example\":\"San Jose\"},\"country\":{\"type\":\"string\",\"example\":\"US\"},\"house_number\":{\"type\":\"string\",\"example\":\"55\"},\"state_code\":{\"type\":\"string\",\"example\":\"CA\"},\"street_name\":{\"type\":\"string\",\"example\":\"ALMADEN BLVD\"},\"zip\":{\"type\":\"string\",\"example\":\"95113\"}}},\"authorizing_person\":{\"type\":\"string\",\"example\":\"zz\"},\"billing_telephone_number\":{\"type\":\"string\",\"example\":\"2058945751\"},\"company\":{\"type\":\"string\",\"example\":\"zm\"},\"customer_requested_date\":{\"type\":\"string\",\"example\":\"2021-08-06\"},\"pin\":{\"type\":\"string\",\"example\":\"111223\"}},\"description\":\"The ported numbers' original billing info.\"},\"printed_name\":{\"type\":\"string\",\"description\":\"The printed names on transferring numbers.\",\"example\":\"Jiang\"},\"replacing_numbers\":{\"type\":\"array\",\"description\":\"The ported numbers' replacement numbers.\",\"items\":{\"type\":\"object\",\"properties\":{\"source_number\":{\"type\":\"string\",\"description\":\"The source number.\",\"example\":\"+12058945752\"},\"target_number\":{\"type\":\"string\",\"description\":\"The replaced number.\",\"example\":\"+12058945755\"}}}},\"status\":{\"type\":\"string\",\"description\":\"The ported numbers' status.\",\"example\":\"Canceled\",\"enum\":[\"Not_Submitted\",\"Waiting\",\"Processing\",\"Successfully\",\"Rejected\",\"Canceled\",\"FOC\"]},\"submission_date_time\":{\"type\":\"string\",\"description\":\"The time ported numbers were submitted (format: 'yyyy-MM-ddThh:dd:ssZ').\",\"example\":\"2021-08-03T07:33:29Z\"}}}}}},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `400` <br>\\n Port in order does not exist <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"PbxAdmin:Read\",\"ContactCenterMgt:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:read:master\"],\"x-granular-scopes\":[\"number_management:read:ported_number:master\"]}}},\"/accounts/{accountId}/number_management/sip_groups\":{\"get\":{\"tags\":[\"Setting\"],\"summary\":\"List SIP groups\",\"description\":\"Returns a list of SIP (Session Initiation Protocol) groups.\\n\\n**Prerequisites** \\n* Pro or a higher account with Zoom Phone license\\n* Account owner or admin permissions\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_sip_groups:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"ListSIPgroups\",\"parameters\":[{\"name\":\"page_size\",\"in\":\"query\",\"description\":\"The number of records returned within a single API call.\",\"required\":false,\"schema\":{\"type\":\"integer\",\"example\":30}},{\"name\":\"next_page_token\",\"in\":\"query\",\"description\":\"The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"Fh98ehf98wehf9wehwqk\"}},{\"name\":\"allocated_product\",\"in\":\"query\",\"description\":\"The phone number's allocated product.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"ZOOM_PHONE\",\"enum\":[\"ZOOM_PHONE\",\"ZOOM_CONTACT_CENTER\"]}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"**HTTP Status Code:** `200`\\n\\nSIP groups successfully listed.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"next_page_token\":{\"type\":\"string\",\"description\":\"The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"example\":\"IXIhcpJWscHfISSKTcdl2QpSMLyRE38zH92\"},\"total_records\":{\"type\":\"integer\",\"description\":\"The number of records returned with a single API call.\",\"example\":88},\"sip_groups\":{\"maxItems\":300,\"type\":\"array\",\"description\":\"The SIP group information.\",\"items\":{\"required\":[\"display_name\",\"sip_group_id\"],\"type\":\"object\",\"properties\":{\"description\":{\"type\":\"string\",\"description\":\"The SIP group's description.\",\"example\":\"test SIP group\"},\"display_name\":{\"type\":\"string\",\"description\":\"The SIP group's display name.\",\"example\":\"RRRR\"},\"sip_group_id\":{\"type\":\"string\",\"description\":\"The SIP group's ID.\",\"example\":\"8MhK7ea4Q4ihIQ4TD_g0kw\"},\"send_sip_group_name\":{\"type\":\"boolean\",\"description\":\"Whether the SIP group's name is sent in the SIP header.\",\"example\":false},\"sip_trunk\":{\"required\":[\"name\",\"sip_trunk_id\"],\"type\":\"object\",\"properties\":{\"sip_trunk_id\":{\"type\":\"string\",\"description\":\"The SIP trunk's  ID.\",\"example\":\"VWQU-veBQnm08EtBkUGnbw\"},\"name\":{\"type\":\"string\",\"description\":\"The SIP trunk group's name.\",\"example\":\"TESTAPI01\"},\"type\":{\"type\":\"string\",\"description\":\"The types of SIP trunks\",\"example\":\"BYOC\",\"enum\":[\"BYOC\",\"BYOP\"]}},\"description\":\"The SIP trunk group.\"},\"source_system\":{\"type\":\"string\",\"description\":\"The source of BYOC SIP group.\",\"example\":\"ZOOM_PHONE\",\"enum\":[\"ZOOM_PHONE\",\"ZOOM_CONTACT_CENTER\",\"COMMON\"]}}}}}}}}},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `1002_006` <br>\\n product cannot be empty <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"ContactCenterMgt:Edit\",\"PbxAdmin:Read\"],\"x-macro-scopes\":[\"number_management_numbers:read:master\"],\"x-granular-scopes\":[\"number_management:read:list_sip_groups:master\"]}}},\"/accounts/{accountId}/number_management/sip_trunks\":{\"get\":{\"tags\":[\"Setting\"],\"summary\":\"List BYOC SIP trunks\",\"description\":\"Returns a list of an account's assigned BYOC (Bring Your Own Carrier) SIP (Session Initiation Protocol) trunks.\\n\\n**[Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management_numbers:read:master`\\n\\n**[Granular Scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-overview/):** `number_management:read:list_sip_trunks:master`\\n\\n**[Rate Limit Label](https://marketplace.zoom.us/docs/api-reference/rate-limits#rate-limits):** `LIGHT`\",\"operationId\":\"ListBYOCSIPtrunks\",\"parameters\":[{\"name\":\"page_size\",\"in\":\"query\",\"description\":\"The number of records returned within a single API call.\",\"required\":false,\"schema\":{\"type\":\"integer\",\"example\":30}},{\"name\":\"next_page_token\",\"in\":\"query\",\"description\":\"The next page token paginates through a large set of results. A next page token returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"required\":false,\"schema\":{\"type\":\"string\",\"example\":\"Fh98ehf98wehf9wehlgz\"}},{\"name\":\"allocated_product\",\"in\":\"query\",\"description\":\"The phone number's allocated product\\r\\n\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"ZOOM_PHONE\",\"enum\":[\"ZOOM_PHONE\",\"ZOOM_CONTACT_CENTER\"]}},{\"name\":\"accountId\",\"in\":\"path\",\"description\":\"Unique identifier of the account.\",\"required\":true,\"schema\":{\"type\":\"string\",\"example\":\"TQTvjT52Tmi_wrhASNNOEw\"}}],\"responses\":{\"200\":{\"description\":\"**HTTP Status Codes**: `200`\\n\\nOK.\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"byoc_sip_trunk\":{\"maxItems\":300,\"type\":\"array\",\"items\":{\"required\":[\"name\",\"sip_trunk_id\"],\"type\":\"object\",\"properties\":{\"carrier\":{\"type\":\"string\",\"description\":\"The name of the carrier.\",\"example\":\"Bandwidth\"},\"carrier_account\":{\"type\":\"string\",\"description\":\"The account associated to the carrier.\",\"example\":\"123123131313\"},\"sip_trunk_id\":{\"type\":\"string\",\"description\":\"The unique SIP Trunk ID.\",\"example\":\"fVA-LsQhQAC2fTS7NiccFA\"},\"name\":{\"type\":\"string\",\"description\":\"The display name of the SIP Trunk.\",\"example\":\"TestSipTrunk\"},\"region\":{\"type\":\"string\",\"description\":\"The region of the carrier.\",\"example\":\"newqa01sipjp01\"},\"sbc_label\":{\"type\":\"string\",\"description\":\"The Session Border Controller (SBC) routing label.\",\"example\":\"Test\"},\"source_system\":{\"type\":\"string\",\"description\":\"The source of BYOC SIP Trunk\",\"example\":\"COMMON\",\"enum\":[\"COMMON\",\"ZOOM_PHONE\",\"ZOOM_CONTACT_CENTER\"]}}}},\"next_page_token\":{\"type\":\"string\",\"description\":\"The next page token paginates through a large set of results. It returns whenever the set of available results exceeds the current page size. The expiration period for this token is 15 minutes.\",\"example\":\"Ds6anZEv59aLMmTSrfF4wmHYCMiYXMWhRQ2\"},\"total_records\":{\"type\":\"integer\",\"description\":\"The number of records returned within a single API call. The default is **30**, and the maximum is **100**.\",\"example\":30,\"default\":30}}}}}},\"400\":{\"description\":\"**HTTP Status Code:** `400` <br>\\n Bad Request  \\n\\n **Error Code:** `1002_006` <br>\\n product cannot be empty <br>\\n\"},\"401\":{\"description\":\"**HTTP Status Code:** `401` <br>\\n Unauthorized  \\n\\n \"},\"403\":{\"description\":\"**HTTP Status Code:** `403` <br>\\n Forbidden  You do not have permission. \\n\\n \"},\"429\":{\"description\":\"**HTTP Status Code:** `429` <br>\\n Too Many Requests. For more information, see [rate limits](https://developers.zoom.us/docs/api/rest/rate-limits/). \\n\\n \"}},\"security\":[{\"openapi_authorization\":[]}],\"x-extensions\":{\"x-permissions\":[\"PbxAdmin:Read\",\"ContactCenterMgt:Edit\"],\"x-macro-scopes\":[\"number_management_numbers:read:master\"],\"x-granular-scopes\":[\"number_management:read:list_sip_trunks:master\"]}}}},\"components\":{\"securitySchemes\":{\"openapi_authorization\":{\"type\":\"http\",\"scheme\":\"bearer\"}}}}",
+    "frontmatter": {
+      "title": "Number Management Master APIs",
+      "keywords": "zoom, rest, api, number managment",
+      "description": "Number Management APIs are part of Zoom's API suite. They let developers manage and provision phone numbers in a Zoom Phone, Contact Center, or Meetings account programmatically. They also help businesses and service providers automate phone number operations at scale.",
+      "skipQualtrics": true
+    },
+    "isScalarApiRef": true
+  },
+  "__N_SSG": true
+}
+```
