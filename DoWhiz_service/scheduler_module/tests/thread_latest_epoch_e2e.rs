@@ -1,6 +1,8 @@
 use run_task_module::RunTaskParams;
 use scheduler_module::index_store::IndexStore;
-use scheduler_module::service::{process_inbound_payload, PostmarkInbound, ServiceConfig};
+use scheduler_module::service::{
+    process_inbound_payload, PostmarkInbound, ServiceConfig, DEFAULT_INBOUND_BODY_MAX_BYTES,
+};
 use scheduler_module::user_store::UserStore;
 use scheduler_module::{Scheduler, SchedulerError, TaskExecution, TaskExecutor, TaskKind};
 use std::env;
@@ -161,6 +163,7 @@ fn thread_latest_epoch_end_to_end() {
         scheduler_poll_interval: Duration::from_millis(50),
         scheduler_max_concurrency: 2,
         scheduler_user_max_concurrency: 1,
+        inbound_body_max_bytes: DEFAULT_INBOUND_BODY_MAX_BYTES,
         skills_source_dir: None,
     };
 

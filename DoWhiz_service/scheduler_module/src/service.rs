@@ -1,5 +1,5 @@
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -32,6 +32,8 @@ use crate::{
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+pub const DEFAULT_INBOUND_BODY_MAX_BYTES: usize = 25 * 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
     pub host: String,
@@ -47,6 +49,7 @@ pub struct ServiceConfig {
     pub scheduler_poll_interval: Duration,
     pub scheduler_max_concurrency: usize,
     pub scheduler_user_max_concurrency: usize,
+    pub inbound_body_max_bytes: usize,
     pub skills_source_dir: Option<PathBuf>,
 }
 
@@ -101,6 +104,11 @@ impl ServiceConfig {
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|value| *value > 0)
             .unwrap_or(3);
+        let inbound_body_max_bytes = env::var("POSTMARK_INBOUND_MAX_BYTES")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_INBOUND_BODY_MAX_BYTES);
         let skills_source_dir = Some(repo_skills_source_dir());
 
         Ok(Self {
@@ -117,6 +125,7 @@ impl ServiceConfig {
             scheduler_poll_interval,
             scheduler_max_concurrency,
             scheduler_user_max_concurrency,
+            inbound_body_max_bytes,
             skills_source_dir,
         })
     }
@@ -384,7 +393,8 @@ pub async fn run_server(
         .route("/", get(health))
         .route("/health", get(health))
         .route("/postmark/inbound", post(postmark_inbound))
-        .with_state(state);
+        .with_state(state)
+        .layer(DefaultBodyLimit::max(config.inbound_body_max_bytes));
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app)

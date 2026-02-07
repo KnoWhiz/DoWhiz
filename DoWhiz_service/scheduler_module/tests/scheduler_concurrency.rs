@@ -1,5 +1,5 @@
 use scheduler_module::index_store::IndexStore;
-use scheduler_module::service::{run_server, ServiceConfig};
+use scheduler_module::service::{run_server, ServiceConfig, DEFAULT_INBOUND_BODY_MAX_BYTES};
 use scheduler_module::user_store::UserStore;
 use scheduler_module::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
 use std::env;
@@ -89,6 +89,7 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
         scheduler_poll_interval: Duration::from_millis(100),
         scheduler_max_concurrency: CONCURRENCY_LIMIT,
         scheduler_user_max_concurrency: 3,
+        inbound_body_max_bytes: DEFAULT_INBOUND_BODY_MAX_BYTES,
         skills_source_dir: None,
     };
 
