@@ -4,6 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
 
 const CODEX_CONFIG_MARKER: &str = "# IMPORTANT: Use your Azure *deployment name* here";
@@ -20,6 +21,31 @@ wire_api = "responses"
 "#;
 const SCHEDULED_TASKS_BEGIN: &str = "SCHEDULED_TASKS_JSON_BEGIN";
 const SCHEDULED_TASKS_END: &str = "SCHEDULED_TASKS_JSON_END";
+const GIT_ASKPASS_SCRIPT: &str = r#"#!/bin/sh
+case "$1" in
+  *Username*)
+    if [ -n "$GITHUB_USERNAME" ]; then
+      printf "%s" "$GITHUB_USERNAME"
+    elif [ -n "$USER" ]; then
+      printf "%s" "$USER"
+    else
+      printf "%s" "x-access-token"
+    fi
+    ;;
+  *Password*)
+    if [ -n "$GH_TOKEN" ]; then
+      printf "%s" "$GH_TOKEN"
+    elif [ -n "$GITHUB_TOKEN" ]; then
+      printf "%s" "$GITHUB_TOKEN"
+    elif [ -n "$GITHUB_PERSONAL_ACCESS_TOKEN" ]; then
+      printf "%s" "$GITHUB_PERSONAL_ACCESS_TOKEN"
+    fi
+    ;;
+  *)
+    ;;
+esac
+exit 0
+"#;
 
 #[derive(Debug, Clone)]
 pub struct RunTaskParams {
@@ -78,6 +104,12 @@ pub struct RunTaskOutput {
     pub codex_output: String,
     pub scheduled_tasks: Vec<ScheduledTaskRequest>,
     pub scheduled_tasks_error: Option<String>,
+}
+
+#[derive(Debug)]
+struct GitHubAuthConfig {
+    env_overrides: Vec<(String, String)>,
+    askpass_path: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -155,6 +187,7 @@ fn run_codex_task(
     reply_attachments_dir: PathBuf,
 ) -> Result<RunTaskOutput, RunTaskError> {
     load_env_sources(request.workspace_dir)?;
+    let github_auth = resolve_github_auth()?;
 
     let api_key = env::var("AZURE_OPENAI_API_KEY_BACKUP")
         .map_err(|_| RunTaskError::MissingEnv { key: "AZURE_OPENAI_API_KEY_BACKUP" })?;
@@ -203,6 +236,13 @@ fn run_codex_task(
         .arg(prompt)
         .env("AZURE_OPENAI_API_KEY_BACKUP", api_key)
         .current_dir(request.workspace_dir);
+    for (key, value) in github_auth.env_overrides {
+        cmd.env(key, value);
+    }
+    if let Some(askpass_path) = github_auth.askpass_path {
+        cmd.env("GIT_ASKPASS", askpass_path);
+        cmd.env("GIT_TERMINAL_PROMPT", "0");
+    }
 
     let output = match cmd.output() {
         Ok(output) => output,
@@ -383,6 +423,102 @@ fn unquote_env_value(value: &str) -> &str {
     value
 }
 
+fn resolve_github_auth() -> Result<GitHubAuthConfig, RunTaskError> {
+    let gh_token = read_env_trimmed("GH_TOKEN");
+    let github_token = read_env_trimmed("GITHUB_TOKEN");
+    let pat_token = read_env_trimmed("GITHUB_PERSONAL_ACCESS_TOKEN");
+    let token = gh_token.clone().or(github_token.clone()).or(pat_token);
+    let github_username = read_env_trimmed("GITHUB_USERNAME")
+        .or_else(|| read_env_trimmed("USER"))
+        .or_else(|| read_env_trimmed("USERNAME"));
+
+    let mut env_overrides = Vec::new();
+    if env_missing_or_empty("GH_PROMPT_DISABLED") {
+        env_overrides.push(("GH_PROMPT_DISABLED".to_string(), "1".to_string()));
+    }
+    if env_missing_or_empty("GH_NO_UPDATE_NOTIFIER") {
+        env_overrides.push(("GH_NO_UPDATE_NOTIFIER".to_string(), "1".to_string()));
+    }
+    if env_missing_or_empty("GIT_EDITOR") {
+        env_overrides.push(("GIT_EDITOR".to_string(), "true".to_string()));
+    }
+    if env_missing_or_empty("VISUAL") {
+        env_overrides.push(("VISUAL".to_string(), "true".to_string()));
+    }
+    if env_missing_or_empty("EDITOR") {
+        env_overrides.push(("EDITOR".to_string(), "true".to_string()));
+    }
+    if let Some(token) = token.clone() {
+        if env_missing_or_empty("GH_TOKEN") {
+            env_overrides.push(("GH_TOKEN".to_string(), token.clone()));
+        }
+        if env_missing_or_empty("GITHUB_TOKEN") {
+            env_overrides.push(("GITHUB_TOKEN".to_string(), token.clone()));
+        }
+    }
+    if let Some(username) = github_username {
+        let email = format!("{}@users.noreply.github.com", username);
+        if env_missing_or_empty("GIT_AUTHOR_NAME") {
+            env_overrides.push(("GIT_AUTHOR_NAME".to_string(), username.clone()));
+        }
+        if env_missing_or_empty("GIT_COMMITTER_NAME") {
+            env_overrides.push(("GIT_COMMITTER_NAME".to_string(), username.clone()));
+        }
+        if env_missing_or_empty("GIT_AUTHOR_EMAIL") {
+            env_overrides.push(("GIT_AUTHOR_EMAIL".to_string(), email.clone()));
+        }
+        if env_missing_or_empty("GIT_COMMITTER_EMAIL") {
+            env_overrides.push(("GIT_COMMITTER_EMAIL".to_string(), email));
+        }
+    }
+
+    let askpass_path = if token.is_some() {
+        Some(write_git_askpass_script()?)
+    } else {
+        None
+    };
+
+    Ok(GitHubAuthConfig {
+        env_overrides,
+        askpass_path,
+    })
+}
+
+fn read_env_trimmed(key: &str) -> Option<String> {
+    let value = env::var(key).ok()?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn env_missing_or_empty(key: &str) -> bool {
+    match env::var(key) {
+        Ok(value) => value.trim().is_empty(),
+        Err(_) => true,
+    }
+}
+
+fn write_git_askpass_script() -> Result<PathBuf, RunTaskError> {
+    let mut path = env::temp_dir();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    path.push(format!("dowhiz-git-askpass-{}-{}", std::process::id(), nanos));
+    fs::write(&path, GIT_ASKPASS_SCRIPT)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&path)?.permissions();
+        perms.set_mode(0o700);
+        fs::set_permissions(&path, perms)?;
+    }
+    Ok(path)
+}
+
 fn ensure_codex_config(model_name: &str, azure_endpoint: &str) -> Result<(), RunTaskError> {
     let home = env::var("HOME")
         .map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
@@ -552,11 +688,15 @@ Optional scheduling:\n\
 \n\
 Rules:\n\
 - Do not modify input directories.\n\
+- You may create or modify other files and folders in the workspace as needed to complete the task.\n\
+  Prefer creating a work/ directory for clones, patches, and build artifacts.\n\
 - If attachments include version suffixes like _v1, _v2, use the highest version.\n\
-- Only write reply_email_draft.html and files under reply_email_attachments/.\n\
+- Always write reply_email_draft.html and files under reply_email_attachments/.\n\
 - If scheduling follow-ups, you may also write the follow-up draft HTML and any attachment\n\
   dirs referenced in the schedule block.\n\
-- Keep the reply concise, friendly, and professional.\n",
+- Avoid interactive commands; use non-interactive flags for git/gh (for example, `gh pr create --title ... --body ...`).\n\
+- Keep the reply concise, friendly, and professional.\n\
+- If the request involves creating a pull request, complete the work and include the PR link in your reply.\n",
         input_email = input_email_dir.display(),
         input_attachments = input_attachments_dir.display(),
         memory = memory_dir.display(),
