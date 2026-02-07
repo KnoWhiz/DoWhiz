@@ -1,6 +1,6 @@
 use lettre::Transport;
 use rusqlite::OptionalExtension;
-use scheduler_module::service::{run_server, ServiceConfig};
+use scheduler_module::service::{run_server, ServiceConfig, DEFAULT_INBOUND_BODY_MAX_BYTES};
 use scheduler_module::user_store::normalize_email;
 use scheduler_module::{
     ScheduledTask, Scheduler, SchedulerError, TaskExecution, TaskExecutor, TaskKind,
@@ -326,6 +326,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         scheduler_poll_interval: Duration::from_secs(1),
         scheduler_max_concurrency: 10,
         scheduler_user_max_concurrency: 3,
+        inbound_body_max_bytes: DEFAULT_INBOUND_BODY_MAX_BYTES,
         skills_source_dir: None,
     };
 
