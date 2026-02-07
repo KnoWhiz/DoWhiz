@@ -770,29 +770,15 @@ Memory management and maintain policy:
 - When split, replace memo.md with a short index or highlights so it stays <= 500 lines.
 - Update memory files at the end if new durable info is learned; otherwise leave unchanged.
 
-Optional scheduling:
-- If the user asks you to send a follow-up email later, create the follow-up draft HTML in the
-  workspace root and any attachment directory it needs.
-- Then output a schedule block to stdout at the end of your response, exactly in this format:
-  {schedule_begin}
-  [{{"type":"send_email","delay_minutes":15,"subject":"Quick reminder","html_path":"reminder_email_draft.html","attachments_dir":"reminder_email_attachments","to":["you@example.com"],"cc":[],"bcc":[]}}]
-  {schedule_end}
-- Use delay_minutes for "N minutes later" requests. Use run_at (RFC3339 UTC) only for specific
-  times.
-- If no follow-up is needed, output an empty array in the schedule block.
-- Do not write scheduled_tasks.json or any other scheduling file.
+Scheduling:
+- You can use the skill "scheduler_maintain" to create, cancel, or reschedule future tasks. You can either create a future task or schedule a future email sending.
 
 Rules:
-- Do not modify input directories.
+- Do not modify input directories. Any file editing requests should be done on the copied version of attachments and save into reply_email_attachments/ to be sent back to the user. Mark version updates as "_v2", "_v3", etc. in the filename.
 - You may create or modify other files and folders in the workspace as needed to complete the task.
   Prefer creating a work/ directory for clones, patches, and build artifacts.
-- If attachments include version suffixes like _v1, _v2, use the highest version.
-- Always write reply_email_draft.html and files under reply_email_attachments/.
-- If scheduling follow-ups, you may also write the follow-up draft HTML and any attachment
-  dirs referenced in the schedule block.
+- If attachments include version suffixes like _v1, _v2, the highest version should be the latest version.
 - Avoid interactive commands; use non-interactive flags for git/gh (for example, `gh pr create --title ... --body ...`).
-- Keep the reply concise, friendly, and professional.
-- If the request involves creating a pull request, complete the work and include the PR link in your reply.
 "#,
         input_email = input_email_dir.display(),
         input_attachments = input_attachments_dir.display(),
