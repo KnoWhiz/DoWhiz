@@ -309,7 +309,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
     let port = env::var("RUST_SERVICE_TEST_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(9010);
+        .unwrap_or(9001);
 
     let codex_disabled = !env_enabled("RUN_CODEX_E2E");
     let config = ServiceConfig {

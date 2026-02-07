@@ -75,8 +75,26 @@ impl TaskExecutor for RecordingExecutor {
 fn write_fake_codex(bin_dir: &Path) -> io::Result<()> {
     let script = r#"#!/bin/sh
 set -e
-if [ -f "incoming_email/email.txt" ]; then
-  subject=$(grep -m1 '^Subject:' incoming_email/email.txt | sed 's/^Subject: //')
+if [ -f "incoming_email/postmark_payload.json" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    subject=$(python3 - <<'PY'
+import json
+with open("incoming_email/postmark_payload.json", "r", encoding="utf-8") as fh:
+    payload = json.load(fh)
+print(payload.get("Subject", "(no subject)"))
+PY
+    )
+  elif command -v python >/dev/null 2>&1; then
+    subject=$(python - <<'PY'
+import json
+with open("incoming_email/postmark_payload.json", "r", encoding="utf-8") as fh:
+    payload = json.load(fh)
+print(payload.get("Subject", "(no subject)"))
+PY
+    )
+  else
+    subject="(no subject)"
+  fi
 else
   subject="(no subject)"
 fi

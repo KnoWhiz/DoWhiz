@@ -894,13 +894,7 @@ fn append_inbound_payload(
     fs::create_dir_all(&entries_email)?;
     fs::create_dir_all(&entries_attachments)?;
 
-    let fallback = format!("email_{}", seq);
-    let message_id = payload
-        .header_message_id()
-        .or(payload.message_id.as_deref())
-        .unwrap_or("");
-    let base = sanitize_token(message_id, &fallback);
-    let entry_name = format!("{:04}_{}", seq, base);
+    let entry_name = build_inbound_entry_name(payload, seq);
     let entry_email_dir = entries_email.join(&entry_name);
     let entry_attachments_dir = entries_attachments.join(&entry_name);
     fs::create_dir_all(&entry_email_dir)?;
@@ -914,6 +908,9 @@ fn append_inbound_payload(
 
     clear_dir_except(&incoming_attachments, &entries_attachments)?;
     write_inbound_payload(payload, raw_payload, &incoming_email, &incoming_attachments)?;
+    if let Err(err) = write_thread_history(&incoming_email, &incoming_attachments) {
+        warn!("failed to write thread history: {}", err);
+    }
     Ok(())
 }
 
@@ -995,8 +992,8 @@ fn write_inbound_payload(
     incoming_attachments: &Path,
 ) -> Result<(), BoxError> {
     fs::write(incoming_email.join("postmark_payload.json"), raw_payload)?;
-    let email_text = render_email_text(payload);
-    fs::write(incoming_email.join("email.txt"), email_text)?;
+    let email_html = render_email_html(payload);
+    fs::write(incoming_email.join("email.html"), email_html)?;
 
     if let Some(attachments) = payload.attachments.as_ref() {
         for attachment in attachments {
@@ -1009,6 +1006,220 @@ fn write_inbound_payload(
         }
     }
     Ok(())
+}
+
+fn build_inbound_entry_name(payload: &PostmarkInbound, seq: u64) -> String {
+    let subject = payload.subject.as_deref().unwrap_or("");
+    let subject_token = sanitize_token(subject, "no_subject");
+    let subject_token = truncate_ascii(&subject_token, 48);
+    let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let base = format!("{}_{}", timestamp, subject_token);
+    format!("{:04}_{}", seq, base)
+}
+
+fn truncate_ascii(value: &str, max_len: usize) -> String {
+    if value.len() <= max_len {
+        return value.to_string();
+    }
+    let mut out = value[..max_len].to_string();
+    while out.ends_with(['.', '_', '-']) {
+        out.pop();
+    }
+    if out.is_empty() {
+        value.to_string()
+    } else {
+        out
+    }
+}
+
+fn write_thread_history(incoming_email: &Path, incoming_attachments: &Path) -> Result<(), BoxError> {
+    let entries_email = incoming_email.join("entries");
+    if !entries_email.exists() {
+        return Ok(());
+    }
+
+    let mut entry_dirs: Vec<PathBuf> = Vec::new();
+    for entry in fs::read_dir(&entries_email)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            entry_dirs.push(entry.path());
+        }
+    }
+    entry_dirs.sort_by_key(|path| {
+        path.file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_default()
+    });
+
+    let mut output = String::new();
+    output.push_str("# Thread history (inbound)\n");
+    output.push_str(
+        "Auto-generated from incoming_email/entries. Latest entry is last.\n\n",
+    );
+
+    for entry_dir in entry_dirs {
+        let entry_name = entry_dir
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_else(|| "entry".to_string());
+        let payload_path = entry_dir.join("postmark_payload.json");
+        let summary = load_payload_summary(&payload_path);
+        let attachments_dir = incoming_attachments.join("entries").join(&entry_name);
+        let attachments = list_attachment_names(&attachments_dir).unwrap_or_default();
+        let email_file = if entry_dir.join("email.html").exists() {
+            "email.html"
+        } else if entry_dir.join("email.txt").exists() {
+            "email.txt"
+        } else {
+            "email.html"
+        };
+
+        output.push_str(&format!("## {entry_name}\n"));
+        if let Some(summary) = summary {
+            output.push_str(&format!("Subject: {}\n", summary.subject));
+            output.push_str(&format!("From: {}\n", summary.from));
+            output.push_str(&format!("To: {}\n", summary.to));
+            if !summary.cc.is_empty() {
+                output.push_str(&format!("Cc: {}\n", summary.cc));
+            }
+            if !summary.bcc.is_empty() {
+                output.push_str(&format!("Bcc: {}\n", summary.bcc));
+            }
+            if let Some(date) = summary.date.as_deref() {
+                output.push_str(&format!("Date: {}\n", date));
+            }
+            if !summary.message_id.is_empty() {
+                output.push_str(&format!("Message-ID: {}\n", summary.message_id));
+            }
+            let preview = build_preview(&summary);
+            if let Some(preview) = preview {
+                output.push_str("Preview:\n```text\n");
+                output.push_str(&preview);
+                output.push_str("\n```\n");
+            }
+        }
+
+        output.push_str("Files:\n");
+        output.push_str(&format!(
+            "- incoming_email/entries/{entry_name}/{email_file}\n"
+        ));
+        output.push_str(&format!(
+            "- incoming_email/entries/{entry_name}/postmark_payload.json\n"
+        ));
+        if !attachments.is_empty() {
+            output.push_str(&format!(
+                "- incoming_attachments/entries/{entry_name}/ ({})\n",
+                attachments.join(", ")
+            ));
+        } else {
+            output.push_str("- incoming_attachments/entries/(none)\n");
+        }
+        output.push('\n');
+    }
+
+    fs::write(incoming_email.join("thread_history.md"), output)?;
+    Ok(())
+}
+
+#[derive(Default)]
+struct PayloadSummary {
+    subject: String,
+    from: String,
+    to: String,
+    cc: String,
+    bcc: String,
+    date: Option<String>,
+    message_id: String,
+    text_body: Option<String>,
+    html_body: Option<String>,
+}
+
+fn load_payload_summary(payload_path: &Path) -> Option<PayloadSummary> {
+    let payload_data = fs::read_to_string(payload_path).ok()?;
+    let payload_json: serde_json::Value = serde_json::from_str(&payload_data).ok()?;
+    Some(PayloadSummary {
+        subject: json_string(&payload_json, "Subject").unwrap_or_default(),
+        from: json_string(&payload_json, "From").unwrap_or_default(),
+        to: json_string(&payload_json, "To").unwrap_or_default(),
+        cc: json_string(&payload_json, "Cc").unwrap_or_default(),
+        bcc: json_string(&payload_json, "Bcc").unwrap_or_default(),
+        date: json_string(&payload_json, "Date")
+            .or_else(|| json_string(&payload_json, "ReceivedAt")),
+        message_id: json_string(&payload_json, "MessageID")
+            .or_else(|| json_string(&payload_json, "MessageId"))
+            .unwrap_or_default(),
+        text_body: json_string(&payload_json, "TextBody")
+            .or_else(|| json_string(&payload_json, "StrippedTextReply")),
+        html_body: json_string(&payload_json, "HtmlBody"),
+    })
+}
+
+fn json_string(payload: &serde_json::Value, key: &str) -> Option<String> {
+    payload
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
+}
+
+fn list_attachment_names(dir: &Path) -> Result<Vec<String>, io::Error> {
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut names = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_file() {
+            names.push(entry.file_name().to_string_lossy().to_string());
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+fn build_preview(summary: &PayloadSummary) -> Option<String> {
+    let mut preview = summary
+        .text_body
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if preview.is_empty() {
+        preview = summary
+            .html_body
+            .as_deref()
+            .map(strip_html_tags)
+            .unwrap_or_default();
+    }
+    let preview = preview.trim();
+    if preview.is_empty() {
+        return None;
+    }
+    Some(truncate_preview(preview, 1200))
+}
+
+fn truncate_preview(input: &str, max_len: usize) -> String {
+    if input.len() <= max_len {
+        return input.to_string();
+    }
+    let mut end = max_len;
+    while end > 0 && !input.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &input[..end])
+}
+
+fn strip_html_tags(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_tag = false;
+    for ch in input.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out
 }
 
 fn create_unique_dir(root: &Path, base: &str) -> Result<PathBuf, io::Error> {
@@ -1031,58 +1242,40 @@ fn create_unique_dir(root: &Path, base: &str) -> Result<PathBuf, io::Error> {
     ))
 }
 
-fn render_email_text(payload: &PostmarkInbound) -> String {
-    let subject = payload.subject.as_deref().unwrap_or("");
-    let from = payload.from.as_deref().unwrap_or("");
-    let to = payload.to.as_deref().unwrap_or("");
-    let cc = payload.cc.as_deref().unwrap_or("");
-    let bcc = payload.bcc.as_deref().unwrap_or("");
-    let body = payload
+fn render_email_html(payload: &PostmarkInbound) -> String {
+    if let Some(html) = payload
+        .html_body
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return html.to_string();
+    }
+
+    let text_body = payload
         .text_body
         .as_deref()
         .or(payload.stripped_text_reply.as_deref())
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| value.to_string())
-        .or_else(|| payload.html_body.as_deref().map(strip_html_tags))
-        .unwrap_or_default();
-
-    let attachment_names = payload
-        .attachments
-        .as_ref()
-        .map(|items| {
-            items
-                .iter()
-                .map(|item| {
-                    let content_type = item.content_type.trim();
-                    if content_type.is_empty() {
-                        item.name.clone()
-                    } else {
-                        format!("{} ({})", item.name, content_type)
-                    }
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let attachment_line = if attachment_names.is_empty() {
-        "(none)".to_string()
-    } else {
-        attachment_names.join(", ")
-    };
-
-    format!(
-        "From: {from}\nTo: {to}\nCc: {cc}\nBcc: {bcc}\nSubject: {subject}\nAttachments: {attachment_line}\n\n{body}\n"
-    )
+        .unwrap_or("");
+    if text_body.trim().is_empty() {
+        return "<pre>(no content)</pre>".to_string();
+    }
+    wrap_text_as_html(text_body)
 }
 
-fn strip_html_tags(input: &str) -> String {
+fn wrap_text_as_html(input: &str) -> String {
+    format!("<pre>{}</pre>", escape_html(input))
+}
+
+fn escape_html(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
-    let mut in_tag = false;
     for ch in input.chars() {
         match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => out.push(ch),
-            _ => {}
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
         }
     }
     out
@@ -1318,7 +1511,8 @@ mod tests {
         let incoming_attachments = archive_dir.join("incoming_attachments");
         fs::create_dir_all(&incoming_email).expect("incoming_email");
         fs::create_dir_all(&incoming_attachments).expect("incoming_attachments");
-        fs::write(incoming_email.join("email.txt"), "Hello").expect("email.txt");
+        fs::write(incoming_email.join("email.html"), "<pre>Hello</pre>")
+            .expect("email.html");
         let archived_payload = r#"{
   "From": "Alice <alice@example.com>",
   "To": "Bob <bob@example.com>",

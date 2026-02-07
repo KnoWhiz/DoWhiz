@@ -194,7 +194,7 @@ Prereqs:
 - `POSTMARK_SERVER_TOKEN`
 - `POSTMARK_INBOUND_HOOK_URL` (public URL, e.g. ngrok base or full `/postmark/inbound` endpoint)
 - `POSTMARK_TEST_FROM` (your inbox for replies)
-- `RUST_SERVICE_TEST_PORT` (optional, defaults to `9010`; ensure ngrok forwards to this port)
+- `RUST_SERVICE_TEST_PORT` (optional, defaults to `9001`; ensure ngrok forwards to this port)
 
 Run:
 ```

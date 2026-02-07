@@ -28,6 +28,7 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
     env::set_var("AZURE_OPENAI_API_KEY_BACKUP", "test-key");
     env::set_var("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.com");
     env::set_var("CODEX_TEST_SLEEP_SECS", format!("{TASK_SLEEP_SECS}"));
+    env::set_var("GH_AUTH_DISABLED", "1");
 
     let fake_bin_dir = temp.path().join("bin");
     fs::create_dir_all(&fake_bin_dir)?;
