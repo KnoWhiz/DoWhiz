@@ -1346,10 +1346,13 @@ pub struct PostmarkInbound {
     #[serde(rename = "From")]
     from: Option<String>,
     #[serde(rename = "To")]
+    #[allow(dead_code)]
     to: Option<String>,
     #[serde(rename = "Cc")]
+    #[allow(dead_code)]
     cc: Option<String>,
     #[serde(rename = "Bcc")]
+    #[allow(dead_code)]
     bcc: Option<String>,
     #[serde(rename = "ReplyTo")]
     reply_to: Option<String>,
@@ -1399,6 +1402,7 @@ struct PostmarkAttachment {
     #[serde(rename = "Content")]
     content: String,
     #[serde(rename = "ContentType")]
+    #[allow(dead_code)]
     content_type: String,
 }
 

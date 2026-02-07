@@ -5,6 +5,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const CODEX_CONFIG_MARKER: &str = "# IMPORTANT: Use your Azure *deployment name* here";
@@ -48,6 +49,7 @@ case "$1" in
 esac
 exit 0
 "#;
+static GH_AUTH_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct RunTaskParams {
@@ -152,6 +154,7 @@ struct GitHubAuthConfig {
     env_overrides: Vec<(String, String)>,
     askpass_path: Option<PathBuf>,
     token: Option<String>,
+    #[allow(dead_code)]
     username: Option<String>,
 }
 
@@ -580,6 +583,52 @@ fn resolve_github_auth() -> Result<GitHubAuthConfig, RunTaskError> {
     })
 }
 
+fn is_keyring_error(output: &str) -> bool {
+    let normalized = output.to_ascii_lowercase();
+    normalized.contains("keyring")
+        || normalized.contains("keychain")
+        || normalized.contains("credential store")
+        || normalized.contains("user interaction is not allowed")
+}
+
+fn gh_auth_status_ok(github_auth: &GitHubAuthConfig) -> Result<bool, RunTaskError> {
+    let mut status_cmd = Command::new("gh");
+    status_cmd.args(["auth", "status", "--hostname", "github.com"]);
+    apply_env_overrides(&mut status_cmd, &github_auth.env_overrides, &[]);
+    match run_auth_command(status_cmd, None, "gh auth status") {
+        Ok(()) => Ok(true),
+        Err(RunTaskError::GitHubAuthFailed { .. }) => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
+fn gh_auth_login(
+    github_auth: &GitHubAuthConfig,
+    token: &str,
+    insecure_storage: bool,
+) -> Result<(), RunTaskError> {
+    let mut login_cmd = Command::new("gh");
+    login_cmd.args([
+        "auth",
+        "login",
+        "--with-token",
+        "--hostname",
+        "github.com",
+        "--git-protocol",
+        "https",
+    ]);
+    if insecure_storage {
+        login_cmd.arg("--insecure-storage");
+    }
+    login_cmd.env_remove("GH_TOKEN").env_remove("GITHUB_TOKEN");
+    apply_env_overrides(
+        &mut login_cmd,
+        &github_auth.env_overrides,
+        &["GH_TOKEN", "GITHUB_TOKEN"],
+    );
+    run_auth_command(login_cmd, Some(token), "gh auth login")
+}
+
 fn ensure_github_cli_auth(github_auth: &GitHubAuthConfig) -> Result<(), RunTaskError> {
     if env_enabled("GH_AUTH_DISABLED") || env_enabled("GITHUB_AUTH_DISABLED") {
         return Ok(());
@@ -588,25 +637,20 @@ fn ensure_github_cli_auth(github_auth: &GitHubAuthConfig) -> Result<(), RunTaskE
         return Ok(());
     };
 
-    let mut login_cmd = Command::new("gh");
-    login_cmd
-        .args([
-            "auth",
-            "login",
-            "--with-token",
-            "--hostname",
-            "github.com",
-            "--git-protocol",
-            "https",
-        ])
-        .env_remove("GH_TOKEN")
-        .env_remove("GITHUB_TOKEN");
-    apply_env_overrides(
-        &mut login_cmd,
-        &github_auth.env_overrides,
-        &["GH_TOKEN", "GITHUB_TOKEN"],
-    );
-    run_auth_command(login_cmd, Some(token), "gh auth login")?;
+    let auth_lock = GH_AUTH_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = auth_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    if gh_auth_status_ok(github_auth)? {
+        return Ok(());
+    }
+
+    match gh_auth_login(github_auth, token, false) {
+        Ok(()) => {}
+        Err(RunTaskError::GitHubAuthFailed { output, .. }) if is_keyring_error(&output) => {
+            gh_auth_login(github_auth, token, true)?;
+        }
+        Err(err) => return Err(err),
+    }
 
     let mut setup_cmd = Command::new("gh");
     setup_cmd.args(["auth", "setup-git", "--hostname", "github.com"]);
