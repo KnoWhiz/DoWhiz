@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Try to keep the whole codebase modular and easy to maintain. If a file is too long (say more than 500 / 1000 lines), consider separate the code file into separate code files and make sure each one has its own well defined functionality.
+
 ## Project Overview
 
 DoWhiz is a Digital Employee Platform - a SaaS system where users delegate tasks via email to AI-powered digital workers (agents named Oliver, Mini-Mouse, etc.). Users interact through their inbox; no UI is required.

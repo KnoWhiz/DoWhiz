@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Try to keep the whole codebase modular and easy to maintain. If a file is too long (say more than 500 / 1000 lines), consider separate the code file into separate code files and make sure each one has its own well defined functionality.
+
 ## Overview
 
 DoWhiz Service is a Rust-based email processing and task scheduling system. It receives inbound email webhooks from Postmark, runs AI agent tasks (via Codex CLI) to process emails, and sends reply emails back via Postmark. The system uses SQLite for persistence with per-user task isolation.

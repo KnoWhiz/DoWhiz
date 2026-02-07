@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+Try to keep the whole codebase modular and easy to maintain. If a file is too long (say more than 500 / 1000 lines), consider separate the code file into separate code files and make sure each one has its own well defined functionality.
+
 ## Project Structure & Module Organization
 - `DoWhiz_service/` Rust workspace for the email service; main crates are `scheduler_module/`, `send_emails_module/`, and `run_task_module/`. Runtime artifacts live under `DoWhiz_service/.workspace/`.
 - `website/` Vite + React site (`src/` for components, `public/` for static assets).

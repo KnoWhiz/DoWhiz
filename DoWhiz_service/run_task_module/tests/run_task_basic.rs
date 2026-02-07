@@ -52,6 +52,7 @@ value = "still"
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
         ("CODEX_MODEL", "new-model"),
+        ("GH_AUTH_DISABLED", "1"),
     ]);
 
     let mut params = build_params(&workspace);

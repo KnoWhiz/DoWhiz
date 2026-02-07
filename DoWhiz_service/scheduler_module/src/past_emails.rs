@@ -265,8 +265,8 @@ pub fn archive_outbound(
         serde_json::to_string_pretty(&payload)?,
     )?;
 
-    let email_text = render_email_text_from_payload(&payload);
-    fs::write(incoming_email.join("email.txt"), email_text)?;
+    let email_html = render_email_html(&html_body, &text_body);
+    fs::write(incoming_email.join("email.html"), email_html)?;
     Ok(())
 }
 
@@ -533,72 +533,33 @@ fn join_recipients(values: &[String]) -> String {
         .join(", ")
 }
 
-fn render_email_text_from_payload(payload: &serde_json::Value) -> String {
-    let subject = payload
-        .get("Subject")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    let from = payload
-        .get("From")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    let to = payload
-        .get("To")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    let cc = payload
-        .get("Cc")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    let bcc = payload
-        .get("Bcc")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
+fn render_email_html(html_body: &str, text_body: &str) -> String {
+    if !html_body.trim().is_empty() {
+        return html_body.to_string();
+    }
+    if text_body.trim().is_empty() {
+        return "<pre>(no content)</pre>".to_string();
+    }
+    wrap_text_as_html(text_body)
+}
 
-    let body = payload
-        .get("TextBody")
-        .and_then(|value| value.as_str())
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| value.to_string())
-        .or_else(|| {
-            payload
-                .get("HtmlBody")
-                .and_then(|value| value.as_str())
-                .map(strip_html_tags)
-        })
-        .unwrap_or_default();
+fn wrap_text_as_html(input: &str) -> String {
+    format!("<pre>{}</pre>", escape_html(input))
+}
 
-    let attachment_line = payload
-        .get("Attachments")
-        .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| {
-                    let name = item.get("Name")?.as_str()?;
-                    let content_type = item
-                        .get("ContentType")
-                        .and_then(|value| value.as_str())
-                        .unwrap_or("");
-                    if content_type.trim().is_empty() {
-                        Some(name.to_string())
-                    } else {
-                        Some(format!("{} ({})", name, content_type))
-                    }
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    let attachment_line = if attachment_line.is_empty() {
-        "(none)".to_string()
-    } else {
-        attachment_line.join(", ")
-    };
-
-    format!(
-        "From: {from}\nTo: {to}\nCc: {cc}\nBcc: {bcc}\nSubject: {subject}\nAttachments: {attachment_line}\n\n{body}\n"
-    )
+fn escape_html(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 fn strip_html_tags(input: &str) -> String {
@@ -902,7 +863,7 @@ mod tests {
             .parent()
             .and_then(|value| value.parent())
             .expect("mail dir");
-        assert!(mail_dir.join("incoming_email").join("email.txt").exists());
+        assert!(mail_dir.join("incoming_email").join("email.html").exists());
         assert!(mail_dir
             .join("incoming_attachments")
             .join("note.txt")

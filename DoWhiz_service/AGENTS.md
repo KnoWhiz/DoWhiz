@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+Try to keep the whole codebase modular and easy to maintain. If a file is too long (say more than 500 / 1000 lines), consider separate the code file into separate code files and make sure each one has its own well defined functionality.
+
 ## Project Structure & Module Organization
 This is a Rust workspace with three crates:
 - `scheduler_module/`: inbound webhook handling, scheduling, and service binaries.
