@@ -127,6 +127,37 @@ mkdir -p reply_email_attachments
     Ok(())
 }
 
+fn write_fake_gh(bin_dir: &Path) -> io::Result<()> {
+    let script = r#"#!/bin/sh
+set -e
+if [ "$1" = "auth" ] && [ "$2" = "login" ]; then
+  token="$(cat)"
+  if [ -z "$token" ]; then
+    echo "missing token" >&2
+    exit 3
+  fi
+  exit 0
+fi
+if [ "$1" = "auth" ] && [ "$2" = "setup-git" ]; then
+  exit 0
+fi
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  exit 0
+fi
+exit 0
+"#;
+    let path = bin_dir.join("gh");
+    fs::write(&path, script)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&path)?.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms)?;
+    }
+    Ok(())
+}
+
 fn first_workspace_dir(root: &Path) -> PathBuf {
     let mut entries = fs::read_dir(root).expect("read workspaces dir");
     while let Some(entry) = entries.next() {
@@ -158,6 +189,7 @@ fn email_flow_injects_github_env() {
     .expect("write .env");
 
     write_fake_codex(&bin_root).expect("write fake codex");
+    write_fake_gh(&bin_root).expect("write fake gh");
 
     let _unset_guard = EnvUnsetGuard::remove(&[
         "GH_TOKEN",

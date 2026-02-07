@@ -2,9 +2,9 @@ use serde::Deserialize;
 use std::env;
 use std::fmt;
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const CODEX_CONFIG_MARKER: &str = "# IMPORTANT: Use your Azure *deployment name* here";
@@ -151,6 +151,8 @@ pub struct RunTaskOutput {
 struct GitHubAuthConfig {
     env_overrides: Vec<(String, String)>,
     askpass_path: Option<PathBuf>,
+    token: Option<String>,
+    username: Option<String>,
 }
 
 #[derive(Debug)]
@@ -166,6 +168,14 @@ pub enum RunTaskError {
     },
     CodexNotFound,
     CodexFailed {
+        status: Option<i32>,
+        output: String,
+    },
+    GitHubAuthCommandNotFound {
+        command: &'static str,
+    },
+    GitHubAuthFailed {
+        command: &'static str,
         status: Option<i32>,
         output: String,
     },
@@ -193,6 +203,18 @@ impl fmt::Display for RunTaskError {
                 f,
                 "Codex CLI failed (status: {:?}). Output tail:\n{}",
                 status, output
+            ),
+            RunTaskError::GitHubAuthCommandNotFound { command } => {
+                write!(f, "GitHub auth command not found on PATH: {}", command)
+            }
+            RunTaskError::GitHubAuthFailed {
+                command,
+                status,
+                output,
+            } => write!(
+                f,
+                "GitHub auth command failed ({} status: {:?}). Output tail:\n{}",
+                command, status, output
             ),
             RunTaskError::OutputMissing { path } => {
                 write!(f, "Expected output not found: {}", path.display())
@@ -271,6 +293,7 @@ fn run_codex_task(
     };
 
     ensure_codex_config(&model_name, &azure_endpoint)?;
+    ensure_github_cli_auth(&github_auth)?;
 
     let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
     let prompt = build_prompt(
@@ -527,7 +550,7 @@ fn resolve_github_auth() -> Result<GitHubAuthConfig, RunTaskError> {
             env_overrides.push(("GITHUB_TOKEN".to_string(), token.clone()));
         }
     }
-    if let Some(username) = github_username {
+    if let Some(username) = github_username.clone() {
         let email = format!("{}@users.noreply.github.com", username);
         if env_missing_or_empty("GIT_AUTHOR_NAME") {
             env_overrides.push(("GIT_AUTHOR_NAME".to_string(), username.clone()));
@@ -552,7 +575,100 @@ fn resolve_github_auth() -> Result<GitHubAuthConfig, RunTaskError> {
     Ok(GitHubAuthConfig {
         env_overrides,
         askpass_path,
+        token,
+        username: github_username,
     })
+}
+
+fn ensure_github_cli_auth(github_auth: &GitHubAuthConfig) -> Result<(), RunTaskError> {
+    if env_enabled("GH_AUTH_DISABLED") || env_enabled("GITHUB_AUTH_DISABLED") {
+        return Ok(());
+    }
+    let Some(token) = github_auth.token.as_deref() else {
+        return Ok(());
+    };
+
+    let mut login_cmd = Command::new("gh");
+    login_cmd
+        .args([
+            "auth",
+            "login",
+            "--with-token",
+            "--hostname",
+            "github.com",
+            "--git-protocol",
+            "https",
+        ])
+        .env_remove("GH_TOKEN")
+        .env_remove("GITHUB_TOKEN");
+    apply_env_overrides(
+        &mut login_cmd,
+        &github_auth.env_overrides,
+        &["GH_TOKEN", "GITHUB_TOKEN"],
+    );
+    run_auth_command(login_cmd, Some(token), "gh auth login")?;
+
+    let mut setup_cmd = Command::new("gh");
+    setup_cmd.args(["auth", "setup-git", "--hostname", "github.com"]);
+    apply_env_overrides(&mut setup_cmd, &github_auth.env_overrides, &[]);
+    run_auth_command(setup_cmd, None, "gh auth setup-git")?;
+
+    let mut status_cmd = Command::new("gh");
+    status_cmd.args(["auth", "status", "--hostname", "github.com"]);
+    apply_env_overrides(&mut status_cmd, &github_auth.env_overrides, &[]);
+    run_auth_command(status_cmd, None, "gh auth status")?;
+
+    Ok(())
+}
+
+fn apply_env_overrides(cmd: &mut Command, overrides: &[(String, String)], skip: &[&str]) {
+    for (key, value) in overrides {
+        if skip.iter().any(|blocked| *blocked == key.as_str()) {
+            continue;
+        }
+        cmd.env(key, value);
+    }
+}
+
+fn run_auth_command(
+    mut cmd: Command,
+    input: Option<&str>,
+    label: &'static str,
+) -> Result<(), RunTaskError> {
+    if input.is_some() {
+        cmd.stdin(Stdio::piped());
+    }
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            return Err(RunTaskError::GitHubAuthCommandNotFound { command: "gh" })
+        }
+        Err(err) => return Err(RunTaskError::Io(err)),
+    };
+
+    if let Some(payload) = input {
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(payload.as_bytes())?;
+            stdin.write_all(b"\n")?;
+        }
+    }
+
+    let output = child.wait_with_output()?;
+    let mut combined_output = String::new();
+    combined_output.push_str(&String::from_utf8_lossy(&output.stdout));
+    combined_output.push_str(&String::from_utf8_lossy(&output.stderr));
+    let output_tail = tail_string(&combined_output, 2000);
+
+    if !output.status.success() {
+        return Err(RunTaskError::GitHubAuthFailed {
+            command: label,
+            status: output.status.code(),
+            output: output_tail,
+        });
+    }
+
+    Ok(())
 }
 
 fn read_env_trimmed(key: &str) -> Option<String> {
@@ -569,6 +685,16 @@ fn env_missing_or_empty(key: &str) -> bool {
     match env::var(key) {
         Ok(value) => value.trim().is_empty(),
         Err(_) => true,
+    }
+}
+
+fn env_enabled(key: &str) -> bool {
+    match env::var(key) {
+        Ok(value) => {
+            let normalized = value.trim().to_ascii_lowercase();
+            !(normalized.is_empty() || normalized == "0" || normalized == "false")
+        }
+        Err(_) => false,
     }
 }
 
@@ -751,7 +877,7 @@ You main goal is
 2. After finishing the task (step one), make sure you write a proper HTML email draft in reply_email_draft.html in the workspace root. If there are files to attach, put them in reply_email_attachments/ and reference them in the email draft. Do not pretend the job has been done without actually doing it, and do not write the email draft until the task is done. If you are not sure about the task, send another email to ask for clarification (and if any, attach information about why did you fail to get the task done, what is the exact error you encountered).
 
 Inputs (relative to workspace root):
-- Incoming email dir: {input_email}
+- Incoming email dir: {input_email} (email.html, postmark_payload.json, thread_history.md, entries/)
 - Incoming attachments dir: {input_attachments}
 - Memory dir (memory about the current user): {memory}
 - Reference dir (contain all past emails with the current user): {reference}
@@ -771,7 +897,7 @@ Memory management and maintain policy:
 - Update memory files at the end if new durable info is learned; otherwise leave unchanged.
 
 Scheduling:
-- You can use the skill "scheduler_maintain" to create, cancel, or reschedule future tasks. You can either create a future task or schedule a future email sending.
+- For any scheduling (email or task), you MUST use the skill "scheduler_maintain".
 
 Rules:
 - Do not modify input directories. Any file editing requests should be done on the copied version of attachments and save into reply_email_attachments/ to be sent back to the user. Mark version updates as "_v2", "_v3", etc. in the filename.
@@ -785,8 +911,6 @@ Rules:
         memory = memory_dir.display(),
         reference = reference_dir.display(),
         memory_section = memory_section,
-        schedule_begin = SCHEDULED_TASKS_BEGIN,
-        schedule_end = SCHEDULED_TASKS_END,
     )
 }
 
@@ -870,7 +994,7 @@ mod tests {
 
         assert!(prompt.contains("Memory context"));
         assert!(prompt.contains("memory/memo.md"));
-        assert!(prompt.contains("Memory policy"));
+        assert!(prompt.contains("Memory management"));
         assert!(prompt.contains("memo.md"));
         assert!(prompt.contains("500 lines"));
     }

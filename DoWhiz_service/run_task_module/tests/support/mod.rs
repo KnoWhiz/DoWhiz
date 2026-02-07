@@ -155,6 +155,36 @@ echo "attachment" > reply_email_attachments/attachment.txt
     Ok(script_path)
 }
 
+#[cfg(unix)]
+pub fn write_fake_gh(dir: &Path) -> io::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let script_path = dir.join("gh");
+    let script = r#"#!/bin/sh
+set -e
+if [ "$1" = "auth" ] && [ "$2" = "login" ]; then
+  token="$(cat)"
+  if [ -z "$token" ]; then
+    echo "missing token" >&2
+    exit 3
+  fi
+  exit 0
+fi
+if [ "$1" = "auth" ] && [ "$2" = "setup-git" ]; then
+  exit 0
+fi
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  exit 0
+fi
+exit 0
+"#;
+    fs::write(&script_path, script)?;
+    let mut perms = fs::metadata(&script_path)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms)?;
+    Ok(script_path)
+}
+
 pub fn create_workspace(root: &Path) -> io::Result<PathBuf> {
     let workspace = root.join("workspace");
     fs::create_dir_all(&workspace)?;
@@ -163,7 +193,10 @@ pub fn create_workspace(root: &Path) -> io::Result<PathBuf> {
     fs::create_dir_all(workspace.join("memory"))?;
     fs::create_dir_all(workspace.join("references"))?;
 
-    fs::write(workspace.join("incoming_email").join("email.txt"), "Hello")?;
+    fs::write(
+        workspace.join("incoming_email").join("email.html"),
+        "<pre>Hello</pre>",
+    )?;
     fs::write(
         workspace.join("incoming_attachments").join("doc_v1.txt"),
         "v1",

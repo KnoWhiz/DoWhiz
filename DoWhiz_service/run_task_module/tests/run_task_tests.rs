@@ -5,8 +5,8 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use support::{
-    build_params, create_workspace, write_fake_codex, EnvGuard, EnvUnsetGuard, FakeCodexMode,
-    TempDir, ENV_MUTEX,
+    build_params, create_workspace, write_fake_codex, write_fake_gh, EnvGuard, EnvUnsetGuard,
+    FakeCodexMode, TempDir, ENV_MUTEX,
 };
 
 #[test]
@@ -30,6 +30,7 @@ fn run_task_success_with_fake_codex() {
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
         ("CODEX_MODEL", "test-model"),
+        ("GH_AUTH_DISABLED", "1"),
     ]);
 
     let params = build_params(&workspace);
@@ -63,6 +64,7 @@ fn run_task_reports_missing_output() {
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
+        ("GH_AUTH_DISABLED", "1"),
     ]);
 
     let params = build_params(&workspace);
@@ -90,6 +92,7 @@ fn run_task_reports_codex_failure() {
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
+        ("GH_AUTH_DISABLED", "1"),
     ]);
 
     let params = build_params(&workspace);
@@ -117,6 +120,7 @@ fn run_task_reports_missing_codex_cli() {
         ("PATH", ""),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
+        ("GH_AUTH_DISABLED", "1"),
     ]);
 
     let params = build_params(&workspace);
@@ -145,6 +149,7 @@ GITHUB_PERSONAL_ACCESS_TOKEN="pat-test-token"
     fs::create_dir_all(&home_dir).unwrap();
     fs::create_dir_all(&bin_dir).unwrap();
     write_fake_codex(&bin_dir, FakeCodexMode::GithubEnvCheck).unwrap();
+    write_fake_gh(&bin_dir).unwrap();
 
     let _unset = EnvUnsetGuard::remove(&[
         "GH_TOKEN",
@@ -160,6 +165,7 @@ GITHUB_PERSONAL_ACCESS_TOKEN="pat-test-token"
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
+        ("GH_AUTH_DISABLED", "1"),
     ]);
 
     let params = build_params(&workspace);
@@ -187,6 +193,7 @@ fn run_task_reports_missing_env() {
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", ""),
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
+        ("GH_AUTH_DISABLED", "1"),
     ]);
 
     let params = build_params(&workspace);
