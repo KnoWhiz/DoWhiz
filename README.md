@@ -81,10 +81,7 @@ npm install -g @openai/codex@latest @playwright/cli@latest
 npx playwright install chromium
 ```
 
-Point the service at the repo skills when running locally:
-```
-export SKILLS_SOURCE_DIR="$PWD/DoWhiz_service/skills"
-```
+Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.
 
 ## Getting started
 Rust service:

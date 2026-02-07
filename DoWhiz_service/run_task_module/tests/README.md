@@ -25,7 +25,6 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 sudo npm install -g @openai/codex@latest @playwright/cli@latest
 sudo npx playwright install --with-deps chromium
-export SKILLS_SOURCE_DIR="$PWD/DoWhiz_service/skills"
 ```
 
 1) Prepare a workspace with the required folders:
@@ -43,6 +42,7 @@ workspace/
 4) Verify the outputs:
    - reply_email_draft.html exists in the workspace root.
    - reply_email_attachments/ exists (and contains any generated attachments).
+   - Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.
 
 ## Future automated tests
 

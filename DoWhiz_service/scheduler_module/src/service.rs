@@ -98,10 +98,7 @@ impl ServiceConfig {
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|value| *value > 0)
             .unwrap_or(3);
-        let skills_source_dir = env::var("SKILLS_SOURCE_DIR")
-            .ok()
-            .map(|value| resolve_path(value))
-            .transpose()?;
+        let skills_source_dir = Some(repo_skills_source_dir());
 
         Ok(Self {
             host,
@@ -1149,6 +1146,15 @@ fn env_flag(key: &str, default: bool) -> bool {
             "1" | "true" | "yes" | "y"
         ),
         Err(_) => default,
+    }
+}
+
+fn repo_skills_source_dir() -> PathBuf {
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if cwd.file_name().map(|name| name == "DoWhiz_service").unwrap_or(false) {
+        cwd.join("skills")
+    } else {
+        cwd.join("DoWhiz_service").join("skills")
     }
 }
 

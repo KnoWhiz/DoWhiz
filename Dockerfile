@@ -54,9 +54,9 @@ RUN useradd -r -u 10001 -g nogroup app && \
 COPY --from=builder /app/DoWhiz_service/target/release/rust_service /app/rust_service
 
 # Copy skills directory for Codex
-COPY DoWhiz_service/skills/ /app/skills/
+COPY DoWhiz_service/skills/ /app/DoWhiz_service/skills/
 
-RUN chown -R app:nogroup /app/skills
+RUN chown -R app:nogroup /app/DoWhiz_service/skills
 
 USER app
 
@@ -68,7 +68,6 @@ ENV PROCESSED_IDS_PATH=/app/.workspace/run_task/state/postmark_processed_ids.txt
 ENV USERS_ROOT=/app/.workspace/run_task/users
 ENV USERS_DB_PATH=/app/.workspace/run_task/state/users.db
 ENV TASK_INDEX_PATH=/app/.workspace/run_task/state/task_index.db
-ENV SKILLS_SOURCE_DIR=/app/skills
 ENV PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
 
 EXPOSE 9001
