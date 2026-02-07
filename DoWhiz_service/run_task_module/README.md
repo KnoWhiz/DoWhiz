@@ -8,7 +8,6 @@ Requirements:
 - Codex CLI installed and available on PATH.
 - Node.js 20 + npm.
 - `playwright-cli` + Chromium (required when Codex calls browser automation skills).
-- `SKILLS_SOURCE_DIR` set to `DoWhiz_service/skills` to load repo skills.
 - Environment variables:
   - `AZURE_OPENAI_API_KEY_BACKUP`
   - `AZURE_OPENAI_ENDPOINT_BACKUP`
@@ -21,7 +20,6 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 sudo npm install -g @openai/codex@latest @playwright/cli@latest
 sudo npx playwright install --with-deps chromium
-export SKILLS_SOURCE_DIR="$PWD/DoWhiz_service/skills"
 ```
 
 Example:
@@ -53,3 +51,4 @@ println!("Reply saved at: {}", result.reply_html_path.display());
 - Input paths must be relative to `workspace_dir`.
 - The module creates `reply_email_draft.html` and `reply_email_attachments/` inside the workspace.
 - When `codex_disabled` is true, it writes a placeholder reply instead of calling Codex.
+- Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.

@@ -9,7 +9,6 @@ then schedules a SendEmail job and sends the reply via Postmark.
 - Node.js 20 + npm
 - `codex` CLI on your PATH (unless `CODEX_DISABLED=1`)
 - `playwright-cli` + Chromium (required for browser automation skills)
-- `SKILLS_SOURCE_DIR` set to `DoWhiz_service/skills` to load repo skills locally
 - `.env` includes:
   - `POSTMARK_SERVER_TOKEN`
   - `OUTBOUND_FROM` (optional, defaults to `oliver@dowhiz.com`)
@@ -41,10 +40,7 @@ npm install -g @openai/codex@latest @playwright/cli@latest
 npx playwright install chromium
 ```
 
-Export the skills directory before running locally:
-```
-export SKILLS_SOURCE_DIR="$PWD/DoWhiz_service/skills"
-```
+Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.
 
 ## Docker (production image)
 Build the image from the repo root and run it with the same `.env` file mounted
