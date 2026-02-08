@@ -16,6 +16,9 @@ pub(crate) mod thread_state;
 use crate::memory_store::{
     resolve_user_memory_dir, sync_user_memory_to_workspace, sync_workspace_memory_to_user,
 };
+use crate::secrets_store::{
+    resolve_user_secrets_path, sync_user_secrets_to_workspace, sync_workspace_secrets_to_user,
+};
 use crate::thread_state::{
     current_thread_epoch, default_thread_state_path, find_thread_state_path,
 };
@@ -202,6 +205,7 @@ impl TaskExecutor for ModuleExecutor {
             TaskKind::RunTask(task) => {
                 let workspace_memory_dir = task.workspace_dir.join(&task.memory_dir);
                 let user_memory_dir = resolve_user_memory_dir(task);
+                let user_secrets_path = resolve_user_secrets_path(task);
                 if let Some(user_memory_dir) = user_memory_dir.as_ref() {
                     sync_user_memory_to_workspace(user_memory_dir, &workspace_memory_dir).map_err(
                         |err| SchedulerError::TaskFailed(format!("memory sync failed: {}", err)),
@@ -209,6 +213,16 @@ impl TaskExecutor for ModuleExecutor {
                 } else {
                     warn!(
                         "unable to resolve user memory dir for workspace {}",
+                        task.workspace_dir.display()
+                    );
+                }
+                if let Some(user_secrets_path) = user_secrets_path.as_ref() {
+                    sync_user_secrets_to_workspace(user_secrets_path, &task.workspace_dir).map_err(
+                        |err| SchedulerError::TaskFailed(format!("secrets sync failed: {}", err)),
+                    )?;
+                } else {
+                    warn!(
+                        "unable to resolve user secrets for workspace {}",
                         task.workspace_dir.display()
                     );
                 }
@@ -226,6 +240,11 @@ impl TaskExecutor for ModuleExecutor {
                 if let Some(user_memory_dir) = user_memory_dir.as_ref() {
                     sync_workspace_memory_to_user(&workspace_memory_dir, user_memory_dir).map_err(
                         |err| SchedulerError::TaskFailed(format!("memory sync failed: {}", err)),
+                    )?;
+                }
+                if let Some(user_secrets_path) = user_secrets_path.as_ref() {
+                    sync_workspace_secrets_to_user(&task.workspace_dir, user_secrets_path).map_err(
+                        |err| SchedulerError::TaskFailed(format!("secrets sync failed: {}", err)),
                     )?;
                 }
                 Ok(TaskExecution {
@@ -1838,6 +1857,7 @@ fn references_contains(references: &str, message_id: &str) -> bool {
 pub mod index_store;
 pub mod memory_store;
 pub mod past_emails;
+pub mod secrets_store;
 pub mod service;
 pub mod user_store;
 
