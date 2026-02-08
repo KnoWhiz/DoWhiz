@@ -959,6 +959,7 @@ Scheduling:
 - For any scheduling (email or task), you MUST use the skill "scheduler_maintain".
 
 Rules:
+- Each workspace includes a `.env` file at the workspace root. You may edit it to manage per-user secrets; updates are synced back after the task completes.
 - Do not modify input directories. Any file editing requests should be done on the copied version of attachments and save into reply_email_attachments/ to be sent back to the user. Mark version updates as "_v2", "_v3", etc. in the filename.
 - You may create or modify other files and folders in the workspace as needed to complete the task.
   Prefer creating a work/ directory for clones, patches, and build artifacts.
