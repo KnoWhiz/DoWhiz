@@ -232,6 +232,7 @@ impl TaskExecutor for ModuleExecutor {
                     input_attachments_dir: task.input_attachments_dir.clone(),
                     memory_dir: task.memory_dir.clone(),
                     reference_dir: task.reference_dir.clone(),
+                    reply_to: task.reply_to.clone(),
                     model_name: task.model_name.clone(),
                     codex_disabled: task.codex_disabled,
                 };

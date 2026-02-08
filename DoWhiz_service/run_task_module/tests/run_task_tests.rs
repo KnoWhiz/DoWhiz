@@ -230,6 +230,7 @@ fn run_task_rejects_absolute_input_dir() {
         input_attachments_dir: Path::new("incoming_attachments").to_path_buf(),
         memory_dir: Path::new("memory").to_path_buf(),
         reference_dir: Path::new("references").to_path_buf(),
+        reply_to: vec!["user@example.com".to_string()],
         model_name: "test-model".to_string(),
         codex_disabled: false,
     };
@@ -250,6 +251,21 @@ fn run_task_codex_disabled_writes_placeholder() {
     let result = run_task(&params).unwrap();
     let html = fs::read_to_string(&result.reply_html_path).unwrap();
     assert!(html.contains("Codex disabled"));
+    assert!(result.reply_attachments_dir.is_dir());
+}
+
+#[test]
+fn run_task_codex_disabled_skips_placeholder_without_reply_to() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("codex_task_disabled_no_reply").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let mut params = build_params(&workspace);
+    params.codex_disabled = true;
+    params.reply_to.clear();
+
+    let result = run_task(&params).unwrap();
+    assert!(!result.reply_html_path.exists());
     assert!(result.reply_attachments_dir.is_dir());
 }
 
