@@ -11,6 +11,7 @@ pub struct SendEmailParams {
     pub subject: String,
     pub html_path: PathBuf,
     pub attachments_dir: PathBuf,
+    pub from: Option<String>,
     pub to: Vec<String>,
     pub cc: Vec<String>,
     pub bcc: Vec<String>,
@@ -86,7 +87,13 @@ pub fn send_email(params: &SendEmailParams) -> Result<PostmarkSendResponse, Send
     if token.trim().is_empty() {
         return Err(SendEmailError::MissingEnv("POSTMARK_SERVER_TOKEN"));
     }
-    let mut from = env::var("OUTBOUND_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
+    let mut from = params
+        .from
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| env::var("OUTBOUND_FROM").unwrap_or_default());
     if from.trim().is_empty() {
         from = "oliver@dowhiz.com".to_string();
     }

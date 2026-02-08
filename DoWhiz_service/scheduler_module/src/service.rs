@@ -24,6 +24,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::index_store::{IndexStore, TaskRef};
+use crate::mailbox;
 use crate::thread_state::{bump_thread_state, default_thread_state_path};
 use crate::user_store::{extract_emails, UserStore};
 use crate::{
@@ -33,11 +34,6 @@ use crate::{
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 pub const DEFAULT_INBOUND_BODY_MAX_BYTES: usize = 25 * 1024 * 1024;
-const WORKSPACE_SOUL_BLOCK: &str = r#"<SOUL>
-Your name is Oliver, a little bear, who is cute and smart and capable. You always get task done.
-Go bears!
-</SOUL>
-"#;
 
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
@@ -579,11 +575,19 @@ pub fn process_inbound_payload(
         );
     }
 
+    let inbound_service_address = mailbox::select_inbound_service_address(&[
+        payload.to.as_deref(),
+        payload.cc.as_deref(),
+        payload.bcc.as_deref(),
+    ]);
+    let persona = mailbox::persona_for_address(inbound_service_address.as_deref());
+
     let thread_key = thread_key(payload, raw_payload);
     let workspace = ensure_thread_workspace(
         &user_paths,
         &user.user_id,
         &thread_key,
+        persona,
         config.skills_source_dir.as_deref(),
     )?;
     let thread_state_path = default_thread_state_path(&workspace);
@@ -776,7 +780,7 @@ fn is_blacklisted_sender(sender: &str) -> bool {
 }
 
 fn is_blacklisted_address(address: &str) -> bool {
-    matches!(address, "agent@dowhiz.com" | "oliver@dowhiz.com")
+    mailbox::is_service_address(address)
 }
 
 fn thread_key(payload: &PostmarkInbound, raw_payload: &[u8]) -> String {
@@ -851,20 +855,25 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn ensure_workspace_soul_files(workspace: &Path) -> io::Result<()> {
-    write_workspace_soul_file(&workspace.join("AGENTS.md"))?;
-    write_workspace_soul_file(&workspace.join("CLAUDE.md"))?;
+fn ensure_workspace_soul_files(
+    workspace: &Path,
+    persona: mailbox::WorkspacePersona,
+) -> io::Result<()> {
+    let soul_block = mailbox::soul_block(persona);
+    write_workspace_soul_file(&workspace.join("AGENTS.md"), soul_block)?;
+    write_workspace_soul_file(&workspace.join("CLAUDE.md"), soul_block)?;
     Ok(())
 }
 
-fn write_workspace_soul_file(path: &Path) -> io::Result<()> {
-    fs::write(path, WORKSPACE_SOUL_BLOCK)
+fn write_workspace_soul_file(path: &Path, soul_block: &str) -> io::Result<()> {
+    fs::write(path, soul_block)
 }
 
 fn ensure_thread_workspace(
     user_paths: &crate::user_store::UserPaths,
     user_id: &str,
     thread_key: &str,
+    persona: mailbox::WorkspacePersona,
     skills_source_dir: Option<&Path>,
 ) -> Result<PathBuf, BoxError> {
     fs::create_dir_all(&user_paths.workspaces_root)?;
@@ -897,7 +906,7 @@ fn ensure_thread_workspace(
         }
     }
 
-    ensure_workspace_soul_files(&workspace)?;
+    ensure_workspace_soul_files(&workspace, persona)?;
 
     // Copy skills to workspace for Codex CLI
     if let Some(skills_src) = skills_source_dir {
@@ -1602,7 +1611,13 @@ mod tests {
         let inbound_payload: PostmarkInbound =
             serde_json::from_str(inbound_raw).expect("parse inbound");
         let thread = thread_key(&inbound_payload, inbound_raw.as_bytes());
-        let workspace = ensure_thread_workspace(&user_paths, "user123", &thread, None)
+        let workspace = ensure_thread_workspace(
+            &user_paths,
+            "user123",
+            &thread,
+            mailbox::WorkspacePersona::LittleBear,
+            None,
+        )
             .expect("create workspace");
 
         let past_root = workspace.join("references").join("past_emails");

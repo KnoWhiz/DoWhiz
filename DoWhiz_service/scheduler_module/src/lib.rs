@@ -13,12 +13,14 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 pub(crate) mod thread_state;
+pub(crate) mod mailbox;
 use crate::memory_store::{
     resolve_user_memory_dir, sync_user_memory_to_workspace, sync_workspace_memory_to_user,
 };
 use crate::secrets_store::{
     resolve_user_secrets_path, sync_user_secrets_to_workspace, sync_workspace_secrets_to_user,
 };
+use crate::mailbox::select_inbound_service_mailbox;
 use crate::thread_state::{
     current_thread_epoch, default_thread_state_path, find_thread_state_path,
 };
@@ -36,6 +38,8 @@ pub struct SendEmailTask {
     pub subject: String,
     pub html_path: PathBuf,
     pub attachments_dir: PathBuf,
+    #[serde(default)]
+    pub from: Option<String>,
     pub to: Vec<String>,
     pub cc: Vec<String>,
     pub bcc: Vec<String>,
@@ -168,6 +172,7 @@ impl TaskExecutor for ModuleExecutor {
                     subject: task.subject.clone(),
                     html_path: task.html_path.clone(),
                     attachments_dir: task.attachments_dir.clone(),
+                    from: task.from.clone(),
                     to: task.to.clone(),
                     cc: task.cc.clone(),
                     bcc: task.bcc.clone(),
@@ -178,11 +183,15 @@ impl TaskExecutor for ModuleExecutor {
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
                 if let Some(archive_root) = task.archive_root.as_ref() {
                     dotenvy::dotenv().ok();
-                    let mut from = env::var("OUTBOUND_FROM")
-                        .unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
-                    if from.trim().is_empty() {
-                        from = "oliver@dowhiz.com".to_string();
-                    }
+                    let from = task
+                        .from
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(|value| value.to_string())
+                        .or_else(|| env::var("OUTBOUND_FROM").ok())
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or_else(|| "oliver@dowhiz.com".to_string());
                     if let Err(err) = crate::past_emails::archive_outbound(
                         archive_root,
                         &task.subject,
@@ -544,6 +553,7 @@ CREATE TABLE IF NOT EXISTS send_email_tasks (
     subject TEXT NOT NULL,
     html_path TEXT NOT NULL,
     attachments_dir TEXT NOT NULL,
+    from_address TEXT,
     in_reply_to TEXT,
     references_header TEXT,
     archive_root TEXT,
@@ -595,6 +605,12 @@ fn ensure_send_email_task_columns(conn: &Connection) -> Result<(), SchedulerErro
     if !columns.contains("in_reply_to") {
         conn.execute(
             "ALTER TABLE send_email_tasks ADD COLUMN in_reply_to TEXT",
+            [],
+        )?;
+    }
+    if !columns.contains("from_address") {
+        conn.execute(
+            "ALTER TABLE send_email_tasks ADD COLUMN from_address TEXT",
             [],
         )?;
     }
@@ -789,13 +805,14 @@ impl SqliteSchedulerStore {
         match &task.kind {
             TaskKind::SendEmail(send) => {
                 tx.execute(
-                    "INSERT INTO send_email_tasks (task_id, subject, html_path, attachments_dir, in_reply_to, references_header, archive_root, thread_epoch, thread_state_path)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    "INSERT INTO send_email_tasks (task_id, subject, html_path, attachments_dir, from_address, in_reply_to, references_header, archive_root, thread_epoch, thread_state_path)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                     params![
                         task.id.to_string(),
                         send.subject.as_str(),
                         send.html_path.to_string_lossy().into_owned(),
                         send.attachments_dir.to_string_lossy().into_owned(),
+                        send.from.as_deref(),
                         send.in_reply_to.as_deref(),
                         send.references.as_deref(),
                         send.archive_root
@@ -915,7 +932,7 @@ impl SqliteSchedulerStore {
     ) -> Result<SendEmailTask, SchedulerError> {
         let row = conn
             .query_row(
-                "SELECT subject, html_path, attachments_dir, in_reply_to, references_header, archive_root, thread_epoch, thread_state_path
+                "SELECT subject, html_path, attachments_dir, from_address, in_reply_to, references_header, archive_root, thread_epoch, thread_state_path
                  FROM send_email_tasks
                  WHERE task_id = ?1",
                 params![task_id],
@@ -927,8 +944,9 @@ impl SqliteSchedulerStore {
                         row.get::<_, Option<String>>(3)?,
                         row.get::<_, Option<String>>(4)?,
                         row.get::<_, Option<String>>(5)?,
-                        row.get::<_, Option<i64>>(6)?,
-                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<i64>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
                     ))
                 },
             )
@@ -937,6 +955,7 @@ impl SqliteSchedulerStore {
             subject,
             html_path,
             attachments_dir,
+            from_raw,
             in_reply_to_raw,
             references_raw,
             archive_root,
@@ -972,6 +991,7 @@ impl SqliteSchedulerStore {
             subject,
             html_path: PathBuf::from(html_path),
             attachments_dir: PathBuf::from(attachments_dir),
+            from: normalize_header_value(from_raw),
             to,
             cc,
             bcc,
@@ -1424,6 +1444,7 @@ fn schedule_auto_reply<E: TaskExecutor>(
         subject: reply_context.subject,
         html_path,
         attachments_dir,
+        from: reply_context.from.clone(),
         to: task.reply_to.clone(),
         cc: Vec::new(),
         bcc: Vec::new(),
@@ -1505,10 +1526,20 @@ fn schedule_send_email<E: TaskExecutor>(
         return Ok(false);
     }
 
+    let reply_context = load_reply_context(&task.workspace_dir);
+    let from = request
+        .from
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .or_else(|| reply_context.from.clone());
+
     let send_task = SendEmailTask {
         subject: request.subject.clone(),
         html_path,
         attachments_dir,
+        from,
         to,
         cc: request.cc.clone(),
         bcc: request.bcc.clone(),
@@ -1747,12 +1778,19 @@ struct ReplyContext {
     subject: String,
     in_reply_to: Option<String>,
     references: Option<String>,
+    from: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct PostmarkInboundLite {
     #[serde(rename = "Subject")]
     subject: Option<String>,
+    #[serde(rename = "To")]
+    to: Option<String>,
+    #[serde(rename = "Cc")]
+    cc: Option<String>,
+    #[serde(rename = "Bcc")]
+    bcc: Option<String>,
     #[serde(rename = "MessageID", alias = "MessageId")]
     message_id: Option<String>,
     #[serde(rename = "Headers")]
@@ -1794,16 +1832,24 @@ fn load_reply_context(workspace_dir: &Path) -> ReplyContext {
         let subject_raw = payload.subject.as_deref().unwrap_or("");
         let subject = reply_subject(subject_raw);
         let (in_reply_to, references) = reply_headers(&payload);
+        let reply_from = select_inbound_service_mailbox(&[
+            payload.to.as_deref(),
+            payload.cc.as_deref(),
+            payload.bcc.as_deref(),
+        ])
+        .map(|mailbox| mailbox.formatted());
         ReplyContext {
             subject,
             in_reply_to,
             references,
+            from: reply_from,
         }
     } else {
         ReplyContext {
             subject: reply_subject(""),
             in_reply_to: None,
             references: None,
+            from: None,
         }
     }
 }

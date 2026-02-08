@@ -17,6 +17,7 @@ impl TaskExecutor for FollowUpExecutor {
                     subject: "Follow up".to_string(),
                     html_path: "followup.html".to_string(),
                     attachments_dir: Some("followup_attachments".to_string()),
+                    from: None,
                     to: vec!["you@example.com".to_string()],
                     cc: Vec::new(),
                     bcc: Vec::new(),
