@@ -95,7 +95,7 @@ oliver@dowhiz.com
 - `SCHEDULER_USER_MAX_CONCURRENCY` (default: `3`)
 - `CODEX_MODEL`
 - `CODEX_DISABLED=1` to bypass Codex CLI
-- Inbound blacklist: `agent@dowhiz.com`, `oliver@dowhiz.com` are ignored (display names and `+tag` aliases are normalized).
+- Inbound blacklist: `little-bear@dowhiz.com`, `agent@dowhiz.com`, `oliver@dowhiz.com`, `mini-mouse@dowhiz.com`, `maggie@dowhiz.com` are ignored (display names and `+tag` aliases are normalized).
 
 ## Database files
 - `DoWhiz_service/.workspace/run_task/state/users.db`: user registry. Table `users(id, email, created_at, last_seen_at)` stores normalized email, creation time, and last activity time (RFC3339 UTC). `last_seen_at` updates on inbound email.

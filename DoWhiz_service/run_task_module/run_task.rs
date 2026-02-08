@@ -114,6 +114,8 @@ pub struct ScheduledSendEmailTask {
     pub html_path: String,
     pub attachments_dir: Option<String>,
     #[serde(default)]
+    pub from: Option<String>,
+    #[serde(default)]
     pub to: Vec<String>,
     #[serde(default)]
     pub cc: Vec<String>,

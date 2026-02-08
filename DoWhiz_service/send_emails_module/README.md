@@ -19,6 +19,7 @@ let params = SendEmailParams {
     subject: "Hello".to_string(),
     html_path: PathBuf::from("/path/to/reply_email_draft.html"),
     attachments_dir: PathBuf::from("/path/to/reply_email_attachments"),
+    from: None,
     to: vec!["mini-mouse@deep-tutor.com".to_string()],
     cc: Vec::new(),
     bcc: Vec::new(),
