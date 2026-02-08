@@ -58,6 +58,7 @@ pub struct RunTaskParams {
     pub input_attachments_dir: PathBuf,
     pub memory_dir: PathBuf,
     pub reference_dir: PathBuf,
+    pub reply_to: Vec<String>,
     pub model_name: String,
     pub codex_disabled: bool,
 }
@@ -70,6 +71,7 @@ struct RunTaskRequest<'a> {
     memory_dir: &'a Path,
     reference_dir: &'a Path,
     model_name: &'a str,
+    reply_to: &'a [String],
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -242,12 +244,15 @@ pub fn run_task(params: &RunTaskParams) -> Result<RunTaskOutput, RunTaskError> {
         memory_dir: &params.memory_dir,
         reference_dir: &params.reference_dir,
         model_name: params.model_name.as_str(),
+        reply_to: &params.reply_to,
     };
 
     let (reply_html_path, reply_attachments_dir) = prepare_workspace(&request)?;
 
     if params.codex_disabled {
-        write_placeholder_reply(&reply_html_path)?;
+        if !params.reply_to.is_empty() {
+            write_placeholder_reply(&reply_html_path)?;
+        }
         return Ok(RunTaskOutput {
             reply_html_path,
             reply_attachments_dir,
@@ -305,6 +310,7 @@ fn run_codex_task(
         request.memory_dir,
         request.reference_dir,
         &memory_context,
+        !request.reply_to.is_empty(),
     );
 
     let mut cmd = Command::new("codex");
@@ -904,6 +910,7 @@ fn build_prompt(
     memory_dir: &Path,
     reference_dir: &Path,
     memory_context: &str,
+    reply_required: bool,
 ) -> String {
     let memory_section = if memory_context.trim().is_empty() {
         "Memory context (from memory/*.md):\n- (no memory files found)\n\n".to_string()
@@ -913,12 +920,17 @@ fn build_prompt(
             memory_context = memory_context.trim_end()
         )
     };
+    let reply_instruction = if reply_required {
+        "2. After finishing the task (step one), make sure you write a proper HTML email draft in reply_email_draft.html in the workspace root. If there are files to attach, put them in reply_email_attachments/ and reference them in the email draft. Do not pretend the job has been done without actually doing it, and do not write the email draft until the task is done. If you are not sure about the task, send another email to ask for clarification (and if any, attach information about why did you fail to get the task done, what is the exact error you encountered)."
+    } else {
+        "2. After finishing the task (step one), do not write any email draft. This inbound message is from a non-replyable address, so skip creating reply_email_draft.html or reply_email_attachments/."
+    };
     format!(
         r#"You are Oliver, a digital assistant at DoWhiz. You are powerful, resilient, and helpful. Your task is to read incoming emails, understand the user's intent, finish the task, and draft appropriate email replies. You can also use memory and reference materials for context (already saved under current workspace). Always be cute, patient, friendly and helpful in your replies.
 
 You main goal is
 1. Most importantly, understand the task described in the incoming email and get the task done.
-2. After finishing the task (step one), make sure you write a proper HTML email draft in reply_email_draft.html in the workspace root. If there are files to attach, put them in reply_email_attachments/ and reference them in the email draft. Do not pretend the job has been done without actually doing it, and do not write the email draft until the task is done. If you are not sure about the task, send another email to ask for clarification (and if any, attach information about why did you fail to get the task done, what is the exact error you encountered).
+{reply_instruction}
 
 Inputs (relative to workspace root):
 - Incoming email dir: {input_email} (email.html, postmark_payload.json, thread_history.md, entries/)
@@ -956,6 +968,7 @@ Rules:
         memory = memory_dir.display(),
         reference = reference_dir.display(),
         memory_section = memory_section,
+        reply_instruction = reply_instruction,
     )
 }
 
@@ -1035,6 +1048,7 @@ mod tests {
             Path::new("memory"),
             Path::new("references"),
             "--- memory/memo.md ---\nHello",
+            true,
         );
 
         assert!(prompt.contains("Memory context"));
@@ -1042,6 +1056,21 @@ mod tests {
         assert!(prompt.contains("Memory management"));
         assert!(prompt.contains("memo.md"));
         assert!(prompt.contains("500 lines"));
+    }
+
+    #[test]
+    fn build_prompt_skips_reply_instruction_for_non_replyable() {
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            "",
+            false,
+        );
+
+        assert!(prompt.contains("non-replyable address"));
+        assert!(!prompt.contains("write a proper HTML email draft"));
     }
 
     #[test]

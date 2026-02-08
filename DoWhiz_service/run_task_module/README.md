@@ -33,6 +33,7 @@ let params = RunTaskParams {
     input_attachments_dir: PathBuf::from("input_attachments"),
     memory_dir: PathBuf::from("memory"),
     reference_dir: PathBuf::from("references"),
+    reply_to: vec!["user@example.com".to_string()],
     model_name: "gpt-5.2-codex".to_string(),
     codex_disabled: false,
 };
@@ -50,5 +51,6 @@ println!("Reply saved at: {}", result.reply_html_path.display());
 
 - Input paths must be relative to `workspace_dir`.
 - The module creates `reply_email_draft.html` and `reply_email_attachments/` inside the workspace.
-- When `codex_disabled` is true, it writes a placeholder reply instead of calling Codex.
+- When `codex_disabled` is true, it writes a placeholder reply instead of calling Codex (unless `reply_to` is empty).
+- When `reply_to` is empty, the prompt skips email drafting and `reply_email_draft.html` is optional.
 - Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.

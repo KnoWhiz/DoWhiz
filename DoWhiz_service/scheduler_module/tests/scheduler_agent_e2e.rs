@@ -48,6 +48,7 @@ impl TaskExecutor for RecordingExecutor {
                     input_attachments_dir: run.input_attachments_dir.clone(),
                     memory_dir: run.memory_dir.clone(),
                     reference_dir: run.reference_dir.clone(),
+                    reply_to: run.reply_to.clone(),
                     model_name: run.model_name.clone(),
                     codex_disabled: run.codex_disabled,
                 };

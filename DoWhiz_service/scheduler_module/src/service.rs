@@ -566,6 +566,19 @@ pub fn process_inbound_payload(
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     user_store.ensure_user_dirs(&user_paths)?;
 
+    let reply_to_raw = payload.reply_to.as_deref().unwrap_or("");
+    let from_raw = payload.from.as_deref().unwrap_or("");
+    let mut to_list = replyable_recipients(reply_to_raw);
+    if to_list.is_empty() {
+        to_list = replyable_recipients(from_raw);
+    }
+    if to_list.is_empty() {
+        info!(
+            "no replyable recipients found (reply_to='{}', from='{}')",
+            reply_to_raw, from_raw
+        );
+    }
+
     let thread_key = thread_key(payload, raw_payload);
     let workspace = ensure_thread_workspace(
         &user_paths,
@@ -595,17 +608,6 @@ pub fn process_inbound_payload(
         thread_key,
         thread_state.epoch
     );
-
-    let reply_target = payload
-        .reply_to
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| payload.from.as_deref())
-        .unwrap_or("");
-    let to_list = split_recipients(reply_target);
-    if to_list.is_empty() {
-        return Err("missing reply recipient".into());
-    }
 
     let run_task = RunTaskTask {
         workspace_dir: workspace.clone(),
@@ -1335,6 +1337,35 @@ fn split_recipients(value: &str) -> Vec<String> {
         .collect()
 }
 
+fn replyable_recipients(raw: &str) -> Vec<String> {
+    split_recipients(raw)
+        .into_iter()
+        .filter(|recipient| contains_replyable_address(recipient))
+        .collect()
+}
+
+fn contains_replyable_address(value: &str) -> bool {
+    let emails = extract_emails(value);
+    if emails.is_empty() {
+        return false;
+    }
+    emails.iter().any(|address| !is_no_reply_address(address))
+}
+
+// Only local-part markers; avoid domain-based filtering.
+const NO_REPLY_LOCAL_PARTS: [&str; 3] = ["noreply", "no-reply", "do-not-reply"];
+
+fn is_no_reply_address(address: &str) -> bool {
+    let normalized = address.trim().to_ascii_lowercase();
+    let local = normalized.split('@').next().unwrap_or("");
+    if local.is_empty() {
+        return false;
+    }
+    NO_REPLY_LOCAL_PARTS
+        .iter()
+        .any(|marker| local == *marker)
+}
+
 fn env_flag(key: &str, default: bool) -> bool {
     match env::var(key) {
         Ok(value) => matches!(
@@ -1587,5 +1618,40 @@ mod tests {
             .join(entry_path)
             .join("attachments_manifest.json")
             .exists());
+    }
+
+    #[test]
+    fn replyable_recipients_filters_no_reply_addresses() {
+        let raw = "No Reply <noreply@example.com>, Real <user@example.com>";
+        let recipients = replyable_recipients(raw);
+        assert_eq!(recipients, vec!["Real <user@example.com>"]);
+    }
+
+    #[test]
+    fn replyable_recipients_returns_empty_when_only_no_reply() {
+        let raw = "No Reply <no-reply@example.com>";
+        let recipients = replyable_recipients(raw);
+        assert!(recipients.is_empty());
+    }
+
+    #[test]
+    fn no_reply_detection_matches_common_variants() {
+        assert!(is_no_reply_address("noreply@example.com"));
+        assert!(is_no_reply_address("no-reply@example.com"));
+        assert!(is_no_reply_address("do-not-reply@example.com"));
+        assert!(!is_no_reply_address("reply@example.com"));
+    }
+
+    #[test]
+    fn no_reply_detection_requires_exact_local_part() {
+        assert!(!is_no_reply_address("noreplying@example.com"));
+        assert!(!is_no_reply_address("reply-noreply@example.com"));
+        assert!(!is_no_reply_address("no-reply-bot@example.com"));
+    }
+
+    #[test]
+    fn no_reply_detection_ignores_domain_markers() {
+        assert!(!is_no_reply_address("notifications@github.com"));
+        assert!(!is_no_reply_address("octocat@users.noreply.github.com"));
     }
 }
