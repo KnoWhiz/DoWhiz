@@ -21,11 +21,18 @@ pub(crate) fn sync_user_secrets_to_workspace(
     user_env_path: &Path,
     workspace_dir: &Path,
 ) -> Result<(), io::Error> {
-    if !user_env_path.exists() {
+    let workspace_env = workspace_env_path(workspace_dir);
+    if user_env_path.exists() {
+        fs::copy(user_env_path, workspace_env)?;
         return Ok(());
     }
-    let workspace_env = workspace_env_path(workspace_dir);
-    fs::copy(user_env_path, workspace_env)?;
+    if workspace_env.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = workspace_env.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(workspace_env, "")?;
     Ok(())
 }
 
@@ -97,5 +104,19 @@ mod tests {
         let workspace_env = workspace_dir.join(".env");
         let contents = fs::read_to_string(workspace_env).expect("workspace env");
         assert_eq!(contents, "TOKEN=origin");
+    }
+
+    #[test]
+    fn sync_user_secrets_to_workspace_creates_empty_env_when_missing() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace_dir = temp.path().join("workspace");
+        fs::create_dir_all(&workspace_dir).expect("workspace");
+        let user_env = temp.path().join("secrets").join(".env");
+
+        sync_user_secrets_to_workspace(&user_env, &workspace_dir).expect("sync");
+
+        let workspace_env = workspace_dir.join(".env");
+        let contents = fs::read_to_string(workspace_env).expect("workspace env");
+        assert!(contents.is_empty());
     }
 }
