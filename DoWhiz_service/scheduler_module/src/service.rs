@@ -1531,6 +1531,7 @@ mod tests {
             state_dir: user_root.join("state"),
             tasks_db_path: user_root.join("state/tasks.db"),
             memory_dir: user_root.join("memory"),
+            secrets_dir: user_root.join("secrets"),
             mail_root: user_root.join("mail"),
             workspaces_root: user_root.join("workspaces"),
         };
