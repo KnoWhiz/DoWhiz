@@ -390,19 +390,20 @@ fn remap_workspace_dir(workspace_dir: &Path) -> Result<PathBuf, RunTaskError> {
     }
 
     let home = env::var("HOME").map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
-    let old_root = PathBuf::from(&home)
-        .join("Documents")
-        .join("GitHub_MacBook")
-        .join("DoWhiz");
-    if !workspace_dir.starts_with(&old_root) {
+    let new_users_root = PathBuf::from(&home)
+        .join(".dowhiz")
+        .join("DoWhiz")
+        .join("run_task")
+        .join("users");
+    if workspace_dir.starts_with(&new_users_root) {
         return Ok(workspace_dir.to_path_buf());
     }
 
-    let new_root = PathBuf::from(&home).join(".dowhiz").join("DoWhiz");
-    let relative = workspace_dir
-        .strip_prefix(&old_root)
-        .unwrap_or_else(|_| Path::new(""));
-    let remapped = new_root.join(relative);
+    let relative = match legacy_workspace_relative(workspace_dir, &home) {
+        Some(relative) => relative,
+        None => return Ok(workspace_dir.to_path_buf()),
+    };
+    let remapped = new_users_root.join(relative);
 
     if workspace_dir.exists() && !remapped.exists() {
         if let Some(parent) = remapped.parent() {
@@ -412,6 +413,48 @@ fn remap_workspace_dir(workspace_dir: &Path) -> Result<PathBuf, RunTaskError> {
     }
 
     Ok(remapped)
+}
+
+fn legacy_workspace_relative(workspace_dir: &Path, home: &str) -> Option<PathBuf> {
+    let legacy_roots = [
+        PathBuf::from(home)
+            .join("Documents")
+            .join("GitHub_MacBook")
+            .join("DoWhiz")
+            .join("DoWhiz_service")
+            .join(".workspace")
+            .join("run_task")
+            .join("users"),
+        PathBuf::from(home)
+            .join("Documents")
+            .join("GitHub_MacBook")
+            .join("DoWhiz")
+            .join(".workspace")
+            .join("run_task")
+            .join("users"),
+        PathBuf::from(home)
+            .join(".dowhiz")
+            .join("DoWhiz")
+            .join("DoWhiz_service")
+            .join(".workspace")
+            .join("run_task")
+            .join("users"),
+    ];
+
+    for root in legacy_roots {
+        if workspace_dir.starts_with(&root) {
+            return workspace_dir
+                .strip_prefix(&root)
+                .ok()
+                .map(|path| path.to_path_buf());
+        }
+    }
+
+    let path_str = workspace_dir.to_string_lossy();
+    let marker = "/.workspace/run_task/users/";
+    path_str
+        .find(marker)
+        .map(|idx| PathBuf::from(&path_str[idx + marker.len()..]))
 }
 
 fn prepare_workspace(request: &RunTaskRequest<'_>) -> Result<(PathBuf, PathBuf), RunTaskError> {

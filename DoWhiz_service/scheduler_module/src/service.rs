@@ -64,29 +64,49 @@ impl ServiceConfig {
             .and_then(|value| value.parse::<u16>().ok())
             .unwrap_or(9001);
 
-        let workspace_root = resolve_path(
-            env::var("WORKSPACE_ROOT")
-                .unwrap_or_else(|_| ".workspace/run_task/workspaces".to_string()),
-        )?;
-        let scheduler_state_path = resolve_path(
-            env::var("SCHEDULER_STATE_PATH")
-                .unwrap_or_else(|_| ".workspace/run_task/state/tasks.db".to_string()),
-        )?;
+        let runtime_root = default_runtime_root()?;
+        let workspace_root = resolve_path(env::var("WORKSPACE_ROOT").unwrap_or_else(|_| {
+            runtime_root
+                .join("workspaces")
+                .to_string_lossy()
+                .into_owned()
+        }))?;
+        let scheduler_state_path =
+            resolve_path(env::var("SCHEDULER_STATE_PATH").unwrap_or_else(|_| {
+                runtime_root
+                    .join("state")
+                    .join("tasks.db")
+                    .to_string_lossy()
+                    .into_owned()
+            }))?;
         let processed_ids_path =
             resolve_path(env::var("PROCESSED_IDS_PATH").unwrap_or_else(|_| {
-                ".workspace/run_task/state/postmark_processed_ids.txt".to_string()
+                runtime_root
+                    .join("state")
+                    .join("postmark_processed_ids.txt")
+                    .to_string_lossy()
+                    .into_owned()
             }))?;
-        let users_root = resolve_path(
-            env::var("USERS_ROOT").unwrap_or_else(|_| ".workspace/run_task/users".to_string()),
-        )?;
-        let users_db_path = resolve_path(
-            env::var("USERS_DB_PATH")
-                .unwrap_or_else(|_| ".workspace/run_task/state/users.db".to_string()),
-        )?;
-        let task_index_path = resolve_path(
-            env::var("TASK_INDEX_PATH")
-                .unwrap_or_else(|_| ".workspace/run_task/state/task_index.db".to_string()),
-        )?;
+        let users_root = resolve_path(env::var("USERS_ROOT").unwrap_or_else(|_| {
+            runtime_root
+                .join("users")
+                .to_string_lossy()
+                .into_owned()
+        }))?;
+        let users_db_path = resolve_path(env::var("USERS_DB_PATH").unwrap_or_else(|_| {
+            runtime_root
+                .join("state")
+                .join("users.db")
+                .to_string_lossy()
+                .into_owned()
+        }))?;
+        let task_index_path = resolve_path(env::var("TASK_INDEX_PATH").unwrap_or_else(|_| {
+            runtime_root
+                .join("state")
+                .join("task_index.db")
+                .to_string_lossy()
+                .into_owned()
+        }))?;
         let codex_model = env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string());
         let codex_disabled = env_flag("CODEX_DISABLED", false);
         let scheduler_poll_interval = env::var("SCHEDULER_POLL_INTERVAL_SECS")
@@ -1396,6 +1416,15 @@ fn repo_skills_source_dir() -> PathBuf {
     } else {
         cwd.join("DoWhiz_service").join("skills")
     }
+}
+
+fn default_runtime_root() -> Result<PathBuf, io::Error> {
+    let home =
+        env::var("HOME").map_err(|_| io::Error::new(io::ErrorKind::NotFound, "HOME not set"))?;
+    Ok(PathBuf::from(home)
+        .join(".dowhiz")
+        .join("DoWhiz")
+        .join("run_task"))
 }
 
 fn resolve_path(raw: String) -> Result<PathBuf, io::Error> {
