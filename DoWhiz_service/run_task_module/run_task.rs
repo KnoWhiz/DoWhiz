@@ -13,6 +13,9 @@ const CODEX_CONFIG_BLOCK_TEMPLATE: &str = r#"# IMPORTANT: Use your Azure *deploy
 model = "{model_name}"
 model_provider = "azure"
 model_reasoning_effort = "xhigh"
+web_search = "live"
+ask_for_approval = "never"
+sandbox = "workspace-write"
 
 [model_providers.azure]
 name = "Azure OpenAI"
@@ -239,8 +242,9 @@ impl From<io::Error> for RunTaskError {
 }
 
 pub fn run_task(params: &RunTaskParams) -> Result<RunTaskOutput, RunTaskError> {
+    let workspace_dir = remap_workspace_dir(&params.workspace_dir)?;
     let request = RunTaskRequest {
-        workspace_dir: &params.workspace_dir,
+        workspace_dir: &workspace_dir,
         input_email_dir: &params.input_email_dir,
         input_attachments_dir: &params.input_attachments_dir,
         memory_dir: &params.memory_dir,
@@ -321,12 +325,15 @@ fn run_codex_task(
         .arg("-m")
         .arg(&model_name)
         .arg("-c")
-        .arg("web_search=\"disabled\"")
+        .arg("web_search=\"live\"")
+        .arg("-c")
+        .arg("ask_for_approval=\"never\"")
+        .arg("-c")
+        .arg("sandbox=\"workspace-write\"")
         .arg("-c")
         .arg("model_providers.azure.env_key=\"AZURE_OPENAI_API_KEY_BACKUP\"")
         .arg("--cd")
         .arg(request.workspace_dir)
-        .arg("--dangerously-bypass-approvals-and-sandbox")
         .arg(prompt)
         .env("AZURE_OPENAI_API_KEY_BACKUP", api_key)
         .current_dir(request.workspace_dir);
@@ -375,6 +382,36 @@ fn run_codex_task(
         scheduler_actions,
         scheduler_actions_error,
     })
+}
+
+fn remap_workspace_dir(workspace_dir: &Path) -> Result<PathBuf, RunTaskError> {
+    if !workspace_dir.is_absolute() {
+        return Ok(workspace_dir.to_path_buf());
+    }
+
+    let home = env::var("HOME").map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
+    let old_root = PathBuf::from(&home)
+        .join("Documents")
+        .join("GitHub_MacBook")
+        .join("DoWhiz");
+    if !workspace_dir.starts_with(&old_root) {
+        return Ok(workspace_dir.to_path_buf());
+    }
+
+    let new_root = PathBuf::from(&home).join(".dowhiz").join("DoWhiz");
+    let relative = workspace_dir
+        .strip_prefix(&old_root)
+        .unwrap_or_else(|_| Path::new(""));
+    let remapped = new_root.join(relative);
+
+    if workspace_dir.exists() && !remapped.exists() {
+        if let Some(parent) = remapped.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::rename(workspace_dir, &remapped)?;
+    }
+
+    Ok(remapped)
 }
 
 fn prepare_workspace(request: &RunTaskRequest<'_>) -> Result<(PathBuf, PathBuf), RunTaskError> {
