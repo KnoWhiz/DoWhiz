@@ -434,6 +434,15 @@ fn run_codex_task(
                 .arg("-e")
                 .arg("GIT_TERMINAL_PROMPT=0");
         }
+        if let Some(network) = read_env_trimmed("RUN_TASK_DOCKER_NETWORK") {
+            cmd.arg("--network").arg(network);
+        }
+        for dns in read_env_list("RUN_TASK_DOCKER_DNS") {
+            cmd.arg("--dns").arg(dns);
+        }
+        for search_domain in read_env_list("RUN_TASK_DOCKER_DNS_SEARCH") {
+            cmd.arg("--dns-search").arg(search_domain);
+        }
         cmd.arg("--entrypoint")
             .arg("codex")
             .arg(&docker_image)
@@ -1081,6 +1090,24 @@ fn read_env_trimmed(key: &str) -> Option<String> {
     } else {
         Some(unquote_env_value(trimmed).to_string())
     }
+}
+
+fn read_env_list(key: &str) -> Vec<String> {
+    read_env_trimmed(key)
+        .map(|value| {
+            value
+                .split(|ch: char| ch == ',' || ch.is_whitespace())
+                .filter_map(|item| {
+                    let trimmed = item.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn env_missing_or_empty(key: &str) -> bool {

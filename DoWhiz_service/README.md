@@ -108,6 +108,9 @@ oliver@dowhiz.com
 - `RUN_TASK_DOCKER_AUTO_BUILD=1` to auto-build missing images
 - `RUN_TASK_DOCKERFILE` to override the Dockerfile path
 - `RUN_TASK_DOCKER_BUILD_CONTEXT` to override the docker build context directory
+- `RUN_TASK_DOCKER_NETWORK` to set Docker's network mode (for example, `host`)
+- `RUN_TASK_DOCKER_DNS` to override Docker DNS servers (comma/space-separated)
+- `RUN_TASK_DOCKER_DNS_SEARCH` to add DNS search domains (comma/space-separated)
 - Inbound blacklist: `little-bear@dowhiz.com`, `agent@dowhiz.com`, `oliver@dowhiz.com`, `mini-mouse@dowhiz.com`, `maggie@dowhiz.com` are ignored (display names and `+tag` aliases are normalized).
 
 ## Database files
