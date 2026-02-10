@@ -1,0 +1,66 @@
+name: Notion workspace access request
+description: Request access to the DoWhiz Notion workspace
+title: "Notion access request: <name>"
+labels:
+  - enhancement
+body:
+  - type: input
+    id: full_name
+    attributes:
+      label: Full name
+      placeholder: Jane Doe
+    validations:
+      required: true
+  - type: input
+    id: email
+    attributes:
+      label: Work email
+      placeholder: name@dowhiz.com
+    validations:
+      required: true
+  - type: input
+    id: role
+    attributes:
+      label: Role / team
+      placeholder: Engineering / Product
+    validations:
+      required: true
+  - type: dropdown
+    id: access_level
+    attributes:
+      label: Access level requested
+      options:
+        - Viewer
+        - Commenter
+        - Editor
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Pages or teamspaces needed
+      description: List the pages, teamspaces, or databases you need access to.
+      placeholder: Teamspace > Product > Roadmap
+    validations:
+      required: true
+  - type: textarea
+    id: reason
+    attributes:
+      label: Reason / use-case
+      placeholder: Need access to update onboarding docs.
+    validations:
+      required: true
+  - type: input
+    id: start_date
+    attributes:
+      label: Desired start date
+      placeholder: 2026-02-10
+    validations:
+      required: false
+  - type: input
+    id: end_date
+    attributes:
+      label: End date (optional)
+      placeholder: 2026-03-10
+    validations:
+      required: false

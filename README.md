@@ -51,6 +51,9 @@ like teammates, and the system escalates when human input is needed.
 - `external/`: Vendored references (including OpenClaw).
 - `scripts/`: Helper scripts.
 
+## Team docs
+- `docs/notion-workspace.md`: Notion workspace access and process.
+
 ## Local dependencies (Dockerfile parity for agents)
 The Docker image installs extra tooling so Codex can run the `playwright-cli`
 skill. For the same capabilities locally, install the Dockerfile deps and set
