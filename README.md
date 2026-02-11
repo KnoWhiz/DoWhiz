@@ -85,15 +85,23 @@ Skills are copied from `DoWhiz_service/skills` automatically when preparing work
 Postmark outbound requires each employee address to be verified as a Sender Signature (or domain) because replies are sent from the inbound mailbox.
 
 ## Getting started
+Local config lives in a repo-root `.env` file. Use `.env.example` as a template.
+
 Rust service:
 ```
 cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
 ```
 Employee profiles (addresses, runner, persona, skills) are defined in `DoWhiz_service/employee.toml`. Each server only processes emails addressed to its configured employee.
 Replies are sent from the employee address that the inbound email targeted. For forwarded mail, the service checks `To`/`Cc`/`Bcc` plus headers like `X-Original-To`, `Delivered-To`, and `X-Forwarded-To` to determine which employee address was targeted.
-If `RUN_TASK_DOCKER_IMAGE` is set in `DoWhiz_service/.env`, each task runs
+If `RUN_TASK_DOCKER_IMAGE` is set in your `.env`, each task runs
 inside a fresh Docker container and the image auto-builds on first use (unless
 disabled with `RUN_TASK_DOCKER_AUTO_BUILD=0`).
+
+One-command local run (auto ngrok + Postmark hook):
+```
+./DoWhiz_service/scripts/run_employee.sh little_bear 9001
+```
+Requires `POSTMARK_SERVER_TOKEN` in your `.env`, plus `ngrok` and `python3` installed. Use `--public-url`, `--skip-hook`, or `--skip-ngrok` for advanced flows.
 
 Multi-employee local run (from repo root):
 ```
@@ -110,7 +118,7 @@ Docker (production image):
 ```
 docker build -t dowhiz-service .
 docker run --rm -p 9001:9001 \
-  -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
+  -v "$PWD/.env:/app/.env:ro" \
   -v dowhiz-workspace:/app/.workspace \
   dowhiz-service
 ```
@@ -145,6 +153,10 @@ npm run dev
 More detail:
 - `DoWhiz_service/README.md`
 - `website/README.md`
+- `CONTRIBUTING.md`
+
+## Contributing
+See `CONTRIBUTING.md` for environment setup, tests, and local development workflow.
 
 ## Testing
 Rust unit tests:

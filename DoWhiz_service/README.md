@@ -79,16 +79,18 @@ docker run --rm -p 9001:9001 \
 
 ## One-command local run (auto ngrok + hook)
 
-From `DoWhiz_service/`:
+From the repo root:
 ```
-scripts/run_employee.sh little_bear 9001
-scripts/run_employee.sh mini_mouse 9002
+./DoWhiz_service/scripts/run_employee.sh little_bear 9001
+./DoWhiz_service/scripts/run_employee.sh mini_mouse 9002
 ```
 
 This command:
 - Starts ngrok and discovers the public URL.
 - Updates the Postmark inbound hook to `https://.../postmark/inbound`.
 - Runs the Rust service bound to the selected host/port.
+
+Requires `POSTMARK_SERVER_TOKEN` in your repo-root `.env`, plus `ngrok` and `python3` installed.
 
 Optional flags:
 - `--public-url https://example.com` uses an existing public URL and skips ngrok.

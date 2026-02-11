@@ -160,6 +160,10 @@ if [[ "$skip_ngrok" != "true" ]]; then
     echo "ngrok not found. Install ngrok or pass --public-url to skip it." >&2
     exit 1
   fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 not found. Install python3 or pass --public-url to skip ngrok." >&2
+    exit 1
+  fi
 
   echo "Starting ngrok on port ${port}..."
   ngrok http "$port" --log=stdout >/tmp/dowhiz-ngrok.log 2>&1 &
@@ -173,8 +177,9 @@ if [[ "$skip_ngrok" != "true" ]]; then
 fi
 
 if [[ -n "$hook_base_url" ]]; then
+  hook_base_url="${hook_base_url%/}"
   if [[ "$hook_base_url" != */postmark/inbound ]]; then
-    hook_base_url="${hook_base_url%/}/postmark/inbound"
+    hook_base_url="${hook_base_url}/postmark/inbound"
   fi
 
   if [[ "$skip_hook" != "true" ]]; then
