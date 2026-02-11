@@ -8,10 +8,10 @@ then schedules a SendEmail job and sends the reply via Postmark.
 - System libs: `libsqlite3`, `libssl`, `pkg-config`, `ca-certificates`
 - Node.js 20 + npm
 - `codex` CLI on your PATH (only required for local execution; optional when `RUN_TASK_DOCKER_IMAGE` is set)
+- `claude` CLI on your PATH (only required for employees with `runner = "claude"`)
 - `playwright-cli` + Chromium (required for browser automation skills)
 - `.env` includes:
   - `POSTMARK_SERVER_TOKEN`
-  - `OUTBOUND_FROM` (optional, defaults to `oliver@dowhiz.com`)
   - `AZURE_OPENAI_API_KEY_BACKUP` and `AZURE_OPENAI_ENDPOINT_BACKUP` (required when Codex is enabled)
   - `GITHUB_USERNAME` + `GITHUB_PERSONAL_ACCESS_TOKEN` (optional; enables Codex/agent GitHub access via `GH_TOKEN`/`GITHUB_TOKEN` + git askpass)
   - `RUN_TASK_DOCKER_IMAGE` (run each task inside a disposable Docker container; use `dowhiz-service` for the repo image)
@@ -24,7 +24,7 @@ sudo apt-get update
 sudo apt-get install -y ca-certificates libsqlite3-dev libssl-dev pkg-config curl
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
-sudo npm install -g @openai/codex@latest @playwright/cli@latest
+sudo npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest @playwright/cli@latest
 sudo npx playwright install --with-deps chromium
 ```
 
@@ -39,11 +39,25 @@ sudo ln -sf "$chromium_path" /opt/google/chrome/chrome
 macOS (Homebrew):
 ```
 brew install node@20 openssl@3 sqlite pkg-config
-npm install -g @openai/codex@latest @playwright/cli@latest
+npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest @playwright/cli@latest
 npx playwright install chromium
 ```
 
 Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.
+Postmark outbound requires each employee address to be a verified Sender Signature (or Domain) because replies are sent from the inbound mailbox.
+
+## Employee configuration
+`employee.toml` defines each employee (addresses, runner, models, AGENTS/CLAUDE/SOUL files, and skills directory). Set `EMPLOYEE_ID` to pick which employee profile this server instance runs. The server only processes inbound mail addressed to its configured addresses; other emails are ignored, so multiple servers can receive the same webhook safely.
+Replies are sent from the employee address that the inbound email targeted (no `OUTBOUND_FROM` override needed).
+For forwarded mail, the service checks `To`/`Cc`/`Bcc` plus headers such as `X-Original-To`, `Delivered-To`, and `X-Forwarded-To` to determine which employee address was targeted.
+
+Runtime state defaults to:
+```
+$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
+```
+Each employee gets isolated `state/`, `users/`, and `workspaces/` folders under that root unless you override paths with environment variables.
+
+Skills are copied per workspace: the base repo skills are always included, and `skills_dir` can optionally add overrides or extra skills.
 
 ## Per-task Docker execution
 When `RUN_TASK_DOCKER_IMAGE` is set, each RunTask spins up a fresh container,
@@ -65,14 +79,20 @@ docker run --rm -p 9001:9001 \
 
 ## Step-by-step: start the Rust service and send real email
 
-1) Start the Rust service (Terminal 1):
+1) Start the Rust service (Terminal 1) for the employee you want:
 ```
-cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
+# Oliver / Little-Bear (Codex)
+EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 \
+  cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
+
+# Maggie / Mini-Mouse (Claude)
+EMPLOYEE_ID=mini_mouse RUST_SERVICE_PORT=9002 \
+  cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9002
 ```
 
 2) Expose the service with ngrok (Terminal 2):
 ```
-ngrok http 9001
+ngrok http 9001   # or 9002 for mini_mouse
 ```
 
 3) Set the Postmark inbound hook to the **new** ngrok URL (Terminal 3):
@@ -81,29 +101,33 @@ cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
   --hook-url https://YOUR-NGROK-URL.ngrok-free.dev/postmark/inbound
 ```
 
-4) Send an email to:
+4) Send an email to the employee address:
 ```
-oliver@dowhiz.com
+oliver@dowhiz.com   # or mini-mouse@dowhiz.com
 ```
 
 5) Watch logs for task execution. Outputs appear under:
-- `.workspace/run_task/workspaces/<message_id>/reply_email_draft.html`
-- `.workspace/run_task/workspaces/<message_id>/reply_email_attachments/`
-- Scheduler state: `.workspace/run_task/state/tasks.db`
+- `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces/<message_id>/reply_email_draft.html`
+- `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces/<message_id>/reply_email_attachments/`
+- Scheduler state: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/tasks.db`
 
 ## Environment knobs
 - `RUST_SERVICE_HOST` / `RUST_SERVICE_PORT`
-- `WORKSPACE_ROOT` (default: `.workspace/run_task/workspaces`)
-- `SCHEDULER_STATE_PATH` (default: `.workspace/run_task/state/tasks.db`)
-- `PROCESSED_IDS_PATH` (default: `.workspace/run_task/state/postmark_processed_ids.txt`)
-- `USERS_ROOT` (default: `.workspace/run_task/users`)
-- `USERS_DB_PATH` (default: `.workspace/run_task/state/users.db`)
-- `TASK_INDEX_PATH` (default: `.workspace/run_task/state/task_index.db`)
+- `EMPLOYEE_ID` (selects employee profile from `employee.toml`)
+- `EMPLOYEE_CONFIG_PATH` (defaults to `DoWhiz_service/employee.toml`)
+- `WORKSPACE_ROOT` (default: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces`)
+- `SCHEDULER_STATE_PATH` (default: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/tasks.db`)
+- `PROCESSED_IDS_PATH` (default: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/postmark_processed_ids.txt`)
+- `USERS_ROOT` (default: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/users`)
+- `USERS_DB_PATH` (default: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/users.db`)
+- `TASK_INDEX_PATH` (default: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/task_index.db`)
 - `SCHEDULER_POLL_INTERVAL_SECS` (default: `1`)
 - `SCHEDULER_MAX_CONCURRENCY` (default: `10`)
 - `SCHEDULER_USER_MAX_CONCURRENCY` (default: `3`)
 - `CODEX_MODEL`
 - `CODEX_DISABLED=1` to bypass Codex CLI
+- `CLAUDE_MODEL` (defaults to `claude-opus-4-5`)
+- `ANTHROPIC_FOUNDRY_RESOURCE` (defaults to `knowhiz-service-openai-backup-2`)
 - `RUN_TASK_DOCKER_IMAGE` to enable per-task containers
 - `RUN_TASK_DOCKER_AUTO_BUILD=1` to auto-build missing images
 - `RUN_TASK_DOCKERFILE` to override the Dockerfile path
@@ -111,21 +135,21 @@ oliver@dowhiz.com
 - `RUN_TASK_DOCKER_NETWORK` to set Docker's network mode (for example, `host`)
 - `RUN_TASK_DOCKER_DNS` to override Docker DNS servers (comma/space-separated)
 - `RUN_TASK_DOCKER_DNS_SEARCH` to add DNS search domains (comma/space-separated)
-- Inbound blacklist: `little-bear@dowhiz.com`, `agent@dowhiz.com`, `oliver@dowhiz.com`, `mini-mouse@dowhiz.com`, `maggie@dowhiz.com` are ignored (display names and `+tag` aliases are normalized).
+- Inbound blacklist: any address listed in `employee.toml` is ignored as a sender (prevents loops; display names and `+tag` aliases are normalized).
 
 ## Database files
-- `DoWhiz_service/.workspace/run_task/state/users.db`: user registry. Table `users(id, email, created_at, last_seen_at)` stores normalized email, creation time, and last activity time (RFC3339 UTC). `last_seen_at` updates on inbound email.
-- `DoWhiz_service/.workspace/run_task/state/task_index.db`: global task index for due work. Table `task_index(task_id, user_id, next_run, enabled)` plus indexes on `next_run` and `user_id`. This is a derived index synced from each user's `tasks.db` and used by the scheduler thread to query due tasks efficiently.
-- `DoWhiz_service/.workspace/run_task/users/<user_id>/state/tasks.db`: per-user scheduler store (SQLite with foreign keys on). Key tables:
+- `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/users.db`: user registry. Table `users(id, email, created_at, last_seen_at)` stores normalized email, creation time, and last activity time (RFC3339 UTC). `last_seen_at` updates on inbound email.
+- `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/task_index.db`: global task index for due work. Table `task_index(task_id, user_id, next_run, enabled)` plus indexes on `next_run` and `user_id`. This is a derived index synced from each user's `tasks.db` and used by the scheduler thread to query due tasks efficiently.
+- `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/users/<user_id>/state/tasks.db`: per-user scheduler store (SQLite with foreign keys on). Key tables:
   - `tasks(id, kind, enabled, created_at, last_run, schedule_type, cron_expression, next_run, run_at)` holds scheduling metadata. `schedule_type` is `cron` or `one_shot`; cron uses `cron_expression` + `next_run`, one-shot uses `run_at`.
   - `send_email_tasks(task_id, subject, html_path, attachments_dir, in_reply_to, references_header[, archive_root])` stores email task payloads. `archive_root` may be added by auto-migration.
   - `send_email_recipients(id, task_id, recipient_type, address)` stores `to`/`cc`/`bcc` recipients.
-  - `run_task_tasks(task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, codex_disabled, reply_to[, archive_root])` stores RunTask parameters. `reply_to` is newline-separated; `archive_root` may be added by auto-migration.
+  - `run_task_tasks(task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, runner, codex_disabled, reply_to, reply_from[, archive_root])` stores RunTask parameters. `reply_to` is newline-separated; `reply_from` carries the inbound service mailbox used for replies.
   - `task_executions(id, task_id, started_at, finished_at, status, error_message)` records execution history and errors.
 
 ## Past email hydration
 Each new workspace populates `references/past_emails/` from the user archive under
-`.workspace/run_task/users/<user_id>/mail`. The hydrator copies `incoming_email/`
+`$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/users/<user_id>/mail`. The hydrator copies `incoming_email/`
 and any attachments <= 50MB; larger attachments are referenced via
 `attachments_manifest.json` (set `*.azure_url` sidecar files to supply the Azure
 blob URL if needed). Outgoing agent replies are archived after successful
@@ -134,7 +158,7 @@ blob URL if needed). Outgoing agent replies are archived after successful
 Manual run:
 ```
 cargo run -p scheduler_module --bin hydrate_past_emails -- \
-  --archive-root .workspace/run_task/users/<user_id>/mail \
+  --archive-root $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/users/<user_id>/mail \
   --references-dir /path/to/workspace/references \
   --user-id <user_id>
 ```

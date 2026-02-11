@@ -76,7 +76,9 @@ async fn main() -> Result<(), BoxError> {
     });
 
     info!(
-        "starting service with users_root={} users_db_path={} task_index_path={}",
+        "starting service employee_id={} runner={} users_root={} users_db_path={} task_index_path={}",
+        config.employee_id,
+        config.employee_profile.runner,
         config.users_root.display(),
         config.users_db_path.display(),
         config.task_index_path.display()

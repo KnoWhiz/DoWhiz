@@ -232,6 +232,7 @@ fn run_task_rejects_absolute_input_dir() {
         reference_dir: Path::new("references").to_path_buf(),
         reply_to: vec!["user@example.com".to_string()],
         model_name: "test-model".to_string(),
+        runner: "codex".to_string(),
         codex_disabled: false,
     };
 

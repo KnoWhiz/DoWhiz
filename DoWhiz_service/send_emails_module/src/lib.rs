@@ -34,6 +34,8 @@ pub struct PostmarkSendResponse {
 pub enum SendEmailError {
     #[error("missing environment variable: {0}")]
     MissingEnv(&'static str),
+    #[error("missing from address")]
+    MissingFrom,
     #[error("missing recipient in To list")]
     MissingRecipient,
     #[error("failed to read file: {0}")]
@@ -87,16 +89,13 @@ pub fn send_email(params: &SendEmailParams) -> Result<PostmarkSendResponse, Send
     if token.trim().is_empty() {
         return Err(SendEmailError::MissingEnv("POSTMARK_SERVER_TOKEN"));
     }
-    let mut from = params
+    let from = params
         .from
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.to_string())
-        .unwrap_or_else(|| env::var("OUTBOUND_FROM").unwrap_or_default());
-    if from.trim().is_empty() {
-        from = "oliver@dowhiz.com".to_string();
-    }
+        .ok_or(SendEmailError::MissingFrom)?;
 
     let to = join_recipients(&params.to).ok_or(SendEmailError::MissingRecipient)?;
     let cc = join_recipients(&params.cc);

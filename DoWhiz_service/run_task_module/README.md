@@ -35,8 +35,13 @@ let params = RunTaskParams {
     reference_dir: PathBuf::from("references"),
     reply_to: vec!["user@example.com".to_string()],
     model_name: "gpt-5.2-codex".to_string(),
+    runner: "codex".to_string(),
     codex_disabled: false,
 };
+
+// runner: "codex" (default) or "claude"
+// For Claude runs, install @anthropic-ai/claude-code and ensure
+// AZURE_OPENAI_API_KEY_BACKUP is set so the Foundry settings are written.
 
 let result = run_task(&params)?;
 println!("Reply saved at: {}", result.reply_html_path.display());

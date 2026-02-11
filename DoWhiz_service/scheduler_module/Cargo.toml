@@ -14,6 +14,7 @@ reqwest = { version = "0.11", features = ["blocking", "json"] }
 rusqlite = "0.31"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
 thiserror = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
 tracing = "0.1"
@@ -26,4 +27,5 @@ run_task_module = { path = "../run_task_module" }
 
 [dev-dependencies]
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder"] }
+mockito = "1"
 tempfile = "3"

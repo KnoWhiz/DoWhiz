@@ -1,7 +1,9 @@
+use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
 use scheduler_module::service::{run_server, ServiceConfig, DEFAULT_INBOUND_BODY_MAX_BYTES};
 use scheduler_module::user_store::UserStore;
 use scheduler_module::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::net::TcpListener;
@@ -17,6 +19,35 @@ const TASK_COUNT: usize = 20;
 const CONCURRENCY_LIMIT: usize = 10;
 const TASK_SLEEP_SECS: f64 = 0.5;
 
+fn test_employee_directory() -> (EmployeeProfile, EmployeeDirectory) {
+    let addresses = vec!["service@example.com".to_string()];
+    let address_set: HashSet<String> =
+        addresses.iter().map(|value| value.to_ascii_lowercase()).collect();
+    let employee = EmployeeProfile {
+        id: "test-employee".to_string(),
+        display_name: None,
+        runner: "codex".to_string(),
+        model: None,
+        addresses: addresses.clone(),
+        address_set: address_set.clone(),
+        agents_path: None,
+        claude_path: None,
+        soul_path: None,
+        skills_dir: None,
+    };
+    let mut employee_by_id = HashMap::new();
+    employee_by_id.insert(employee.id.clone(), employee.clone());
+    let mut service_addresses = HashSet::new();
+    service_addresses.extend(address_set);
+    let directory = EmployeeDirectory {
+        employees: vec![employee.clone()],
+        employee_by_id,
+        default_employee_id: Some(employee.id.clone()),
+        service_addresses,
+    };
+    (employee, directory)
+}
+
 #[test]
 fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::error::Error>> {
     let _ = tracing_subscriber::fmt().with_target(false).try_init();
@@ -29,6 +60,8 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
     env::set_var("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.com");
     env::set_var("CODEX_TEST_SLEEP_SECS", format!("{TASK_SLEEP_SECS}"));
     env::set_var("GH_AUTH_DISABLED", "1");
+    env::set_var("RUN_TASK_DOCKER_IMAGE", "");
+    env::set_var("RUN_TASK_USE_DOCKER", "0");
 
     let fake_bin_dir = temp.path().join("bin");
     fs::create_dir_all(&fake_bin_dir)?;
@@ -61,8 +94,10 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
             memory_dir: PathBuf::from("memory"),
             reference_dir: PathBuf::from("references"),
             model_name: "gpt-5.2-codex".to_string(),
+            runner: "codex".to_string(),
             codex_disabled: false,
             reply_to: Vec::new(),
+            reply_from: None,
             archive_root: None,
             thread_id: None,
             thread_epoch: None,
@@ -75,9 +110,14 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
     }
 
     let port = pick_free_port()?;
+    let (employee_profile, employee_directory) = test_employee_directory();
     let config = ServiceConfig {
         host: "127.0.0.1".to_string(),
         port,
+        employee_id: employee_profile.id.clone(),
+        employee_config_path: temp.path().join("employee.toml"),
+        employee_profile,
+        employee_directory,
         workspace_root,
         scheduler_state_path: state_dir.join("tasks.db"),
         processed_ids_path: state_dir.join("postmark_processed_ids.txt"),

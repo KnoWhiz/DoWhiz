@@ -6,7 +6,6 @@ Send HTML emails with attachments via the Postmark API. This module reads a repl
 
 Environment variables (loaded from `.env` if present):
 - `POSTMARK_SERVER_TOKEN` (required)
-- `OUTBOUND_FROM` (optional, defaults to `oliver@dowhiz.com`)
 - `POSTMARK_API_BASE_URL` (optional, override Postmark base URL for tests)
 - `POSTMARK_LIVE_TEST` (required by tests, must be `1`)
 
@@ -19,7 +18,7 @@ let params = SendEmailParams {
     subject: "Hello".to_string(),
     html_path: PathBuf::from("/path/to/reply_email_draft.html"),
     attachments_dir: PathBuf::from("/path/to/reply_email_attachments"),
-    from: None,
+    from: Some("oliver@dowhiz.com".to_string()),
     to: vec!["mini-mouse@deep-tutor.com".to_string()],
     cc: Vec::new(),
     bcc: Vec::new(),

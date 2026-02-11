@@ -1,29 +1,5 @@
 use crate::user_store::extract_emails;
-
-const LITTLE_BEAR_ADDRESSES: &[&str] = &[
-    "little-bear@dowhiz.com",
-    "agent@dowhiz.com",
-    "oliver@dowhiz.com",
-];
-const MINI_MOUSE_ADDRESSES: &[&str] = &["mini-mouse@dowhiz.com", "maggie@dowhiz.com"];
-
-const LITTLE_BEAR_SOUL_BLOCK: &str = r#"<SOUL>
-Your name is Oliver, a little bear, who is cute and smart and capable. You always get task done.
-Go bears!
-</SOUL>
-"#;
-
-const MINI_MOUSE_SOUL_BLOCK: &str = r#"<SOUL>
-Your name is Mini-Mouse, a tiny mouse, who is curious and quick and capable. You always get task done.
-Go mice!
-</SOUL>
-"#;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WorkspacePersona {
-    LittleBear,
-    MiniMouse,
-}
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceMailbox {
@@ -45,32 +21,17 @@ impl ServiceMailbox {
     }
 }
 
-pub fn persona_for_address(address: Option<&str>) -> WorkspacePersona {
-    match address {
-        Some(value) if is_mini_mouse_address(value) => WorkspacePersona::MiniMouse,
-        _ => WorkspacePersona::LittleBear,
-    }
+pub fn is_service_address(address: &str, service_addresses: &HashSet<String>) -> bool {
+    service_addresses.contains(&normalize_address(address))
 }
 
-pub fn soul_block(persona: WorkspacePersona) -> &'static str {
-    match persona {
-        WorkspacePersona::LittleBear => LITTLE_BEAR_SOUL_BLOCK,
-        WorkspacePersona::MiniMouse => MINI_MOUSE_SOUL_BLOCK,
-    }
-}
-
-pub fn is_service_address(address: &str) -> bool {
-    is_little_bear_address(address) || is_mini_mouse_address(address)
-}
-
-pub fn select_inbound_service_address(raws: &[Option<&str>]) -> Option<String> {
-    select_inbound_service_mailbox(raws).map(|mailbox| mailbox.address)
-}
-
-pub fn select_inbound_service_mailbox(raws: &[Option<&str>]) -> Option<ServiceMailbox> {
+pub fn select_inbound_service_mailbox(
+    raws: &[Option<&str>],
+    service_addresses: &HashSet<String>,
+) -> Option<ServiceMailbox> {
     for raw in raws.iter().copied().flatten() {
         for email in extract_emails(raw) {
-            if is_service_address(&email) {
+            if is_service_address(&email, service_addresses) {
                 return Some(ServiceMailbox {
                     address: email.clone(),
                     display_name: display_name_for_address(raw, &email),
@@ -81,16 +42,8 @@ pub fn select_inbound_service_mailbox(raws: &[Option<&str>]) -> Option<ServiceMa
     None
 }
 
-fn is_little_bear_address(address: &str) -> bool {
-    LITTLE_BEAR_ADDRESSES
-        .iter()
-        .any(|candidate| candidate.eq_ignore_ascii_case(address))
-}
-
-fn is_mini_mouse_address(address: &str) -> bool {
-    MINI_MOUSE_ADDRESSES
-        .iter()
-        .any(|candidate| candidate.eq_ignore_ascii_case(address))
+fn normalize_address(address: &str) -> String {
+    address.trim().to_ascii_lowercase()
 }
 
 fn display_name_for_address(raw: &str, address: &str) -> Option<String> {
@@ -120,10 +73,18 @@ fn display_name_for_address(raw: &str, address: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn service_addresses() -> HashSet<String> {
+        ["oliver@dowhiz.com", "mini-mouse@dowhiz.com"]
+            .iter()
+            .map(|value| value.to_string())
+            .collect()
+    }
+
     #[test]
     fn selects_service_mailbox_with_display_name() {
         let raws = &[Some("Oliver Bear <oliver@dowhiz.com>")];
-        let mailbox = select_inbound_service_mailbox(raws).expect("mailbox");
+        let mailbox = select_inbound_service_mailbox(raws, &service_addresses())
+            .expect("mailbox");
         assert_eq!(mailbox.address, "oliver@dowhiz.com");
         assert_eq!(mailbox.display_name.as_deref(), Some("Oliver Bear"));
         assert_eq!(mailbox.formatted(), "Oliver Bear <oliver@dowhiz.com>");
@@ -132,22 +93,17 @@ mod tests {
     #[test]
     fn selects_service_mailbox_without_display_name() {
         let raws = &[Some("mini-mouse@dowhiz.com")];
-        let mailbox = select_inbound_service_mailbox(raws).expect("mailbox");
+        let mailbox = select_inbound_service_mailbox(raws, &service_addresses())
+            .expect("mailbox");
         assert_eq!(mailbox.address, "mini-mouse@dowhiz.com");
         assert_eq!(mailbox.display_name, None);
         assert_eq!(mailbox.formatted(), "mini-mouse@dowhiz.com");
     }
 
     #[test]
-    fn persona_for_address_defaults_to_little_bear() {
-        assert_eq!(persona_for_address(None), WorkspacePersona::LittleBear);
-        assert_eq!(
-            persona_for_address(Some("little-bear@dowhiz.com")),
-            WorkspacePersona::LittleBear
-        );
-        assert_eq!(
-            persona_for_address(Some("mini-mouse@dowhiz.com")),
-            WorkspacePersona::MiniMouse
-        );
+    fn rejects_non_service_address() {
+        let raws = &[Some("user@example.com")];
+        let mailbox = select_inbound_service_mailbox(raws, &service_addresses());
+        assert!(mailbox.is_none());
     }
 }

@@ -1,0 +1,26 @@
+# Employee-specific configuration for DoWhiz service instances.
+
+# Optional default employee id if EMPLOYEE_ID is not set.
+default_employee_id = "little_bear"
+
+[[employees]]
+id = "little_bear"
+display_name = "Oliver"
+runner = "codex"
+model = "gpt-5.2-codex"
+addresses = ["oliver@dowhiz.com", "little-bear@dowhiz.com", "agent@dowhiz.com"]
+agents_path = "employees/little_bear/AGENTS.md"
+claude_path = "employees/little_bear/CLAUDE.md"
+soul_path = "employees/little_bear/SOUL.md"
+skills_dir = "skills"
+
+[[employees]]
+id = "mini_mouse"
+display_name = "Maggie"
+runner = "claude"
+model = "claude-opus-4-5"
+addresses = ["maggie@dowhiz.com", "mini-mouse@dowhiz.com"]
+agents_path = "employees/mini_mouse/AGENTS.md"
+claude_path = "employees/mini_mouse/CLAUDE.md"
+soul_path = "employees/mini_mouse/SOUL.md"
+skills_dir = "skills"
