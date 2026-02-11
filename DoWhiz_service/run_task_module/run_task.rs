@@ -871,6 +871,9 @@ fn extract_claude_fragment(event: &serde_json::Value) -> Option<String> {
 }
 
 fn remap_workspace_dir(workspace_dir: &Path) -> Result<PathBuf, RunTaskError> {
+    if env_enabled("RUN_TASK_SKIP_WORKSPACE_REMAP") {
+        return Ok(workspace_dir.to_path_buf());
+    }
     if !workspace_dir.is_absolute() {
         return Ok(workspace_dir.to_path_buf());
     }
@@ -895,7 +898,12 @@ fn remap_workspace_dir(workspace_dir: &Path) -> Result<PathBuf, RunTaskError> {
         if let Some(parent) = remapped.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::rename(workspace_dir, &remapped)?;
+        if let Err(err) = fs::rename(workspace_dir, &remapped) {
+            if err.raw_os_error() == Some(18) {
+                return Ok(workspace_dir.to_path_buf());
+            }
+            return Err(RunTaskError::Io(err));
+        }
     }
 
     Ok(remapped)

@@ -346,7 +346,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
     let users_root = temp.path().join("users");
 
     let test_host = env::var("RUST_SERVICE_TEST_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let port = env::var("RUST_SERVICE_TEST_PORT")
+    let port = env::var("RUST_SERVICE_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(9001);

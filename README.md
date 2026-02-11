@@ -153,6 +153,9 @@ cargo test -p scheduler_module
 cargo test -p run_task_module
 ```
 
+Live Postmark E2E:
+See `DoWhiz_service/README.md` for the full Docker + local live E2E workflow, including ngrok port mapping for `mini_mouse` (9002) and `little_bear` (9001).
+
 Website lint:
 ```
 cd website
