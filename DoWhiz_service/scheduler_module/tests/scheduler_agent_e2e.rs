@@ -50,6 +50,7 @@ impl TaskExecutor for RecordingExecutor {
                     reference_dir: run.reference_dir.clone(),
                     reply_to: run.reply_to.clone(),
                     model_name: run.model_name.clone(),
+                    runner: run.runner.clone(),
                     codex_disabled: run.codex_disabled,
                 };
                 let output = run_task_module::run_task(&params)
@@ -129,6 +130,7 @@ fn scheduler_actions_end_to_end() {
     let original_path = env::var("PATH").unwrap_or_default();
     let path_value = format!("{}:{}", bin_root.display(), original_path);
     let _path_guard = EnvGuard::set("PATH", &path_value);
+    let _docker_guard = EnvGuard::set("RUN_TASK_DOCKER_IMAGE", "");
     let _api_guard = EnvGuard::set("AZURE_OPENAI_API_KEY_BACKUP", "test-key");
     let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");
 
@@ -158,8 +160,10 @@ fn scheduler_actions_end_to_end() {
         memory_dir: PathBuf::from("memory"),
         reference_dir: PathBuf::from("references"),
         model_name: "gpt-5.2-codex".to_string(),
+        runner: "codex".to_string(),
         codex_disabled: false,
         reply_to: Vec::new(),
+        reply_from: None,
         archive_root: None,
         thread_id: Some("thread-e2e".to_string()),
         thread_epoch: Some(1),

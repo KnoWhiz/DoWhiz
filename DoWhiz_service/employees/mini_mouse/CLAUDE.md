@@ -135,6 +135,6 @@ Each user gets separate SQLite databases and workspace directories. Concurrency 
 Inbound emails from `little-bear@dowhiz.com`, `agent@dowhiz.com`, `oliver@dowhiz.com`, `mini-mouse@dowhiz.com`, and `maggie@dowhiz.com` are ignored (prevents loops).
 
 <SOUL>
-Your name is Oliver, a little bear, who is cute and smart and capable. You always get task done.
-Go bears!
+Your name is Mini-Mouse, a tiny mouse, who is curious and quick and capable. You always get task done.
+Go mice!
 </SOUL>

@@ -25,6 +25,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+use crate::employee_config::{load_employee_directory, EmployeeDirectory, EmployeeProfile};
 use crate::index_store::{IndexStore, TaskRef};
 use crate::mailbox;
 use crate::thread_state::{bump_thread_state, default_thread_state_path};
@@ -41,6 +42,10 @@ pub const DEFAULT_INBOUND_BODY_MAX_BYTES: usize = 25 * 1024 * 1024;
 pub struct ServiceConfig {
     pub host: String,
     pub port: u16,
+    pub employee_id: String,
+    pub employee_config_path: PathBuf,
+    pub employee_profile: EmployeeProfile,
+    pub employee_directory: EmployeeDirectory,
     pub workspace_root: PathBuf,
     pub scheduler_state_path: PathBuf,
     pub processed_ids_path: PathBuf,
@@ -66,16 +71,36 @@ impl ServiceConfig {
             .and_then(|value| value.parse::<u16>().ok())
             .unwrap_or(9001);
 
+        let employee_config_path =
+            resolve_path(env::var("EMPLOYEE_CONFIG_PATH").unwrap_or_else(|_| {
+                default_employee_config_path()
+                    .to_string_lossy()
+                    .into_owned()
+            }))?;
+        let employee_directory = load_employee_directory(&employee_config_path)?;
+        let employee_id = env::var("EMPLOYEE_ID")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .or_else(|| employee_directory.default_employee_id.clone())
+            .or_else(|| employee_directory.employees.first().map(|emp| emp.id.clone()))
+            .ok_or_else(|| "employee config has no employees".to_string())?;
+        let employee_profile = employee_directory
+            .employee(&employee_id)
+            .ok_or_else(|| format!("employee '{}' not found in {}", employee_id, employee_config_path.display()))?
+            .clone();
+
         let runtime_root = default_runtime_root()?;
+        let employee_runtime_root = runtime_root.join(&employee_id);
         let workspace_root = resolve_path(env::var("WORKSPACE_ROOT").unwrap_or_else(|_| {
-            runtime_root
+            employee_runtime_root
                 .join("workspaces")
                 .to_string_lossy()
                 .into_owned()
         }))?;
         let scheduler_state_path =
             resolve_path(env::var("SCHEDULER_STATE_PATH").unwrap_or_else(|_| {
-                runtime_root
+                employee_runtime_root
                     .join("state")
                     .join("tasks.db")
                     .to_string_lossy()
@@ -83,7 +108,7 @@ impl ServiceConfig {
             }))?;
         let processed_ids_path =
             resolve_path(env::var("PROCESSED_IDS_PATH").unwrap_or_else(|_| {
-                runtime_root
+                employee_runtime_root
                     .join("state")
                     .join("postmark_processed_ids.txt")
                     .to_string_lossy()
@@ -91,17 +116,17 @@ impl ServiceConfig {
             }))?;
         let users_root = resolve_path(
             env::var("USERS_ROOT")
-                .unwrap_or_else(|_| runtime_root.join("users").to_string_lossy().into_owned()),
+                .unwrap_or_else(|_| employee_runtime_root.join("users").to_string_lossy().into_owned()),
         )?;
         let users_db_path = resolve_path(env::var("USERS_DB_PATH").unwrap_or_else(|_| {
-            runtime_root
+            employee_runtime_root
                 .join("state")
                 .join("users.db")
                 .to_string_lossy()
                 .into_owned()
         }))?;
         let task_index_path = resolve_path(env::var("TASK_INDEX_PATH").unwrap_or_else(|_| {
-            runtime_root
+            employee_runtime_root
                 .join("state")
                 .join("task_index.db")
                 .to_string_lossy()
@@ -135,6 +160,10 @@ impl ServiceConfig {
         Ok(Self {
             host,
             port,
+            employee_id,
+            employee_config_path,
+            employee_profile,
+            employee_directory,
             workspace_root,
             scheduler_state_path,
             processed_ids_path,
@@ -569,7 +598,7 @@ pub fn process_inbound_payload(
     info!("processing inbound payload into workspace");
 
     let sender = payload.from.as_deref().unwrap_or("").trim();
-    if is_blacklisted_sender(sender) {
+    if is_blacklisted_sender(sender, &config.employee_directory.service_addresses) {
         info!("skipping blacklisted sender: {}", sender);
         return Ok(());
     }
@@ -595,21 +624,38 @@ pub fn process_inbound_payload(
         );
     }
 
-    let inbound_service_address = mailbox::select_inbound_service_address(&[
-        payload.to.as_deref(),
-        payload.cc.as_deref(),
-        payload.bcc.as_deref(),
-    ]);
-    let persona = mailbox::persona_for_address(inbound_service_address.as_deref());
+    let inbound_candidates = collect_service_address_candidates(payload);
+    let inbound_service_mailbox = mailbox::select_inbound_service_mailbox(
+        &inbound_candidates,
+        &config.employee_profile.address_set,
+    );
+    let inbound_service_mailbox = match inbound_service_mailbox {
+        Some(mailbox) => mailbox,
+        None => {
+            info!("no service address found in inbound payload; skipping");
+            return Ok(());
+        }
+    };
 
     let thread_key = thread_key(payload, raw_payload);
     let workspace = ensure_thread_workspace(
         &user_paths,
         &user.user_id,
         &thread_key,
-        persona,
+        &config.employee_profile,
         config.skills_source_dir.as_deref(),
     )?;
+    let reply_from = Some(inbound_service_mailbox.formatted());
+    let model_name = match config.employee_profile.model.clone() {
+        Some(model) => model,
+        None => {
+            if config.employee_profile.runner.eq_ignore_ascii_case("claude") {
+                String::new()
+            } else {
+                config.codex_model.clone()
+            }
+        }
+    };
     let thread_state_path = default_thread_state_path(&workspace);
     let message_id = payload
         .header_message_id()
@@ -639,9 +685,11 @@ pub fn process_inbound_payload(
         input_attachments_dir: PathBuf::from("incoming_attachments"),
         memory_dir: PathBuf::from("memory"),
         reference_dir: PathBuf::from("references"),
-        model_name: config.codex_model.clone(),
+        model_name,
+        runner: config.employee_profile.runner.clone(),
         codex_disabled: config.codex_disabled,
         reply_to: to_list.clone(),
+        reply_from,
         archive_root: Some(user_paths.mail_root.clone()),
         thread_id: Some(thread_key.clone()),
         thread_epoch: Some(thread_state.epoch),
@@ -784,14 +832,14 @@ fn task_kind_label(kind: &TaskKind) -> &'static str {
     }
 }
 
-fn is_blacklisted_sender(sender: &str) -> bool {
+fn is_blacklisted_sender(sender: &str, service_addresses: &HashSet<String>) -> bool {
     if sender.is_empty() {
         return false;
     }
     let mut matched = false;
     let addresses = extract_emails(sender);
     for address in addresses {
-        if is_blacklisted_address(&address) {
+        if is_blacklisted_address(&address, service_addresses) {
             matched = true;
             break;
         }
@@ -799,8 +847,8 @@ fn is_blacklisted_sender(sender: &str) -> bool {
     matched
 }
 
-fn is_blacklisted_address(address: &str) -> bool {
-    mailbox::is_service_address(address)
+fn is_blacklisted_address(address: &str, service_addresses: &HashSet<String>) -> bool {
+    mailbox::is_service_address(address, service_addresses)
 }
 
 fn thread_key(payload: &PostmarkInbound, raw_payload: &[u8]) -> String {
@@ -875,25 +923,33 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn ensure_workspace_soul_files(
+fn ensure_workspace_employee_files(
     workspace: &Path,
-    persona: mailbox::WorkspacePersona,
+    employee: &EmployeeProfile,
 ) -> io::Result<()> {
-    let soul_block = mailbox::soul_block(persona);
-    write_workspace_soul_file(&workspace.join("AGENTS.md"), soul_block)?;
-    write_workspace_soul_file(&workspace.join("CLAUDE.md"), soul_block)?;
+    if let Some(path) = employee.agents_path.as_ref() {
+        if path.exists() {
+            fs::copy(path, workspace.join("AGENTS.md"))?;
+        }
+    }
+    if let Some(path) = employee.claude_path.as_ref() {
+        if path.exists() {
+            fs::copy(path, workspace.join("CLAUDE.md"))?;
+        }
+    }
+    if let Some(path) = employee.soul_path.as_ref() {
+        if path.exists() {
+            fs::copy(path, workspace.join("SOUL.md"))?;
+        }
+    }
     Ok(())
-}
-
-fn write_workspace_soul_file(path: &Path, soul_block: &str) -> io::Result<()> {
-    fs::write(path, soul_block)
 }
 
 fn ensure_thread_workspace(
     user_paths: &crate::user_store::UserPaths,
     user_id: &str,
     thread_key: &str,
-    persona: mailbox::WorkspacePersona,
+    employee: &EmployeeProfile,
     skills_source_dir: Option<&Path>,
 ) -> Result<PathBuf, BoxError> {
     fs::create_dir_all(&user_paths.workspaces_root)?;
@@ -926,13 +982,23 @@ fn ensure_thread_workspace(
         }
     }
 
-    ensure_workspace_soul_files(&workspace, persona)?;
+    ensure_workspace_employee_files(&workspace, employee)?;
 
-    // Copy skills to workspace for Codex CLI
+    // Copy skills to workspace for Codex/Claude runners.
+    let agents_skills_dir = workspace.join(".agents").join("skills");
     if let Some(skills_src) = skills_source_dir {
-        let agents_skills_dir = workspace.join(".agents").join("skills");
         if let Err(err) = copy_skills_directory(skills_src, &agents_skills_dir) {
-            error!("failed to copy skills to workspace: {}", err);
+            error!("failed to copy base skills to workspace: {}", err);
+        }
+    }
+    if let Some(employee_skills) = employee.skills_dir.as_deref() {
+        let should_copy = skills_source_dir
+            .map(|base| base != employee_skills)
+            .unwrap_or(true);
+        if should_copy {
+            if let Err(err) = copy_skills_directory(employee_skills, &agents_skills_dir) {
+                error!("failed to copy employee skills to workspace: {}", err);
+            }
         }
     }
 
@@ -1807,6 +1873,19 @@ fn repo_skills_source_dir() -> PathBuf {
     }
 }
 
+fn default_employee_config_path() -> PathBuf {
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if cwd
+        .file_name()
+        .map(|name| name == "DoWhiz_service")
+        .unwrap_or(false)
+    {
+        cwd.join("employee.toml")
+    } else {
+        cwd.join("DoWhiz_service").join("employee.toml")
+    }
+}
+
 fn default_runtime_root() -> Result<PathBuf, io::Error> {
     let home =
         env::var("HOME").map_err(|_| io::Error::new(io::ErrorKind::NotFound, "HOME not set"))?;
@@ -1826,6 +1905,48 @@ fn resolve_path(raw: String) -> Result<PathBuf, io::Error> {
     }
 }
 
+fn collect_service_address_candidates(payload: &PostmarkInbound) -> Vec<Option<&str>> {
+    let mut candidates = Vec::new();
+    if let Some(value) = payload.to.as_deref() {
+        candidates.push(Some(value));
+    }
+    if let Some(value) = payload.cc.as_deref() {
+        candidates.push(Some(value));
+    }
+    if let Some(value) = payload.bcc.as_deref() {
+        candidates.push(Some(value));
+    }
+    if let Some(list) = payload.to_full.as_ref() {
+        for entry in list {
+            candidates.push(Some(entry.email.as_str()));
+        }
+    }
+    if let Some(list) = payload.cc_full.as_ref() {
+        for entry in list {
+            candidates.push(Some(entry.email.as_str()));
+        }
+    }
+    if let Some(list) = payload.bcc_full.as_ref() {
+        for entry in list {
+            candidates.push(Some(entry.email.as_str()));
+        }
+    }
+    for header in [
+        "X-Original-To",
+        "Delivered-To",
+        "Envelope-To",
+        "X-Envelope-To",
+        "X-Forwarded-To",
+        "X-Original-Recipient",
+        "Original-Recipient",
+    ] {
+        for value in payload.header_values(header) {
+            candidates.push(Some(value));
+        }
+    }
+    candidates
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct PostmarkInbound {
     #[serde(rename = "From")]
@@ -1839,6 +1960,15 @@ pub struct PostmarkInbound {
     #[serde(rename = "Bcc")]
     #[allow(dead_code)]
     bcc: Option<String>,
+    #[serde(rename = "ToFull")]
+    #[allow(dead_code)]
+    to_full: Option<Vec<PostmarkRecipient>>,
+    #[serde(rename = "CcFull")]
+    #[allow(dead_code)]
+    cc_full: Option<Vec<PostmarkRecipient>>,
+    #[serde(rename = "BccFull")]
+    #[allow(dead_code)]
+    bcc_full: Option<Vec<PostmarkRecipient>>,
     #[serde(rename = "ReplyTo")]
     reply_to: Option<String>,
     #[serde(rename = "Subject")]
@@ -1870,6 +2000,31 @@ impl PostmarkInbound {
     fn header_message_id(&self) -> Option<&str> {
         self.header_value("Message-ID")
     }
+
+    fn header_values(&self, name: &str) -> Vec<&str> {
+        self.headers
+            .as_ref()
+            .map(|headers| {
+                headers
+                    .iter()
+                    .filter(|header| header.name.eq_ignore_ascii_case(name))
+                    .map(|header| header.value.as_str())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PostmarkRecipient {
+    #[serde(rename = "Email")]
+    email: String,
+    #[serde(rename = "Name")]
+    #[allow(dead_code)]
+    name: Option<String>,
+    #[serde(rename = "MailboxHash")]
+    #[allow(dead_code)]
+    mailbox_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2028,11 +2183,26 @@ mod tests {
         let inbound_payload: PostmarkInbound =
             serde_json::from_str(inbound_raw).expect("parse inbound");
         let thread = thread_key(&inbound_payload, inbound_raw.as_bytes());
+        let addresses = vec!["service@example.com".to_string()];
+        let address_set: HashSet<String> =
+            addresses.iter().map(|value| value.to_ascii_lowercase()).collect();
+        let employee = EmployeeProfile {
+            id: "test-employee".to_string(),
+            display_name: None,
+            runner: "codex".to_string(),
+            model: None,
+            addresses,
+            address_set,
+            agents_path: None,
+            claude_path: None,
+            soul_path: None,
+            skills_dir: None,
+        };
         let workspace = ensure_thread_workspace(
             &user_paths,
             "user123",
             &thread,
-            mailbox::WorkspacePersona::LittleBear,
+            &employee,
             None,
         )
         .expect("create workspace");

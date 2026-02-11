@@ -62,7 +62,7 @@ sudo apt-get update
 sudo apt-get install -y ca-certificates libsqlite3-dev libssl-dev pkg-config curl
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
-sudo npm install -g @openai/codex@latest @playwright/cli@latest
+sudo npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest @playwright/cli@latest
 sudo npx playwright install --with-deps chromium
 ```
 
@@ -77,20 +77,34 @@ sudo ln -sf "$chromium_path" /opt/google/chrome/chrome
 macOS (Homebrew):
 ```
 brew install node@20 openssl@3 sqlite pkg-config
-npm install -g @openai/codex@latest @playwright/cli@latest
+npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest @playwright/cli@latest
 npx playwright install chromium
 ```
 
 Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.
+Postmark outbound requires each employee address to be verified as a Sender Signature (or domain) because replies are sent from the inbound mailbox.
 
 ## Getting started
 Rust service:
 ```
 cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
 ```
+Employee profiles (addresses, runner, persona, skills) are defined in `DoWhiz_service/employee.toml`. Each server only processes emails addressed to its configured employee.
+Replies are sent from the employee address that the inbound email targeted. For forwarded mail, the service checks `To`/`Cc`/`Bcc` plus headers like `X-Original-To`, `Delivered-To`, and `X-Forwarded-To` to determine which employee address was targeted.
 If `RUN_TASK_DOCKER_IMAGE` is set in `DoWhiz_service/.env`, each task runs
 inside a fresh Docker container and the image auto-builds on first use (unless
 disabled with `RUN_TASK_DOCKER_AUTO_BUILD=0`).
+
+Multi-employee local run (from repo root):
+```
+# Oliver / Little-Bear (Codex)
+EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 \
+  cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
+
+# Maggie / Mini-Mouse (Claude)
+EMPLOYEE_ID=mini_mouse RUST_SERVICE_PORT=9002 \
+  cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9002
+```
 
 Docker (production image):
 ```

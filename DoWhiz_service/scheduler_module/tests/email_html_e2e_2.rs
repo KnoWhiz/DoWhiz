@@ -1,8 +1,10 @@
+use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
 use scheduler_module::service::{
     process_inbound_payload, PostmarkInbound, ServiceConfig, DEFAULT_INBOUND_BODY_MAX_BYTES,
 };
 use scheduler_module::user_store::UserStore;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -40,6 +42,35 @@ fn assert_clean_html(html: &str) {
     assert!(!html.contains("Hidden text"), "hidden text still present");
 }
 
+fn test_employee_directory() -> (EmployeeProfile, EmployeeDirectory) {
+    let addresses = vec!["service@example.com".to_string()];
+    let address_set: HashSet<String> =
+        addresses.iter().map(|value| value.to_ascii_lowercase()).collect();
+    let employee = EmployeeProfile {
+        id: "test-employee".to_string(),
+        display_name: None,
+        runner: "codex".to_string(),
+        model: None,
+        addresses: addresses.clone(),
+        address_set: address_set.clone(),
+        agents_path: None,
+        claude_path: None,
+        soul_path: None,
+        skills_dir: None,
+    };
+    let mut employee_by_id = HashMap::new();
+    employee_by_id.insert(employee.id.clone(), employee.clone());
+    let mut service_addresses = HashSet::new();
+    service_addresses.extend(address_set);
+    let directory = EmployeeDirectory {
+        employees: vec![employee.clone()],
+        employee_by_id,
+        default_employee_id: Some(employee.id.clone()),
+        service_addresses,
+    };
+    (employee, directory)
+}
+
 #[test]
 fn inbound_email_html_is_sanitized() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let temp = TempDir::new()?;
@@ -49,9 +80,14 @@ fn inbound_email_html_is_sanitized() -> Result<(), Box<dyn std::error::Error + S
     fs::create_dir_all(&users_root)?;
     fs::create_dir_all(&state_root)?;
 
+    let (employee_profile, employee_directory) = test_employee_directory();
     let config = ServiceConfig {
         host: "127.0.0.1".to_string(),
         port: 0,
+        employee_id: employee_profile.id.clone(),
+        employee_config_path: root.join("employee.toml"),
+        employee_profile,
+        employee_directory,
         workspace_root: root.join("workspaces"),
         scheduler_state_path: state_root.join("tasks.db"),
         processed_ids_path: state_root.join("processed_ids.txt"),

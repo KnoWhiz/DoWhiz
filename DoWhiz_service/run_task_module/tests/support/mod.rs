@@ -39,10 +39,40 @@ pub struct EnvGuard {
 
 impl EnvGuard {
     pub fn set(vars: &[(&str, &str)]) -> Self {
-        let mut saved = Vec::with_capacity(vars.len());
+        let mut saved = Vec::with_capacity(vars.len() + 1);
+        let mut has_docker_override = false;
+        let mut has_docker_use_override = false;
+        let mut has_codex_e2e_override = false;
         for (key, value) in vars {
             saved.push((key.to_string(), env::var_os(key)));
             env::set_var(key, value);
+            if *key == "RUN_TASK_DOCKER_IMAGE" {
+                has_docker_override = true;
+            }
+            if *key == "RUN_TASK_USE_DOCKER" {
+                has_docker_use_override = true;
+            }
+            if *key == "RUN_CODEX_E2E" {
+                has_codex_e2e_override = true;
+            }
+        }
+        if !has_docker_override {
+            saved.push((
+                "RUN_TASK_DOCKER_IMAGE".to_string(),
+                env::var_os("RUN_TASK_DOCKER_IMAGE"),
+            ));
+            env::set_var("RUN_TASK_DOCKER_IMAGE", "");
+        }
+        if !has_docker_use_override {
+            saved.push((
+                "RUN_TASK_USE_DOCKER".to_string(),
+                env::var_os("RUN_TASK_USE_DOCKER"),
+            ));
+            env::set_var("RUN_TASK_USE_DOCKER", "0");
+        }
+        if !has_codex_e2e_override {
+            saved.push(("RUN_CODEX_E2E".to_string(), env::var_os("RUN_CODEX_E2E")));
+            env::set_var("RUN_CODEX_E2E", "0");
         }
         Self { saved }
     }
@@ -156,6 +186,7 @@ echo "attachment" > reply_email_attachments/attachment.txt
 }
 
 #[cfg(unix)]
+#[allow(dead_code)]
 pub fn write_fake_gh(dir: &Path) -> io::Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -217,6 +248,7 @@ pub fn build_params(workspace: &Path) -> RunTaskParams {
         reference_dir: PathBuf::from("references"),
         reply_to: vec!["user@example.com".to_string()],
         model_name: "test-model".to_string(),
+        runner: "codex".to_string(),
         codex_disabled: false,
     }
 }

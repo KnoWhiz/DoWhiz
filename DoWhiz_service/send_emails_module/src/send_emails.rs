@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub const DEFAULT_POSTMARK_API_BASE: &str = "https://api.postmarkapp.com";
-const DEFAULT_FROM_ADDRESS: &str = "oliver@dowhiz.com";
 
 #[derive(Debug, Clone)]
 pub struct SendEmailRequest<'a> {
@@ -34,6 +33,7 @@ pub struct SendEmailResponse {
 #[derive(Debug)]
 pub enum SendEmailError {
     MissingPostmarkToken,
+    MissingFrom,
     MissingRecipients,
     InvalidAttachmentsDir(PathBuf),
     Io(std::io::Error),
@@ -46,6 +46,7 @@ impl fmt::Display for SendEmailError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SendEmailError::MissingPostmarkToken => write!(f, "POSTMARK_SERVER_TOKEN not set"),
+            SendEmailError::MissingFrom => write!(f, "From address is required"),
             SendEmailError::MissingRecipients => write!(f, "At least one recipient is required"),
             SendEmailError::InvalidAttachmentsDir(path) => {
                 write!(f, "Attachments path is not a directory: {}", path.display())
@@ -125,7 +126,7 @@ pub fn send_email(request: SendEmailRequest<'_>) -> Result<SendEmailResponse, Se
 
     let from = match request.from {
         Some(from) if !from.trim().is_empty() => from.to_string(),
-        _ => env::var("OUTBOUND_FROM").unwrap_or_else(|_| DEFAULT_FROM_ADDRESS.to_string()),
+        _ => return Err(SendEmailError::MissingFrom),
     };
 
     let to_list = normalize_recipients(request.to);

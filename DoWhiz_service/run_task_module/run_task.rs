@@ -23,6 +23,8 @@ base_url = "{azure_endpoint}"
 env_key = "AZURE_OPENAI_API_KEY_BACKUP"
 wire_api = "responses"
 "#;
+const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-4-5";
+const CLAUDE_FOUNDRY_RESOURCE_DEFAULT: &str = "knowhiz-service-openai-backup-2";
 const DOCKER_WORKSPACE_DIR: &str = "/workspace";
 const DOCKER_CODEX_HOME_DIR: &str = ".codex";
 const SCHEDULED_TASKS_BEGIN: &str = "SCHEDULED_TASKS_JSON_BEGIN";
@@ -65,6 +67,7 @@ pub struct RunTaskParams {
     pub reference_dir: PathBuf,
     pub reply_to: Vec<String>,
     pub model_name: String,
+    pub runner: String,
     pub codex_disabled: bool,
 }
 
@@ -183,6 +186,14 @@ pub enum RunTaskError {
         status: Option<i32>,
         output: String,
     },
+    ClaudeNotFound,
+    ClaudeInstallFailed {
+        output: String,
+    },
+    ClaudeFailed {
+        status: Option<i32>,
+        output: String,
+    },
     DockerNotFound,
     DockerFailed {
         status: Option<i32>,
@@ -220,6 +231,17 @@ impl fmt::Display for RunTaskError {
             RunTaskError::CodexFailed { status, output } => write!(
                 f,
                 "Codex CLI failed (status: {:?}). Output tail:\n{}",
+                status, output
+            ),
+            RunTaskError::ClaudeNotFound => write!(f, "Claude CLI not found on PATH."),
+            RunTaskError::ClaudeInstallFailed { output } => write!(
+                f,
+                "Claude CLI install failed. Output tail:\n{}",
+                output
+            ),
+            RunTaskError::ClaudeFailed { status, output } => write!(
+                f,
+                "Claude CLI failed (status: {:?}). Output tail:\n{}",
                 status, output
             ),
             RunTaskError::DockerNotFound => write!(f, "Docker CLI not found on PATH."),
@@ -262,6 +284,7 @@ impl From<io::Error> for RunTaskError {
 
 pub fn run_task(params: &RunTaskParams) -> Result<RunTaskOutput, RunTaskError> {
     let workspace_dir = remap_workspace_dir(&params.workspace_dir)?;
+    let runner = normalize_runner(&params.runner);
     let request = RunTaskRequest {
         workspace_dir: &workspace_dir,
         input_email_dir: &params.input_email_dir,
@@ -289,11 +312,24 @@ pub fn run_task(params: &RunTaskParams) -> Result<RunTaskOutput, RunTaskError> {
         });
     }
 
-    run_codex_task(request, reply_html_path, reply_attachments_dir)
+    match runner.as_str() {
+        "claude" => run_claude_task(request, &runner, reply_html_path, reply_attachments_dir),
+        _ => run_codex_task(request, &runner, reply_html_path, reply_attachments_dir),
+    }
+}
+
+fn normalize_runner(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        "codex".to_string()
+    } else {
+        trimmed.to_ascii_lowercase()
+    }
 }
 
 fn run_codex_task(
     request: RunTaskRequest<'_>,
+    runner: &str,
     reply_html_path: PathBuf,
     reply_attachments_dir: PathBuf,
 ) -> Result<RunTaskOutput, RunTaskError> {
@@ -376,6 +412,8 @@ fn run_codex_task(
         request.input_attachments_dir,
         request.memory_dir,
         request.reference_dir,
+        request.workspace_dir,
+        runner,
         &memory_context,
         !request.reply_to.is_empty(),
     );
@@ -548,6 +586,288 @@ fn run_codex_task(
         scheduler_actions,
         scheduler_actions_error,
     })
+}
+
+fn run_claude_task(
+    request: RunTaskRequest<'_>,
+    runner: &str,
+    reply_html_path: PathBuf,
+    reply_attachments_dir: PathBuf,
+) -> Result<RunTaskOutput, RunTaskError> {
+    load_env_sources(request.workspace_dir)?;
+
+    let api_key =
+        env::var("AZURE_OPENAI_API_KEY_BACKUP").map_err(|_| RunTaskError::MissingEnv {
+            key: "AZURE_OPENAI_API_KEY_BACKUP",
+        })?;
+    if api_key.trim().is_empty() {
+        return Err(RunTaskError::MissingEnv {
+            key: "AZURE_OPENAI_API_KEY_BACKUP",
+        });
+    }
+
+    let model_name = if request.model_name.trim().is_empty() {
+        env::var("CLAUDE_MODEL").unwrap_or_else(|_| DEFAULT_CLAUDE_MODEL.to_string())
+    } else {
+        request.model_name.to_string()
+    };
+
+    let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
+    let prompt = build_prompt(
+        request.input_email_dir,
+        request.input_attachments_dir,
+        request.memory_dir,
+        request.reference_dir,
+        request.workspace_dir,
+        runner,
+        &memory_context,
+        !request.reply_to.is_empty(),
+    );
+
+    let env_overrides = prepare_claude_env(&api_key, &model_name)?;
+    let output = run_claude_command(request.workspace_dir, &prompt, &model_name, &env_overrides)?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut combined_output = String::new();
+    combined_output.push_str(&stdout);
+    combined_output.push_str(&stderr);
+    let output_tail = tail_string(&combined_output, 2000);
+
+    if !output.status.success() {
+        return Err(RunTaskError::ClaudeFailed {
+            status: output.status.code(),
+            output: output_tail,
+        });
+    }
+
+    let (assistant_text, _logs) = extract_claude_text(&stdout);
+    if assistant_text.trim().is_empty() {
+        return Err(RunTaskError::ClaudeFailed {
+            status: output.status.code(),
+            output: output_tail,
+        });
+    }
+    let (scheduled_tasks, scheduled_tasks_error) = extract_scheduled_tasks(&assistant_text);
+    let (scheduler_actions, scheduler_actions_error) = extract_scheduler_actions(&assistant_text);
+    let assistant_tail = tail_string(&assistant_text, 2000);
+
+    if !reply_html_path.exists() {
+        return Err(RunTaskError::OutputMissing {
+            path: reply_html_path,
+            output: assistant_tail,
+        });
+    }
+
+    Ok(RunTaskOutput {
+        reply_html_path,
+        reply_attachments_dir,
+        codex_output: assistant_tail,
+        scheduled_tasks,
+        scheduled_tasks_error,
+        scheduler_actions,
+        scheduler_actions_error,
+    })
+}
+
+fn prepare_claude_env(api_key: &str, model_name: &str) -> Result<Vec<(String, String)>, RunTaskError> {
+    let foundry_resource = env::var("ANTHROPIC_FOUNDRY_RESOURCE")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| CLAUDE_FOUNDRY_RESOURCE_DEFAULT.to_string());
+    let default_opus = env::var("ANTHROPIC_DEFAULT_OPUS_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_CLAUDE_MODEL.to_string());
+    let default_sonnet = env::var("ANTHROPIC_DEFAULT_SONNET_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "claude-sonnet-4-5".to_string());
+    let default_haiku = env::var("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "claude-haiku-4-5".to_string());
+
+    ensure_claude_settings(model_name, api_key, &foundry_resource, &default_opus, &default_sonnet, &default_haiku)?;
+
+    Ok(vec![
+        ("AZURE_OPENAI_API_KEY_BACKUP".to_string(), api_key.to_string()),
+        ("CLAUDE_CODE_USE_FOUNDRY".to_string(), "1".to_string()),
+        (
+            "ANTHROPIC_FOUNDRY_RESOURCE".to_string(),
+            foundry_resource,
+        ),
+        ("ANTHROPIC_FOUNDRY_API_KEY".to_string(), api_key.to_string()),
+        ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), default_opus),
+        (
+            "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+            default_sonnet,
+        ),
+        ("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(), default_haiku),
+    ])
+}
+
+fn ensure_claude_settings(
+    model_name: &str,
+    api_key: &str,
+    foundry_resource: &str,
+    default_opus: &str,
+    default_sonnet: &str,
+    default_haiku: &str,
+) -> Result<(), RunTaskError> {
+    let home = env::var("HOME").map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
+    let settings_dir = PathBuf::from(home).join(".claude");
+    fs::create_dir_all(&settings_dir)?;
+    let settings_path = settings_dir.join("settings.json");
+    let payload = serde_json::json!({
+        "env": {
+            "CLAUDE_CODE_USE_FOUNDRY": "1",
+            "ANTHROPIC_FOUNDRY_RESOURCE": foundry_resource,
+            "ANTHROPIC_FOUNDRY_API_KEY": api_key,
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": default_opus,
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": default_sonnet,
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": default_haiku,
+        },
+        "model": model_name,
+    });
+    let rendered = serde_json::to_string_pretty(&payload).map_err(|err| {
+        RunTaskError::Io(io::Error::new(io::ErrorKind::Other, err.to_string()))
+    })?;
+    fs::write(settings_path, format!("{}\n", rendered))?;
+    Ok(())
+}
+
+fn run_claude_command(
+    workspace_dir: &Path,
+    prompt: &str,
+    model_name: &str,
+    env_overrides: &[(String, String)],
+) -> Result<std::process::Output, RunTaskError> {
+    match build_claude_command(workspace_dir, prompt, model_name, env_overrides).output() {
+        Ok(output) => return Ok(output),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(err) => return Err(RunTaskError::Io(err)),
+    }
+
+    ensure_claude_cli_installed(env_overrides)?;
+    match build_claude_command(workspace_dir, prompt, model_name, env_overrides).output() {
+        Ok(output) => Ok(output),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Err(RunTaskError::ClaudeNotFound),
+        Err(err) => Err(RunTaskError::Io(err)),
+    }
+}
+
+fn build_claude_command(
+    workspace_dir: &Path,
+    prompt: &str,
+    model_name: &str,
+    env_overrides: &[(String, String)],
+) -> Command {
+    let mut cmd = Command::new("claude");
+    cmd.arg("-p")
+        .arg("--output-format")
+        .arg("stream-json")
+        .arg("--include-partial-messages")
+        .arg("--verbose")
+        .arg("--model")
+        .arg(model_name)
+        .arg("--allowedTools")
+        .arg("Read,Glob,Grep,Bash")
+        .arg("--max-turns")
+        .arg("10")
+        .arg("--dangerously-skip-permissions")
+        .arg(prompt)
+        .current_dir(workspace_dir);
+    apply_env_pairs(&mut cmd, env_overrides);
+    cmd
+}
+
+fn ensure_claude_cli_installed(env_overrides: &[(String, String)]) -> Result<(), RunTaskError> {
+    let mut cmd = Command::new("npm");
+    cmd.args(["i", "-g", "@anthropic-ai/claude-code"]);
+    apply_env_pairs(&mut cmd, env_overrides);
+    let output = match cmd.output() {
+        Ok(output) => output,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            return Err(RunTaskError::ClaudeInstallFailed {
+                output: "npm not found on PATH".to_string(),
+            })
+        }
+        Err(err) => return Err(RunTaskError::Io(err)),
+    };
+    let mut combined = String::new();
+    combined.push_str(&String::from_utf8_lossy(&output.stdout));
+    combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    if !output.status.success() {
+        return Err(RunTaskError::ClaudeInstallFailed {
+            output: tail_string(&combined, 2000),
+        });
+    }
+    Ok(())
+}
+
+fn apply_env_pairs(cmd: &mut Command, overrides: &[(String, String)]) {
+    for (key, value) in overrides {
+        cmd.env(key, value);
+    }
+}
+
+fn extract_claude_text(raw: &str) -> (String, Vec<String>) {
+    let mut text = String::new();
+    let mut logs = Vec::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let event: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(value) => value,
+            Err(_) => {
+                logs.push(trimmed.to_string());
+                continue;
+            }
+        };
+        let event_type = event
+            .get("type")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        if matches!(
+            event_type,
+            "text_delta" | "message_delta" | "content_block_delta" | "message_stop" | "result"
+        ) {
+            if let Some(fragment) = extract_claude_fragment(&event) {
+                text.push_str(&fragment);
+            }
+        }
+    }
+    (text, logs)
+}
+
+fn extract_claude_fragment(event: &serde_json::Value) -> Option<String> {
+    if let Some(text) = event.get("text").and_then(|value| value.as_str()) {
+        return Some(text.to_string());
+    }
+    if let Some(text) = event
+        .get("delta")
+        .and_then(|value| value.get("text"))
+        .and_then(|value| value.as_str())
+    {
+        return Some(text.to_string());
+    }
+    if let Some(text) = event
+        .get("message")
+        .and_then(|value| value.get("text"))
+        .and_then(|value| value.as_str())
+    {
+        return Some(text.to_string());
+    }
+    if let Some(text) = event.get("final_text").and_then(|value| value.as_str()) {
+        return Some(text.to_string());
+    }
+    if let Some(text) = event.get("result").and_then(|value| value.as_str()) {
+        return Some(text.to_string());
+    }
+    None
 }
 
 fn remap_workspace_dir(workspace_dir: &Path) -> Result<PathBuf, RunTaskError> {
@@ -1367,6 +1687,8 @@ fn build_prompt(
     input_attachments_dir: &Path,
     memory_dir: &Path,
     reference_dir: &Path,
+    workspace_dir: &Path,
+    runner: &str,
     memory_context: &str,
     reply_required: bool,
 ) -> String {
@@ -1383,8 +1705,12 @@ fn build_prompt(
     } else {
         "2. After finishing the task (step one), do not write any email draft. This inbound message is from a non-replyable address, so skip creating reply_email_draft.html or reply_email_attachments/."
     };
+    let guidance_section = build_guidance_section(workspace_dir, runner);
     format!(
-        r#"You are Oliver, a digital assistant at DoWhiz. You are powerful, resilient, and helpful. Your task is to read incoming emails, understand the user's intent, finish the task, and draft appropriate email replies. You can also use memory and reference materials for context (already saved under current workspace). Always be cute, patient, friendly and helpful in your replies.
+        r#"You are a DoWhiz digital employee. Follow the employee guidance provided below. Your task is to read incoming emails, understand the user's intent, finish the task, and draft appropriate email replies. You can also use memory and reference materials for context (already saved under current workspace). Always be cute, patient, friendly and helpful in your replies.
+
+Employee guidance (from workspace files):
+{guidance_section}
 
 You main goal is
 1. Most importantly, understand the task described in the incoming email and get the task done.
@@ -1427,8 +1753,45 @@ Rules:
         memory = memory_dir.display(),
         reference = reference_dir.display(),
         memory_section = memory_section,
+        guidance_section = guidance_section,
         reply_instruction = reply_instruction,
     )
+}
+
+fn build_guidance_section(workspace_dir: &Path, runner: &str) -> String {
+    let mut blocks = Vec::new();
+
+    if let Some(content) = load_optional_text(&workspace_dir.join("SOUL.md")) {
+        blocks.push(format_guidance_block("SOUL.md", &content));
+    }
+    if let Some(content) = load_optional_text(&workspace_dir.join("AGENTS.md")) {
+        blocks.push(format_guidance_block("AGENTS.md", &content));
+    }
+    if runner.eq_ignore_ascii_case("claude") {
+        if let Some(content) = load_optional_text(&workspace_dir.join("CLAUDE.md")) {
+            blocks.push(format_guidance_block("CLAUDE.md", &content));
+        }
+    }
+
+    if blocks.is_empty() {
+        "- (no employee guidance files found)\n".to_string()
+    } else {
+        blocks.join("\n")
+    }
+}
+
+fn load_optional_text(path: &Path) -> Option<String> {
+    let content = fs::read_to_string(path).ok()?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn format_guidance_block(label: &str, content: &str) -> String {
+    format!("{label}:\n```\n{content}\n```\n")
 }
 
 fn load_memory_context(workspace_dir: &Path, memory_dir: &Path) -> Result<String, RunTaskError> {
@@ -1506,6 +1869,8 @@ mod tests {
             Path::new("incoming_attachments"),
             Path::new("memory"),
             Path::new("references"),
+            Path::new("."),
+            "codex",
             "--- memory/memo.md ---\nHello",
             true,
         );
@@ -1524,6 +1889,8 @@ mod tests {
             Path::new("incoming_attachments"),
             Path::new("memory"),
             Path::new("references"),
+            Path::new("."),
+            "codex",
             "",
             false,
         );

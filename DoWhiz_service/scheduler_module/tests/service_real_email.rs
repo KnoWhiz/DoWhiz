@@ -1,11 +1,14 @@
+use lettre::message::header::{HeaderName, HeaderValue};
 use lettre::Transport;
 use rusqlite::OptionalExtension;
+use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::service::{run_server, ServiceConfig, DEFAULT_INBOUND_BODY_MAX_BYTES};
 use scheduler_module::user_store::normalize_email;
 use scheduler_module::{
     ScheduledTask, Scheduler, SchedulerError, TaskExecution, TaskExecutor, TaskKind,
 };
 use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,6 +24,34 @@ impl TaskExecutor for NoopExecutor {
     fn execute(&self, _task: &TaskKind) -> Result<TaskExecution, SchedulerError> {
         Ok(TaskExecution::default())
     }
+}
+
+fn test_employee_directory(addresses: Vec<String>) -> (EmployeeProfile, EmployeeDirectory) {
+    let address_set: HashSet<String> =
+        addresses.iter().map(|value| value.to_ascii_lowercase()).collect();
+    let employee = EmployeeProfile {
+        id: "test-employee".to_string(),
+        display_name: None,
+        runner: "codex".to_string(),
+        model: None,
+        addresses: addresses.clone(),
+        address_set: address_set.clone(),
+        agents_path: None,
+        claude_path: None,
+        soul_path: None,
+        skills_dir: None,
+    };
+    let mut employee_by_id = HashMap::new();
+    employee_by_id.insert(employee.id.clone(), employee.clone());
+    let mut service_addresses = HashSet::new();
+    service_addresses.extend(address_set);
+    let directory = EmployeeDirectory {
+        employees: vec![employee.clone()],
+        employee_by_id,
+        default_employee_id: Some(employee.id.clone()),
+        service_addresses,
+    };
+    (employee, directory)
 }
 
 fn load_env_from_repo() {
@@ -182,12 +213,19 @@ fn send_smtp_inbound(
     from_addr: &str,
     to_addr: &str,
     subject: &str,
+    original_to: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let message = lettre::Message::builder()
+    let mut builder = lettre::Message::builder()
         .from(from_addr.parse()?)
         .to(to_addr.parse()?)
-        .subject(subject)
-        .body("Rust service live email test.".to_string())?;
+        .subject(subject);
+    if let Some(original_to) = original_to {
+        builder = builder.raw_header(HeaderValue::new(
+            HeaderName::new_from_ascii_str("X-Original-To"),
+            original_to.to_string(),
+        ));
+    }
+    let message = builder.body("Rust service live email test.".to_string())?;
 
     let mailer = lettre::SmtpTransport::builder_dangerous("inbound.postmarkapp.com")
         .port(25)
@@ -280,6 +318,8 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         .map_err(|_| "POSTMARK_INBOUND_HOOK_URL must be set (ngrok URL)")?;
     let from_addr =
         env::var("POSTMARK_TEST_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
+    let service_address = env::var("POSTMARK_TEST_SERVICE_ADDRESS")
+        .unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
 
     let server_info = postmark_request("GET", "https://api.postmarkapp.com/server", &token, None)?;
     let inbound_address = server_info
@@ -312,9 +352,15 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         .unwrap_or(9001);
 
     let codex_disabled = !env_enabled("RUN_CODEX_E2E");
+    let (employee_profile, employee_directory) =
+        test_employee_directory(vec![service_address.clone()]);
     let config = ServiceConfig {
         host: test_host.clone(),
         port,
+        employee_id: employee_profile.id.clone(),
+        employee_config_path: workspace_root.join("employee.toml"),
+        employee_profile,
+        employee_directory,
         workspace_root: workspace_root.clone(),
         scheduler_state_path: state_dir.join("tasks.db"),
         processed_ids_path: state_dir.join("postmark_processed_ids.txt"),
@@ -359,7 +405,12 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
 
     let subject = format!("Rust service live test {}", timestamp_suffix());
     println!("Sending inbound SMTP message with subject: {}", subject);
-    send_smtp_inbound(&from_addr, &inbound_address, &subject)?;
+    send_smtp_inbound(
+        &from_addr,
+        &inbound_address,
+        &subject,
+        Some(&service_address),
+    )?;
     println!("Inbound message sent; waiting for workspace output...");
 
     let workspace_timeout = if env_enabled("RUN_CODEX_E2E") {

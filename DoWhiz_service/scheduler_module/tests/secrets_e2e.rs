@@ -1,9 +1,13 @@
+use mockito::{Matcher, Server};
+use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
 use scheduler_module::service::{
     process_inbound_payload, PostmarkInbound, ServiceConfig, DEFAULT_INBOUND_BODY_MAX_BYTES,
 };
 use scheduler_module::user_store::UserStore;
 use scheduler_module::{ModuleExecutor, RunTaskTask, Scheduler, TaskExecutor, TaskKind};
+use serde_json::json;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -63,6 +67,35 @@ impl Drop for EnvUnsetGuard {
             }
         }
     }
+}
+
+fn test_employee_directory() -> (EmployeeProfile, EmployeeDirectory) {
+    let addresses = vec!["service@example.com".to_string()];
+    let address_set: HashSet<String> =
+        addresses.iter().map(|value| value.to_ascii_lowercase()).collect();
+    let employee = EmployeeProfile {
+        id: "test-employee".to_string(),
+        display_name: None,
+        runner: "codex".to_string(),
+        model: None,
+        addresses: addresses.clone(),
+        address_set: address_set.clone(),
+        agents_path: None,
+        claude_path: None,
+        soul_path: None,
+        skills_dir: None,
+    };
+    let mut employee_by_id = HashMap::new();
+    employee_by_id.insert(employee.id.clone(), employee.clone());
+    let mut service_addresses = HashSet::new();
+    service_addresses.extend(address_set);
+    let directory = EmployeeDirectory {
+        employees: vec![employee.clone()],
+        employee_by_id,
+        default_employee_id: Some(employee.id.clone()),
+        service_addresses,
+    };
+    (employee, directory)
 }
 
 #[cfg(unix)]
@@ -163,6 +196,7 @@ fn secrets_sync_roundtrip_via_run_task() -> Result<(), Box<dyn std::error::Error
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.com"),
         ("CODEX_MODEL", "test-model"),
+        ("RUN_TASK_DOCKER_IMAGE", ""),
     ]);
 
     let user_root = temp.path().join("users").join("user_1");
@@ -187,8 +221,10 @@ fn secrets_sync_roundtrip_via_run_task() -> Result<(), Box<dyn std::error::Error
         memory_dir: PathBuf::from("memory"),
         reference_dir: PathBuf::from("references"),
         model_name: "test-model".to_string(),
+        runner: "codex".to_string(),
         codex_disabled: false,
         reply_to: Vec::new(),
+        reply_from: None,
         archive_root: Some(user_mail),
         thread_id: None,
         thread_epoch: None,
@@ -229,18 +265,44 @@ fn secrets_persist_across_workspaces_and_load(
 
     let old_path = env::var("PATH").unwrap_or_default();
     let new_path = format!("{}:{}", bin_root.display(), old_path);
+    let mut server = Server::new();
+    let mock_response = json!({
+        "ErrorCode": 0,
+        "Message": "OK",
+        "MessageID": "test-message-id",
+        "SubmittedAt": "2026-02-10T00:00:00Z",
+        "To": "alice@example.com"
+    });
+    let api_base = server.url();
+    let _mock = server
+        .mock("POST", "/email")
+        .match_header("x-postmark-server-token", "test-token")
+        .match_body(Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(mock_response.to_string())
+        .expect(2)
+        .create();
     let _env = EnvGuard::set(&[
         ("HOME", home_root.to_str().unwrap()),
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test"),
         ("GH_AUTH_DISABLED", "1"),
+        ("RUN_TASK_DOCKER_IMAGE", ""),
+        ("POSTMARK_SERVER_TOKEN", "test-token"),
+        ("POSTMARK_API_BASE_URL", api_base.as_str()),
     ]);
     let _unset = EnvUnsetGuard::remove(&[env_key]);
 
+    let (employee_profile, employee_directory) = test_employee_directory();
     let config = ServiceConfig {
         host: "127.0.0.1".to_string(),
         port: 0,
+        employee_id: employee_profile.id.clone(),
+        employee_config_path: root.join("employee.toml"),
+        employee_profile,
+        employee_directory,
         workspace_root: root.join("workspaces"),
         scheduler_state_path: state_root.join("tasks.db"),
         processed_ids_path: state_root.join("processed_ids.txt"),

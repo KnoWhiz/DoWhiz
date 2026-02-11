@@ -1,10 +1,12 @@
 use run_task_module::RunTaskParams;
+use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
 use scheduler_module::service::{
     process_inbound_payload, PostmarkInbound, ServiceConfig, DEFAULT_INBOUND_BODY_MAX_BYTES,
 };
 use scheduler_module::user_store::UserStore;
 use scheduler_module::{Scheduler, SchedulerError, TaskExecution, TaskExecutor, TaskKind};
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::io;
@@ -66,6 +68,35 @@ impl Drop for EnvUnsetGuard {
     }
 }
 
+fn test_employee_directory() -> (EmployeeProfile, EmployeeDirectory) {
+    let addresses = vec!["service@example.com".to_string()];
+    let address_set: HashSet<String> =
+        addresses.iter().map(|value| value.to_ascii_lowercase()).collect();
+    let employee = EmployeeProfile {
+        id: "test-employee".to_string(),
+        display_name: None,
+        runner: "codex".to_string(),
+        model: None,
+        addresses: addresses.clone(),
+        address_set: address_set.clone(),
+        agents_path: None,
+        claude_path: None,
+        soul_path: None,
+        skills_dir: None,
+    };
+    let mut employee_by_id = HashMap::new();
+    employee_by_id.insert(employee.id.clone(), employee.clone());
+    let mut service_addresses = HashSet::new();
+    service_addresses.extend(address_set);
+    let directory = EmployeeDirectory {
+        employees: vec![employee.clone()],
+        employee_by_id,
+        default_employee_id: Some(employee.id.clone()),
+        service_addresses,
+    };
+    (employee, directory)
+}
+
 impl TaskExecutor for RecordingExecutor {
     fn execute(&self, task: &TaskKind) -> Result<TaskExecution, SchedulerError> {
         match task {
@@ -78,6 +109,7 @@ impl TaskExecutor for RecordingExecutor {
                     reference_dir: run.reference_dir.clone(),
                     reply_to: run.reply_to.clone(),
                     model_name: run.model_name.clone(),
+                    runner: run.runner.clone(),
                     codex_disabled: run.codex_disabled,
                 };
                 let output = run_task_module::run_task(&params)
@@ -207,9 +239,14 @@ fn email_flow_injects_github_env() {
     let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");
     let _home_guard = EnvGuard::set("HOME", &home_root);
 
+    let (employee_profile, employee_directory) = test_employee_directory();
     let config = ServiceConfig {
         host: "127.0.0.1".to_string(),
         port: 0,
+        employee_id: employee_profile.id.clone(),
+        employee_config_path: root.join("employee.toml"),
+        employee_profile,
+        employee_directory,
         workspace_root: root.join("workspaces"),
         scheduler_state_path: state_root.join("tasks.db"),
         processed_ids_path: state_root.join("processed_ids.txt"),

@@ -3,7 +3,6 @@ use cron::Schedule as CronSchedule;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::env;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
@@ -14,13 +13,13 @@ use uuid::Uuid;
 
 pub(crate) mod thread_state;
 pub(crate) mod mailbox;
+pub mod employee_config;
 use crate::memory_store::{
     resolve_user_memory_dir, sync_user_memory_to_workspace, sync_workspace_memory_to_user,
 };
 use crate::secrets_store::{
     resolve_user_secrets_path, sync_user_secrets_to_workspace, sync_workspace_secrets_to_user,
 };
-use crate::mailbox::select_inbound_service_mailbox;
 use crate::thread_state::{
     current_thread_epoch, default_thread_state_path, find_thread_state_path,
 };
@@ -65,9 +64,13 @@ pub struct RunTaskTask {
     #[serde(alias = "references_dir")]
     pub reference_dir: PathBuf,
     pub model_name: String,
+    #[serde(default = "default_runner")]
+    pub runner: String,
     pub codex_disabled: bool,
     #[serde(default)]
     pub reply_to: Vec<String>,
+    #[serde(default)]
+    pub reply_from: Option<String>,
     #[serde(default)]
     pub archive_root: Option<PathBuf>,
     #[serde(default)]
@@ -76,6 +79,10 @@ pub struct RunTaskTask {
     pub thread_epoch: Option<u64>,
     #[serde(default)]
     pub thread_state_path: Option<PathBuf>,
+}
+
+fn default_runner() -> String {
+    "codex".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -188,10 +195,7 @@ impl TaskExecutor for ModuleExecutor {
                         .as_deref()
                         .map(str::trim)
                         .filter(|value| !value.is_empty())
-                        .map(|value| value.to_string())
-                        .or_else(|| env::var("OUTBOUND_FROM").ok())
-                        .filter(|value| !value.trim().is_empty())
-                        .unwrap_or_else(|| "oliver@dowhiz.com".to_string());
+                        .unwrap_or("");
                     if let Err(err) = crate::past_emails::archive_outbound(
                         archive_root,
                         &task.subject,
@@ -204,7 +208,7 @@ impl TaskExecutor for ModuleExecutor {
                         task.references.as_deref(),
                         &response.message_id,
                         &response.submitted_at,
-                        &from,
+                        from,
                     ) {
                         warn!("failed to archive outbound email: {}", err);
                     }
@@ -243,6 +247,7 @@ impl TaskExecutor for ModuleExecutor {
                     reference_dir: task.reference_dir.clone(),
                     reply_to: task.reply_to.clone(),
                     model_name: task.model_name.clone(),
+                    runner: task.runner.clone(),
                     codex_disabled: task.codex_disabled,
                 };
                 let output = run_task_module::run_task(&params)
@@ -576,8 +581,10 @@ CREATE TABLE IF NOT EXISTS run_task_tasks (
     memory_dir TEXT NOT NULL,
     reference_dir TEXT NOT NULL,
     model_name TEXT NOT NULL,
+    runner TEXT NOT NULL,
     codex_disabled INTEGER NOT NULL,
     reply_to TEXT NOT NULL,
+    reply_from TEXT,
     archive_root TEXT,
     thread_id TEXT,
     thread_epoch INTEGER,
@@ -652,6 +659,18 @@ fn ensure_run_task_task_columns(conn: &Connection) -> Result<(), SchedulerError>
     if !columns.contains("archive_root") {
         conn.execute(
             "ALTER TABLE run_task_tasks ADD COLUMN archive_root TEXT",
+            [],
+        )?;
+    }
+    if !columns.contains("runner") {
+        conn.execute(
+            "ALTER TABLE run_task_tasks ADD COLUMN runner TEXT",
+            [],
+        )?;
+    }
+    if !columns.contains("reply_from") {
+        conn.execute(
+            "ALTER TABLE run_task_tasks ADD COLUMN reply_from TEXT",
             [],
         )?;
     }
@@ -830,8 +849,8 @@ impl SqliteSchedulerStore {
             }
             TaskKind::RunTask(run) => {
                 tx.execute(
-                    "INSERT INTO run_task_tasks (task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, codex_disabled, reply_to, archive_root, thread_id, thread_epoch, thread_state_path)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                    "INSERT INTO run_task_tasks (task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, runner, codex_disabled, reply_to, reply_from, archive_root, thread_id, thread_epoch, thread_state_path)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                     params![
                         task.id.to_string(),
                         run.workspace_dir.to_string_lossy().into_owned(),
@@ -840,8 +859,10 @@ impl SqliteSchedulerStore {
                         run.memory_dir.to_string_lossy().into_owned(),
                         run.reference_dir.to_string_lossy().into_owned(),
                         run.model_name.as_str(),
+                        run.runner.as_str(),
                         bool_to_int(run.codex_disabled),
                         join_recipients(&run.reply_to),
+                        run.reply_from.as_deref(),
                         run.archive_root
                             .as_ref()
                             .map(|value| value.to_string_lossy().into_owned()),
@@ -1010,7 +1031,7 @@ impl SqliteSchedulerStore {
     ) -> Result<RunTaskTask, SchedulerError> {
         let row = conn
             .query_row(
-                "SELECT workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, codex_disabled, reply_to, archive_root, thread_id, thread_epoch, thread_state_path
+                "SELECT workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, runner, codex_disabled, reply_to, reply_from, archive_root, thread_id, thread_epoch, thread_state_path
                  FROM run_task_tasks
                  WHERE task_id = ?1",
                 params![task_id],
@@ -1022,12 +1043,14 @@ impl SqliteSchedulerStore {
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
                         row.get::<_, String>(5)?,
-                        row.get::<_, i64>(6)?,
-                        row.get::<_, String>(7)?,
-                        row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, String>(8)?,
                         row.get::<_, Option<String>>(9)?,
-                        row.get::<_, Option<i64>>(10)?,
+                        row.get::<_, Option<String>>(10)?,
                         row.get::<_, Option<String>>(11)?,
+                        row.get::<_, Option<i64>>(12)?,
+                        row.get::<_, Option<String>>(13)?,
                     ))
                 },
             )
@@ -1039,8 +1062,10 @@ impl SqliteSchedulerStore {
             memory_dir,
             reference_dir,
             model_name,
+            runner,
             codex_disabled,
             reply_to_raw,
+            reply_from,
             archive_root,
             thread_id,
             thread_epoch_raw,
@@ -1056,8 +1081,15 @@ impl SqliteSchedulerStore {
             memory_dir: PathBuf::from(memory_dir),
             reference_dir: PathBuf::from(reference_dir),
             model_name,
+            runner: runner
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "codex".to_string()),
             codex_disabled: codex_disabled != 0,
             reply_to: split_recipients(&reply_to_raw),
+            reply_from: normalize_header_value(reply_from),
             archive_root: normalize_optional_path(archive_root),
             thread_id,
             thread_epoch: thread_epoch_raw.map(|value| value as u64),
@@ -1439,12 +1471,13 @@ fn schedule_auto_reply<E: TaskExecutor>(
     }
     let attachments_dir = task.workspace_dir.join("reply_email_attachments");
     let reply_context = load_reply_context(&task.workspace_dir);
+    let reply_from = task.reply_from.clone().or(reply_context.from.clone());
 
     let send_task = SendEmailTask {
         subject: reply_context.subject,
         html_path,
         attachments_dir,
-        from: reply_context.from.clone(),
+        from: reply_from,
         to: task.reply_to.clone(),
         cc: Vec::new(),
         bcc: Vec::new(),
@@ -1533,6 +1566,7 @@ fn schedule_send_email<E: TaskExecutor>(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.to_string())
+        .or_else(|| task.reply_from.clone())
         .or_else(|| reply_context.from.clone());
 
     let send_task = SendEmailTask {
@@ -1786,10 +1820,13 @@ struct PostmarkInboundLite {
     #[serde(rename = "Subject")]
     subject: Option<String>,
     #[serde(rename = "To")]
+    #[allow(dead_code)]
     to: Option<String>,
     #[serde(rename = "Cc")]
+    #[allow(dead_code)]
     cc: Option<String>,
     #[serde(rename = "Bcc")]
+    #[allow(dead_code)]
     bcc: Option<String>,
     #[serde(rename = "MessageID", alias = "MessageId")]
     message_id: Option<String>,
@@ -1832,17 +1869,11 @@ fn load_reply_context(workspace_dir: &Path) -> ReplyContext {
         let subject_raw = payload.subject.as_deref().unwrap_or("");
         let subject = reply_subject(subject_raw);
         let (in_reply_to, references) = reply_headers(&payload);
-        let reply_from = select_inbound_service_mailbox(&[
-            payload.to.as_deref(),
-            payload.cc.as_deref(),
-            payload.bcc.as_deref(),
-        ])
-        .map(|mailbox| mailbox.formatted());
         ReplyContext {
             subject,
             in_reply_to,
             references,
-            from: reply_from,
+            from: None,
         }
     } else {
         ReplyContext {
@@ -1930,8 +1961,10 @@ mod tests {
             memory_dir: PathBuf::from("memory"),
             reference_dir: PathBuf::from("references"),
             model_name: "gpt-test".to_string(),
+            runner: "codex".to_string(),
             codex_disabled: false,
             reply_to: vec!["user@example.com".to_string()],
+            reply_from: None,
             archive_root: Some(mail_root.to_path_buf()),
             thread_id: Some("thread-test".to_string()),
             thread_epoch: Some(1),
