@@ -10,7 +10,7 @@ then schedules a SendEmail job and sends the reply via Postmark.
 - `codex` CLI on your PATH (only required for local execution; optional when `RUN_TASK_DOCKER_IMAGE` is set)
 - `claude` CLI on your PATH (only required for employees with `runner = "claude"`)
 - `playwright-cli` + Chromium (required for browser automation skills)
-- `.env` includes:
+- `.env` includes (see repo-root `.env.example` for a template):
   - `POSTMARK_SERVER_TOKEN`
   - `AZURE_OPENAI_API_KEY_BACKUP` and `AZURE_OPENAI_ENDPOINT_BACKUP` (required when Codex is enabled)
   - `GITHUB_USERNAME` + `GITHUB_PERSONAL_ACCESS_TOKEN` (optional; enables Codex/agent GitHub access via `GH_TOKEN`/`GITHUB_TOKEN` + git askpass)
@@ -72,10 +72,30 @@ so `dotenv` can load it inside the container:
 ```
 docker build -t dowhiz-service .
 docker run --rm -p 9001:9001 \
-  -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
+  -v "$PWD/.env:/app/.env:ro" \
   -v dowhiz-workspace:/app/.workspace \
   dowhiz-service
 ```
+
+## One-command local run (auto ngrok + hook)
+
+From the repo root:
+```
+./DoWhiz_service/scripts/run_employee.sh little_bear 9001
+./DoWhiz_service/scripts/run_employee.sh mini_mouse 9002
+```
+
+This command:
+- Starts ngrok and discovers the public URL.
+- Updates the Postmark inbound hook to `https://.../postmark/inbound`.
+- Runs the Rust service bound to the selected host/port.
+
+Requires `POSTMARK_SERVER_TOKEN` in your repo-root `.env`, plus `ngrok` and `python3` installed.
+
+Optional flags:
+- `--public-url https://example.com` uses an existing public URL and skips ngrok.
+- `--skip-hook` leaves the Postmark hook unchanged.
+- `--skip-ngrok` disables ngrok (requires `--public-url` or `--skip-hook`).
 
 ## Step-by-step: start the Rust service and send real email
 
@@ -134,7 +154,7 @@ docker run --rm -p 9002:9002 \
   -e EMPLOYEE_ID=mini_mouse \
   -e RUST_SERVICE_PORT=9002 \
   -e RUN_TASK_SKIP_WORKSPACE_REMAP=1 \
-  -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
+  -v "$PWD/.env:/app/.env:ro" \
   -v dowhiz-workspace:/app/.workspace \
   dowhiz-service
 ```
