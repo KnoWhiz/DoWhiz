@@ -111,6 +111,138 @@ oliver@dowhiz.com   # or mini-mouse@dowhiz.com
 - `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces/<message_id>/reply_email_attachments/`
 - Scheduler state: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/tasks.db`
 
+## Live E2E (Postmark)
+These steps run a real inbound email through Postmark and wait for the outbound reply.
+
+Prereqs:
+- ngrok installed and authenticated.
+- Postmark inbound address configured on the server.
+- Sender signatures for `oliver@dowhiz.com`, `mini-mouse@dowhiz.com`, and the `POSTMARK_TEST_FROM` address.
+- `POSTMARK_SERVER_TOKEN`, `POSTMARK_TEST_FROM`, `AZURE_OPENAI_API_KEY_BACKUP`, and `AZURE_OPENAI_ENDPOINT_BACKUP` set.
+- `RUN_CODEX_E2E=1` if you want Codex to execute real tasks (otherwise it is disabled in the live test).
+
+Docker flow (run service in Docker, then drive the live email from the host):
+1) Start ngrok:
+```
+ngrok http 9002   # mini_mouse
+ngrok http 9001   # little_bear
+```
+
+2) Start the container (match the same port you exposed with ngrok):
+```
+docker run --rm -p 9002:9002 \
+  -e EMPLOYEE_ID=mini_mouse \
+  -e RUST_SERVICE_PORT=9002 \
+  -e RUN_TASK_SKIP_WORKSPACE_REMAP=1 \
+  -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
+  -v dowhiz-workspace:/app/.workspace \
+  dowhiz-service
+```
+
+For `little_bear` (Codex), add `-e CODEX_BYPASS_SANDBOX=1` if Codex fails with Landlock sandbox errors inside Docker.
+
+3) Run the live driver (works for Docker or local as long as the service is already running and ngrok is pointing at it):
+```
+POSTMARK_INBOUND_HOOK_URL="https://<ngrok>.ngrok-free.dev/postmark/inbound" \
+POSTMARK_TEST_SERVICE_ADDRESS="mini-mouse@dowhiz.com" \
+POSTMARK_TEST_FROM="mini-mouse@deep-tutor.com" \
+python - <<'PY'
+import os, time, json, urllib.request, urllib.parse, smtplib
+from email.message import EmailMessage
+
+TOKEN = os.environ.get("POSTMARK_SERVER_TOKEN")
+HOOK = os.environ.get("POSTMARK_INBOUND_HOOK_URL")
+FROM_ADDR = os.environ.get("POSTMARK_TEST_FROM") or "oliver@dowhiz.com"
+SERVICE_ADDR = os.environ.get("POSTMARK_TEST_SERVICE_ADDRESS") or "oliver@dowhiz.com"
+
+if not TOKEN or not HOOK:
+    raise SystemExit("Missing POSTMARK_SERVER_TOKEN or POSTMARK_INBOUND_HOOK_URL")
+
+base_url = HOOK.rstrip("/")
+if base_url.endswith("/postmark/inbound"):
+    base_url = base_url[: -len("/postmark/inbound")]
+health_url = base_url + "/health"
+
+def request(method, url, payload=None, timeout=30):
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Accept", "application/json")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("X-Postmark-Server-Token", TOKEN)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = resp.read().decode("utf-8")
+        if resp.status < 200 or resp.status >= 300:
+            raise RuntimeError(f"Postmark request failed: {resp.status} {body}")
+        return json.loads(body) if body else {}
+
+with urllib.request.urlopen(health_url, timeout=10) as resp:
+    if resp.status < 200 or resp.status >= 300:
+        raise SystemExit(f"Health check failed: {resp.status}")
+
+server_info = request("GET", "https://api.postmarkapp.com/server")
+prev_hook = server_info.get("InboundHookUrl", "") or ""
+inbound_address = server_info.get("InboundAddress", "") or ""
+if not inbound_address:
+    raise SystemExit("Postmark server missing inbound address")
+
+hook_url = base_url + "/postmark/inbound"
+request("PUT", "https://api.postmarkapp.com/server", {"InboundHookUrl": hook_url})
+
+subject = f"Live E2E test {int(time.time())}"
+msg = EmailMessage()
+msg["From"] = FROM_ADDR
+msg["To"] = inbound_address
+msg["Subject"] = subject
+msg["X-Original-To"] = SERVICE_ADDR
+msg.set_content("Rust service live email test.")
+
+with smtplib.SMTP("inbound.postmarkapp.com", 25, timeout=30) as smtp:
+    smtp.send_message(msg)
+
+subject_hint = f"Re: {subject}"
+start = time.time()
+found = None
+while time.time() - start < 300:
+    params = urllib.parse.urlencode({"recipient": FROM_ADDR, "count": 50, "offset": 0})
+    data = request("GET", "https://api.postmarkapp.com/messages/outbound?" + params)
+    for message in data.get("Messages", []) or []:
+        subj = message.get("Subject") or ""
+        if subject_hint in subj:
+            found = message
+            break
+    if found:
+        break
+    time.sleep(2)
+
+request("PUT", "https://api.postmarkapp.com/server", {"InboundHookUrl": prev_hook})
+
+if not found:
+    raise SystemExit("Timed out waiting for outbound reply")
+status = (found.get("Status") or "")
+if status not in ("Sent", "Delivered"):
+    raise SystemExit(f"Unexpected outbound status: {status}")
+
+print("live e2e ok")
+PY
+```
+
+Local flow (service spawned by the test, no Docker required):
+1) Start ngrok:
+```
+ngrok http 9002   # mini_mouse
+ngrok http 9001   # little_bear
+```
+
+2) Run the live test (do not start `rust_service` separately; the test binds to the port itself):
+```
+RUST_SERVICE_PORT=9002 \
+POSTMARK_INBOUND_HOOK_URL="https://<ngrok>.ngrok-free.dev/postmark/inbound" \
+POSTMARK_TEST_SERVICE_ADDRESS="mini-mouse@dowhiz.com" \
+POSTMARK_TEST_FROM="mini-mouse@deep-tutor.com" \
+RUST_SERVICE_LIVE_TEST=1 RUN_CODEX_E2E=1 \
+cargo test -p scheduler_module --test service_real_email -- --nocapture
+```
+
 ## Environment knobs
 - `RUST_SERVICE_HOST` / `RUST_SERVICE_PORT`
 - `EMPLOYEE_ID` (selects employee profile from `employee.toml`)
@@ -126,6 +258,8 @@ oliver@dowhiz.com   # or mini-mouse@dowhiz.com
 - `SCHEDULER_USER_MAX_CONCURRENCY` (default: `3`)
 - `CODEX_MODEL`
 - `CODEX_DISABLED=1` to bypass Codex CLI
+- `CODEX_SANDBOX` (defaults to `workspace-write`)
+- `CODEX_BYPASS_SANDBOX=1` to bypass the Codex sandbox (sometimes required inside Docker)
 - `CLAUDE_MODEL` (defaults to `claude-opus-4-5`)
 - `ANTHROPIC_FOUNDRY_RESOURCE` (defaults to `knowhiz-service-openai-backup-2`)
 - `RUN_TASK_DOCKER_IMAGE` to enable per-task containers
@@ -135,6 +269,7 @@ oliver@dowhiz.com   # or mini-mouse@dowhiz.com
 - `RUN_TASK_DOCKER_NETWORK` to set Docker's network mode (for example, `host`)
 - `RUN_TASK_DOCKER_DNS` to override Docker DNS servers (comma/space-separated)
 - `RUN_TASK_DOCKER_DNS_SEARCH` to add DNS search domains (comma/space-separated)
+- `RUN_TASK_SKIP_WORKSPACE_REMAP=1` to disable legacy workspace path migration (useful with volume mounts)
 - Inbound blacklist: any address listed in `employee.toml` is ignored as a sender (prevents loops; display names and `+tag` aliases are normalized).
 
 ## Database files
@@ -234,7 +369,7 @@ Prereqs:
 - `POSTMARK_SERVER_TOKEN`
 - `POSTMARK_INBOUND_HOOK_URL` (public URL, e.g. ngrok base or full `/postmark/inbound` endpoint)
 - `POSTMARK_TEST_FROM` (your inbox for replies)
-- `RUST_SERVICE_TEST_PORT` (optional, defaults to `9001`; ensure ngrok forwards to this port)
+- `RUST_SERVICE_PORT` (optional, defaults to `9001`; ensure ngrok forwards to this port for live tests)
 
 Run:
 ```
