@@ -483,13 +483,13 @@ ul {
 
 .coming-soon {
   opacity: 0.8;
-  filter: grayscale(0.8);
+  filter: grayscale(0.25);
   transition: all 0.4s ease;
 }
 
 .coming-soon:hover {
   opacity: 1;
-  filter: grayscale(0);
+  filter: grayscale(0.1);
 }
 
 .role-header {
