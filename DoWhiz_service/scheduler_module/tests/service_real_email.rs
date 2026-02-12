@@ -374,6 +374,8 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         scheduler_user_max_concurrency: 3,
         inbound_body_max_bytes: DEFAULT_INBOUND_BODY_MAX_BYTES,
         skills_source_dir: None,
+        slack_bot_token: None,
+        slack_bot_user_id: None,
     };
 
     let rt = Runtime::new()?;

@@ -106,6 +106,7 @@ fn memory_sync_roundtrip_via_run_task() -> Result<(), Box<dyn std::error::Error>
         thread_id: None,
         thread_epoch: None,
         thread_state_path: None,
+        channel: scheduler_module::channel::Channel::default(),
     };
 
     let executor = ModuleExecutor::default();

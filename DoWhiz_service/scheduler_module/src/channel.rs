@@ -34,6 +34,19 @@ impl std::fmt::Display for Channel {
     }
 }
 
+impl std::str::FromStr for Channel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "email" => Ok(Channel::Email),
+            "slack" => Ok(Channel::Slack),
+            "telegram" => Ok(Channel::Telegram),
+            _ => Err(format!("unknown channel: {}", s)),
+        }
+    }
+}
+
 /// Normalized inbound message from any channel.
 ///
 /// This struct provides a common representation for messages received from

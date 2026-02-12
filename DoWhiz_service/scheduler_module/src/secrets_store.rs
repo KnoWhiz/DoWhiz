@@ -77,6 +77,7 @@ mod tests {
             thread_id: None,
             thread_epoch: None,
             thread_state_path: None,
+            channel: crate::channel::Channel::default(),
         }
     }
 

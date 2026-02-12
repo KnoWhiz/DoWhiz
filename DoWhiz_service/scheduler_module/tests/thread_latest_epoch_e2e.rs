@@ -216,6 +216,8 @@ fn thread_latest_epoch_end_to_end() {
         scheduler_user_max_concurrency: 1,
         inbound_body_max_bytes: DEFAULT_INBOUND_BODY_MAX_BYTES,
         skills_source_dir: None,
+        slack_bot_token: None,
+        slack_bot_user_id: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");

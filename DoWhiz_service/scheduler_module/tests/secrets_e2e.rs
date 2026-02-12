@@ -229,6 +229,7 @@ fn secrets_sync_roundtrip_via_run_task() -> Result<(), Box<dyn std::error::Error
         thread_id: None,
         thread_epoch: None,
         thread_state_path: None,
+        channel: scheduler_module::channel::Channel::default(),
     };
 
     let executor = ModuleExecutor::default();
@@ -316,6 +317,8 @@ fn secrets_persist_across_workspaces_and_load(
         scheduler_user_max_concurrency: 1,
         inbound_body_max_bytes: DEFAULT_INBOUND_BODY_MAX_BYTES,
         skills_source_dir: None,
+        slack_bot_token: None,
+        slack_bot_user_id: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path)?;

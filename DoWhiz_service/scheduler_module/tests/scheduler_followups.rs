@@ -61,6 +61,7 @@ fn run_task_followups_persist_to_sqlite() {
         thread_id: None,
         thread_epoch: None,
         thread_state_path: None,
+        channel: scheduler_module::channel::Channel::default(),
     };
 
     let mut scheduler =

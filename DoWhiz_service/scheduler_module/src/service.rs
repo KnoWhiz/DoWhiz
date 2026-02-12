@@ -31,6 +31,7 @@ use crate::index_store::{IndexStore, TaskRef};
 use crate::mailbox;
 use crate::thread_state::{bump_thread_state, default_thread_state_path};
 use crate::user_store::{extract_emails, UserStore};
+use crate::channel::Channel;
 use crate::{
     ModuleExecutor, RunTaskTask, Schedule, ScheduledTask, Scheduler, SchedulerError, TaskKind,
 };
@@ -60,6 +61,10 @@ pub struct ServiceConfig {
     pub scheduler_user_max_concurrency: usize,
     pub inbound_body_max_bytes: usize,
     pub skills_source_dir: Option<PathBuf>,
+    /// Slack bot OAuth token for sending messages
+    pub slack_bot_token: Option<String>,
+    /// Slack bot user ID for filtering out bot's own messages
+    pub slack_bot_user_id: Option<String>,
 }
 
 impl ServiceConfig {
@@ -158,6 +163,10 @@ impl ServiceConfig {
             .unwrap_or(DEFAULT_INBOUND_BODY_MAX_BYTES);
         let skills_source_dir = Some(repo_skills_source_dir());
 
+        // Slack configuration
+        let slack_bot_token = env::var("SLACK_BOT_TOKEN").ok().filter(|s| !s.is_empty());
+        let slack_bot_user_id = env::var("SLACK_BOT_USER_ID").ok().filter(|s| !s.is_empty());
+
         Ok(Self {
             host,
             port,
@@ -178,6 +187,8 @@ impl ServiceConfig {
             scheduler_user_max_concurrency,
             inbound_body_max_bytes,
             skills_source_dir,
+            slack_bot_token,
+            slack_bot_user_id,
         })
     }
 }
@@ -633,14 +644,13 @@ async fn slack_events(State(state): State<AppState>, body: Bytes) -> impl IntoRe
         }
     }
 
-    // TODO: Process Slack event payload similar to postmark_inbound
-    // For now, just acknowledge receipt
+    // Process Slack event payload similar to postmark_inbound
     let config = state.config.clone();
-    let _user_store = state.user_store.clone();
-    let _index_store = state.index_store.clone();
+    let user_store = state.user_store.clone();
+    let index_store = state.index_store.clone();
     let body_bytes = body.to_vec();
     tokio::task::spawn_blocking(move || {
-        if let Err(err) = process_slack_event(&config, &body_bytes) {
+        if let Err(err) = process_slack_event(&config, &user_store, &index_store, &body_bytes) {
             error!("failed to process slack event: {err}");
         }
     });
@@ -648,23 +658,34 @@ async fn slack_events(State(state): State<AppState>, body: Bytes) -> impl IntoRe
     (StatusCode::OK, Json(json!({"status": "accepted"})))
 }
 
-fn process_slack_event(_config: &ServiceConfig, raw_payload: &[u8]) -> Result<(), BoxError> {
+fn process_slack_event(
+    config: &ServiceConfig,
+    user_store: &UserStore,
+    index_store: &IndexStore,
+    raw_payload: &[u8],
+) -> Result<(), BoxError> {
     use crate::adapters::slack::SlackInboundAdapter;
     use crate::channel::InboundAdapter;
 
     info!("processing slack event");
 
-    let adapter = SlackInboundAdapter::default();
-    let message = adapter.parse(raw_payload)?;
+    // Build bot_user_ids set from config
+    let mut bot_user_ids = HashSet::new();
+    if let Some(ref bot_id) = config.slack_bot_user_id {
+        bot_user_ids.insert(bot_id.clone());
+    }
+    let adapter = SlackInboundAdapter::new(bot_user_ids);
 
-    // Check if this is a bot message (should be ignored)
+    // Check if this is a bot message (should be ignored) before parsing
     let wrapper: SlackEventWrapper = serde_json::from_slice(raw_payload)?;
-    if let Some(event) = &wrapper.event {
+    if let Some(ref event) = wrapper.event {
         if adapter.is_bot_message(event) {
             info!("ignoring bot message from user {:?}", event.user);
             return Ok(());
         }
     }
+
+    let message = adapter.parse(raw_payload)?;
 
     info!(
         "slack message from {} in channel {:?}: {:?}",
@@ -673,13 +694,142 @@ fn process_slack_event(_config: &ServiceConfig, raw_payload: &[u8]) -> Result<()
         message.text_body
     );
 
-    // TODO: Create workspace and schedule task similar to email flow
-    // This will involve:
-    // 1. Look up or create user based on Slack user ID
-    // 2. Create/get thread workspace
-    // 3. Save the message to workspace
-    // 4. Schedule a RunTask to process and reply
+    // Get channel ID (required for Slack)
+    let channel_id = message
+        .metadata
+        .slack_channel_id
+        .as_ref()
+        .ok_or("missing slack_channel_id")?;
 
+    // Use Slack user ID as fake email (user_store requires email format)
+    let slack_user_email = format!("{}@slack.local", message.sender);
+    let user = user_store.get_or_create_user(&slack_user_email)?;
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+    user_store.ensure_user_dirs(&user_paths)?;
+
+    // Thread key: channel_id + thread_id for grouping conversations
+    let thread_key = format!("slack:{}:{}", channel_id, message.thread_id);
+
+    // Create/get workspace for this thread
+    let workspace = ensure_thread_workspace(
+        &user_paths,
+        &user.user_id,
+        &thread_key,
+        &config.employee_profile,
+        config.skills_source_dir.as_deref(),
+    )?;
+
+    // Bump thread state
+    let thread_state_path = default_thread_state_path(&workspace);
+    let thread_state = bump_thread_state(
+        &thread_state_path,
+        &thread_key,
+        message.message_id.clone(),
+    )?;
+
+    // Save the incoming Slack message to workspace
+    append_slack_message(&workspace, &message, raw_payload, thread_state.last_email_seq)?;
+
+    // Determine model and runner
+    let model_name = match config.employee_profile.model.clone() {
+        Some(model) => model,
+        None => {
+            if config.employee_profile.runner.eq_ignore_ascii_case("claude") {
+                String::new()
+            } else {
+                config.codex_model.clone()
+            }
+        }
+    };
+
+    info!(
+        "workspace ready at {} for user {} thread={} epoch={}",
+        workspace.display(),
+        user.user_id,
+        thread_key,
+        thread_state.epoch
+    );
+
+    // Create RunTask to process the message
+    let run_task = RunTaskTask {
+        workspace_dir: workspace.clone(),
+        input_email_dir: PathBuf::from("incoming_email"),
+        input_attachments_dir: PathBuf::from("incoming_attachments"),
+        memory_dir: PathBuf::from("memory"),
+        reference_dir: PathBuf::from("references"),
+        model_name,
+        runner: config.employee_profile.runner.clone(),
+        codex_disabled: config.codex_disabled,
+        reply_to: vec![channel_id.clone()], // Reply to the same channel
+        reply_from: None, // Slack uses bot token, not a "from" address
+        archive_root: Some(user_paths.mail_root.clone()),
+        thread_id: Some(thread_key.clone()),
+        thread_epoch: Some(thread_state.epoch),
+        thread_state_path: Some(thread_state_path.clone()),
+        channel: Channel::Slack,
+    };
+
+    // Schedule the task
+    let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+    if let Err(err) = cancel_pending_thread_tasks(&mut scheduler, &workspace, thread_state.epoch) {
+        warn!(
+            "failed to cancel pending thread tasks for {}: {}",
+            workspace.display(),
+            err
+        );
+    }
+    let task_id = scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
+    index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
+
+    info!(
+        "scheduler tasks enqueued user_id={} task_id={} message_id={:?} workspace={} thread_epoch={}",
+        user.user_id,
+        task_id,
+        message.message_id,
+        workspace.display(),
+        thread_state.epoch
+    );
+
+    Ok(())
+}
+
+/// Save an incoming Slack message to the workspace.
+fn append_slack_message(
+    workspace: &Path,
+    message: &crate::channel::InboundMessage,
+    raw_payload: &[u8],
+    seq: u64,
+) -> Result<(), BoxError> {
+    let incoming_dir = workspace.join("incoming_email");
+    fs::create_dir_all(&incoming_dir)?;
+
+    // Save the raw JSON payload
+    let raw_path = incoming_dir.join(format!("{:05}_slack_raw.json", seq));
+    fs::write(&raw_path, raw_payload)?;
+
+    // Save message text as a simple text file (similar to email body)
+    let text_path = incoming_dir.join(format!("{:05}_slack_message.txt", seq));
+    let text_content = message.text_body.clone().unwrap_or_default();
+    fs::write(&text_path, &text_content)?;
+
+    // Create a metadata file with sender info
+    let meta_path = incoming_dir.join(format!("{:05}_slack_meta.json", seq));
+    let meta = serde_json::json!({
+        "channel": "slack",
+        "sender": message.sender,
+        "channel_id": message.metadata.slack_channel_id,
+        "team_id": message.metadata.slack_team_id,
+        "thread_id": message.thread_id,
+        "message_id": message.message_id,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    });
+    fs::write(&meta_path, serde_json::to_string_pretty(&meta)?)?;
+
+    info!(
+        "saved Slack message seq={} to {}",
+        seq,
+        incoming_dir.display()
+    );
     Ok(())
 }
 
@@ -789,6 +939,7 @@ pub fn process_inbound_payload(
         thread_id: Some(thread_key.clone()),
         thread_epoch: Some(thread_state.epoch),
         thread_state_path: Some(thread_state_path.clone()),
+        channel: Channel::Email,
     };
 
     let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
