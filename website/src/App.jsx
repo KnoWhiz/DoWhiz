@@ -29,6 +29,7 @@ function App() {
     {
       name: 'Oliver',
       email: 'oliver@dowhiz.com',
+      pronoun: 'He/Him',
       nickname: 'Little-Bear',
       title: 'Writer',
       desc: 'Writer for daily office work across Notion, Overleaf, Google Docs, Google Slides, and Google Sheets.',
@@ -41,6 +42,7 @@ function App() {
     {
       name: 'Maggie',
       email: 'maggie@dowhiz.com',
+      pronoun: 'She/Her',
       nickname: 'Mini-Mouse',
       title: 'TPM',
       desc: 'TPM who turns meeting notes into action items, follows up with people and agents at milestones, updates the board, and sends daily reports.',
@@ -53,6 +55,7 @@ function App() {
     {
       name: 'Devin',
       email: 'devin@dowhiz.com',
+      pronoun: 'He/Him',
       nickname: 'Sticky-Octopus',
       title: 'Coder',
       desc: 'Coder handling daily development tasks and feature delivery.',
@@ -65,6 +68,7 @@ function App() {
     {
       name: 'Lumio',
       email: 'lumio@dowhiz.com',
+      pronoun: 'He/Him',
       nickname: 'Sky-Dragon',
       title: 'CEO',
       desc: 'CEO focused on strategy, leadership, and decision-making.',
@@ -77,6 +81,7 @@ function App() {
     {
       name: 'Claw',
       email: 'claw@dowhiz.com',
+      pronoun: 'She/Her',
       nickname: 'Cozy-Lobster',
       title: 'OpenClaw',
       desc: 'OpenClaw: your personal AI assistant on any OS or platform. The lobster way.',
@@ -89,6 +94,7 @@ function App() {
     {
       name: 'Jeffery',
       email: 'jeffery@dowhiz.com',
+      pronoun: 'He/Him',
       nickname: 'Strutton-Pigeon',
       title: 'DeepTutor',
       desc: 'DeepTutor helps you understand and manage documents and papers.',
@@ -101,6 +107,7 @@ function App() {
     {
       name: 'Anna',
       email: 'anna@dowhiz.com',
+      pronoun: 'She/Her',
       nickname: 'Fluffy-Elephant',
       title: 'TBD',
       desc: 'Role definition in progress.',
@@ -113,6 +120,7 @@ function App() {
     {
       name: 'Rachel',
       email: 'rachel@dowhiz.com',
+      pronoun: 'She/Her',
       nickname: 'Plush-Axolotl',
       title: 'GTM Specialist',
       desc: 'GTM specialist tracking team status and product progress, publishing posts to LinkedIn, Xiaohongshu, Reddit, YouTube, X, Medium, Product Hunt, Hacker News, and WeChat groups.',
@@ -201,7 +209,10 @@ function App() {
                       <img src={member.img} alt={member.name} className="role-avatar" />
                       <div>
                         <h3>{member.name}</h3>
-                        <div className="role-title">{member.title}</div>
+                        <div className="role-title">
+                          <span className="role-title-text">{member.title}</span>
+                          <span className="pronoun-tag">{member.pronoun}</span>
+                        </div>
                         <code className="email-tag">{member.email}</code>
                         <div className="nickname-tag">{member.nickname}</div>
                       </div>
