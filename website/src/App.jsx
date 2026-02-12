@@ -170,7 +170,7 @@ function App() {
             <span className="text-gradient">with A Digital Employee Team</span>
           </h1>
           <p className="hero-subtitle">
-            Seamlessly collaborate with <a href="#roles" className="role-link">Oliver</a>, <a href="#roles" className="role-link">Maggie</a>, and your entire digital workforce—directly from your email inbox.
+            Seamlessly collaborate with <a href="#roles" className="role-link">Oliver</a>, <a href="#roles" className="role-link">Maggie</a>, and your entire digital workforce—directly from your email inbox. Soon you will also reach them by phone, Slack, Discord, WhatsApp, and more.
           </p>
           <div className="hero-cta">
             <a className="btn btn-primary" href="mailto:oliver@dowhiz.com">
@@ -226,7 +226,7 @@ function App() {
           <h2 className="section-title">Core Features</h2>
           <div className="features-grid">
             {[
-              { title: "Task via Email", desc: "Delegate tasks naturally by sending an email. No complex dashboards or new apps to master." },
+              { title: "Multi-Channel Access", desc: "Start with email today, and soon connect via phone, Slack, Discord, WhatsApp, and other channels." },
               { title: "Autonomous Tools", desc: "Agents intelligently select and utilize the right tools for each request without manual configuration." },
               { title: "Direct Delivery", desc: "Completed work is delivered straight back to your inbox. Focus on results, not the process." }
             ].map((item, idx) => (
