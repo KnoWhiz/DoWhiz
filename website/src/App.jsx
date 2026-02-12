@@ -7,10 +7,10 @@ import cozyLobsterImg from './assets/Cozy-Lobster.jpg';
 import struttonPigeonImg from './assets/Strutton-Pigeon.jpg';
 import fluffyElephantImg from './assets/Fluffy-Elephant.jpg';
 import plushAxolotlImg from './assets/Plush-Axolotl.jpg';
-import workflowEmail from './assets/Workflow-Email.png';
-import workflowTriage from './assets/Workflow-Triage.png';
-import workflowExecution from './assets/Workflow-Execution.png';
-import workflowReturn from './assets/Workflow-Return.png';
+import workflowMessage from './assets/Messages.jpg';
+import workflowTriage from './assets/Triage.jpg';
+import workflowExecution from './assets/Execution.jpg';
+import workflowReturn from './assets/Return.jpg';
 
 function App() {
   const [theme, setTheme] = useState('dark');
@@ -257,7 +257,7 @@ function App() {
           <div className="workflow-container">
             <div className="workflow-line"></div>
             {[
-              { step: "1", label: "Email", img: workflowEmail },
+              { step: "1", label: "Message", img: workflowMessage },
               { step: "2", label: "Triage", img: workflowTriage },
               { step: "3", label: "Execution", img: workflowExecution },
               { step: "4", label: "Return", img: workflowReturn },
