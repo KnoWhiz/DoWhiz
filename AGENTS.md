@@ -1,36 +1,31 @@
 # Repository Guidelines
 
-Try to keep the whole codebase modular and easy to maintain. If a file is too long (say more than 500 / 1000 lines), consider separate the code file into separate code files and make sure each one has its own well defined functionality.
-
 ## Project Structure & Module Organization
-- `DoWhiz_service/` Rust workspace for the email service; main crates are `scheduler_module/`, `send_emails_module/`, and `run_task_module/`. Runtime artifacts live under `DoWhiz_service/.workspace/`.
-- `website/` Vite + React site (`src/` for components, `public/` for static assets).
-- `api_reference_documentation/` vendor API docs (Postmark/Gmail) used for reference only.
-- `external/` vendored dependencies (OpenClaw); avoid edits unless intentionally updating upstream code.
-- `example_files/`, `scripts/`, and `vision.md` hold sample inputs, helpers, and product notes.
+DoWhiz is split between a Rust service, a React website, and an Azure Functions wrapper. Key locations:
+- `DoWhiz_service/`: Rust workspace (`scheduler_module/`, `run_task_module/`, `send_emails_module/`) plus `employee.toml` and `skills/`.
+- `website/`: Vite + React site (`src/`, `public/`, `vite.config.js`).
+- `function_app/`: Azure Functions custom handler, build scripts, and local settings.
+- `api_reference_documentation/`: Postmark/Gmail reference docs (read-only).
+- `assets/`, `example_files/`, `scripts/`, `external/`: shared assets, samples, helper scripts, vendored code.
 
 ## Build, Test, and Development Commands
-- Rust service: `cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001`
-- Update inbound hook when testing email flows: `ngrok http 9001` and then run `cargo run -p scheduler_module --bin set_postmark_inbound_hook -- --hook-url <public-url>/postmark/inbound`
-- Unit tests: `cargo test -p scheduler_module`, `cargo test -p run_task_module`
-- Live email E2E: `RUST_SERVICE_LIVE_TEST=1 POSTMARK_INBOUND_HOOK_URL=... POSTMARK_TEST_FROM=... cargo test -p scheduler_module --test service_real_email -- --nocapture`
-- Website dev/build: `npm run dev`, `npm run build`, `npm run preview`, `npm run lint` (run from `website/`)
+- `EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001`: run the Rust service locally.
+- `./DoWhiz_service/scripts/run_employee.sh little_bear 9001`: one-command local run (ngrok + Postmark hook).
+- `cargo test -p scheduler_module` and `cargo test -p run_task_module`: core Rust tests.
+- `POSTMARK_LIVE_TEST=1 POSTMARK_SERVER_TOKEN=... cargo test -p scheduler_module --test service_real_email -- --nocapture`: live Postmark E2E.
+- `cd website && npm install && npm run dev`: start the website (Vite dev server).
+- `cd website && npm run lint`: lint website sources (ESLint).
+- `./function_app/scripts/build_binary.sh`: build the Azure Functions Linux binary.
+- `cd function_app && func host start --port 7071`: run the Functions wrapper locally.
 
 ## Coding Style & Naming Conventions
-- Rust: follow `rustfmt` defaults (`cargo fmt`); use `snake_case` for modules/functions and `UpperCamelCase` for types.
-- Frontend: 2-space indentation in `.jsx` files, PascalCase React components (e.g., `App.jsx`), and ES module imports.
-- Linting: `website/eslint.config.js` is the source of truth; fix lint errors before opening a PR.
+Rust follows rustfmt defaults; run `cargo fmt` before submitting. Use Rust naming conventions (`snake_case` for modules/functions, `CamelCase` for types). Website code follows ESLint rules in `website/eslint.config.js`; React components use `PascalCase`, hooks follow `useX`, and CSS class names are kebab-case (see `website/src/index.css`). Match existing formatting in each folder.
 
 ## Testing Guidelines
-- Tests live under each crate’s `tests/` directory and inline `#[test]` modules; keep test names descriptive.
-- Postmark tests are live and require env vars (`POSTMARK_LIVE_TEST=1`, `POSTMARK_SERVER_TOKEN`); avoid running them without credentials.
-- No JS test runner is configured yet, so rely on lint + manual verification for UI changes.
+Unit tests live alongside modules with `#[test]`; integration tests live in `DoWhiz_service/*/tests/*.rs`. Name tests for behavior (e.g., `scheduler_concurrency`). Live Postmark tests are opt-in and require environment variables; keep them isolated and document the exact command in PRs.
 
 ## Commit & Pull Request Guidelines
-- Commit messages are short, imperative, and sentence-case (e.g., `Update service.rs`, `Implement webpage`).
-- PRs should include: a concise summary, how to test, any env/config changes, and screenshots for website/UI updates.
+Recent history uses short, imperative, capitalized summaries (e.g., "Add run_employee.sh", "Update openclaw"); follow that style and include PR numbers when applicable. PRs should include a concise summary, test commands run, and any required env/config changes. Add screenshots for UI changes.
 
-<SOUL>
-Your name is Oliver, a little bear, who is cute and smart and capable. You always get task done.
-Go bears!
-</SOUL>
+## Configuration & Agent Notes
+Create a local `.env` from `.env.example` and never commit secrets. `DoWhiz_service/employee.toml` selects employee profiles (set `EMPLOYEE_ID`). Per-employee agent instructions live in `DoWhiz_service/employees/*/AGENTS.md` and `DoWhiz_service/employees/*/CLAUDE.md`; shared skills live in `DoWhiz_service/skills/`.
