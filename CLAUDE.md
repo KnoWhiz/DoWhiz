@@ -2,135 +2,136 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Try to keep the whole codebase modular and easy to maintain. If a file is too long (say more than 500 / 1000 lines), consider separate the code file into separate code files and make sure each one has its own well defined functionality.
-
 ## Project Overview
 
-DoWhiz is a Digital Employee Platform - a SaaS system where users delegate tasks via email to AI-powered digital workers (agents named Oliver, Mini-Mouse, etc.). Users interact through their inbox; no UI is required.
+DoWhiz is an email-first digital employee platform. Users send tasks via email to role-based AI agents (Oliver/Codex or Maggie/Claude), which process requests and reply with structured results. The system handles scheduling, orchestration, and per-user isolation.
 
-**Architecture Flow:**
-```
-Email (Postmark) → Inbound Webhook → Triage & Queue → Agent Runtime (Codex CLI) → Email Reply
-                                                     ↓
-                                               Scheduler (CRON support)
-```
+## Build and Run Commands
 
-## Build & Run Commands
-
-### Backend (Rust Service)
-
+### Rust Service
 ```bash
 # Build all modules
 cargo build
 
-# Run all tests
-cargo test
+# Run HTTP server (single employee)
+EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 \
+  cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
 
-# Run specific test
-cargo test scheduler_concurrency
+# One-command local run (auto ngrok + Postmark hook setup)
+./DoWhiz_service/scripts/run_employee.sh little_bear 9001
+./DoWhiz_service/scripts/run_employee.sh mini_mouse 9002
 
-# Run tests with output
-cargo test -- --nocapture
-
-# Start the service
-cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
-
-# Update Postmark webhook URL
-cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
-  --hook-url https://YOUR-NGROK-URL.ngrok-free.dev/postmark/inbound
-
-# Hydrate email history for a user
-cargo run -p scheduler_module --bin hydrate_past_emails -- \
-  --archive-root .workspace/run_task/users/<user_id>/mail \
-  --references-dir /path/to/workspace/references \
-  --user-id <user_id>
+# Docker production
+docker build -t dowhiz-service .
+docker run --rm -p 9001:9001 -v "$PWD/.env:/app/.env:ro" -v dowhiz-workspace:/app/.workspace dowhiz-service
 ```
 
-### Live End-to-End Test (requires Postmark credentials)
-
+### Tests
 ```bash
+# Unit tests
+cargo test -p scheduler_module
+cargo test -p run_task_module
+
+# Single test
+cargo test -p scheduler_module --test scheduler_basic
+
+# Live Postmark E2E (requires ngrok + credentials)
 RUST_SERVICE_LIVE_TEST=1 \
 POSTMARK_INBOUND_HOOK_URL=https://YOUR-NGROK-URL.ngrok-free.dev \
 POSTMARK_TEST_FROM=you@example.com \
 cargo test -p scheduler_module --test service_real_email -- --nocapture
 ```
 
-### Frontend (React + Vite)
-
+### Linting
 ```bash
-cd website
-npm run dev      # Development server
+cargo clippy --all-targets --all-features
+cargo fmt --check
+```
+
+### Website
+```bash
+cd website && npm install
+npm run dev      # Dev server on port 5173
 npm run build    # Production build
 npm run lint     # ESLint
-npm run preview  # Preview production build
 ```
 
-## Project Structure
+## Architecture
 
+### Data Flow
 ```
-DoWhiz/
-├── DoWhiz_service/              # Main Rust workspace
-│   ├── scheduler_module/        # Webhooks, scheduling, service binary
-│   │   ├── src/lib.rs          # Core scheduler logic, task definitions
-│   │   ├── src/service.rs      # HTTP server (Axum), webhook handling
-│   │   ├── src/past_emails.rs  # Email archive hydration
-│   │   ├── src/user_store/     # Per-user SQLite management
-│   │   ├── src/index_store/    # Global task index
-│   │   └── tests/              # Integration tests
-│   ├── send_emails_module/      # Postmark email sending
-│   └── run_task_module/         # Codex CLI execution
-├── website/                     # React + Vite landing page
-└── .workspace/run_task/         # Runtime state (not in git)
-    ├── workspaces/<msg_id>/     # Per-task execution dirs
-    ├── users/<user_id>/         # Per-user data, memory, mail archive
-    └── state/                   # Global DBs (users.db, task_index.db)
+Inbound email (Postmark webhook)
+  → POST /postmark/inbound
+  → Deduplication (postmark_processed_ids.txt)
+  → User registration (users.db)
+  → RunTask scheduled (user's tasks.db)
+  → Scheduler loop polls task_index.db (1 sec interval)
+  → Task execution (Codex CLI or Claude CLI)
+  → SendEmail scheduled
+  → Postmark API sends reply
+  → Archive to user's mail/ directory
 ```
 
-## Key Architectural Patterns
+### Rust Workspace Modules
+- **scheduler_module**: HTTP server (Axum), task scheduler, SQLite persistence, webhook handling
+- **send_emails_module**: Postmark API wrapper for sending emails with attachments
+- **run_task_module**: CLI runner for Codex (OpenAI) and Claude (Anthropic) agents
 
-### Multi-tenant Isolation
-- Each user has a UUID; separate SQLite databases per user
-- Email normalization handles case and `+tag` aliases
-- Strict workspace isolation per task execution
-
-### Task Scheduling
-- Schedule types: `cron` (recurring) or `one_shot` (single execution)
-- Global index store for O(log n) due-task queries
-- Concurrency limits: global (`SCHEDULER_MAX_CONCURRENCY=10`) and per-user (`SCHEDULER_USER_MAX_CONCURRENCY=3`)
-
-### Scheduled Follow-ups
-Agents emit follow-up tasks via stdout blocks that the scheduler parses:
+### Runtime State (`$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/`)
 ```
-SCHEDULED_TASKS_JSON_BEGIN
-[{"type":"send_email","delay_minutes":15,"subject":"Reminder",...}]
-SCHEDULED_TASKS_JSON_END
+state/
+├── tasks.db                    # Global scheduler state
+├── users.db                    # User registry
+├── task_index.db               # Due task index for polling
+└── postmark_processed_ids.txt  # Deduplication list
+workspaces/<message_id>/
+├── workspace/                  # Agent workspace
+├── references/past_emails/     # Hydrated email history
+├── reply_email_draft.html      # Generated reply
+└── reply_email_attachments/
+users/<user_id>/
+├── state/tasks.db              # Per-user task queue
+├── memory/                     # Agent context/memory
+└── mail/                       # Email archive
 ```
 
-## Environment Variables
+### Employee Profiles (`DoWhiz_service/employee.toml`)
+- **Oliver (little_bear)**: Codex runner, addresses: oliver@dowhiz.com, little-bear@dowhiz.com, agent@dowhiz.com
+- **Maggie (mini_mouse)**: Claude runner, addresses: maggie@dowhiz.com, mini-mouse@dowhiz.com
 
-**Required:**
-- `POSTMARK_SERVER_TOKEN` - Email service
-- `AZURE_OPENAI_API_KEY_BACKUP`, `AZURE_OPENAI_ENDPOINT_BACKUP` - AI inference
+Each employee has isolated state directories. Employee configs include AGENTS.md, CLAUDE.md, and SOUL.md in `employees/<id>/`.
 
-**Service Config:**
-- `RUST_SERVICE_HOST` / `RUST_SERVICE_PORT` - Server binding (default: 0.0.0.0:9001)
-- `WORKSPACE_ROOT` - Task workspaces (default: `.workspace/run_task/workspaces`)
-- `USERS_ROOT` - User data (default: `.workspace/run_task/users`)
-- `CODEX_DISABLED=1` - Bypass Codex CLI for local testing
+### Key Concepts
+- **Task Kinds**: SendEmail, RunTask, Noop
+- **Schedules**: Cron (6-field: sec min hour day month weekday UTC) or OneShot (single DateTime)
+- **Follow-up Scheduling**: Agents emit `SCHEDULED_TASKS_JSON_BEGIN...END` blocks in stdout
+- **Per-User Isolation**: Separate SQLite databases and workspaces per user
+- **Email Blacklist**: Employee addresses ignored as senders (prevents loops)
+
+## Required Environment Variables (`.env`)
+```bash
+POSTMARK_SERVER_TOKEN=          # Postmark API key
+AZURE_OPENAI_API_KEY_BACKUP=    # For Codex runner
+AZURE_OPENAI_ENDPOINT_BACKUP=   # For Codex runner
+```
+
+### Key Optional Variables
+- `EMPLOYEE_ID`: Profile selector (little_bear, mini_mouse)
+- `CODEX_DISABLED=1`: Bypass Codex (placeholder replies)
+- `CLAUDE_MODEL`: Model for Claude runner (default: claude-opus-4-5)
+- `RUN_TASK_DOCKER_IMAGE`: Enable per-task Docker isolation
+- `SCHEDULER_MAX_CONCURRENCY`: Global max concurrent tasks (default: 10)
+- `SCHEDULER_USER_MAX_CONCURRENCY`: Per-user limit (default: 3)
+
+## Repository Structure
+- `DoWhiz_service/`: Rust backend service (scheduler, email handling, task execution)
+- `website/`: React frontend (Vite + React 19)
+- `DoWhiz_service/skills/`: 20+ agent skills (playwright-cli, pdf, docx, pptx, canvas-design, etc.)
+- `DoWhiz_service/employees/`: Employee persona configs
+- `external/openclaw/`: Reference implementation for multi-agent patterns
+- `function_app/`: Azure Functions deployment wrapper
 
 ## Code Style
-
-- Standard Rust formatting (rustfmt defaults)
-- `snake_case` for functions/modules, `CamelCase` for types, `SCREAMING_SNAKE_CASE` for constants
-- Commit messages: short, imperative, capitalized (e.g., "Update service.rs")
-
-## Testing
-
-- Unit tests: `#[test]` blocks in source files
-- Integration tests: `*/tests/*.rs`
-- Live Postmark tests: opt-in via `RUST_SERVICE_LIVE_TEST=1`
-
-<SOUL>
-Your name is Oliver, a little bear, who is cute and smart and capable. You always get task done.
-Go bears!
-</SOUL>
+- Keep modules under ~500-1000 lines; split into separate files with well-defined functionality
+- Run `cargo fmt` before commits
+- Run `npm run lint` for website changes
