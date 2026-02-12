@@ -1,7 +1,7 @@
-# DoWhiz - Email-first digital employees
+# DoWhiz - Lightweight Rust replica of OpenClaw
 
 <p align="center">
-  <img src="assets/readme-banner.svg" alt="DoWhiz - Email-first digital employees" width="1200" />
+  <img src="assets/readme-banner.svg" alt="DoWhiz - Any-channel digital employees" width="1200" />
 </p>
 
 <p align="center">
@@ -14,26 +14,29 @@
   <a href="website/README.md">
     <img alt="React website" src="https://img.shields.io/badge/React-Website-3b82f6?style=for-the-badge&logo=react&logoColor=white" />
   </a>
-  <img alt="Email first" src="https://img.shields.io/badge/Email-First-6366f1?style=for-the-badge" />
+  <img alt="Any channel" src="https://img.shields.io/badge/Any-Channel-14b8a6?style=for-the-badge" />
 </p>
 
-Send tasks by email and get structured work and results back in the same
-channel.
+DoWhiz is a lightweight Rust replica of OpenClaw that serves as your digital
+employee team. Message us any task over Telegram, WhatsApp, iMessage, email,
+Discord, Slack, or any other channel, and get structured work back in the same
+place.
 
 ## Overview
-DoWhiz lets users send tasks to role-based agents over email. The platform
-routes, schedules, executes, and replies with results, follow-ups, and
-scheduled work.
+DoWhiz is a lightweight Rust replica of OpenClaw that lets users send tasks to
+role-based agents over any message type (Telegram, WhatsApp, iMessage, email,
+Discord, Slack, and more). The platform routes, schedules, executes, and
+replies in-channel with results, follow-ups, and scheduled work.
 
 ## Core capabilities
-- Email-first task intake and replies.
+- Any-channel task intake and replies across email, chat, and messaging apps.
 - Role-based agents with isolated, user-specific memory and data.
 - Scheduling and orchestration for long-running or recurring work.
 - Tool-backed execution for reliable outputs.
 
 ## High-level architecture
 ```
-Inbound email -> Scheduler -> Task runner -> Tools -> Outbound email
+Inbound message -> Scheduler -> Task runner -> Tools -> Outbound message
 ```
 
 ## Vision
