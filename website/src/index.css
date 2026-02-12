@@ -112,6 +112,12 @@
     color: var(--text-secondary);
   }
 
+  .pronoun-tag {
+    border-color: rgba(0, 0, 0, 0.08);
+    background: rgba(0, 0, 0, 0.04);
+    color: var(--text-secondary);
+  }
+
   .security-card h3 {
     color: var(--text-primary);
   }
@@ -506,11 +512,29 @@ ul {
 }
 
 .role-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0;
+}
+
+.role-title-text {
   font-size: 0.8rem;
   letter-spacing: 0.06em;
   color: var(--text-secondary);
   font-weight: 600;
-  margin-bottom: 0;
+}
+
+.pronoun-tag {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  line-height: 1;
 }
 
 .role-profile {
