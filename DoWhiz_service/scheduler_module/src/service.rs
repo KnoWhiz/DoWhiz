@@ -1,7 +1,7 @@
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Redirect};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -29,6 +29,7 @@ use crate::adapters::slack::{is_url_verification, SlackChallengeResponse, SlackE
 use crate::employee_config::{load_employee_directory, EmployeeDirectory, EmployeeProfile};
 use crate::index_store::{IndexStore, TaskRef};
 use crate::mailbox;
+use crate::slack_store::{SlackInstallation, SlackStore};
 use crate::thread_state::{bump_thread_state, default_thread_state_path};
 use crate::user_store::{extract_emails, UserStore};
 use crate::channel::Channel;
@@ -61,10 +62,18 @@ pub struct ServiceConfig {
     pub scheduler_user_max_concurrency: usize,
     pub inbound_body_max_bytes: usize,
     pub skills_source_dir: Option<PathBuf>,
-    /// Slack bot OAuth token for sending messages
+    /// Slack bot OAuth token for sending messages (legacy single-workspace)
     pub slack_bot_token: Option<String>,
-    /// Slack bot user ID for filtering out bot's own messages
+    /// Slack bot user ID for filtering out bot's own messages (legacy single-workspace)
     pub slack_bot_user_id: Option<String>,
+    /// Path to slack installations database
+    pub slack_store_path: PathBuf,
+    /// Slack OAuth client ID (for multi-workspace support)
+    pub slack_client_id: Option<String>,
+    /// Slack OAuth client secret (for multi-workspace support)
+    pub slack_client_secret: Option<String>,
+    /// Slack OAuth redirect URI
+    pub slack_redirect_uri: Option<String>,
 }
 
 impl ServiceConfig {
@@ -169,6 +178,16 @@ impl ServiceConfig {
         // Slack configuration
         let slack_bot_token = env::var("SLACK_BOT_TOKEN").ok().filter(|s| !s.is_empty());
         let slack_bot_user_id = env::var("SLACK_BOT_USER_ID").ok().filter(|s| !s.is_empty());
+        let slack_store_path = resolve_path(env::var("SLACK_STORE_PATH").unwrap_or_else(|_| {
+            employee_runtime_root
+                .join("state")
+                .join("slack.db")
+                .to_string_lossy()
+                .into_owned()
+        }))?;
+        let slack_client_id = env::var("SLACK_CLIENT_ID").ok().filter(|s| !s.is_empty());
+        let slack_client_secret = env::var("SLACK_CLIENT_SECRET").ok().filter(|s| !s.is_empty());
+        let slack_redirect_uri = env::var("SLACK_REDIRECT_URI").ok().filter(|s| !s.is_empty());
 
         Ok(Self {
             host,
@@ -192,6 +211,10 @@ impl ServiceConfig {
             skills_source_dir,
             slack_bot_token,
             slack_bot_user_id,
+            slack_store_path,
+            slack_client_id,
+            slack_client_secret,
+            slack_redirect_uri,
         })
     }
 }
@@ -202,6 +225,7 @@ struct AppState {
     dedupe_store: Arc<AsyncMutex<ProcessedMessageStore>>,
     user_store: Arc<UserStore>,
     index_store: Arc<IndexStore>,
+    slack_store: Arc<SlackStore>,
 }
 
 #[derive(Default)]
@@ -287,10 +311,13 @@ pub async fn run_server(
     config: ServiceConfig,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> Result<(), BoxError> {
+    // Export SLACK_STORE_PATH so execute_slack_send can find the OAuth tokens
+    env::set_var("SLACK_STORE_PATH", &config.slack_store_path);
     let config = Arc::new(config);
     let dedupe_store = ProcessedMessageStore::load(&config.processed_ids_path)?;
     let user_store = Arc::new(UserStore::new(&config.users_db_path)?);
     let index_store = Arc::new(IndexStore::new(&config.task_index_path)?);
+    let slack_store = Arc::new(SlackStore::new(&config.slack_store_path)?);
     if let Ok(user_ids) = user_store.list_user_ids() {
         for user_id in user_ids {
             let paths = user_store.user_paths(&config.users_root, &user_id);
@@ -445,6 +472,7 @@ pub async fn run_server(
         dedupe_store: Arc::new(AsyncMutex::new(dedupe_store)),
         user_store,
         index_store,
+        slack_store,
     };
 
     let host: IpAddr = config
@@ -459,6 +487,8 @@ pub async fn run_server(
         .route("/health", get(health))
         .route("/postmark/inbound", post(postmark_inbound))
         .route("/slack/events", post(slack_events))
+        .route("/slack/install", get(slack_install))
+        .route("/slack/oauth/callback", get(slack_oauth_callback))
         .with_state(state)
         .layer(DefaultBodyLimit::max(config.inbound_body_max_bytes));
 
@@ -651,9 +681,10 @@ async fn slack_events(State(state): State<AppState>, body: Bytes) -> impl IntoRe
     let config = state.config.clone();
     let user_store = state.user_store.clone();
     let index_store = state.index_store.clone();
+    let slack_store = state.slack_store.clone();
     let body_bytes = body.to_vec();
     tokio::task::spawn_blocking(move || {
-        if let Err(err) = process_slack_event(&config, &user_store, &index_store, &body_bytes) {
+        if let Err(err) = process_slack_event(&config, &user_store, &index_store, &slack_store, &body_bytes) {
             error!("failed to process slack event: {err}");
         }
     });
@@ -661,10 +692,198 @@ async fn slack_events(State(state): State<AppState>, body: Bytes) -> impl IntoRe
     (StatusCode::OK, Json(json!({"status": "accepted"})))
 }
 
+/// Redirect to Slack OAuth authorization page.
+/// GET /slack/install
+async fn slack_install(State(state): State<AppState>) -> impl IntoResponse {
+    let client_id = match &state.config.slack_client_id {
+        Some(id) => id.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Slack OAuth not configured (missing SLACK_CLIENT_ID)",
+            )
+                .into_response();
+        }
+    };
+
+    let redirect_uri = state
+        .config
+        .slack_redirect_uri
+        .clone()
+        .unwrap_or_else(|| format!("http://localhost:{}/slack/oauth/callback", state.config.port));
+
+    let scopes = "chat:write,channels:history,groups:history,im:history,mpim:history";
+
+    let auth_url = format!(
+        "https://slack.com/oauth/v2/authorize?client_id={}&scope={}&redirect_uri={}",
+        urlencoding::encode(&client_id),
+        urlencoding::encode(scopes),
+        urlencoding::encode(&redirect_uri)
+    );
+
+    Redirect::temporary(&auth_url).into_response()
+}
+
+/// Query parameters for OAuth callback.
+#[derive(Debug, Deserialize)]
+struct SlackOAuthCallbackParams {
+    code: Option<String>,
+    error: Option<String>,
+}
+
+/// Handle Slack OAuth callback.
+/// GET /slack/oauth/callback?code=...
+async fn slack_oauth_callback(
+    State(state): State<AppState>,
+    Query(params): Query<SlackOAuthCallbackParams>,
+) -> impl IntoResponse {
+    // Check for OAuth errors
+    if let Some(error) = params.error {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("Slack OAuth error: {}", error),
+        )
+            .into_response();
+    }
+
+    let code = match params.code {
+        Some(c) => c,
+        None => {
+            return (StatusCode::BAD_REQUEST, "Missing OAuth code").into_response();
+        }
+    };
+
+    let client_id = match &state.config.slack_client_id {
+        Some(id) => id.clone(),
+        None => {
+            return (StatusCode::SERVICE_UNAVAILABLE, "SLACK_CLIENT_ID not configured").into_response();
+        }
+    };
+
+    let client_secret = match &state.config.slack_client_secret {
+        Some(secret) => secret.clone(),
+        None => {
+            return (StatusCode::SERVICE_UNAVAILABLE, "SLACK_CLIENT_SECRET not configured").into_response();
+        }
+    };
+
+    let redirect_uri = state
+        .config
+        .slack_redirect_uri
+        .clone()
+        .unwrap_or_else(|| format!("http://localhost:{}/slack/oauth/callback", state.config.port));
+
+    // Exchange code for token
+    let client = reqwest::Client::new();
+    let token_response = match client
+        .post("https://slack.com/api/oauth.v2.access")
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("code", code.as_str()),
+            ("redirect_uri", redirect_uri.as_str()),
+        ])
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            error!("Slack OAuth token exchange failed: {}", e);
+            return (StatusCode::BAD_GATEWAY, "Failed to contact Slack API").into_response();
+        }
+    };
+
+    let token_json: serde_json::Value = match token_response.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            error!("Failed to parse Slack OAuth response: {}", e);
+            return (StatusCode::BAD_GATEWAY, "Invalid response from Slack").into_response();
+        }
+    };
+
+    // Check for API errors
+    if token_json.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let error_msg = token_json
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        error!("Slack OAuth error: {}", error_msg);
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("Slack API error: {}", error_msg),
+        )
+            .into_response();
+    }
+
+    // Extract installation details
+    let team_id = token_json
+        .get("team")
+        .and_then(|t| t.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let team_name = token_json
+        .get("team")
+        .and_then(|t| t.get("name"))
+        .and_then(|v| v.as_str());
+    let bot_token = token_json
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let bot_user_id = token_json
+        .get("bot_user_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if team_id.is_empty() || bot_token.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Missing team_id or access_token in Slack response",
+        )
+            .into_response();
+    }
+
+    // Save installation
+    let installation = SlackInstallation {
+        team_id: team_id.to_string(),
+        team_name: team_name.map(|s| s.to_string()),
+        bot_token: bot_token.to_string(),
+        bot_user_id: bot_user_id.to_string(),
+        installed_at: Utc::now(),
+    };
+
+    if let Err(e) = state.slack_store.upsert_installation(&installation) {
+        error!("Failed to save Slack installation: {}", e);
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save installation").into_response();
+    }
+
+    info!(
+        "Slack app installed for team {} ({})",
+        team_id,
+        team_name.unwrap_or("unknown")
+    );
+
+    // Return success page
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html>
+<head><title>DoWhiz - Slack Installation Complete</title></head>
+<body style="font-family: sans-serif; text-align: center; padding: 50px;">
+    <h1>Installation Complete!</h1>
+    <p>DoWhiz has been successfully installed to <strong>{}</strong>.</p>
+    <p>You can now close this window and start chatting with the bot in Slack.</p>
+</body>
+</html>"#,
+        team_name.unwrap_or(team_id)
+    );
+
+    (StatusCode::OK, axum::response::Html(html)).into_response()
+}
+
 fn process_slack_event(
     config: &ServiceConfig,
     user_store: &UserStore,
     index_store: &IndexStore,
+    slack_store: &SlackStore,
     raw_payload: &[u8],
 ) -> Result<(), BoxError> {
     use crate::adapters::slack::SlackInboundAdapter;
@@ -672,15 +891,23 @@ fn process_slack_event(
 
     info!("processing slack event");
 
-    // Build bot_user_ids set from config
+    // Parse wrapper first to get team_id
+    let wrapper: SlackEventWrapper = serde_json::from_slice(raw_payload)?;
+
+    // Look up bot_user_id from SlackStore (with fallback to env var)
+    let team_id = wrapper.team_id.as_deref().unwrap_or("");
     let mut bot_user_ids = HashSet::new();
-    if let Some(ref bot_id) = config.slack_bot_user_id {
+    if let Ok(installation) = slack_store.get_installation_or_env(team_id) {
+        if !installation.bot_user_id.is_empty() {
+            bot_user_ids.insert(installation.bot_user_id);
+        }
+    } else if let Some(ref bot_id) = config.slack_bot_user_id {
+        // Legacy fallback
         bot_user_ids.insert(bot_id.clone());
     }
     let adapter = SlackInboundAdapter::new(bot_user_ids);
 
-    // Check if this is a bot message (should be ignored) before parsing
-    let wrapper: SlackEventWrapper = serde_json::from_slice(raw_payload)?;
+    // Check if this is a bot message (should be ignored)
     if let Some(ref event) = wrapper.event {
         if adapter.is_bot_message(event) {
             info!("ignoring bot message from user {:?}", event.user);
@@ -770,6 +997,7 @@ fn process_slack_event(
         thread_epoch: Some(thread_state.epoch),
         thread_state_path: Some(thread_state_path.clone()),
         channel: Channel::Slack,
+        slack_team_id: message.metadata.slack_team_id.clone(),
     };
 
     // Schedule the task
@@ -943,6 +1171,7 @@ pub fn process_inbound_payload(
         thread_epoch: Some(thread_state.epoch),
         thread_state_path: Some(thread_state_path.clone()),
         channel: Channel::Email,
+        slack_team_id: None,
     };
 
     let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;

@@ -264,6 +264,10 @@ fn email_flow_injects_github_env() {
         skills_source_dir: None,
         slack_bot_token: None,
         slack_bot_user_id: None,
+        slack_store_path: state_root.join("slack.db"),
+        slack_client_id: None,
+        slack_client_secret: None,
+        slack_redirect_uri: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");

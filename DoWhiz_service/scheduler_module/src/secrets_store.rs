@@ -78,6 +78,7 @@ mod tests {
             thread_epoch: None,
             thread_state_path: None,
             channel: crate::channel::Channel::default(),
+            slack_team_id: None,
         }
     }
 
