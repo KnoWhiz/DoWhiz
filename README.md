@@ -189,5 +189,8 @@ cd website
 npm run lint
 ```
 
+## Documentation and Task Board
+https://docs.google.com/document/d/1MRU00FTJIlCJno2yj9jrlnXNPq1TJ34B5jldg687fSg/edit?tab=t.0
+
 ## License
 See `LICENSE`.
