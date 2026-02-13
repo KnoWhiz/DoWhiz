@@ -97,7 +97,10 @@ impl ServiceConfig {
             .clone();
 
         let runtime_root = default_runtime_root()?;
-        let employee_runtime_root = runtime_root.join(&employee_id);
+        let employee_runtime_root = employee_profile
+            .runtime_root
+            .clone()
+            .unwrap_or_else(|| runtime_root.join(&employee_id));
         let workspace_root = resolve_path(env::var("WORKSPACE_ROOT").unwrap_or_else(|_| {
             employee_runtime_root
                 .join("workspaces")
@@ -2435,15 +2438,16 @@ mod tests {
         let employee = EmployeeProfile {
             id: "test-employee".to_string(),
             display_name: None,
-            runner: "codex".to_string(),
-            model: None,
-            addresses,
-            address_set,
-            agents_path: None,
-            claude_path: None,
-            soul_path: None,
-            skills_dir: None,
-        };
+        runner: "codex".to_string(),
+        model: None,
+        addresses,
+        address_set,
+        runtime_root: None,
+        agents_path: None,
+        claude_path: None,
+        soul_path: None,
+        skills_dir: None,
+    };
         let workspace = ensure_thread_workspace(
             &user_paths,
             "user123",

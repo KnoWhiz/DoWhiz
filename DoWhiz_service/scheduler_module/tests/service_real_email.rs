@@ -36,6 +36,7 @@ fn test_employee_directory(addresses: Vec<String>) -> (EmployeeProfile, Employee
         model: None,
         addresses: addresses.clone(),
         address_set: address_set.clone(),
+        runtime_root: None,
         agents_path: None,
         claude_path: None,
         soul_path: None,
