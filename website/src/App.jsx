@@ -12,6 +12,8 @@ import workflowTriage from './assets/Triage.jpg';
 import workflowExecution from './assets/Execution.jpg';
 import workflowReturn from './assets/Return.jpg';
 
+const WAITLIST_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSe--lL-qvzufB9paHd-DAoGzxmy-e4shhmzvtAwwoujq9o48Q/viewform?usp=publish-editor';
+
 function App() {
   const [theme, setTheme] = useState('dark');
 
@@ -181,8 +183,8 @@ function App() {
             Seamlessly collaborate with <a href="#roles" className="role-link">Oliver</a>, <a href="#roles" className="role-link">Maggie</a>, and your entire digital workforce—directly from your email inbox. Soon you will also reach them by phone, Slack, Discord, WhatsApp, and more.
           </p>
           <div className="hero-cta">
-            <a className="btn btn-primary" href="mailto:oliver@dowhiz.com">
-              Start Free Trial
+            <a className="btn btn-primary" href={WAITLIST_FORM_URL} target="_blank" rel="noopener noreferrer">
+              Join waitlist
             </a>
           </div>
         </div>
