@@ -69,6 +69,8 @@ pub struct RunTaskParams {
     pub model_name: String,
     pub runner: String,
     pub codex_disabled: bool,
+    /// Channel for the reply: "email", "slack", "telegram", etc.
+    pub channel: String,
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +82,7 @@ struct RunTaskRequest<'a> {
     reference_dir: &'a Path,
     model_name: &'a str,
     reply_to: &'a [String],
+    channel: &'a str,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -293,6 +296,7 @@ pub fn run_task(params: &RunTaskParams) -> Result<RunTaskOutput, RunTaskError> {
         reference_dir: &params.reference_dir,
         model_name: params.model_name.as_str(),
         reply_to: &params.reply_to,
+        channel: &params.channel,
     };
 
     let (reply_html_path, reply_attachments_dir) = prepare_workspace(&request)?;
@@ -416,6 +420,7 @@ fn run_codex_task(
         runner,
         &memory_context,
         !request.reply_to.is_empty(),
+        request.channel,
     );
 
     let output = if use_docker {
@@ -570,7 +575,8 @@ fn run_codex_task(
         });
     }
 
-    if !reply_html_path.exists() {
+    // Only check for reply file if a reply was expected
+    if !request.reply_to.is_empty() && !reply_html_path.exists() {
         return Err(RunTaskError::OutputMissing {
             path: reply_html_path,
             output: output_tail,
@@ -622,6 +628,7 @@ fn run_claude_task(
         runner,
         &memory_context,
         !request.reply_to.is_empty(),
+        request.channel,
     );
 
     let env_overrides = prepare_claude_env(&api_key, &model_name)?;
@@ -652,7 +659,8 @@ fn run_claude_task(
     let (scheduler_actions, scheduler_actions_error) = extract_scheduler_actions(&assistant_text);
     let assistant_tail = tail_string(&assistant_text, 2000);
 
-    if !reply_html_path.exists() {
+    // Only check for reply file if a reply was expected
+    if !request.reply_to.is_empty() && !reply_html_path.exists() {
         return Err(RunTaskError::OutputMissing {
             path: reply_html_path,
             output: assistant_tail,
@@ -971,11 +979,20 @@ fn prepare_workspace(request: &RunTaskRequest<'_>) -> Result<(PathBuf, PathBuf),
         "reference_dir",
     )?;
 
-    let reply_html_path = request.workspace_dir.join("reply_email_draft.html");
-    let reply_attachments_dir = request.workspace_dir.join("reply_email_attachments");
+    // Use channel-specific reply file and attachments directory
+    let (reply_path, reply_attachments_dir) = match request.channel.to_lowercase().as_str() {
+        "slack" | "telegram" => (
+            request.workspace_dir.join("reply_message.txt"),
+            request.workspace_dir.join("reply_attachments"),
+        ),
+        _ => (
+            request.workspace_dir.join("reply_email_draft.html"),
+            request.workspace_dir.join("reply_email_attachments"),
+        ),
+    };
     ensure_dir_exists(&reply_attachments_dir, "reply_attachments_dir")?;
 
-    Ok((reply_html_path, reply_attachments_dir))
+    Ok((reply_path, reply_attachments_dir))
 }
 
 fn write_placeholder_reply(path: &Path) -> Result<(), RunTaskError> {
@@ -1699,6 +1716,7 @@ fn build_prompt(
     runner: &str,
     memory_context: &str,
     reply_required: bool,
+    channel: &str,
 ) -> String {
     let memory_section = if memory_context.trim().is_empty() {
         "Memory context (from memory/*.md):\n- (no memory files found)\n\n".to_string()
@@ -1708,10 +1726,23 @@ fn build_prompt(
             memory_context = memory_context.trim_end()
         )
     };
-    let reply_instruction = if reply_required {
-        "2. After finishing the task (step one), make sure you write a proper HTML email draft in reply_email_draft.html in the workspace root. If there are files to attach, put them in reply_email_attachments/ and reference them in the email draft. Do not pretend the job has been done without actually doing it, and do not write the email draft until the task is done. If you are not sure about the task, send another email to ask for clarification (and if any, attach information about why did you fail to get the task done, what is the exact error you encountered)."
+
+    // Channel-specific reply instructions
+    let reply_instruction = if !reply_required {
+        "2. After finishing the task (step one), do not write any reply. This inbound message is from a non-replyable address, so skip creating any reply files."
     } else {
-        "2. After finishing the task (step one), do not write any email draft. This inbound message is from a non-replyable address, so skip creating reply_email_draft.html or reply_email_attachments/."
+        match channel.to_lowercase().as_str() {
+            "slack" => {
+                "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Use Slack mrkdwn formatting: *bold*, _italic_, `code`, ```code blocks```. Keep the reply concise and conversational. Do not use HTML. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."
+            }
+            "telegram" => {
+                "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Use Telegram MarkdownV2 formatting. Keep the reply concise. Do not use HTML. If there are files to attach, put them in reply_attachments/. Do not pretend the job has been done without actually doing it."
+            }
+            _ => {
+                // Default to email (HTML)
+                "2. After finishing the task (step one), make sure you write a proper HTML email draft in reply_email_draft.html in the workspace root. If there are files to attach, put them in reply_email_attachments/ and reference them in the email draft. Do not pretend the job has been done without actually doing it, and do not write the email draft until the task is done. If you are not sure about the task, send another email to ask for clarification (and if any, attach information about why did you fail to get the task done, what is the exact error you encountered)."
+            }
+        }
     };
     let guidance_section = build_guidance_section(workspace_dir, runner);
     format!(
@@ -1881,6 +1912,7 @@ mod tests {
             "codex",
             "--- memory/memo.md ---\nHello",
             true,
+            "email",
         );
 
         assert!(prompt.contains("Memory context"));
@@ -1901,9 +1933,10 @@ mod tests {
             "codex",
             "",
             false,
+            "email",
         );
 
-        assert!(prompt.contains("non-replyable address"));
+        assert!(prompt.contains("non-replyable"));
         assert!(!prompt.contains("write a proper HTML email draft"));
     }
 

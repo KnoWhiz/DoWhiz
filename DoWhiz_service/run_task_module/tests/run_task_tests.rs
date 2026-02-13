@@ -234,6 +234,7 @@ fn run_task_rejects_absolute_input_dir() {
         model_name: "test-model".to_string(),
         runner: "codex".to_string(),
         codex_disabled: false,
+        channel: "email".to_string(),
     };
 
     let err = run_task(&request).unwrap_err();

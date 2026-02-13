@@ -97,6 +97,7 @@ impl TaskExecutor for RecordingExecutor {
                     model_name: run.model_name.clone(),
                     runner: run.runner.clone(),
                     codex_disabled: run.codex_disabled,
+                    channel: run.channel.to_string(),
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
