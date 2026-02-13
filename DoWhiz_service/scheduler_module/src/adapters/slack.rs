@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::env;
 
 use crate::channel::{
     AdapterError, Attachment, Channel, ChannelMetadata, InboundAdapter, InboundMessage,
@@ -178,9 +179,12 @@ impl OutboundAdapter for SlackOutboundAdapter {
         };
 
         // Send via Slack API
+        let api_base = env::var("SLACK_API_BASE_URL")
+            .unwrap_or_else(|_| "https://slack.com/api".to_string());
+        let url = format!("{}/chat.postMessage", api_base.trim_end_matches('/'));
         let client = reqwest::blocking::Client::new();
         let response = client
-            .post("https://slack.com/api/chat.postMessage")
+            .post(url)
             .header("Authorization", format!("Bearer {}", self.bot_token))
             .header("Content-Type", "application/json")
             .json(&request)

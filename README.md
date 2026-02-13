@@ -129,6 +129,19 @@ EMPLOYEE_ID=boiled_egg RUST_SERVICE_PORT=9004 \
 ```
 Service addresses include `oliver@dowhiz.com`, `mini-mouse@dowhiz.com`, `devin@dowhiz.com`, and `proto@dowhiz.com` (plus aliases like `sticky-octopus@dowhiz.com`, `coder@dowhiz.com`, and `boiled-egg@dowhiz.com`).
 
+Fanout gateway (single Postmark server):
+```
+./DoWhiz_service/scripts/run_fanout_local.sh
+```
+Docker one-click (fanout + all employees):
+```
+./DoWhiz_service/scripts/run_all_employees_docker.sh
+```
+Proto debug (Docker):
+```
+./DoWhiz_service/scripts/run_proto_docker.sh
+```
+
 Docker (production image):
 ```
 docker build -t dowhiz-service .
@@ -190,14 +203,14 @@ npm run lint
 ```
 
 ### Slack Local Testing
-Set up the ngrok tunnel on port 9001:
+Set up the ngrok tunnel on port 9004:
 ```
-ngrok http 9001 --authtoken={NGROK_AUTHTOKEN}--domain=shayne-laminar-lillian.ngrok-free.dev
+ngrok http 9004 --authtoken={NGROK_AUTHTOKEN} --domain=shayne-laminar-lillian.ngrok-free.dev
 ```
 
 Start the dev employee (```boiled_egg```):
 cd DoWhiz_service && /Users/dylantang/.cargo/bin/cargo build --release
-./DoWhiz_service/scripts/run_employee.sh boiled_egg 9001 --public-url https://shayne-laminar-lillian.ngrok-free.dev --skip-hook
+./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004 --public-url https://shayne-laminar-lillian.ngrok-free.dev --skip-hook
 
 Go to Oauth URL: https://shayne-laminar-lillian.ngrok-free.dev/slack/oauth/callback
 - This endpoint may be unreachable on workstations with SafeBrowse.

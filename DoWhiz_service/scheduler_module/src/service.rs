@@ -551,37 +551,53 @@ fn execute_due_task(
             .expect("running thread lock poisoned");
         running.remove(&key);
     }
-    let executed = executed?;
-    if executed {
-        info!(
-            "scheduler task completed task_id={} user_id={} status=success",
-            task_ref.task_id, task_ref.user_id
-        );
-        let refreshed_scheduler =
-            Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default());
-        match refreshed_scheduler {
-            Ok(refreshed_scheduler) => {
-                index_store.sync_user_tasks(&task_ref.user_id, refreshed_scheduler.tasks())?;
-                let summary = summarize_tasks(refreshed_scheduler.tasks(), Utc::now());
-                log_task_snapshot(&task_ref.user_id, "after_execute", &summary);
-            }
-            Err(err) => {
-                warn!(
-                    "scheduler reload failed after execute task_id={} user_id={} error={}",
-                    task_ref.task_id, task_ref.user_id, err
+
+    match executed {
+        Ok(executed) => {
+            if executed {
+                info!(
+                    "scheduler task completed task_id={} user_id={} status=success",
+                    task_ref.task_id, task_ref.user_id
                 );
-                index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks())?;
-                let summary = summarize_tasks(scheduler.tasks(), Utc::now());
-                log_task_snapshot(&task_ref.user_id, "after_execute", &summary);
+                let refreshed_scheduler =
+                    Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default());
+                match refreshed_scheduler {
+                    Ok(refreshed_scheduler) => {
+                        index_store.sync_user_tasks(&task_ref.user_id, refreshed_scheduler.tasks())?;
+                        let summary = summarize_tasks(refreshed_scheduler.tasks(), Utc::now());
+                        log_task_snapshot(&task_ref.user_id, "after_execute", &summary);
+                    }
+                    Err(err) => {
+                        warn!(
+                            "scheduler reload failed after execute task_id={} user_id={} error={}",
+                            task_ref.task_id, task_ref.user_id, err
+                        );
+                        index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks())?;
+                        let summary = summarize_tasks(scheduler.tasks(), Utc::now());
+                        log_task_snapshot(&task_ref.user_id, "after_execute", &summary);
+                    }
+                }
+            } else {
+                warn!(
+                    "scheduler task skipped task_id={} user_id={} status={}",
+                    task_ref.task_id, task_ref.user_id, status_label
+                );
             }
+            Ok(())
         }
-    } else {
-        warn!(
-            "scheduler task skipped task_id={} user_id={} status={}",
-            task_ref.task_id, task_ref.user_id, status_label
-        );
+        Err(err) => {
+            if let Err(sync_err) = index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks()) {
+                warn!(
+                    "scheduler sync failed after error task_id={} user_id={} error={}",
+                    task_ref.task_id, task_ref.user_id, sync_err
+                );
+            } else {
+                let summary = summarize_tasks(scheduler.tasks(), Utc::now());
+                log_task_snapshot(&task_ref.user_id, "after_execute_error", &summary);
+            }
+            Err(Box::new(err))
+        }
     }
-    Ok(())
 }
 
 async fn health() -> impl IntoResponse {
