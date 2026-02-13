@@ -65,6 +65,7 @@ fn test_employee_directory(root: &Path) -> (EmployeeProfile, EmployeeDirectory) 
         model: None,
         addresses: addresses.clone(),
         address_set: address_set.clone(),
+        runtime_root: None,
         agents_path: Some(agents_path),
         claude_path: Some(claude_path),
         soul_path: Some(soul_path),
@@ -97,6 +98,7 @@ impl TaskExecutor for RecordingExecutor {
                     model_name: run.model_name.clone(),
                     runner: run.runner.clone(),
                     codex_disabled: run.codex_disabled,
+                    channel: run.channel.to_string(),
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;

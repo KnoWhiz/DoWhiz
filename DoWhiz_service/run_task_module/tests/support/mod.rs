@@ -250,5 +250,6 @@ pub fn build_params(workspace: &Path) -> RunTaskParams {
         model_name: "test-model".to_string(),
         runner: "codex".to_string(),
         codex_disabled: false,
+        channel: "email".to_string(),
     }
 }

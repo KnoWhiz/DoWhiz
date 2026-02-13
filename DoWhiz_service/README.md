@@ -57,6 +57,8 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 ```
 Each employee gets isolated `state/`, `users/`, and `workspaces/` folders under that root unless you override paths with environment variables.
 
+`employee.toml` also supports `runtime_root` per employee to override the default runtime location (for repo-local runs, use `.workspace/<employee_id>` relative to `DoWhiz_service/employee.toml`).
+
 Skills are copied per workspace: the base repo skills are always included, and `skills_dir` can optionally add overrides or extra skills.
 
 ## Per-task Docker execution
@@ -83,6 +85,8 @@ From the repo root:
 ```
 ./DoWhiz_service/scripts/run_employee.sh little_bear 9001
 ./DoWhiz_service/scripts/run_employee.sh mini_mouse 9002
+./DoWhiz_service/scripts/run_employee.sh sticky_octopus 9003
+./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004
 ```
 
 This command:
@@ -108,6 +112,14 @@ EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 \
 # Maggie / Mini-Mouse (Claude)
 EMPLOYEE_ID=mini_mouse RUST_SERVICE_PORT=9002 \
   cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9002
+
+# Sticky-Octopus (Codex)
+EMPLOYEE_ID=sticky_octopus RUST_SERVICE_PORT=9003 \
+  cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9003
+
+# Boiled-Egg (Codex)
+EMPLOYEE_ID=boiled_egg RUST_SERVICE_PORT=9004 \
+  cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9004
 ```
 
 2) Expose the service with ngrok (Terminal 2):
@@ -123,7 +135,7 @@ cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
 
 4) Send an email to the employee address:
 ```
-oliver@dowhiz.com   # or mini-mouse@dowhiz.com
+oliver@dowhiz.com   # or mini-mouse@dowhiz.com, devin@dowhiz.com, proto@dowhiz.com
 ```
 
 5) Watch logs for task execution. Outputs appear under:
@@ -137,7 +149,7 @@ These steps run a real inbound email through Postmark and wait for the outbound 
 Prereqs:
 - ngrok installed and authenticated.
 - Postmark inbound address configured on the server.
-- Sender signatures for `oliver@dowhiz.com`, `mini-mouse@dowhiz.com`, and the `POSTMARK_TEST_FROM` address.
+- Sender signatures for `oliver@dowhiz.com`, `mini-mouse@dowhiz.com`, `devin@dowhiz.com`, `sticky-octopus@dowhiz.com`, `coder@dowhiz.com`, `proto@dowhiz.com`, `boiled-egg@dowhiz.com`, and the `POSTMARK_TEST_FROM` address.
 - `POSTMARK_SERVER_TOKEN`, `POSTMARK_TEST_FROM`, `AZURE_OPENAI_API_KEY_BACKUP`, and `AZURE_OPENAI_ENDPOINT_BACKUP` set.
 - `RUN_CODEX_E2E=1` if you want Codex to execute real tasks (otherwise it is disabled in the live test).
 
@@ -267,7 +279,7 @@ cargo test -p scheduler_module --test service_real_email -- --nocapture
 - `RUST_SERVICE_HOST` / `RUST_SERVICE_PORT`
 - `EMPLOYEE_ID` (selects employee profile from `employee.toml`)
 - `EMPLOYEE_CONFIG_PATH` (defaults to `DoWhiz_service/employee.toml`)
-- `WORKSPACE_ROOT` (default: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces`)
+- `WORKSPACE_ROOT` (default: `<runtime_root>/workspaces`, where `runtime_root` is `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>` unless overridden by `runtime_root` in `employee.toml`)
 - `SCHEDULER_STATE_PATH` (default: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/tasks.db`)
 - `PROCESSED_IDS_PATH` (default: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/postmark_processed_ids.txt`)
 - `USERS_ROOT` (default: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/users`)

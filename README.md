@@ -103,6 +103,9 @@ disabled with `RUN_TASK_DOCKER_AUTO_BUILD=0`).
 One-command local run (auto ngrok + Postmark hook):
 ```
 ./DoWhiz_service/scripts/run_employee.sh little_bear 9001
+./DoWhiz_service/scripts/run_employee.sh mini_mouse 9002
+./DoWhiz_service/scripts/run_employee.sh sticky_octopus 9003
+./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004
 ```
 Requires `POSTMARK_SERVER_TOKEN` in your `.env`, plus `ngrok` and `python3` installed. Use `--public-url`, `--skip-hook`, or `--skip-ngrok` for advanced flows.
 
@@ -115,7 +118,16 @@ EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 \
 # Maggie / Mini-Mouse (Claude)
 EMPLOYEE_ID=mini_mouse RUST_SERVICE_PORT=9002 \
   cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9002
+
+# Sticky-Octopus (Codex)
+EMPLOYEE_ID=sticky_octopus RUST_SERVICE_PORT=9003 \
+  cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9003
+
+# Boiled-Egg (Codex)
+EMPLOYEE_ID=boiled_egg RUST_SERVICE_PORT=9004 \
+  cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9004
 ```
+Service addresses include `oliver@dowhiz.com`, `mini-mouse@dowhiz.com`, `devin@dowhiz.com`, and `proto@dowhiz.com` (plus aliases like `sticky-octopus@dowhiz.com`, `coder@dowhiz.com`, and `boiled-egg@dowhiz.com`).
 
 Docker (production image):
 ```

@@ -238,6 +238,7 @@ impl TaskExecutor for ModuleExecutor {
                     model_name: task.model_name.clone(),
                     runner: task.runner.clone(),
                     codex_disabled: task.codex_disabled,
+                    channel: task.channel.to_string(),
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -1699,22 +1700,36 @@ fn schedule_auto_reply<E: TaskExecutor>(
         return Ok(false);
     }
 
-    let html_path = task.workspace_dir.join("reply_email_draft.html");
-    if !html_path.exists() {
+    // Determine reply file path and attachments dir based on channel
+    let (reply_path, attachments_dir) = match &task.channel {
+        Channel::Slack | Channel::Telegram => {
+            let txt_path = task.workspace_dir.join("reply_message.txt");
+            let attachments = task.workspace_dir.join("reply_attachments");
+            (txt_path, attachments)
+        }
+        _ => {
+            // Default to email (HTML)
+            let html_path = task.workspace_dir.join("reply_email_draft.html");
+            let attachments = task.workspace_dir.join("reply_email_attachments");
+            (html_path, attachments)
+        }
+    };
+
+    if !reply_path.exists() {
         warn!(
-            "auto reply missing reply_email_draft.html in workspace {}",
+            "auto reply missing {} in workspace {}",
+            reply_path.file_name().unwrap_or_default().to_string_lossy(),
             task.workspace_dir.display()
         );
         return Ok(false);
     }
-    let attachments_dir = task.workspace_dir.join("reply_email_attachments");
     let reply_context = load_reply_context(&task.workspace_dir);
     let reply_from = task.reply_from.clone().or(reply_context.from.clone());
 
     let send_task = SendReplyTask {
         channel: task.channel.clone(),
         subject: reply_context.subject,
-        html_path,
+        html_path: reply_path,
         attachments_dir,
         from: reply_from,
         to: task.reply_to.clone(),

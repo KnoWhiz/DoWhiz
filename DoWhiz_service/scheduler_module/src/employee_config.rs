@@ -26,6 +26,8 @@ pub struct EmployeeConfigEntry {
     #[serde(default)]
     pub addresses: Vec<String>,
     #[serde(default)]
+    pub runtime_root: Option<PathBuf>,
+    #[serde(default)]
     pub agents_path: Option<PathBuf>,
     #[serde(default)]
     pub claude_path: Option<PathBuf>,
@@ -43,6 +45,7 @@ pub struct EmployeeProfile {
     pub model: Option<String>,
     pub addresses: Vec<String>,
     pub address_set: HashSet<String>,
+    pub runtime_root: Option<PathBuf>,
     pub agents_path: Option<PathBuf>,
     pub claude_path: Option<PathBuf>,
     pub soul_path: Option<PathBuf>,
@@ -124,6 +127,7 @@ pub fn load_employee_directory(config_path: &Path) -> Result<EmployeeDirectory, 
                 .map(|value| value.to_string()),
             addresses,
             address_set,
+            runtime_root: resolve_optional_path(base_dir, entry.runtime_root.as_ref()),
             agents_path: resolve_optional_path(base_dir, entry.agents_path.as_ref()),
             claude_path: resolve_optional_path(base_dir, entry.claude_path.as_ref()),
             soul_path: resolve_optional_path(base_dir, entry.soul_path.as_ref()),

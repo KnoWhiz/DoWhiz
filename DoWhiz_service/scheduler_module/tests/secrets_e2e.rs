@@ -80,6 +80,7 @@ fn test_employee_directory() -> (EmployeeProfile, EmployeeDirectory) {
         model: None,
         addresses: addresses.clone(),
         address_set: address_set.clone(),
+        runtime_root: None,
         agents_path: None,
         claude_path: None,
         soul_path: None,

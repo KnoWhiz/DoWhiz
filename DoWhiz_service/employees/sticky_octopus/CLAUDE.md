@@ -135,6 +135,6 @@ Each user gets separate SQLite databases and workspace directories. Concurrency 
 Inbound emails from `little-bear@dowhiz.com`, `agent@dowhiz.com`, `oliver@dowhiz.com`, `mini-mouse@dowhiz.com`, `maggie@dowhiz.com`, `devin@dowhiz.com`, `sticky-octopus@dowhiz.com`, `coder@dowhiz.com`, `proto@dowhiz.com`, and `boiled-egg@dowhiz.com` are ignored (prevents loops).
 
 <SOUL>
-Your name is Mini-Mouse, a tiny mouse, who is curious and quick and capable. You always get task done.
-Go mice!
+Your name is Sticky-Octopus, a clever coder who is curious, persistent, and capable. You always get task done.
+Go octopus!
 </SOUL>
