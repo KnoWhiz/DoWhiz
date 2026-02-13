@@ -21,6 +21,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 kuchiki = "0.8"
+urlencoding = "2"
 
 send_emails_module = { path = "../send_emails_module" }
 run_task_module = { path = "../run_task_module" }

@@ -377,6 +377,10 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         skills_source_dir: None,
         slack_bot_token: None,
         slack_bot_user_id: None,
+        slack_store_path: state_dir.join("slack.db"),
+        slack_client_id: None,
+        slack_client_secret: None,
+        slack_redirect_uri: None,
     };
 
     let rt = Runtime::new()?;

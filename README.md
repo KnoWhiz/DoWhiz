@@ -189,5 +189,25 @@ cd website
 npm run lint
 ```
 
+### Slack Local Testing
+Set up the ngrok tunnel on port 9001:
+```
+ngrok http 9001 --authtoken={NGROK_AUTHTOKEN}--domain=shayne-laminar-lillian.ngrok-free.dev
+```
+
+Start the dev employee (```boiled_egg```):
+cd DoWhiz_service && /Users/dylantang/.cargo/bin/cargo build --release
+./DoWhiz_service/scripts/run_employee.sh boiled_egg 9001 --public-url https://shayne-laminar-lillian.ngrok-free.dev --skip-hook
+
+Go to Oauth URL: https://shayne-laminar-lillian.ngrok-free.dev/slack/oauth/callback
+- This endpoint may be unreachable on workstations with SafeBrowse.
+- To bypass this, go this URL on your mobile device with Wi-Fi turned off (use mobile data)
+- After OAuth, invite the bot to the channel:
+  - In Slack, go to the channel and type /invite @DoWhiz (or click the channel settings → Integrations → Add apps)
+
+
+## Documentation and Task Board
+https://docs.google.com/document/d/1MRU00FTJIlCJno2yj9jrlnXNPq1TJ34B5jldg687fSg/edit?tab=t.0
+
 ## License
 See `LICENSE`.
