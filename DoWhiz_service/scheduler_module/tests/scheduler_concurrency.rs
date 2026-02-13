@@ -103,6 +103,7 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
             thread_epoch: None,
             thread_state_path: None,
             channel: scheduler_module::channel::Channel::default(),
+            slack_team_id: None,
         };
 
         let mut scheduler = Scheduler::load(&paths.tasks_db_path, ModuleExecutor::default())?;
@@ -134,6 +135,10 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
         skills_source_dir: None,
         slack_bot_token: None,
         slack_bot_user_id: None,
+        slack_store_path: state_dir.join("slack.db"),
+        slack_client_id: None,
+        slack_client_secret: None,
+        slack_redirect_uri: None,
     };
 
     let rt = Runtime::new()?;

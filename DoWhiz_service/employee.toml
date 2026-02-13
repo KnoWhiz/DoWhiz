@@ -24,3 +24,27 @@ agents_path = "employees/mini_mouse/AGENTS.md"
 claude_path = "employees/mini_mouse/CLAUDE.md"
 soul_path = "employees/mini_mouse/SOUL.md"
 skills_dir = "skills"
+
+[[employees]]
+id = "sticky_octopus"
+display_name = "Sticky-Octopus"
+runner = "codex"
+model = "gpt-5.2-codex"
+addresses = ["devin@dowhiz.com", "sticky-octopus@dowhiz.com", "coder@dowhiz.com"]
+runtime_root = ".workspace/sticky_octopus"
+agents_path = "employees/sticky_octopus/AGENTS.md"
+claude_path = "employees/sticky_octopus/CLAUDE.md"
+soul_path = "employees/sticky_octopus/SOUL.md"
+skills_dir = "skills"
+
+[[employees]]
+id = "boiled_egg"
+display_name = "Boiled-Egg"
+runner = "codex"
+model = "gpt-5.2-codex"
+addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com"]
+runtime_root = ".workspace/boiled_egg"
+agents_path = "employees/boiled_egg/AGENTS.md"
+claude_path = "employees/boiled_egg/CLAUDE.md"
+soul_path = "employees/boiled_egg/SOUL.md"
+skills_dir = "skills"

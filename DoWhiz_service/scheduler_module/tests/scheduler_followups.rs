@@ -62,6 +62,7 @@ fn run_task_followups_persist_to_sqlite() {
         thread_epoch: None,
         thread_state_path: None,
         channel: scheduler_module::channel::Channel::default(),
+        slack_team_id: None,
     };
 
     let mut scheduler =

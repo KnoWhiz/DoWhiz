@@ -170,6 +170,7 @@ fn scheduler_actions_end_to_end() {
         thread_epoch: Some(1),
         thread_state_path: None,
         channel: scheduler_module::channel::Channel::default(),
+        slack_team_id: None,
     };
 
     scheduler
