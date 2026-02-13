@@ -65,6 +65,7 @@ fn test_employee_directory(root: &Path) -> (EmployeeProfile, EmployeeDirectory) 
         model: None,
         addresses: addresses.clone(),
         address_set: address_set.clone(),
+        runtime_root: None,
         agents_path: Some(agents_path),
         claude_path: Some(claude_path),
         soul_path: Some(soul_path),

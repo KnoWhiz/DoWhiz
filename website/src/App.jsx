@@ -402,7 +402,7 @@ function App() {
               <span className="text-gradient">with A Digital Employee Team</span>
             </h1>
             <p className="hero-subtitle">
-              Seamlessly collaborate with <a href="#roles" className="role-link">Oliver</a>, <a href="#roles" className="role-link">Maggie</a>, and your entire digital workforce—directly from your email inbox. Soon you will also reach them by phone, Slack, Discord, WhatsApp, and more.
+              Seamlessly collaborate with <a href="#roles" className="role-link">Oliver 🧸</a> (Writer), <a href="#roles" className="role-link">Maggie 🐭</a> (TPM), <a href="#roles" className="role-link">Devin 🐙</a> (Coder), <a href="#roles" className="role-link">Lumio 🐉</a> (CEO), <a href="#roles" className="role-link">Claw 🦞</a> (OpenClaw assistant), <a href="#roles" className="role-link">Jeffery 🐦</a> (DeepTutor), <a href="#roles" className="role-link">Anna 🐘</a> (role in progress), and <a href="#roles" className="role-link">Rachel 👾</a> (GTM Specialist)—directly from your email inbox. Soon you will also reach them by phone, Slack, Discord, WhatsApp, and more.
             </p>
             <div className="hero-cta">
               <a className="btn btn-primary" href={WAITLIST_FORM_URL} target="_blank" rel="noopener noreferrer">
