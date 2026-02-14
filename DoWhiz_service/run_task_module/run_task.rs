@@ -981,7 +981,7 @@ fn prepare_workspace(request: &RunTaskRequest<'_>) -> Result<(PathBuf, PathBuf),
 
     // Use channel-specific reply file and attachments directory
     let (reply_path, reply_attachments_dir) = match request.channel.to_lowercase().as_str() {
-        "slack" | "telegram" => (
+        "slack" | "discord" | "telegram" => (
             request.workspace_dir.join("reply_message.txt"),
             request.workspace_dir.join("reply_attachments"),
         ),
@@ -1734,6 +1734,9 @@ fn build_prompt(
         match channel.to_lowercase().as_str() {
             "slack" => {
                 "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Use Slack mrkdwn formatting: *bold*, _italic_, `code`, ```code blocks```. Keep the reply concise and conversational. Do not use HTML. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."
+            }
+            "discord" => {
+                "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Use Discord markdown formatting: **bold**, *italic*, `code`, ```code blocks```. Keep the reply concise and conversational. Do not use HTML. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."
             }
             "telegram" => {
                 "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Use Telegram MarkdownV2 formatting. Keep the reply concise. Do not use HTML. If there are files to attach, put them in reply_attachments/. Do not pretend the job has been done without actually doing it."

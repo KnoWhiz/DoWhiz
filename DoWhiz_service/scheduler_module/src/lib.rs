@@ -18,6 +18,7 @@ pub mod employee_config;
 pub mod channel;
 pub mod adapters;
 pub mod slack_store;
+pub mod discord_gateway;
 use crate::memory_store::{
     resolve_user_memory_dir, sync_user_memory_to_workspace, sync_workspace_memory_to_user,
 };
@@ -208,6 +209,9 @@ impl TaskExecutor for ModuleExecutor {
                     Channel::Slack => {
                         execute_slack_send(task)?;
                     }
+                    Channel::Discord => {
+                        execute_discord_send(task)?;
+                    }
                     Channel::Email | Channel::Telegram => {
                         // Email (and Telegram as fallback) use Postmark
                         execute_email_send(task)?;
@@ -397,6 +401,67 @@ fn execute_slack_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
 
     info!(
         "sent Slack message to {:?}, message_id={}",
+        task.to, result.message_id
+    );
+    Ok(())
+}
+
+/// Execute a SendReplyTask via Discord.
+fn execute_discord_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
+    use crate::adapters::discord::DiscordOutboundAdapter;
+    use crate::channel::{ChannelMetadata, OutboundAdapter, OutboundMessage};
+
+    dotenvy::dotenv().ok();
+
+    let bot_token = std::env::var("DISCORD_BOT_TOKEN")
+        .map_err(|_| SchedulerError::TaskFailed("DISCORD_BOT_TOKEN not set".to_string()))?;
+
+    let adapter = DiscordOutboundAdapter::new(bot_token);
+
+    // Read text content from html_path if it exists
+    let text_body = if task.html_path.exists() {
+        fs::read_to_string(&task.html_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    // Parse channel_id from to[0]
+    let discord_channel_id = task
+        .to
+        .first()
+        .and_then(|s| s.parse::<u64>().ok());
+
+    let message = OutboundMessage {
+        channel: Channel::Discord,
+        from: task.from.clone(),
+        to: task.to.clone(),
+        cc: vec![],
+        bcc: vec![],
+        subject: task.subject.clone(),
+        text_body,
+        html_body: String::new(),
+        html_path: Some(task.html_path.clone()),
+        attachments_dir: Some(task.attachments_dir.clone()),
+        thread_id: task.in_reply_to.clone(),
+        metadata: ChannelMetadata {
+            discord_channel_id,
+            ..Default::default()
+        },
+    };
+
+    let result = adapter.send(&message).map_err(|err| {
+        SchedulerError::TaskFailed(format!("Discord send failed: {}", err))
+    })?;
+
+    if !result.success {
+        return Err(SchedulerError::TaskFailed(format!(
+            "Discord API error: {}",
+            result.error.unwrap_or_default()
+        )));
+    }
+
+    info!(
+        "sent Discord message to {:?}, message_id={}",
         task.to, result.message_id
     );
     Ok(())
@@ -757,6 +822,15 @@ CREATE TABLE IF NOT EXISTS send_slack_tasks (
     workspace_dir TEXT
 );
 
+CREATE TABLE IF NOT EXISTS send_discord_tasks (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    discord_guild_id TEXT,
+    discord_channel_id TEXT NOT NULL,
+    thread_id TEXT,
+    text_path TEXT NOT NULL,
+    workspace_dir TEXT
+);
+
 CREATE TABLE IF NOT EXISTS run_task_tasks (
     task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
     workspace_dir TEXT NOT NULL,
@@ -1029,6 +1103,7 @@ impl SqliteSchedulerStore {
                     // Dispatch to appropriate loader based on channel
                     let send_task = match channel {
                         Channel::Slack => self.load_send_slack_task(&conn, &id_raw)?,
+                        Channel::Discord => self.load_send_discord_task(&conn, &id_raw)?,
                         Channel::Email | Channel::Telegram => {
                             self.load_send_email_task(&conn, &id_raw)?
                         }
@@ -1084,6 +1159,9 @@ impl SqliteSchedulerStore {
                 match send.channel {
                     Channel::Slack => {
                         self.insert_send_slack_task(&tx, &task.id.to_string(), send)?;
+                    }
+                    Channel::Discord => {
+                        self.insert_send_discord_task(&tx, &task.id.to_string(), send)?;
                     }
                     Channel::Email | Channel::Telegram => {
                         self.insert_send_email_task(&tx, &task.id.to_string(), send)?;
@@ -1302,6 +1380,35 @@ impl SqliteSchedulerStore {
         Ok(())
     }
 
+    fn insert_send_discord_task(
+        &self,
+        tx: &Transaction,
+        task_id: &str,
+        send: &SendReplyTask,
+    ) -> Result<(), SchedulerError> {
+        // For Discord, we use to[0] as channel_id and html_path as text_path
+        let discord_channel_id = send.to.first().cloned().unwrap_or_default();
+        let thread_id = send.in_reply_to.clone();
+        let workspace_dir = send.archive_root.as_ref().map(|p| p.to_string_lossy().into_owned());
+        // Extract guild_id from references field if present (stored as "guild:{id}")
+        let discord_guild_id = send.references.as_ref().and_then(|r| {
+            r.strip_prefix("guild:").map(|s| s.to_string())
+        });
+        tx.execute(
+            "INSERT INTO send_discord_tasks (task_id, discord_guild_id, discord_channel_id, thread_id, text_path, workspace_dir)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                task_id,
+                discord_guild_id,
+                discord_channel_id,
+                thread_id,
+                send.html_path.to_string_lossy().into_owned(),
+                workspace_dir,
+            ],
+        )?;
+        Ok(())
+    }
+
     fn load_send_email_task(
         &self,
         conn: &Connection,
@@ -1423,6 +1530,50 @@ impl SqliteSchedulerStore {
             thread_epoch: None,
             thread_state_path: None,
             slack_team_id,
+        })
+    }
+
+    fn load_send_discord_task(
+        &self,
+        conn: &Connection,
+        task_id: &str,
+    ) -> Result<SendReplyTask, SchedulerError> {
+        let row = conn
+            .query_row(
+                "SELECT discord_guild_id, discord_channel_id, thread_id, text_path, workspace_dir
+                 FROM send_discord_tasks
+                 WHERE task_id = ?1",
+                params![task_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let (discord_guild_id, discord_channel_id, thread_id, text_path, workspace_dir) = row.ok_or_else(|| {
+            SchedulerError::Storage(format!("missing send_discord_tasks row for task {}", task_id))
+        })?;
+
+        Ok(SendReplyTask {
+            channel: Channel::Discord,
+            subject: String::new(), // Discord doesn't use subject
+            html_path: PathBuf::from(text_path),
+            attachments_dir: PathBuf::new(), // Discord attachments handled differently
+            from: None,
+            to: vec![discord_channel_id], // channel_id stored in to[0]
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            in_reply_to: thread_id, // thread_id stored in in_reply_to
+            references: discord_guild_id.map(|id| format!("guild:{}", id)), // guild_id stored in references
+            archive_root: workspace_dir.map(PathBuf::from),
+            thread_epoch: None,
+            thread_state_path: None,
+            slack_team_id: None,
         })
     }
 
@@ -1880,7 +2031,7 @@ fn schedule_auto_reply<E: TaskExecutor>(
 
     // Determine reply file path and attachments dir based on channel
     let (reply_path, attachments_dir) = match &task.channel {
-        Channel::Slack | Channel::Telegram => {
+        Channel::Slack | Channel::Discord | Channel::Telegram => {
             let txt_path = task.workspace_dir.join("reply_message.txt");
             let attachments = task.workspace_dir.join("reply_attachments");
             (txt_path, attachments)
