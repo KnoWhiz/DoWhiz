@@ -43,16 +43,27 @@ cp .env.example .env
 # Edit .env and add your POSTMARK_SERVER_TOKEN
 ```
 
-### 3. Start Service (One Command)
+### 3. Start Service
 
+**Option A: Start All Employees (Docker, recommended)**
+```bash
+# Terminal 1: Start all services (Ollama + fanout + 4 employees)
+./DoWhiz_service/scripts/run_all_employees_docker.sh
+
+# Terminal 2: Expose fanout to the internet
+ngrok http 9100
+
+# Terminal 3: Set Postmark webhook to ngrok URL
+cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
+  --hook-url https://YOUR-NGROK-URL.ngrok-free.dev/postmark/inbound
+```
+
+**Option B: Start Single Employee (auto ngrok + hook)**
 ```bash
 ./DoWhiz_service/scripts/run_employee.sh little_bear 9001
 ```
 
-This single command:
-- Starts ngrok and discovers the public URL
-- Updates the Postmark inbound hook automatically
-- Runs the Rust service
+This single command starts ngrok, updates the Postmark hook, and runs the service.
 
 **Available employees:**
 | Employee | Port | Runner | Email |
@@ -62,7 +73,7 @@ This single command:
 | `sticky_octopus` | 9003 | Codex | devin@dowhiz.com |
 | `boiled_egg` | 9004 | Codex | proto@dowhiz.com |
 
-Now send an email to `oliver@dowhiz.com` and watch the magic happen!
+Now send an email to `oliver@dowhiz.com` (or any employee) and watch the magic happen!
 
 ## Architecture
 
