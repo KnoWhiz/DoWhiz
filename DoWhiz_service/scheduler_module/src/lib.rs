@@ -17,6 +17,7 @@ pub mod channel;
 pub mod discord_gateway;
 pub mod employee_config;
 pub(crate) mod mailbox;
+pub mod message_router;
 pub mod slack_store;
 pub(crate) mod thread_state;
 use crate::memory_store::{

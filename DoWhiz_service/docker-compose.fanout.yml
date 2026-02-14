@@ -1,4 +1,17 @@
 services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Once the container is created, run docker exec dowhiz_service-ollama-1 ollama pull phi3:mini
+
   fanout:
     build:
       context: ..
@@ -29,11 +42,17 @@ services:
       RUN_TASK_DOCKER_IMAGE: ""
       RUN_TASK_DOCKER_AUTO_BUILD: "0"
       CODEX_BYPASS_SANDBOX: "1"
+      OLLAMA_URL: "http://ollama:11434"
+      OLLAMA_MODEL: "phi3:mini"
+      OLLAMA_ENABLED: "true"
     ports:
       - "9001:9001"
     volumes:
       - ../DoWhiz_service/.env:/app/.env:ro
       - dowhiz-workspace-oliver:/app/.workspace
+    depends_on:
+      ollama:
+        condition: service_healthy
 
   maggie:
     build:
@@ -45,11 +64,17 @@ services:
       RUST_SERVICE_PORT: "9001"
       RUN_TASK_DOCKER_IMAGE: ""
       RUN_TASK_DOCKER_AUTO_BUILD: "0"
+      OLLAMA_URL: "http://ollama:11434"
+      OLLAMA_MODEL: "phi3:mini"
+      OLLAMA_ENABLED: "true"
     ports:
       - "9002:9001"
     volumes:
       - ../DoWhiz_service/.env:/app/.env:ro
       - dowhiz-workspace-maggie:/app/.workspace
+    depends_on:
+      ollama:
+        condition: service_healthy
 
   devin:
     build:
@@ -62,11 +87,17 @@ services:
       RUN_TASK_DOCKER_IMAGE: ""
       RUN_TASK_DOCKER_AUTO_BUILD: "0"
       CODEX_BYPASS_SANDBOX: "1"
+      OLLAMA_URL: "http://ollama:11434"
+      OLLAMA_MODEL: "phi3:mini"
+      OLLAMA_ENABLED: "true"
     ports:
       - "9003:9001"
     volumes:
       - ../DoWhiz_service/.env:/app/.env:ro
       - dowhiz-workspace-devin:/app/.workspace
+    depends_on:
+      ollama:
+        condition: service_healthy
 
   proto:
     build:
@@ -79,13 +110,20 @@ services:
       RUN_TASK_DOCKER_IMAGE: ""
       RUN_TASK_DOCKER_AUTO_BUILD: "0"
       CODEX_BYPASS_SANDBOX: "1"
+      OLLAMA_URL: "http://ollama:11434"
+      OLLAMA_MODEL: "phi3:mini"
+      OLLAMA_ENABLED: "true"
     ports:
       - "9004:9001"
     volumes:
       - ../DoWhiz_service/.env:/app/.env:ro
       - dowhiz-workspace-proto:/app/.workspace
+    depends_on:
+      ollama:
+        condition: service_healthy
 
 volumes:
+  ollama-models:
   dowhiz-workspace-oliver:
   dowhiz-workspace-maggie:
   dowhiz-workspace-devin:
