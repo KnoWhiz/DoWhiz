@@ -1,4 +1,4 @@
-# DoWhiz - Lightweight Rust replica of OpenClaw
+# DoWhiz - Lightweight Rust replica of OpenClaw 🦞
 
 <p align="center">
   <img src="assets/readme-banner.svg" alt="DoWhiz - Any-channel digital employees" width="1200" />
