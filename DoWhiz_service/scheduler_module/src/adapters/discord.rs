@@ -140,9 +140,9 @@ impl OutboundAdapter for DiscordOutboundAdapter {
                 message.text_body.clone()
             },
             message_reference: message.thread_id.as_ref().and_then(|tid| {
-                tid.parse::<u64>().ok().map(|id| DiscordMessageReference {
-                    message_id: id,
-                })
+                tid.parse::<u64>()
+                    .ok()
+                    .map(|id| DiscordMessageReference { message_id: id })
             }),
         };
 

@@ -71,8 +71,10 @@ impl Drop for EnvUnsetGuard {
 
 fn test_employee_directory() -> (EmployeeProfile, EmployeeDirectory) {
     let addresses = vec!["service@example.com".to_string()];
-    let address_set: HashSet<String> =
-        addresses.iter().map(|value| value.to_ascii_lowercase()).collect();
+    let address_set: HashSet<String> = addresses
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect();
     let employee = EmployeeProfile {
         id: "test-employee".to_string(),
         display_name: None,
@@ -260,8 +262,7 @@ fn secrets_persist_across_workspaces_and_load(
     fs::create_dir_all(&bin_root)?;
     fs::create_dir_all(&home_root)?;
 
-    let instruction =
-        "My api_key for weather is weather-123, could you help me store it?";
+    let instruction = "My api_key for weather is weather-123, could you help me store it?";
     let env_key = "DOWHIZ_TEST_WEATHER_API_KEY";
     let env_value = "weather-123";
     let expected_line = format!("{env_key}={env_value}");
@@ -359,8 +360,7 @@ fn secrets_persist_across_workspaces_and_load(
     let workspaces = list_workspace_dirs(&user_paths.workspaces_root);
     assert_eq!(workspaces.len(), 1);
     let first_workspace = workspaces[0].clone();
-    let email_html =
-        fs::read_to_string(first_workspace.join("incoming_email").join("email.html"))?;
+    let email_html = fs::read_to_string(first_workspace.join("incoming_email").join("email.html"))?;
     assert!(email_html.contains("My api_key for weather"));
 
     let user_env_path = user_paths.secrets_dir.join(".env");

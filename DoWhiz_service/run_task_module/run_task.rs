@@ -237,11 +237,9 @@ impl fmt::Display for RunTaskError {
                 status, output
             ),
             RunTaskError::ClaudeNotFound => write!(f, "Claude CLI not found on PATH."),
-            RunTaskError::ClaudeInstallFailed { output } => write!(
-                f,
-                "Claude CLI install failed. Output tail:\n{}",
-                output
-            ),
+            RunTaskError::ClaudeInstallFailed { output } => {
+                write!(f, "Claude CLI install failed. Output tail:\n{}", output)
+            }
             RunTaskError::ClaudeFailed { status, output } => write!(
                 f,
                 "Claude CLI failed (status: {:?}). Output tail:\n{}",
@@ -601,6 +599,7 @@ fn run_claude_task(
     reply_attachments_dir: PathBuf,
 ) -> Result<RunTaskOutput, RunTaskError> {
     load_env_sources(request.workspace_dir)?;
+    let github_auth = resolve_github_auth(None)?;
 
     let api_key =
         env::var("AZURE_OPENAI_API_KEY_BACKUP").map_err(|_| RunTaskError::MissingEnv {
@@ -631,7 +630,16 @@ fn run_claude_task(
         request.channel,
     );
 
-    let env_overrides = prepare_claude_env(&api_key, &model_name)?;
+    ensure_github_cli_auth(&github_auth)?;
+    let mut env_overrides = prepare_claude_env(&api_key, &model_name)?;
+    env_overrides.extend(github_auth.env_overrides.clone());
+    if let Some(askpass_path) = github_auth.askpass_path.as_ref() {
+        env_overrides.push((
+            "GIT_ASKPASS".to_string(),
+            askpass_path.to_string_lossy().into_owned(),
+        ));
+        env_overrides.push(("GIT_TERMINAL_PROMPT".to_string(), "0".to_string()));
+    }
     let output = run_claude_command(request.workspace_dir, &prompt, &model_name, &env_overrides)?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -678,7 +686,10 @@ fn run_claude_task(
     })
 }
 
-fn prepare_claude_env(api_key: &str, model_name: &str) -> Result<Vec<(String, String)>, RunTaskError> {
+fn prepare_claude_env(
+    api_key: &str,
+    model_name: &str,
+) -> Result<Vec<(String, String)>, RunTaskError> {
     let foundry_resource = env::var("ANTHROPIC_FOUNDRY_RESOURCE")
         .ok()
         .filter(|value| !value.trim().is_empty())
@@ -696,21 +707,25 @@ fn prepare_claude_env(api_key: &str, model_name: &str) -> Result<Vec<(String, St
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "claude-haiku-4-5".to_string());
 
-    ensure_claude_settings(model_name, api_key, &foundry_resource, &default_opus, &default_sonnet, &default_haiku)?;
+    ensure_claude_settings(
+        model_name,
+        api_key,
+        &foundry_resource,
+        &default_opus,
+        &default_sonnet,
+        &default_haiku,
+    )?;
 
     Ok(vec![
-        ("AZURE_OPENAI_API_KEY_BACKUP".to_string(), api_key.to_string()),
-        ("CLAUDE_CODE_USE_FOUNDRY".to_string(), "1".to_string()),
         (
-            "ANTHROPIC_FOUNDRY_RESOURCE".to_string(),
-            foundry_resource,
+            "AZURE_OPENAI_API_KEY_BACKUP".to_string(),
+            api_key.to_string(),
         ),
+        ("CLAUDE_CODE_USE_FOUNDRY".to_string(), "1".to_string()),
+        ("ANTHROPIC_FOUNDRY_RESOURCE".to_string(), foundry_resource),
         ("ANTHROPIC_FOUNDRY_API_KEY".to_string(), api_key.to_string()),
         ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), default_opus),
-        (
-            "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
-            default_sonnet,
-        ),
+        ("ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(), default_sonnet),
         ("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(), default_haiku),
     ])
 }
@@ -738,9 +753,8 @@ fn ensure_claude_settings(
         },
         "model": model_name,
     });
-    let rendered = serde_json::to_string_pretty(&payload).map_err(|err| {
-        RunTaskError::Io(io::Error::new(io::ErrorKind::Other, err.to_string()))
-    })?;
+    let rendered = serde_json::to_string_pretty(&payload)
+        .map_err(|err| RunTaskError::Io(io::Error::new(io::ErrorKind::Other, err.to_string())))?;
     fs::write(settings_path, format!("{}\n", rendered))?;
     Ok(())
 }
@@ -771,6 +785,7 @@ fn build_claude_command(
     model_name: &str,
     env_overrides: &[(String, String)],
 ) -> Command {
+    let max_turns = claude_max_turns();
     let mut cmd = Command::new("claude");
     cmd.arg("-p")
         .arg("--output-format")
@@ -782,12 +797,20 @@ fn build_claude_command(
         .arg("--allowedTools")
         .arg("Read,Glob,Grep,Bash")
         .arg("--max-turns")
-        .arg("10")
+        .arg(max_turns.to_string())
         .arg("--dangerously-skip-permissions")
         .arg(prompt)
         .current_dir(workspace_dir);
     apply_env_pairs(&mut cmd, env_overrides);
     cmd
+}
+
+fn claude_max_turns() -> u32 {
+    env::var("CLAUDE_MAX_TURNS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(10)
 }
 
 fn ensure_claude_cli_installed(env_overrides: &[(String, String)]) -> Result<(), RunTaskError> {
@@ -1229,12 +1252,71 @@ fn unquote_env_value(value: &str) -> &str {
     value
 }
 
+#[derive(Debug, Clone)]
+struct EmployeeGithubEnv {
+    username: Option<String>,
+    token: Option<String>,
+}
+
+fn normalize_env_prefix(raw: &str) -> String {
+    raw.trim()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn employee_id_default_github_prefix(employee_id: &str) -> Option<&'static str> {
+    let normalized = employee_id.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "little_bear" => Some("OLIVER"),
+        "mini_mouse" => Some("MAGGIE"),
+        "sticky_octopus" => Some("DEVIN"),
+        "boiled_egg" => Some("PROTO"),
+        _ => None,
+    }
+}
+
+fn resolve_employee_github_env() -> Option<EmployeeGithubEnv> {
+    let explicit_prefix = read_env_trimmed("EMPLOYEE_GITHUB_ENV_PREFIX")
+        .or_else(|| read_env_trimmed("GITHUB_ENV_PREFIX"));
+    let prefix = explicit_prefix.or_else(|| {
+        read_env_trimmed("EMPLOYEE_ID").and_then(|id| {
+            employee_id_default_github_prefix(&id)
+                .map(|value| value.to_string())
+                .or_else(|| Some(normalize_env_prefix(&id)))
+        })
+    })?;
+
+    let username = read_env_trimmed(&format!("{}_GITHUB_USERNAME", prefix));
+    let token = read_env_trimmed(&format!("{}_GH_TOKEN", prefix))
+        .or_else(|| read_env_trimmed(&format!("{}_GITHUB_TOKEN", prefix)))
+        .or_else(|| read_env_trimmed(&format!("{}_GITHUB_PERSONAL_ACCESS_TOKEN", prefix)));
+
+    if username.is_none() && token.is_none() {
+        return None;
+    }
+
+    Some(EmployeeGithubEnv { username, token })
+}
+
 fn resolve_github_auth(askpass_dir: Option<&Path>) -> Result<GitHubAuthConfig, RunTaskError> {
     let gh_token = read_env_trimmed("GH_TOKEN");
     let github_token = read_env_trimmed("GITHUB_TOKEN");
     let pat_token = read_env_trimmed("GITHUB_PERSONAL_ACCESS_TOKEN");
-    let token = gh_token.clone().or(github_token.clone()).or(pat_token);
+    let employee_env = resolve_employee_github_env();
+    let token = gh_token
+        .clone()
+        .or(github_token.clone())
+        .or(pat_token)
+        .or_else(|| employee_env.as_ref().and_then(|env| env.token.clone()));
     let github_username = read_env_trimmed("GITHUB_USERNAME")
+        .or_else(|| employee_env.as_ref().and_then(|env| env.username.clone()))
         .or_else(|| read_env_trimmed("USER"))
         .or_else(|| read_env_trimmed("USERNAME"));
 
@@ -1264,6 +1346,9 @@ fn resolve_github_auth(askpass_dir: Option<&Path>) -> Result<GitHubAuthConfig, R
     }
     if let Some(username) = github_username.clone() {
         let email = format!("{}@users.noreply.github.com", username);
+        if env_missing_or_empty("GITHUB_USERNAME") {
+            env_overrides.push(("GITHUB_USERNAME".to_string(), username.clone()));
+        }
         if env_missing_or_empty("GIT_AUTHOR_NAME") {
             env_overrides.push(("GIT_AUTHOR_NAME".to_string(), username.clone()));
         }
@@ -1279,9 +1364,7 @@ fn resolve_github_auth(askpass_dir: Option<&Path>) -> Result<GitHubAuthConfig, R
     }
 
     let askpass_path = if token.is_some() {
-        let target_dir = askpass_dir
-            .map(PathBuf::from)
-            .unwrap_or_else(env::temp_dir);
+        let target_dir = askpass_dir.map(PathBuf::from).unwrap_or_else(env::temp_dir);
         Some(write_git_askpass_script_in(&target_dir)?)
     } else {
         None
@@ -1350,7 +1433,9 @@ fn ensure_github_cli_auth(github_auth: &GitHubAuthConfig) -> Result<(), RunTaskE
     };
 
     let auth_lock = GH_AUTH_LOCK.get_or_init(|| Mutex::new(()));
-    let _guard = auth_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = auth_lock
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     if gh_auth_status_ok(github_auth)? {
         return Ok(());
@@ -1595,8 +1680,7 @@ fn codex_sandbox_mode() -> String {
 }
 
 fn codex_bypass_sandbox() -> bool {
-    env_enabled("CODEX_BYPASS_SANDBOX")
-        || env_enabled("CODEX_DANGEROUSLY_BYPASS_SANDBOX")
+    env_enabled("CODEX_BYPASS_SANDBOX") || env_enabled("CODEX_DANGEROUSLY_BYPASS_SANDBOX")
 }
 
 fn normalize_azure_endpoint(endpoint: &str) -> String {
