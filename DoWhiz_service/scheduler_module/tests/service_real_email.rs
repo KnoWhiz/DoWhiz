@@ -381,6 +381,8 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         slack_client_id: None,
         slack_client_secret: None,
         slack_redirect_uri: None,
+        discord_bot_token: None,
+        discord_bot_user_id: None,
     };
 
     let rt = Runtime::new()?;

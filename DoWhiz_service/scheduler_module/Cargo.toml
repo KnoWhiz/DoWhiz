@@ -22,6 +22,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 kuchiki = "0.8"
 urlencoding = "2"
+serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "rustls_backend"] }
 
 send_emails_module = { path = "../send_emails_module" }
 run_task_module = { path = "../run_task_module" }

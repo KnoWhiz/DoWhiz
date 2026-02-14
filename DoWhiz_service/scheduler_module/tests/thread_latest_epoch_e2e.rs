@@ -224,6 +224,8 @@ fn thread_latest_epoch_end_to_end() {
         slack_client_id: None,
         slack_client_secret: None,
         slack_redirect_uri: None,
+        discord_bot_token: None,
+        discord_bot_user_id: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
