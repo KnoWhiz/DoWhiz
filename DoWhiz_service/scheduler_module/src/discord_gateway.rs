@@ -103,17 +103,21 @@ impl EventHandler for DiscordEventHandler {
 
         // Only respond to:
         // 1. Messages that @ mention the bot
-        // 2. Messages that are replies (to any message)
+        // 2. Messages that are replies to the bot's messages
         let is_mention = msg.mentions.iter().any(|u| self.adapter.bot_user_ids.contains(&u.id.get()));
-        let is_reply = msg.referenced_message.is_some();
+        let is_reply_to_bot = msg
+            .referenced_message
+            .as_ref()
+            .map(|ref_msg| self.adapter.bot_user_ids.contains(&ref_msg.author.id.get()))
+            .unwrap_or(false);
 
-        if !is_mention && !is_reply {
+        if !is_mention && !is_reply_to_bot {
             return;
         }
 
         info!(
-            "Discord message from {} in channel {:?} (mention={}, reply={}): {:?}",
-            inbound.sender, inbound.metadata.discord_channel_id, is_mention, is_reply, inbound.text_body
+            "Discord message from {} in channel {:?} (mention={}, reply_to_bot={}): {:?}",
+            inbound.sender, inbound.metadata.discord_channel_id, is_mention, is_reply_to_bot, inbound.text_body
         );
 
         // Process the message
