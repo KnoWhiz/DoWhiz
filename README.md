@@ -1,4 +1,4 @@
-# DoWhiz
+# DoWhiz - A lightweight Rust replica of OpenClaw🦞 with better security, accessibility, and token usage.
 
 <p align="center">
   <img src="assets/readme-banner.svg" alt="DoWhiz - Any-channel digital employees" width="1200" />
