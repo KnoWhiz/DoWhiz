@@ -1,0 +1,81 @@
+services:
+  fanout:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: dowhiz-service
+    entrypoint: ["/app/inbound_fanout"]
+    environment:
+      FANOUT_HOST: "0.0.0.0"
+      FANOUT_PORT: "9100"
+      FANOUT_TIMEOUT_SECS: "15"
+      FANOUT_TARGETS: "http://oliver:9001,http://maggie:9001,http://devin:9001,http://proto:9001"
+    ports:
+      - "9100:9100"
+    depends_on:
+      - oliver
+      - maggie
+      - devin
+      - proto
+
+  oliver:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: dowhiz-service
+    environment:
+      EMPLOYEE_ID: "little_bear"
+      RUST_SERVICE_PORT: "9001"
+    ports:
+      - "9001:9001"
+    volumes:
+      - ../DoWhiz_service/.env:/app/.env:ro
+      - dowhiz-workspace-oliver:/app/.workspace
+
+  maggie:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: dowhiz-service
+    environment:
+      EMPLOYEE_ID: "mini_mouse"
+      RUST_SERVICE_PORT: "9001"
+    ports:
+      - "9002:9001"
+    volumes:
+      - ../DoWhiz_service/.env:/app/.env:ro
+      - dowhiz-workspace-maggie:/app/.workspace
+
+  devin:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: dowhiz-service
+    environment:
+      EMPLOYEE_ID: "sticky_octopus"
+      RUST_SERVICE_PORT: "9001"
+    ports:
+      - "9003:9001"
+    volumes:
+      - ../DoWhiz_service/.env:/app/.env:ro
+      - dowhiz-workspace-devin:/app/.workspace
+
+  proto:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: dowhiz-service
+    environment:
+      EMPLOYEE_ID: "boiled_egg"
+      RUST_SERVICE_PORT: "9001"
+    ports:
+      - "9004:9001"
+    volumes:
+      - ../DoWhiz_service/.env:/app/.env:ro
+      - dowhiz-workspace-proto:/app/.workspace
+
+volumes:
+  dowhiz-workspace-oliver:
+  dowhiz-workspace-maggie:
+  dowhiz-workspace-devin:
+  dowhiz-workspace-proto:

@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY DoWhiz_service/ DoWhiz_service/
 
-RUN cargo build --locked -p scheduler_module --bin rust_service --release \
+RUN cargo build --locked -p scheduler_module --bin rust_service --bin inbound_fanout --release \
   --manifest-path DoWhiz_service/Cargo.toml
 
 FROM debian:bookworm-slim AS runtime
@@ -71,6 +71,7 @@ RUN useradd -r -u 10001 -g nogroup app && \
   chown -R app:nogroup /app
 
 COPY --from=builder /app/DoWhiz_service/target/release/rust_service /app/rust_service
+COPY --from=builder /app/DoWhiz_service/target/release/inbound_fanout /app/inbound_fanout
 
 # Copy employee configuration and personas
 COPY DoWhiz_service/employee.toml /app/DoWhiz_service/employee.toml
@@ -95,5 +96,6 @@ ENV TASK_INDEX_PATH=/app/.workspace/run_task/state/task_index.db
 ENV PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
 
 EXPOSE 9001
+EXPOSE 9100
 
 ENTRYPOINT ["/app/rust_service"]
