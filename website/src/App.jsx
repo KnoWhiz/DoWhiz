@@ -7,10 +7,6 @@ import cozyLobsterImg from './assets/Cozy-Lobster.jpg';
 import struttonPigeonImg from './assets/Strutton-Pigeon.jpg';
 import fluffyElephantImg from './assets/Fluffy-Elephant.jpg';
 import plushAxolotlImg from './assets/Plush-Axolotl.jpg';
-import workflowMessage from './assets/Messages.jpg';
-import workflowTriage from './assets/Triage.jpg';
-import workflowExecution from './assets/Execution.jpg';
-import workflowReturn from './assets/Return.jpg';
 
 const WAITLIST_FORM_URL = 'https://docs.google.com/forms/d/1UgZpFgYxq0uSjmVdai1mpjbfj2GxcWakFt3YKL8by34/viewform';
 
@@ -364,8 +360,7 @@ function App() {
             <a href="#" className="logo">Do<span className="text-gradient">Whiz</span></a>
             <div className="nav-links">
               <a href="#roles" className="nav-btn">Team</a>
-              <a href="#features" className="nav-btn">Features</a>
-              <a href="#security" className="nav-btn">Security</a>
+              <a href="/user-guide/" className="nav-btn">User Guide</a>
             </div>
             <div className="nav-actions">
               <div className="social-links">
@@ -455,74 +450,32 @@ function App() {
           </div>
         </section>
 
-        {/* Core Experience */}
-        <section id="features" className="section features-section">
-          <div className="container">
-            <h2 className="section-title">Core Features</h2>
-            <div className="features-grid">
-              {[
-                { title: "Multi-Channel Access", desc: "Start with email today, and soon connect via phone, Slack, Discord, WhatsApp, and other channels." },
-                { title: "Autonomous Tools", desc: "Agents intelligently select and utilize the right tools for each request without manual configuration." },
-                { title: "Direct Delivery", desc: "Completed work is delivered straight back to your inbox. Focus on results, not the process." }
-              ].map((item, idx) => (
-                <div key={idx} className="feature-card">
-                  <h3>{item.title}</h3>
-                  <p>{item.desc}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Workflow */}
-        <section className="section workflow-section">
-          <div className="container">
-            <h2 className="section-title">How It Works</h2>
-            <div className="workflow-container">
-              <div className="workflow-line"></div>
-              {[
-                { step: "1", label: "Message", img: workflowMessage },
-                { step: "2", label: "Triage", img: workflowTriage },
-                { step: "3", label: "Execution", img: workflowExecution },
-                { step: "4", label: "Return", img: workflowReturn },
-              ].map((s, i) => (
-                <div key={i} className="workflow-step" style={{ animationDelay: `${i * 0.2}s` }}>
-                  <div className="step-icon-wrapper">
-                    <div className="step-icon">
-                      <img src={s.img} alt={s.label} />
-                    </div>
-                  </div>
-                  <h4>{s.label}</h4>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Security */}
-        <section id="security" className="section security-section">
-          <div className="container">
-            <h2 className="section-title">Security First Design</h2>
-            <div className="security-grid">
-              <div className="security-card">
-                <h3>Isolation</h3>
-                <p>
-                  User data and agent memories are strictly isolated. Your data never leaks to other tenants.
-                </p>
-              </div>
-              <div className="security-card">
-                <h3>Auditability & Trust</h3>
-                <p>
-                  All actions are logged and reversible. You maintain full control over your digital workforce.
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
         {/* Footer */}
-        <footer>
-          <p>&copy; {new Date().getFullYear()} DoWhiz. All rights reserved.</p>
+        <footer className="site-footer">
+          <div className="container footer-content">
+            <div className="footer-brand">
+              <a href="#" className="footer-logo">
+                Do<span className="text-gradient">Whiz</span>
+              </a>
+              <p className="footer-tagline">
+                Digital employees that turn messages into finished work, delivered back to your inbox.
+              </p>
+              <div className="footer-pill">Email-first today. Multi-channel soon.</div>
+            </div>
+            <div className="footer-links">
+              <span className="footer-title">Essentials</span>
+              <div className="footer-link-grid">
+                <a href="/privacy/" className="footer-link">Privacy</a>
+                <a href="/terms/" className="footer-link">Terms of Service</a>
+                <a href="/user-guide/" className="footer-link">User Guide</a>
+                <a href="mailto:admin@dowhiz.com" className="footer-link">Contact</a>
+              </div>
+            </div>
+          </div>
+          <div className="container footer-bottom">
+            <span>&copy; {new Date().getFullYear()} DoWhiz. All rights reserved.</span>
+            <span>Built for teams that live in their inbox.</span>
+          </div>
         </footer>
 
         {/* Theme Toggle */}
