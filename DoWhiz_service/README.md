@@ -10,6 +10,7 @@ then schedules a SendEmail job and sends the reply via Postmark.
 - `codex` CLI on your PATH (only required for local execution; optional when `RUN_TASK_DOCKER_IMAGE` is set)
 - `claude` CLI on your PATH (only required for employees with `runner = "claude"`)
 - `playwright-cli` + Chromium (required for browser automation skills)
+- Ollama (optional; required for local message routing via phi3:mini)
 - `.env` includes (see repo-root `.env.example` for a template):
   - `POSTMARK_SERVER_TOKEN`
   - `AZURE_OPENAI_API_KEY_BACKUP` and `AZURE_OPENAI_ENDPOINT_BACKUP` (required when Codex is enabled)
@@ -28,6 +29,12 @@ sudo npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest @playw
 sudo npx playwright install --with-deps chromium
 ```
 
+Optional: Install Ollama for local message routing:
+```
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull phi3:mini
+```
+
 Optional (match Dockerfile's chrome-channel lookup used by E2E):
 ```
 export PLAYWRIGHT_BROWSERS_PATH="$PWD/.cache/ms-playwright"
@@ -38,9 +45,10 @@ sudo ln -sf "$chromium_path" /opt/google/chrome/chrome
 
 macOS (Homebrew):
 ```
-brew install node@20 openssl@3 sqlite pkg-config
+brew install node@20 openssl@3 sqlite pkg-config ollama
 npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest @playwright/cli@latest
 npx playwright install chromium
+ollama pull phi3:mini
 ```
 
 Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.
@@ -306,6 +314,35 @@ POSTMARK_TEST_FROM="mini-mouse@deep-tutor.com" \
 RUST_SERVICE_LIVE_TEST=1 RUN_CODEX_E2E=1 \
 cargo test -p scheduler_module --test service_real_email -- --nocapture
 ```
+
+## Message Router (Ollama)
+
+The service includes a local LLM message router that classifies incoming Discord messages using Ollama. Simple queries (greetings, casual chat) are handled directly by a local model (phi3:mini), while complex queries are forwarded to the full Codex/Claude pipeline.
+
+### Configuration
+
+Environment variables:
+- `OLLAMA_URL`: Ollama server URL (default: `http://localhost:11434`)
+- `OLLAMA_MODEL`: Model to use (default: `phi3:mini`)
+- `OLLAMA_ENABLED`: Set to `"false"` to disable routing (default: enabled)
+
+### Docker Setup
+
+The `docker-compose.fanout.yml` includes an Ollama sidecar container. After starting the containers, pull the model:
+
+```bash
+docker exec dowhiz_service-ollama-1 ollama pull phi3:mini
+```
+
+The model is persisted in a Docker volume (`ollama-models`) so it only needs to be pulled once.
+
+### How it works
+
+1. Incoming Discord messages are classified by phi3:mini (~200-500ms)
+2. Simple queries get a quick local response
+3. Complex queries are forwarded to the full pipeline (Codex/Claude)
+
+This reduces API costs and latency for simple interactions while preserving full capability for complex tasks.
 
 ## Environment knobs
 - `RUST_SERVICE_HOST` / `RUST_SERVICE_PORT`
