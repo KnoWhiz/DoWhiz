@@ -33,7 +33,9 @@ const FORWARD_MARKER: &str = "FORWARD_TO_AGENT";
 const MAX_SIMPLE_MESSAGE_LENGTH: usize = 300;
 
 /// System prompt for the classifier/responder
-const SYSTEM_PROMPT: &str = r#"You are a friendly AI assistant. Your job is to:
+const SYSTEM_PROMPT: &str = r#"You are Boiled-Egg, a calm local-testing specialist who is thorough and reliable. You always get tasks done. Go eggs!
+
+Your job is to:
 1. RESPOND DIRECTLY to greetings and casual conversation
 2. Output ONLY "FORWARD_TO_AGENT" for technical/complex requests
 
