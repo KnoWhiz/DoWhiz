@@ -27,8 +27,10 @@ impl TaskExecutor for NoopExecutor {
 }
 
 fn test_employee_directory(addresses: Vec<String>) -> (EmployeeProfile, EmployeeDirectory) {
-    let address_set: HashSet<String> =
-        addresses.iter().map(|value| value.to_ascii_lowercase()).collect();
+    let address_set: HashSet<String> = addresses
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect();
     let employee = EmployeeProfile {
         id: "test-employee".to_string(),
         display_name: None,

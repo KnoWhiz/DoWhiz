@@ -108,11 +108,13 @@ async fn forward_request(
                 if should_skip_header(name) {
                     continue;
                 }
-                let header_name = match reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes()) {
-                    Ok(name) => name,
-                    Err(_) => continue,
-                };
-                let header_value = match reqwest::header::HeaderValue::from_bytes(value.as_bytes()) {
+                let header_name =
+                    match reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes()) {
+                        Ok(name) => name,
+                        Err(_) => continue,
+                    };
+                let header_value = match reqwest::header::HeaderValue::from_bytes(value.as_bytes())
+                {
                     Ok(value) => value,
                     Err(_) => continue,
                 };

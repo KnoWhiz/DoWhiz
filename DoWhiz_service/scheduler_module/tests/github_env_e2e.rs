@@ -70,8 +70,10 @@ impl Drop for EnvUnsetGuard {
 
 fn test_employee_directory() -> (EmployeeProfile, EmployeeDirectory) {
     let addresses = vec!["service@example.com".to_string()];
-    let address_set: HashSet<String> =
-        addresses.iter().map(|value| value.to_ascii_lowercase()).collect();
+    let address_set: HashSet<String> = addresses
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect();
     let employee = EmployeeProfile {
         id: "test-employee".to_string(),
         display_name: None,
@@ -234,6 +236,117 @@ fn email_flow_injects_github_env() {
         "GITHUB_PERSONAL_ACCESS_TOKEN",
         "GITHUB_USERNAME",
     ]);
+    let original_path = env::var("PATH").unwrap_or_default();
+    let path_value = format!("{}:{}", bin_root.display(), original_path);
+    let _path_guard = EnvGuard::set("PATH", path_value);
+    let _api_guard = EnvGuard::set("AZURE_OPENAI_API_KEY_BACKUP", "test-key");
+    let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");
+    let _home_guard = EnvGuard::set("HOME", &home_root);
+
+    let (employee_profile, employee_directory) = test_employee_directory();
+    let config = ServiceConfig {
+        host: "127.0.0.1".to_string(),
+        port: 0,
+        employee_id: employee_profile.id.clone(),
+        employee_config_path: root.join("employee.toml"),
+        employee_profile,
+        employee_directory,
+        workspace_root: root.join("workspaces"),
+        scheduler_state_path: state_root.join("tasks.db"),
+        processed_ids_path: state_root.join("processed_ids.txt"),
+        users_root: users_root.clone(),
+        users_db_path: state_root.join("users.db"),
+        task_index_path: state_root.join("task_index.db"),
+        codex_model: "gpt-5.2-codex".to_string(),
+        codex_disabled: false,
+        scheduler_poll_interval: Duration::from_millis(50),
+        scheduler_max_concurrency: 1,
+        scheduler_user_max_concurrency: 1,
+        inbound_body_max_bytes: DEFAULT_INBOUND_BODY_MAX_BYTES,
+        skills_source_dir: None,
+        slack_bot_token: None,
+        slack_bot_user_id: None,
+        slack_store_path: state_root.join("slack.db"),
+        slack_client_id: None,
+        slack_client_secret: None,
+        slack_redirect_uri: None,
+        discord_bot_token: None,
+        discord_bot_user_id: None,
+    };
+
+    let user_store = UserStore::new(&config.users_db_path).expect("user store");
+    let index_store = IndexStore::new(&config.task_index_path).expect("index store");
+
+    let inbound_raw = r#"{
+  "From": "Alice <alice@example.com>",
+  "To": "Service <service@example.com>",
+  "Subject": "Open a PR",
+  "TextBody": "Please open a PR for issue 56.",
+  "Headers": [{"Name": "Message-ID", "Value": "<msg-1@example.com>"}]
+}"#;
+    let payload: PostmarkInbound = serde_json::from_str(inbound_raw).expect("parse inbound");
+    process_inbound_payload(
+        &config,
+        &user_store,
+        &index_store,
+        &payload,
+        inbound_raw.as_bytes(),
+    )
+    .expect("process inbound");
+
+    let user = user_store
+        .get_or_create_user("alice@example.com")
+        .expect("user lookup");
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+
+    let executor = RecordingExecutor::default();
+    let mut scheduler =
+        Scheduler::load(&user_paths.tasks_db_path, executor.clone()).expect("load scheduler");
+    scheduler.tick().expect("tick run_task");
+
+    let workspace = first_workspace_dir(&user_paths.workspaces_root);
+    assert!(
+        workspace.join("reply_email_draft.html").exists(),
+        "reply draft should be written"
+    );
+
+    let errors = executor
+        .errors
+        .lock()
+        .expect("errors lock poisoned")
+        .clone();
+    assert!(errors.is_empty(), "expected no executor errors");
+}
+
+#[test]
+fn email_flow_injects_employee_github_env() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path();
+    let users_root = root.join("users");
+    let state_root = root.join("state");
+    let bin_root = root.join("bin");
+    let home_root = root.join("home");
+    fs::create_dir_all(&users_root).expect("users root");
+    fs::create_dir_all(&state_root).expect("state root");
+    fs::create_dir_all(&bin_root).expect("bin root");
+    fs::create_dir_all(&home_root).expect("home root");
+
+    fs::write(
+        root.join(".env"),
+        "MAGGIE_GITHUB_USERNAME=octo-user\nMAGGIE_GITHUB_PERSONAL_ACCESS_TOKEN=pat-test-token\n",
+    )
+    .expect("write .env");
+
+    write_fake_codex(&bin_root).expect("write fake codex");
+    write_fake_gh(&bin_root).expect("write fake gh");
+
+    let _unset_guard = EnvUnsetGuard::remove(&[
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "GITHUB_USERNAME",
+    ]);
+    let _employee_guard = EnvGuard::set("EMPLOYEE_ID", "mini_mouse");
     let original_path = env::var("PATH").unwrap_or_default();
     let path_value = format!("{}:{}", bin_root.display(), original_path);
     let _path_guard = EnvGuard::set("PATH", path_value);

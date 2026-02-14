@@ -81,8 +81,8 @@ impl PostmarkInboundAdapter {
 
 impl InboundAdapter for PostmarkInboundAdapter {
     fn parse(&self, raw_payload: &[u8]) -> Result<InboundMessage, AdapterError> {
-        let payload: PostmarkInboundPayload =
-            serde_json::from_slice(raw_payload).map_err(|e| AdapterError::ParseError(e.to_string()))?;
+        let payload: PostmarkInboundPayload = serde_json::from_slice(raw_payload)
+            .map_err(|e| AdapterError::ParseError(e.to_string()))?;
 
         let sender = payload
             .from
@@ -93,12 +93,13 @@ impl InboundAdapter for PostmarkInboundAdapter {
             .to_string();
 
         let sender_name = extract_display_name(&sender);
-        let sender_email = extract_emails(&sender).into_iter().next().unwrap_or(sender.clone());
+        let sender_email = extract_emails(&sender)
+            .into_iter()
+            .next()
+            .unwrap_or(sender.clone());
 
         // Get recipient (service address)
-        let recipient = self
-            .find_service_address(&payload)
-            .unwrap_or_default();
+        let recipient = self.find_service_address(&payload).unwrap_or_default();
 
         // Build thread ID
         let thread_id = self.extract_thread_key(&payload, raw_payload);
@@ -142,7 +143,10 @@ impl InboundAdapter for PostmarkInboundAdapter {
             sender_name,
             recipient,
             subject: payload.subject.clone(),
-            text_body: payload.text_body.clone().or(payload.stripped_text_reply.clone()),
+            text_body: payload
+                .text_body
+                .clone()
+                .or(payload.stripped_text_reply.clone()),
             html_body: payload.html_body.clone(),
             thread_id,
             message_id,

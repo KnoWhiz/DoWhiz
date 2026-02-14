@@ -56,8 +56,10 @@ fn test_employee_directory(root: &Path) -> (EmployeeProfile, EmployeeDirectory) 
     fs::write(&claude_path, EXPECTED_SOUL_BLOCK).expect("write claude");
     fs::write(&soul_path, EXPECTED_SOUL_BLOCK).expect("write soul");
     let addresses = vec!["service@example.com".to_string()];
-    let address_set: HashSet<String> =
-        addresses.iter().map(|value| value.to_ascii_lowercase()).collect();
+    let address_set: HashSet<String> = addresses
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect();
     let employee = EmployeeProfile {
         id: "test-employee".to_string(),
         display_name: None,

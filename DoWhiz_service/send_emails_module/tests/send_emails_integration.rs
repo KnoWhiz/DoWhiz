@@ -225,8 +225,7 @@ fn live_postmark_delivery_with_attachments() -> Result<(), Box<dyn std::error::E
 
     let token = env::var("POSTMARK_SERVER_TOKEN")
         .expect("POSTMARK_SERVER_TOKEN must be set for live tests");
-    let from =
-        env::var("POSTMARK_TEST_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
+    let from = env::var("POSTMARK_TEST_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
     let to_addr =
         env::var("POSTMARK_TEST_TO").unwrap_or_else(|_| "mini-mouse@deep-tutor.com".to_string());
     let cc_addr = env::var("POSTMARK_TEST_CC").ok();
@@ -286,9 +285,7 @@ fn send_email_requires_recipient() {
     let html_path = temp.path().join("reply_email_draft.html");
     fs::write(&html_path, "<p>Hello</p>").expect("write html");
 
-    let _env = EnvGuard::set(&[
-        ("POSTMARK_SERVER_TOKEN", "test-token"),
-    ]);
+    let _env = EnvGuard::set(&[("POSTMARK_SERVER_TOKEN", "test-token")]);
 
     let params = SendEmailParams {
         subject: "Test subject".to_string(),

@@ -82,10 +82,7 @@ impl DiscordEventHandler {
 #[async_trait]
 impl EventHandler for DiscordEventHandler {
     async fn ready(&self, _ctx: Context, ready: Ready) {
-        info!(
-            "Discord bot connected as {}",
-            ready.user.name
-        );
+        info!("Discord bot connected as {}", ready.user.name);
     }
 
     async fn message(&self, _ctx: Context, msg: Message) {
@@ -104,7 +101,10 @@ impl EventHandler for DiscordEventHandler {
         // Only respond to:
         // 1. Messages that @ mention the bot
         // 2. Messages that are replies to the bot's messages
-        let is_mention = msg.mentions.iter().any(|u| self.adapter.bot_user_ids.contains(&u.id.get()));
+        let is_mention = msg
+            .mentions
+            .iter()
+            .any(|u| self.adapter.bot_user_ids.contains(&u.id.get()));
         let is_reply_to_bot = msg
             .referenced_message
             .as_ref()
@@ -117,7 +117,11 @@ impl EventHandler for DiscordEventHandler {
 
         info!(
             "Discord message from {} in channel {:?} (mention={}, reply_to_bot={}): {:?}",
-            inbound.sender, inbound.metadata.discord_channel_id, is_mention, is_reply_to_bot, inbound.text_body
+            inbound.sender,
+            inbound.metadata.discord_channel_id,
+            is_mention,
+            is_reply_to_bot,
+            inbound.text_body
         );
 
         // Process the message
@@ -169,7 +173,8 @@ fn process_discord_message(
 
     // Bump thread state
     let thread_state_path = default_thread_state_path(&workspace);
-    let thread_state = bump_thread_state(&thread_state_path, &thread_key, message.message_id.clone())?;
+    let thread_state =
+        bump_thread_state(&thread_state_path, &thread_key, message.message_id.clone())?;
 
     // Save the incoming Discord message to workspace
     append_discord_message(&workspace, message, raw_msg, thread_state.last_email_seq)?;
@@ -178,7 +183,11 @@ fn process_discord_message(
     let model_name = match config.employee_profile.model.clone() {
         Some(model) => model,
         None => {
-            if config.employee_profile.runner.eq_ignore_ascii_case("claude") {
+            if config
+                .employee_profile
+                .runner
+                .eq_ignore_ascii_case("claude")
+            {
                 String::new()
             } else {
                 config.codex_model.clone()
@@ -216,7 +225,8 @@ fn process_discord_message(
 
     // Schedule the task using guild-based scheduler
     let mut scheduler = Scheduler::load(&guild_paths.tasks_db_path, ModuleExecutor::default())?;
-    if let Err(err) = crate::service::cancel_pending_thread_tasks(&mut scheduler, &workspace, thread_state.epoch)
+    if let Err(err) =
+        crate::service::cancel_pending_thread_tasks(&mut scheduler, &workspace, thread_state.epoch)
     {
         warn!(
             "failed to cancel pending thread tasks for {}: {}",
@@ -353,7 +363,11 @@ fn append_discord_message(
     });
     fs::write(&meta_path, serde_json::to_string_pretty(&meta)?)?;
 
-    info!("saved Discord message seq={} to {}", seq, incoming_dir.display());
+    info!(
+        "saved Discord message seq={} to {}",
+        seq,
+        incoming_dir.display()
+    );
     Ok(())
 }
 
@@ -368,8 +382,9 @@ pub async fn start_discord_client(
     bot_user_id: Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Set up intents - we need message content to read user messages
-    let intents =
-        GatewayIntents::GUILD_MESSAGES | GatewayIntents::DIRECT_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
+    let intents = GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::DIRECT_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT;
 
     let mut bot_user_ids = HashSet::new();
     if let Some(id) = bot_user_id {

@@ -83,8 +83,7 @@ mod tests {
     #[test]
     fn selects_service_mailbox_with_display_name() {
         let raws = &[Some("Oliver Bear <oliver@dowhiz.com>")];
-        let mailbox = select_inbound_service_mailbox(raws, &service_addresses())
-            .expect("mailbox");
+        let mailbox = select_inbound_service_mailbox(raws, &service_addresses()).expect("mailbox");
         assert_eq!(mailbox.address, "oliver@dowhiz.com");
         assert_eq!(mailbox.display_name.as_deref(), Some("Oliver Bear"));
         assert_eq!(mailbox.formatted(), "Oliver Bear <oliver@dowhiz.com>");
@@ -93,8 +92,7 @@ mod tests {
     #[test]
     fn selects_service_mailbox_without_display_name() {
         let raws = &[Some("mini-mouse@dowhiz.com")];
-        let mailbox = select_inbound_service_mailbox(raws, &service_addresses())
-            .expect("mailbox");
+        let mailbox = select_inbound_service_mailbox(raws, &service_addresses()).expect("mailbox");
         assert_eq!(mailbox.address, "mini-mouse@dowhiz.com");
         assert_eq!(mailbox.display_name, None);
         assert_eq!(mailbox.formatted(), "mini-mouse@dowhiz.com");

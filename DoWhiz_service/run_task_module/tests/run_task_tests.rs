@@ -186,6 +186,52 @@ GITHUB_PERSONAL_ACCESS_TOKEN="pat-test-token"
 
 #[test]
 #[cfg(unix)]
+fn run_task_maps_employee_github_env_from_dotenv() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("codex_task_employee_github_env").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let env_path = temp.path.join(".env");
+    fs::write(
+        &env_path,
+        r#"MAGGIE_GITHUB_USERNAME="octo-user"
+MAGGIE_GITHUB_PERSONAL_ACCESS_TOKEN="pat-test-token"
+"#,
+    )
+    .unwrap();
+
+    let home_dir = temp.path.join("home");
+    let bin_dir = temp.path.join("bin");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_fake_codex(&bin_dir, FakeCodexMode::GithubEnvCheck).unwrap();
+    write_fake_gh(&bin_dir).unwrap();
+
+    let _unset = EnvUnsetGuard::remove(&[
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "GITHUB_USERNAME",
+    ]);
+
+    let old_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), old_path);
+    let _env = EnvGuard::set(&[
+        ("HOME", home_dir.to_str().unwrap()),
+        ("PATH", &new_path),
+        ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
+        ("GH_AUTH_DISABLED", "1"),
+        ("EMPLOYEE_ID", "mini_mouse"),
+    ]);
+
+    let params = build_params(&workspace);
+    let result = run_task(&params);
+    assert!(result.is_ok(), "expected employee GH env to reach codex");
+}
+
+#[test]
+#[cfg(unix)]
 fn run_task_reports_missing_env() {
     let _lock = ENV_MUTEX.lock().unwrap();
     let temp = TempDir::new("codex_task_missing_env").unwrap();

@@ -105,15 +105,17 @@ impl SlackStore {
 
     /// Get installation by team_id, with fallback to environment variables.
     /// This provides backward compatibility with single-workspace setup.
-    pub fn get_installation_or_env(&self, team_id: &str) -> Result<SlackInstallation, SlackStoreError> {
+    pub fn get_installation_or_env(
+        &self,
+        team_id: &str,
+    ) -> Result<SlackInstallation, SlackStoreError> {
         match self.get_installation(team_id) {
             Ok(installation) => Ok(installation),
             Err(SlackStoreError::NotFound(_)) => {
                 // Fallback to environment variables for backward compatibility
                 let bot_token = std::env::var("SLACK_BOT_TOKEN")
                     .map_err(|_| SlackStoreError::NotFound(team_id.to_string()))?;
-                let bot_user_id = std::env::var("SLACK_BOT_USER_ID")
-                    .unwrap_or_default();
+                let bot_user_id = std::env::var("SLACK_BOT_USER_ID").unwrap_or_default();
 
                 Ok(SlackInstallation {
                     team_id: team_id.to_string(),

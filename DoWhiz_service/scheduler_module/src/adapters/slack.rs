@@ -43,17 +43,14 @@ impl SlackInboundAdapter {
     /// Extract thread ID from a Slack message event.
     pub fn extract_thread_id(&self, event: &SlackMessageEvent) -> String {
         // Use thread_ts if present, otherwise use ts (message timestamp) as thread ID
-        event
-            .thread_ts
-            .clone()
-            .unwrap_or_else(|| event.ts.clone())
+        event.thread_ts.clone().unwrap_or_else(|| event.ts.clone())
     }
 }
 
 impl InboundAdapter for SlackInboundAdapter {
     fn parse(&self, raw_payload: &[u8]) -> Result<InboundMessage, AdapterError> {
-        let wrapper: SlackEventWrapper =
-            serde_json::from_slice(raw_payload).map_err(|e| AdapterError::ParseError(e.to_string()))?;
+        let wrapper: SlackEventWrapper = serde_json::from_slice(raw_payload)
+            .map_err(|e| AdapterError::ParseError(e.to_string()))?;
 
         // Handle URL verification challenge
         if wrapper.event_type == "url_verification" {
@@ -70,9 +67,7 @@ impl InboundAdapter for SlackInboundAdapter {
             )));
         }
 
-        let event = wrapper
-            .event
-            .ok_or(AdapterError::MissingField("event"))?;
+        let event = wrapper.event.ok_or(AdapterError::MissingField("event"))?;
 
         // Only handle message events (not subtypes like message_changed, etc.)
         if event.event_type != "message" {
@@ -179,8 +174,8 @@ impl OutboundAdapter for SlackOutboundAdapter {
         };
 
         // Send via Slack API
-        let api_base = env::var("SLACK_API_BASE_URL")
-            .unwrap_or_else(|_| "https://slack.com/api".to_string());
+        let api_base =
+            env::var("SLACK_API_BASE_URL").unwrap_or_else(|_| "https://slack.com/api".to_string());
         let url = format!("{}/chat.postMessage", api_base.trim_end_matches('/'));
         let client = reqwest::blocking::Client::new();
         let response = client
@@ -353,7 +348,10 @@ mod tests {
         let verification = is_url_verification(payload.as_bytes());
         assert!(verification.is_some());
         let v = verification.unwrap();
-        assert_eq!(v.challenge, "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P");
+        assert_eq!(
+            v.challenge,
+            "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P"
+        );
     }
 
     #[test]
@@ -379,8 +377,14 @@ mod tests {
         assert_eq!(message.channel, Channel::Slack);
         assert_eq!(message.sender, "U123ABC456");
         assert_eq!(message.text_body, Some("Hello, world!".to_string()));
-        assert_eq!(message.metadata.slack_channel_id, Some("C123ABC456".to_string()));
-        assert_eq!(message.metadata.slack_team_id, Some("T123ABC456".to_string()));
+        assert_eq!(
+            message.metadata.slack_channel_id,
+            Some("C123ABC456".to_string())
+        );
+        assert_eq!(
+            message.metadata.slack_team_id,
+            Some("T123ABC456".to_string())
+        );
     }
 
     #[test]
