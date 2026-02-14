@@ -31,9 +31,9 @@ use crate::index_store::{IndexStore, TaskRef};
 use crate::mailbox;
 use crate::slack_store::{SlackInstallation, SlackStore};
 // Re-export thread_state functions for use by discord_gateway
+use crate::channel::Channel;
 pub use crate::thread_state::{bump_thread_state, default_thread_state_path};
 use crate::user_store::{extract_emails, UserStore};
-use crate::channel::Channel;
 use crate::{
     ModuleExecutor, RunTaskTask, Schedule, ScheduledTask, Scheduler, SchedulerError, TaskKind,
 };
@@ -103,11 +103,22 @@ impl ServiceConfig {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .or_else(|| employee_directory.default_employee_id.clone())
-            .or_else(|| employee_directory.employees.first().map(|emp| emp.id.clone()))
+            .or_else(|| {
+                employee_directory
+                    .employees
+                    .first()
+                    .map(|emp| emp.id.clone())
+            })
             .ok_or_else(|| "employee config has no employees".to_string())?;
         let employee_profile = employee_directory
             .employee(&employee_id)
-            .ok_or_else(|| format!("employee '{}' not found in {}", employee_id, employee_config_path.display()))?
+            .ok_or_else(|| {
+                format!(
+                    "employee '{}' not found in {}",
+                    employee_id,
+                    employee_config_path.display()
+                )
+            })?
             .clone();
 
         let runtime_root = default_runtime_root()?;
@@ -137,10 +148,12 @@ impl ServiceConfig {
                     .to_string_lossy()
                     .into_owned()
             }))?;
-        let users_root = resolve_path(
-            env::var("USERS_ROOT")
-                .unwrap_or_else(|_| employee_runtime_root.join("users").to_string_lossy().into_owned()),
-        )?;
+        let users_root = resolve_path(env::var("USERS_ROOT").unwrap_or_else(|_| {
+            employee_runtime_root
+                .join("users")
+                .to_string_lossy()
+                .into_owned()
+        }))?;
         let users_db_path = resolve_path(env::var("USERS_DB_PATH").unwrap_or_else(|_| {
             employee_runtime_root
                 .join("state")
@@ -191,8 +204,12 @@ impl ServiceConfig {
                 .into_owned()
         }))?;
         let slack_client_id = env::var("SLACK_CLIENT_ID").ok().filter(|s| !s.is_empty());
-        let slack_client_secret = env::var("SLACK_CLIENT_SECRET").ok().filter(|s| !s.is_empty());
-        let slack_redirect_uri = env::var("SLACK_REDIRECT_URI").ok().filter(|s| !s.is_empty());
+        let slack_client_secret = env::var("SLACK_CLIENT_SECRET")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let slack_redirect_uri = env::var("SLACK_REDIRECT_URI")
+            .ok()
+            .filter(|s| !s.is_empty());
 
         // Discord configuration
         let discord_bot_token = env::var("DISCORD_BOT_TOKEN").ok().filter(|s| !s.is_empty());
@@ -491,11 +508,17 @@ pub async fn run_server(
             let token = discord_token.clone();
             let bot_user_id = config.discord_bot_user_id;
             tokio::spawn(async move {
-                if let Err(e) = crate::discord_gateway::start_discord_client(token, discord_state, bot_user_id).await {
+                if let Err(e) =
+                    crate::discord_gateway::start_discord_client(token, discord_state, bot_user_id)
+                        .await
+                {
                     error!("Discord client error: {}", e);
                 }
             });
-            info!("Discord Gateway client spawned for employee {}", config.employee_id);
+            info!(
+                "Discord Gateway client spawned for employee {}",
+                config.employee_id
+            );
         } else {
             info!(
                 "Discord Gateway disabled for employee {} (discord_enabled=false)",
@@ -548,8 +571,12 @@ fn execute_due_task(
 
     // Handle Discord guild-based paths differently from regular user paths
     let tasks_db_path = if task_ref.user_id.starts_with("discord:") {
-        let guild_id = task_ref.user_id.strip_prefix("discord:").unwrap_or(&task_ref.user_id);
-        let guild_paths = crate::discord_gateway::DiscordGuildPaths::new(&config.workspace_root, guild_id);
+        let guild_id = task_ref
+            .user_id
+            .strip_prefix("discord:")
+            .unwrap_or(&task_ref.user_id);
+        let guild_paths =
+            crate::discord_gateway::DiscordGuildPaths::new(&config.workspace_root, guild_id);
         guild_paths.tasks_db_path
     } else {
         let user_paths = user_store.user_paths(&config.users_root, &task_ref.user_id);
@@ -604,8 +631,7 @@ fn execute_due_task(
             "scheduler task completed task_id={} user_id={} status=success",
             task_ref.task_id, task_ref.user_id
         );
-        let refreshed_scheduler =
-            Scheduler::load(&tasks_db_path, ModuleExecutor::default());
+        let refreshed_scheduler = Scheduler::load(&tasks_db_path, ModuleExecutor::default());
         match refreshed_scheduler {
             Ok(refreshed_scheduler) => {
                 index_store.sync_user_tasks(&task_ref.user_id, refreshed_scheduler.tasks())?;
@@ -614,7 +640,9 @@ fn execute_due_task(
                 Ok(())
             }
             Err(err) => {
-                if let Err(sync_err) = index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks()) {
+                if let Err(sync_err) =
+                    index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks())
+                {
                     warn!(
                         "scheduler sync failed after error task_id={} user_id={} error={}",
                         task_ref.task_id, task_ref.user_id, sync_err
@@ -731,7 +759,13 @@ async fn slack_events(State(state): State<AppState>, body: Bytes) -> impl IntoRe
     let slack_store = state.slack_store.clone();
     let body_bytes = body.to_vec();
     tokio::task::spawn_blocking(move || {
-        if let Err(err) = process_slack_event(&config, &user_store, &index_store, &slack_store, &body_bytes) {
+        if let Err(err) = process_slack_event(
+            &config,
+            &user_store,
+            &index_store,
+            &slack_store,
+            &body_bytes,
+        ) {
             error!("failed to process slack event: {err}");
         }
     });
@@ -753,11 +787,12 @@ async fn slack_install(State(state): State<AppState>) -> impl IntoResponse {
         }
     };
 
-    let redirect_uri = state
-        .config
-        .slack_redirect_uri
-        .clone()
-        .unwrap_or_else(|| format!("http://localhost:{}/slack/oauth/callback", state.config.port));
+    let redirect_uri = state.config.slack_redirect_uri.clone().unwrap_or_else(|| {
+        format!(
+            "http://localhost:{}/slack/oauth/callback",
+            state.config.port
+        )
+    });
 
     let scopes = "chat:write,channels:history,groups:history,im:history,mpim:history";
 
@@ -803,22 +838,31 @@ async fn slack_oauth_callback(
     let client_id = match &state.config.slack_client_id {
         Some(id) => id.clone(),
         None => {
-            return (StatusCode::SERVICE_UNAVAILABLE, "SLACK_CLIENT_ID not configured").into_response();
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "SLACK_CLIENT_ID not configured",
+            )
+                .into_response();
         }
     };
 
     let client_secret = match &state.config.slack_client_secret {
         Some(secret) => secret.clone(),
         None => {
-            return (StatusCode::SERVICE_UNAVAILABLE, "SLACK_CLIENT_SECRET not configured").into_response();
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "SLACK_CLIENT_SECRET not configured",
+            )
+                .into_response();
         }
     };
 
-    let redirect_uri = state
-        .config
-        .slack_redirect_uri
-        .clone()
-        .unwrap_or_else(|| format!("http://localhost:{}/slack/oauth/callback", state.config.port));
+    let redirect_uri = state.config.slack_redirect_uri.clone().unwrap_or_else(|| {
+        format!(
+            "http://localhost:{}/slack/oauth/callback",
+            state.config.port
+        )
+    });
 
     // Exchange code for token
     let client = reqwest::Client::new();
@@ -900,7 +944,11 @@ async fn slack_oauth_callback(
 
     if let Err(e) = state.slack_store.upsert_installation(&installation) {
         error!("Failed to save Slack installation: {}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save installation").into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save installation",
+        )
+            .into_response();
     }
 
     info!(
@@ -966,9 +1014,7 @@ fn process_slack_event(
 
     info!(
         "slack message from {} in channel {:?}: {:?}",
-        message.sender,
-        message.metadata.slack_channel_id,
-        message.text_body
+        message.sender, message.metadata.slack_channel_id, message.text_body
     );
 
     // Get channel ID (required for Slack)
@@ -998,20 +1044,26 @@ fn process_slack_event(
 
     // Bump thread state
     let thread_state_path = default_thread_state_path(&workspace);
-    let thread_state = bump_thread_state(
-        &thread_state_path,
-        &thread_key,
-        message.message_id.clone(),
-    )?;
+    let thread_state =
+        bump_thread_state(&thread_state_path, &thread_key, message.message_id.clone())?;
 
     // Save the incoming Slack message to workspace
-    append_slack_message(&workspace, &message, raw_payload, thread_state.last_email_seq)?;
+    append_slack_message(
+        &workspace,
+        &message,
+        raw_payload,
+        thread_state.last_email_seq,
+    )?;
 
     // Determine model and runner
     let model_name = match config.employee_profile.model.clone() {
         Some(model) => model,
         None => {
-            if config.employee_profile.runner.eq_ignore_ascii_case("claude") {
+            if config
+                .employee_profile
+                .runner
+                .eq_ignore_ascii_case("claude")
+            {
                 String::new()
             } else {
                 config.codex_model.clone()
@@ -1038,7 +1090,7 @@ fn process_slack_event(
         runner: config.employee_profile.runner.clone(),
         codex_disabled: config.codex_disabled,
         reply_to: vec![channel_id.clone()], // Reply to the same channel
-        reply_from: None, // Slack uses bot token, not a "from" address
+        reply_from: None,                   // Slack uses bot token, not a "from" address
         archive_root: Some(user_paths.mail_root.clone()),
         thread_id: Some(thread_key.clone()),
         thread_epoch: Some(thread_state.epoch),
@@ -1172,7 +1224,11 @@ pub fn process_inbound_payload(
     let model_name = match config.employee_profile.model.clone() {
         Some(model) => model,
         None => {
-            if config.employee_profile.runner.eq_ignore_ascii_case("claude") {
+            if config
+                .employee_profile
+                .runner
+                .eq_ignore_ascii_case("claude")
+            {
                 String::new()
             } else {
                 config.codex_model.clone()
@@ -1448,10 +1504,7 @@ pub fn copy_dir_recursive(src: &Path, dest: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn ensure_workspace_employee_files(
-    workspace: &Path,
-    employee: &EmployeeProfile,
-) -> io::Result<()> {
+fn ensure_workspace_employee_files(workspace: &Path, employee: &EmployeeProfile) -> io::Result<()> {
     if let Some(path) = employee.agents_path.as_ref() {
         if path.exists() {
             fs::copy(path, workspace.join("AGENTS.md"))?;
@@ -2709,30 +2762,26 @@ mod tests {
             serde_json::from_str(inbound_raw).expect("parse inbound");
         let thread = thread_key(&inbound_payload, inbound_raw.as_bytes());
         let addresses = vec!["service@example.com".to_string()];
-        let address_set: HashSet<String> =
-            addresses.iter().map(|value| value.to_ascii_lowercase()).collect();
+        let address_set: HashSet<String> = addresses
+            .iter()
+            .map(|value| value.to_ascii_lowercase())
+            .collect();
         let employee = EmployeeProfile {
             id: "test-employee".to_string(),
             display_name: None,
-        runner: "codex".to_string(),
-        model: None,
-        addresses,
-        address_set,
-        runtime_root: None,
-        agents_path: None,
-        claude_path: None,
-        soul_path: None,
-        skills_dir: None,
-        discord_enabled: false,
-    };
-        let workspace = ensure_thread_workspace(
-            &user_paths,
-            "user123",
-            &thread,
-            &employee,
-            None,
-        )
-        .expect("create workspace");
+            runner: "codex".to_string(),
+            model: None,
+            addresses,
+            address_set,
+            runtime_root: None,
+            agents_path: None,
+            claude_path: None,
+            soul_path: None,
+            skills_dir: None,
+            discord_enabled: false,
+        };
+        let workspace = ensure_thread_workspace(&user_paths, "user123", &thread, &employee, None)
+            .expect("create workspace");
 
         let past_root = workspace.join("references").join("past_emails");
         let index_path = past_root.join("index.json");

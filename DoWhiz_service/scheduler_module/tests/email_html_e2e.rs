@@ -44,8 +44,10 @@ fn assert_clean_html(html: &str) {
 
 fn test_employee_directory() -> (EmployeeProfile, EmployeeDirectory) {
     let addresses = vec!["service@example.com".to_string()];
-    let address_set: HashSet<String> =
-        addresses.iter().map(|value| value.to_ascii_lowercase()).collect();
+    let address_set: HashSet<String> = addresses
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect();
     let employee = EmployeeProfile {
         id: "test-employee".to_string(),
         display_name: None,

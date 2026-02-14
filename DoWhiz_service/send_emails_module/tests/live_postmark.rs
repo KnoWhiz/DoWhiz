@@ -174,8 +174,7 @@ fn build_html_file(dir: &Path, name: &str) -> PathBuf {
 fn send_email_with_attachments_and_delivery() {
     load_env_from_repo();
     let (token, recipient) = require_live_config();
-    let from =
-        env::var("POSTMARK_TEST_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
+    let from = env::var("POSTMARK_TEST_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
 
     let temp = tempfile::tempdir().expect("tempdir failed");
     let html_path = build_html_file(temp.path(), "reply_email_draft.html");
@@ -221,8 +220,7 @@ fn send_email_with_attachments_and_delivery() {
 fn send_multiple_emails_batch() {
     load_env_from_repo();
     let (token, recipient) = require_live_config();
-    let from =
-        env::var("POSTMARK_TEST_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
+    let from = env::var("POSTMARK_TEST_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
 
     let temp = tempfile::tempdir().expect("tempdir failed");
     let html_path = build_html_file(temp.path(), "reply_email_draft.html");

@@ -1,12 +1,6 @@
 use mockito::{Matcher, Server};
 use scheduler_module::{
-    channel::Channel,
-    RunTaskTask,
-    Scheduler,
-    SchedulerError,
-    TaskExecution,
-    TaskExecutor,
-    TaskKind,
+    channel::Channel, RunTaskTask, Scheduler, SchedulerError, TaskExecution, TaskExecutor, TaskKind,
 };
 use std::env;
 use std::fs;
@@ -128,12 +122,18 @@ fn run_task_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Err
         .iter()
         .find(|task| task.id == task_id)
         .expect("task exists");
-    assert!(task.enabled, "task should remain enabled before third failure");
+    assert!(
+        task.enabled,
+        "task should remain enabled before third failure"
+    );
 
     let failure_dir = workspace.join("failure_notifications");
     if failure_dir.exists() {
         let mut entries = fs::read_dir(&failure_dir)?;
-        assert!(entries.next().is_none(), "no failure notice before third attempt");
+        assert!(
+            entries.next().is_none(),
+            "no failure notice before third attempt"
+        );
     }
 
     // Third failure should disable and notify.
@@ -175,17 +175,16 @@ fn run_task_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Err
         for entry in fs::read_dir(&report_dir)? {
             let entry = entry?;
             let path = entry.path();
-            let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("");
             if name.contains(&needle) {
                 report_files.push(path);
             }
         }
     }
-    assert_eq!(
-        report_files.len(),
-        1,
-        "expected one admin failure report"
-    );
+    assert_eq!(report_files.len(), 1, "expected one admin failure report");
     let report_html = fs::read_to_string(&report_files[0])?;
     assert!(
         report_html.contains(&format!("Task ID: {}", task_id)),

@@ -1,12 +1,6 @@
 use mockito::{Matcher, Server};
 use scheduler_module::{
-    channel::Channel,
-    RunTaskTask,
-    Scheduler,
-    SchedulerError,
-    TaskExecution,
-    TaskExecutor,
-    TaskKind,
+    channel::Channel, RunTaskTask, Scheduler, SchedulerError, TaskExecution, TaskExecutor, TaskKind,
 };
 use std::env;
 use std::fs;
@@ -66,7 +60,9 @@ fn slack_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Error>
         .match_header("authorization", "Bearer xoxb-test")
         .match_header("content-type", "application/json")
         .match_body(Matcher::Regex("\"channel\":\"C123\"".to_string()))
-        .match_body(Matcher::Regex("We could not complete your request".to_string()))
+        .match_body(Matcher::Regex(
+            "We could not complete your request".to_string(),
+        ))
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(r#"{"ok":true,"ts":"1700000000.123"}"#)
@@ -125,12 +121,18 @@ fn slack_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Error>
         .iter()
         .find(|task| task.id == task_id)
         .expect("task exists");
-    assert!(task.enabled, "task should remain enabled before third failure");
+    assert!(
+        task.enabled,
+        "task should remain enabled before third failure"
+    );
 
     let failure_dir = workspace.join("failure_notifications");
     if failure_dir.exists() {
         let mut entries = fs::read_dir(&failure_dir)?;
-        assert!(entries.next().is_none(), "no failure notice before third attempt");
+        assert!(
+            entries.next().is_none(),
+            "no failure notice before third attempt"
+        );
     }
 
     let _ = scheduler.tick();
@@ -171,17 +173,16 @@ fn slack_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Error>
         for entry in fs::read_dir(&report_dir)? {
             let entry = entry?;
             let path = entry.path();
-            let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("");
             if name.contains(&needle) {
                 report_files.push(path);
             }
         }
     }
-    assert_eq!(
-        report_files.len(),
-        1,
-        "expected one admin failure report"
-    );
+    assert_eq!(report_files.len(), 1, "expected one admin failure report");
     let report_html = fs::read_to_string(&report_files[0])?;
     assert!(
         report_html.contains(&format!("Task ID: {}", task_id)),
