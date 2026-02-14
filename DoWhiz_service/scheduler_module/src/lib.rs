@@ -2299,6 +2299,30 @@ Please resend your request.",
             };
             execute_slack_send(&send_task)?;
         }
+        Channel::Discord => {
+            let text_path = notification_dir.join(format!("user_failure_{}.txt", timestamp));
+            fs::write(&text_path, format!("{}\n", message))?;
+            let send_task = SendReplyTask {
+                channel: task.channel.clone(),
+                subject: String::new(),
+                html_path: text_path,
+                attachments_dir: notification_dir.join(format!(
+                    "user_failure_attachments_{}",
+                    timestamp
+                )),
+                from: None,
+                to: task.reply_to.clone(),
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                in_reply_to: None,
+                references: None,
+                archive_root: task.archive_root.clone(),
+                thread_epoch: task.thread_epoch,
+                thread_state_path: task.thread_state_path.clone(),
+                slack_team_id: task.slack_team_id.clone(),
+            };
+            execute_discord_send(&send_task)?;
+        }
         Channel::Email | Channel::Telegram => {
             let reply_context = load_reply_context(&task.workspace_dir);
             let from = normalize_header_value(task.reply_from.clone())

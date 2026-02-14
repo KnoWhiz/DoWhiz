@@ -604,21 +604,23 @@ fn execute_due_task(
                 index_store.sync_user_tasks(&task_ref.user_id, refreshed_scheduler.tasks())?;
                 let summary = summarize_tasks(refreshed_scheduler.tasks(), Utc::now());
                 log_task_snapshot(&task_ref.user_id, "after_execute", &summary);
+                Ok(())
             }
-            Ok(())
-        }
-        Err(err) => {
-            if let Err(sync_err) = index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks()) {
-                warn!(
-                    "scheduler sync failed after error task_id={} user_id={} error={}",
-                    task_ref.task_id, task_ref.user_id, sync_err
-                );
-            } else {
-                let summary = summarize_tasks(scheduler.tasks(), Utc::now());
-                log_task_snapshot(&task_ref.user_id, "after_execute_error", &summary);
+            Err(err) => {
+                if let Err(sync_err) = index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks()) {
+                    warn!(
+                        "scheduler sync failed after error task_id={} user_id={} error={}",
+                        task_ref.task_id, task_ref.user_id, sync_err
+                    );
+                } else {
+                    let summary = summarize_tasks(scheduler.tasks(), Utc::now());
+                    log_task_snapshot(&task_ref.user_id, "after_execute_error", &summary);
+                }
+                Err(Box::new(err))
             }
-            Err(Box::new(err))
         }
+    } else {
+        Ok(())
     }
 }
 
