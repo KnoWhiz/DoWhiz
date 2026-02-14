@@ -58,6 +58,7 @@ fn test_employee_directory() -> (EmployeeProfile, EmployeeDirectory) {
         claude_path: None,
         soul_path: None,
         skills_dir: None,
+        discord_enabled: false,
     };
     let mut employee_by_id = HashMap::new();
     employee_by_id.insert(employee.id.clone(), employee.clone());
