@@ -961,7 +961,7 @@ async fn slack_oauth_callback(
     let html = format!(
         r#"<!DOCTYPE html>
 <html>
-<head><title>DoWhiz - Slack Installation Complete</title></head>
+<head><title>DoWhiz Slack Integration | Install Complete and Next Steps</title></head>
 <body style="font-family: sans-serif; text-align: center; padding: 50px;">
     <h1>Installation Complete!</h1>
     <p>DoWhiz has been successfully installed to <strong>{}</strong>.</p>
