@@ -1,4 +1,4 @@
-# DoWhiz - A lightweight Rust replica of OpenClaw🦞 with better security, accessibility, and token usage.
+# DoWhiz - A lightweight Rust replica of OpenClaw🦞
 
 <p align="center">
   <img src="assets/readme-banner.svg" alt="DoWhiz - Any-channel digital employees" width="1200" />
@@ -16,7 +16,7 @@
   </a>
 </p>
 
-A lightweight Rust replica of OpenClaw with better security, accessibility, and token usage. Serve as your digital employee team, message us any task over email, Discord, Slack, Telegram, WhatsApp, iMessage, or any other channel.
+A lightweight Rust replica of OpenClaw🦞 with **better security, accessibility, and token usage**. Serve as your digital employee team, message us any task over email, Discord, Slack, Telegram, WhatsApp, iMessage, or any other channel. 🧸🐭🐙🐘👾🦞🐦🐉
 
 ## Quick Start
 
