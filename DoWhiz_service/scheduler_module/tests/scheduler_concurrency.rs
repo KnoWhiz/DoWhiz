@@ -140,6 +140,8 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
         slack_client_id: None,
         slack_client_secret: None,
         slack_redirect_uri: None,
+        discord_bot_token: None,
+        discord_bot_user_id: None,
     };
 
     let rt = Runtime::new()?;

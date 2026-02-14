@@ -30,7 +30,8 @@ use crate::employee_config::{load_employee_directory, EmployeeDirectory, Employe
 use crate::index_store::{IndexStore, TaskRef};
 use crate::mailbox;
 use crate::slack_store::{SlackInstallation, SlackStore};
-use crate::thread_state::{bump_thread_state, default_thread_state_path};
+// Re-export thread_state functions for use by discord_gateway
+pub use crate::thread_state::{bump_thread_state, default_thread_state_path};
 use crate::user_store::{extract_emails, UserStore};
 use crate::channel::Channel;
 use crate::{
@@ -74,6 +75,10 @@ pub struct ServiceConfig {
     pub slack_client_secret: Option<String>,
     /// Slack OAuth redirect URI
     pub slack_redirect_uri: Option<String>,
+    /// Discord bot token
+    pub discord_bot_token: Option<String>,
+    /// Discord bot application ID (for filtering out bot's own messages)
+    pub discord_bot_user_id: Option<u64>,
 }
 
 impl ServiceConfig {
@@ -189,6 +194,12 @@ impl ServiceConfig {
         let slack_client_secret = env::var("SLACK_CLIENT_SECRET").ok().filter(|s| !s.is_empty());
         let slack_redirect_uri = env::var("SLACK_REDIRECT_URI").ok().filter(|s| !s.is_empty());
 
+        // Discord configuration
+        let discord_bot_token = env::var("DISCORD_BOT_TOKEN").ok().filter(|s| !s.is_empty());
+        let discord_bot_user_id = env::var("DISCORD_BOT_USER_ID")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok());
+
         Ok(Self {
             host,
             port,
@@ -215,6 +226,8 @@ impl ServiceConfig {
             slack_client_id,
             slack_client_secret,
             slack_redirect_uri,
+            discord_bot_token,
+            discord_bot_user_id,
         })
     }
 }
@@ -467,6 +480,23 @@ pub async fn run_server(
             }
         });
     }
+
+    // Start Discord Gateway client if token is configured
+    if let Some(ref discord_token) = config.discord_bot_token {
+        let discord_state = crate::discord_gateway::DiscordHandlerState {
+            config: config.clone(),
+            index_store: index_store.clone(),
+        };
+        let token = discord_token.clone();
+        let bot_user_id = config.discord_bot_user_id;
+        tokio::spawn(async move {
+            if let Err(e) = crate::discord_gateway::start_discord_client(token, discord_state, bot_user_id).await {
+                error!("Discord client error: {}", e);
+            }
+        });
+        info!("Discord Gateway client spawned");
+    }
+
     let state = AppState {
         config: config.clone(),
         dedupe_store: Arc::new(AsyncMutex::new(dedupe_store)),
@@ -508,8 +538,18 @@ fn execute_due_task(
     running_threads: &Arc<Mutex<HashSet<String>>>,
 ) -> Result<(), BoxError> {
     let task_id = Uuid::parse_str(&task_ref.task_id)?;
-    let user_paths = user_store.user_paths(&config.users_root, &task_ref.user_id);
-    let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+
+    // Handle Discord guild-based paths differently from regular user paths
+    let tasks_db_path = if task_ref.user_id.starts_with("discord:") {
+        let guild_id = task_ref.user_id.strip_prefix("discord:").unwrap_or(&task_ref.user_id);
+        let guild_paths = crate::discord_gateway::DiscordGuildPaths::new(&config.workspace_root, guild_id);
+        guild_paths.tasks_db_path
+    } else {
+        let user_paths = user_store.user_paths(&config.users_root, &task_ref.user_id);
+        user_paths.tasks_db_path
+    };
+
+    let mut scheduler = Scheduler::load(&tasks_db_path, ModuleExecutor::default())?;
     let now = Utc::now();
     let summary = summarize_tasks(scheduler.tasks(), now);
     log_task_snapshot(&task_ref.user_id, "before_execute", &summary);
@@ -558,30 +598,28 @@ fn execute_due_task(
             task_ref.task_id, task_ref.user_id
         );
         let refreshed_scheduler =
-            Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default());
+            Scheduler::load(&tasks_db_path, ModuleExecutor::default());
         match refreshed_scheduler {
             Ok(refreshed_scheduler) => {
                 index_store.sync_user_tasks(&task_ref.user_id, refreshed_scheduler.tasks())?;
                 let summary = summarize_tasks(refreshed_scheduler.tasks(), Utc::now());
                 log_task_snapshot(&task_ref.user_id, "after_execute", &summary);
             }
-            Err(err) => {
-                warn!(
-                    "scheduler reload failed after execute task_id={} user_id={} error={}",
-                    task_ref.task_id, task_ref.user_id, err
-                );
-                index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks())?;
-                let summary = summarize_tasks(scheduler.tasks(), Utc::now());
-                log_task_snapshot(&task_ref.user_id, "after_execute", &summary);
-            }
+            Ok(())
         }
-    } else {
-        warn!(
-            "scheduler task skipped task_id={} user_id={} status={}",
-            task_ref.task_id, task_ref.user_id, status_label
-        );
+        Err(err) => {
+            if let Err(sync_err) = index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks()) {
+                warn!(
+                    "scheduler sync failed after error task_id={} user_id={} error={}",
+                    task_ref.task_id, task_ref.user_id, sync_err
+                );
+            } else {
+                let summary = summarize_tasks(scheduler.tasks(), Utc::now());
+                log_task_snapshot(&task_ref.user_id, "after_execute_error", &summary);
+            }
+            Err(Box::new(err))
+        }
     }
-    Ok(())
 }
 
 async fn health() -> impl IntoResponse {
@@ -1385,7 +1423,7 @@ fn copy_skills_directory(src: &Path, dest: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn copy_dir_recursive(src: &Path, dest: &Path) -> io::Result<()> {
+pub fn copy_dir_recursive(src: &Path, dest: &Path) -> io::Result<()> {
     fs::create_dir_all(dest)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
@@ -1560,7 +1598,7 @@ fn archive_inbound(
     Ok(())
 }
 
-fn cancel_pending_thread_tasks<E: crate::TaskExecutor>(
+pub fn cancel_pending_thread_tasks<E: crate::TaskExecutor>(
     scheduler: &mut Scheduler<E>,
     workspace: &Path,
     current_epoch: u64,

@@ -101,6 +101,38 @@ Optional flags:
 - `--skip-hook` leaves the Postmark hook unchanged.
 - `--skip-ngrok` disables ngrok (requires `--public-url` or `--skip-hook`).
 
+## Fanout gateway (single Postmark server)
+If you want **one Postmark server** to deliver inbound messages to multiple employee services, run the fanout gateway and point Postmark/Slack at the fanout URL. The gateway forwards every inbound request to **all** employee services; each service ignores non-matching addresses.
+
+Local (fanout only):
+```
+./DoWhiz_service/scripts/run_fanout_local.sh
+```
+Override targets/port with env:
+```
+FANOUT_TARGETS="http://127.0.0.1:9001,http://127.0.0.1:9002,http://127.0.0.1:9003" \
+FANOUT_PORT=9100 \
+./DoWhiz_service/scripts/run_fanout_local.sh
+```
+
+Docker: start **fanout + all employees** in one command:
+```
+./DoWhiz_service/scripts/run_all_employees_docker.sh
+```
+
+Point Postmark inbound hook and Slack event subscriptions at the **fanout** URL, for example:
+- `https://<ngrok>.ngrok-free.dev/postmark/inbound`
+- `https://<ngrok>.ngrok-free.dev/slack/events`
+
+Proto (boiled_egg) debug:
+```
+./DoWhiz_service/scripts/run_proto_docker.sh
+```
+Local (no Docker):
+```
+./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004 --skip-hook
+```
+
 ## Step-by-step: start the Rust service and send real email
 
 1) Start the Rust service (Terminal 1) for the employee you want:
@@ -302,6 +334,9 @@ cargo test -p scheduler_module --test service_real_email -- --nocapture
 - `RUN_TASK_DOCKER_DNS` to override Docker DNS servers (comma/space-separated)
 - `RUN_TASK_DOCKER_DNS_SEARCH` to add DNS search domains (comma/space-separated)
 - `RUN_TASK_SKIP_WORKSPACE_REMAP=1` to disable legacy workspace path migration (useful with volume mounts)
+- `FANOUT_HOST` / `FANOUT_PORT` for the inbound fanout gateway
+- `FANOUT_TARGETS` (comma-separated list of target base URLs)
+- `FANOUT_TIMEOUT_SECS` (fanout request timeout)
 - Inbound blacklist: any address listed in `employee.toml` is ignored as a sender (prevents loops; display names and `+tag` aliases are normalized).
 
 ## Database files

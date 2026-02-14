@@ -12,8 +12,10 @@ use std::path::PathBuf;
 pub enum Channel {
     /// Email via Postmark
     Email,
-    /// Slack (future)
+    /// Slack
     Slack,
+    /// Discord
+    Discord,
     /// Telegram (future)
     Telegram,
 }
@@ -29,6 +31,7 @@ impl std::fmt::Display for Channel {
         match self {
             Channel::Email => write!(f, "email"),
             Channel::Slack => write!(f, "slack"),
+            Channel::Discord => write!(f, "discord"),
             Channel::Telegram => write!(f, "telegram"),
         }
     }
@@ -41,6 +44,7 @@ impl std::str::FromStr for Channel {
         match s.to_lowercase().as_str() {
             "email" => Ok(Channel::Email),
             "slack" => Ok(Channel::Slack),
+            "discord" => Ok(Channel::Discord),
             "telegram" => Ok(Channel::Telegram),
             _ => Err(format!("unknown channel: {}", s)),
         }
@@ -103,6 +107,10 @@ pub struct ChannelMetadata {
     pub slack_channel_id: Option<String>,
     /// Slack-specific: Team ID
     pub slack_team_id: Option<String>,
+    /// Discord-specific: Guild (server) ID
+    pub discord_guild_id: Option<u64>,
+    /// Discord-specific: Channel ID
+    pub discord_channel_id: Option<u64>,
     /// Telegram-specific: Chat ID
     pub telegram_chat_id: Option<i64>,
 }

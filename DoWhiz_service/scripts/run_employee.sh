@@ -155,6 +155,10 @@ if [[ -n "$public_url" ]]; then
   skip_ngrok="true"
 fi
 
+if [[ "$skip_hook" == "true" ]] && [[ -z "$hook_base_url" ]]; then
+  skip_ngrok="true"
+fi
+
 if [[ "$skip_ngrok" != "true" ]]; then
   if ! command -v ngrok >/dev/null 2>&1; then
     echo "ngrok not found. Install ngrok or pass --public-url to skip it." >&2

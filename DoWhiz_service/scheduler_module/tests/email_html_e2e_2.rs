@@ -108,6 +108,8 @@ fn inbound_email_html_is_sanitized() -> Result<(), Box<dyn std::error::Error + S
         slack_client_id: None,
         slack_client_secret: None,
         slack_redirect_uri: None,
+        discord_bot_token: None,
+        discord_bot_user_id: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path)?;
