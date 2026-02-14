@@ -220,7 +220,7 @@ Go to Oauth URL: https://shayne-laminar-lillian.ngrok-free.dev/slack/oauth/callb
 
 
 ## Documentation and Task Board
-https://docs.google.com/document/d/1MRU00FTJIlCJno2yj9jrlnXNPq1TJ34B5jldg687fSg/edit?tab=t.0
+__[For DoWhiz Developers]__ https://docs.google.com/document/d/1MRU00FTJIlCJno2yj9jrlnXNPq1TJ34B5jldg687fSg/edit?tab=t.0
 
 ## License
 See `LICENSE`.
