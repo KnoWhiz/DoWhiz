@@ -25,8 +25,10 @@ use tokio::sync::Mutex as AsyncMutex;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+use crate::adapters::discord::DiscordOutboundAdapter;
 use crate::adapters::slack::{is_url_verification, SlackChallengeResponse, SlackEventWrapper};
 use crate::employee_config::{load_employee_directory, EmployeeDirectory, EmployeeProfile};
+use crate::message_router::MessageRouter;
 use crate::index_store::{IndexStore, TaskRef};
 use crate::mailbox;
 use crate::slack_store::{SlackInstallation, SlackStore};
@@ -504,6 +506,8 @@ pub async fn run_server(
             let discord_state = crate::discord_gateway::DiscordHandlerState {
                 config: config.clone(),
                 index_store: index_store.clone(),
+                message_router: Arc::new(MessageRouter::new()),
+                outbound_adapter: DiscordOutboundAdapter::new(discord_token.clone()),
             };
             let token = discord_token.clone();
             let bot_user_id = config.discord_bot_user_id;
@@ -961,7 +965,14 @@ async fn slack_oauth_callback(
     let html = format!(
         r#"<!DOCTYPE html>
 <html>
-<head><title>DoWhiz - Slack Installation Complete</title></head>
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="description"
+    content="DoWhiz Slack integration is installed. Confirm your workspace, learn next steps, and start chatting with digital employees right away."
+  />
+  <title>DoWhiz Slack Integration | Install Complete and Next Steps</title>
+</head>
 <body style="font-family: sans-serif; text-align: center; padding: 50px;">
     <h1>Installation Complete!</h1>
     <p>DoWhiz has been successfully installed to <strong>{}</strong>.</p>

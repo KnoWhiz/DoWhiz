@@ -14,9 +14,10 @@ use serenity::async_trait;
 use serenity::Client;
 use tracing::{error, info, warn};
 
-use crate::adapters::discord::DiscordInboundAdapter;
+use crate::adapters::discord::{DiscordInboundAdapter, DiscordOutboundAdapter};
 use crate::channel::Channel;
 use crate::index_store::IndexStore;
+use crate::message_router::{MessageRouter, RouterDecision};
 use crate::service::ServiceConfig;
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
 
@@ -62,6 +63,10 @@ impl DiscordGuildPaths {
 pub struct DiscordHandlerState {
     pub config: Arc<ServiceConfig>,
     pub index_store: Arc<IndexStore>,
+    /// Message router for handling simple queries locally
+    pub message_router: Arc<MessageRouter>,
+    /// Outbound adapter for sending quick responses
+    pub outbound_adapter: DiscordOutboundAdapter,
 }
 
 /// Serenity event handler for Discord Gateway events.
@@ -115,16 +120,42 @@ impl EventHandler for DiscordEventHandler {
             return;
         }
 
+        let msg_len = inbound.text_body.as_ref().map(|t| t.len()).unwrap_or(0);
         info!(
-            "Discord message from {} in channel {:?} (mention={}, reply_to_bot={}): {:?}",
+            "Discord message from {} in channel {:?} (mention={}, reply_to_bot={}, len={}): {:?}",
             inbound.sender,
             inbound.metadata.discord_channel_id,
             is_mention,
             is_reply_to_bot,
+            msg_len,
             inbound.text_body
         );
 
-        // Process the message
+        // Try local router first for simple queries
+        if let Some(text) = &inbound.text_body {
+            match self.state.message_router.classify(text).await {
+                RouterDecision::Simple(response) => {
+                    info!("Router handled message locally, sending quick response");
+                    if let Err(e) = send_quick_discord_response(
+                        &self.state.outbound_adapter.bot_token,
+                        &inbound,
+                        &msg,
+                        &response,
+                    ).await {
+                        error!("failed to send quick Discord response: {}", e);
+                    }
+                    return;
+                }
+                RouterDecision::Complex => {
+                    info!("Router forwarding to full pipeline");
+                }
+                RouterDecision::Passthrough => {
+                    info!("Router passthrough (disabled or error)");
+                }
+            }
+        }
+
+        // Process the message through full pipeline
         if let Err(e) = process_discord_message(&self.state, &inbound, &msg) {
             error!("failed to process Discord message: {}", e);
         }
@@ -248,6 +279,59 @@ fn process_discord_message(
         workspace.display(),
         thread_state.epoch
     );
+
+    Ok(())
+}
+
+/// Send a quick response via Discord for locally-handled queries (async version).
+async fn send_quick_discord_response(
+    bot_token: &str,
+    inbound: &crate::channel::InboundMessage,
+    raw_msg: &Message,
+    response_text: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let channel_id = inbound
+        .metadata
+        .discord_channel_id
+        .ok_or("missing discord_channel_id")?;
+
+    let request = serde_json::json!({
+        "content": response_text,
+        "message_reference": {
+            "message_id": raw_msg.id.get()
+        }
+    });
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!(
+            "https://discord.com/api/v10/channels/{}/messages",
+            channel_id
+        ))
+        .header("Authorization", format!("Bot {}", bot_token))
+        .header("Content-Type", "application/json")
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+    if response.status().is_success() {
+        let api_response: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        let message_id = api_response["id"].as_str().unwrap_or("unknown");
+        info!(
+            "Quick response sent to Discord channel {} message_id={}",
+            channel_id, message_id
+        );
+    } else {
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "unknown error".to_string());
+        warn!("Quick response failed: {}", error_text);
+    }
 
     Ok(())
 }
