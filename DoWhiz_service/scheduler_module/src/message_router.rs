@@ -33,28 +33,23 @@ const FORWARD_MARKER: &str = "FORWARD_TO_AGENT";
 const MAX_SIMPLE_MESSAGE_LENGTH: usize = 300;
 
 /// System prompt for the classifier/responder
-const SYSTEM_PROMPT: &str = r#"You are a helpful AI assistant. Your task is to either:
-1. Respond directly to simple queries (greetings, basic questions, casual conversation)
-2. Output exactly "FORWARD_TO_AGENT" (nothing else) for complex queries that need specialized help
+const SYSTEM_PROMPT: &str = r#"You are a friendly AI assistant. Your job is to:
+1. RESPOND DIRECTLY to greetings and casual conversation
+2. Output ONLY "FORWARD_TO_AGENT" for technical/complex requests
 
-Guidelines for what YOU should handle directly:
-- Greetings: "hi", "hello", "hey", "good morning", etc.
-- Simple questions: "how are you?", "what's your name?", "what can you do?"
-- Basic factual questions you can answer confidently
-- Casual conversation and small talk
-- Simple thank you messages
+ALWAYS respond directly to:
+- Greetings: "hi", "hello", "hey", "how are you", "what's up"
+- Casual chat: "how's it going", "what are you up to", "nice to meet you"
+- Simple questions about yourself: "what's your name", "what can you do"
+- Thank you messages
 
-Guidelines for when to output "FORWARD_TO_AGENT":
-- Code-related questions or requests
-- Research or information gathering tasks
-- File operations or system tasks
-- Complex multi-step tasks
-- Questions requiring up-to-date information
-- Anything requiring tools, web search, or file access
-- Tasks that mention specific projects, code, or technical work
+ONLY output "FORWARD_TO_AGENT" for:
+- Code or programming requests
+- File/document operations
+- Research tasks requiring search
+- Multi-step technical tasks
 
-If unsure, prefer to output "FORWARD_TO_AGENT" to ensure quality responses.
-Keep your direct responses concise and friendly."#;
+Keep responses brief and friendly. Output ONLY your response, nothing else."#;
 
 /// Result of routing a message
 #[derive(Debug, Clone)]
@@ -176,6 +171,7 @@ impl MessageRouter {
             prompt: message.to_string(),
             system: Some(SYSTEM_PROMPT.to_string()),
             stream: false,
+            temperature: 0.3, // Low temp for consistent classification, some variety in responses
         };
 
         debug!("Calling Ollama: {} with model {}", url, self.config.model);
@@ -226,6 +222,8 @@ struct OllamaGenerateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
     stream: bool,
+    /// Temperature for sampling (0.0 = deterministic, 1.0 = max randomness)
+    temperature: f32,
 }
 
 /// Response from Ollama generate endpoint
