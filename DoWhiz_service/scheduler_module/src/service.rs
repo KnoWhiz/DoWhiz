@@ -2778,6 +2778,7 @@ mod tests {
             claude_path: None,
             soul_path: None,
             skills_dir: None,
+            discord_enabled: false,
         };
         let workspace = ensure_thread_workspace(&user_paths, "user123", &thread, &employee, None)
             .expect("create workspace");
