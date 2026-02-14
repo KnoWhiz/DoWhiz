@@ -26,6 +26,9 @@ services:
     environment:
       EMPLOYEE_ID: "little_bear"
       RUST_SERVICE_PORT: "9001"
+      RUN_TASK_DOCKER_IMAGE: ""
+      RUN_TASK_DOCKER_AUTO_BUILD: "0"
+      CODEX_BYPASS_SANDBOX: "1"
     ports:
       - "9001:9001"
     volumes:
@@ -40,6 +43,8 @@ services:
     environment:
       EMPLOYEE_ID: "mini_mouse"
       RUST_SERVICE_PORT: "9001"
+      RUN_TASK_DOCKER_IMAGE: ""
+      RUN_TASK_DOCKER_AUTO_BUILD: "0"
     ports:
       - "9002:9001"
     volumes:
@@ -54,6 +59,9 @@ services:
     environment:
       EMPLOYEE_ID: "sticky_octopus"
       RUST_SERVICE_PORT: "9001"
+      RUN_TASK_DOCKER_IMAGE: ""
+      RUN_TASK_DOCKER_AUTO_BUILD: "0"
+      CODEX_BYPASS_SANDBOX: "1"
     ports:
       - "9003:9001"
     volumes:
@@ -68,6 +76,9 @@ services:
     environment:
       EMPLOYEE_ID: "boiled_egg"
       RUST_SERVICE_PORT: "9001"
+      RUN_TASK_DOCKER_IMAGE: ""
+      RUN_TASK_DOCKER_AUTO_BUILD: "0"
+      CODEX_BYPASS_SANDBOX: "1"
     ports:
       - "9004:9001"
     volumes:
