@@ -35,6 +35,9 @@ pub struct EmployeeConfigEntry {
     pub soul_path: Option<PathBuf>,
     #[serde(default)]
     pub skills_dir: Option<PathBuf>,
+    /// Whether this employee handles Discord messages. Only one employee should have this enabled.
+    #[serde(default)]
+    pub discord_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -50,6 +53,8 @@ pub struct EmployeeProfile {
     pub claude_path: Option<PathBuf>,
     pub soul_path: Option<PathBuf>,
     pub skills_dir: Option<PathBuf>,
+    /// Whether this employee handles Discord messages.
+    pub discord_enabled: bool,
 }
 
 impl EmployeeProfile {
@@ -132,6 +137,7 @@ pub fn load_employee_directory(config_path: &Path) -> Result<EmployeeDirectory, 
             claude_path: resolve_optional_path(base_dir, entry.claude_path.as_ref()),
             soul_path: resolve_optional_path(base_dir, entry.soul_path.as_ref()),
             skills_dir: resolve_optional_path(base_dir, entry.skills_dir.as_ref()),
+            discord_enabled: entry.discord_enabled,
         };
 
         employee_by_id.insert(profile.id.clone(), profile.clone());
