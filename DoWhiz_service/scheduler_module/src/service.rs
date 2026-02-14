@@ -481,20 +481,27 @@ pub async fn run_server(
         });
     }
 
-    // Start Discord Gateway client if token is configured
+    // Start Discord Gateway client if token is configured and employee has discord_enabled
     if let Some(ref discord_token) = config.discord_bot_token {
-        let discord_state = crate::discord_gateway::DiscordHandlerState {
-            config: config.clone(),
-            index_store: index_store.clone(),
-        };
-        let token = discord_token.clone();
-        let bot_user_id = config.discord_bot_user_id;
-        tokio::spawn(async move {
-            if let Err(e) = crate::discord_gateway::start_discord_client(token, discord_state, bot_user_id).await {
-                error!("Discord client error: {}", e);
-            }
-        });
-        info!("Discord Gateway client spawned");
+        if config.employee_profile.discord_enabled {
+            let discord_state = crate::discord_gateway::DiscordHandlerState {
+                config: config.clone(),
+                index_store: index_store.clone(),
+            };
+            let token = discord_token.clone();
+            let bot_user_id = config.discord_bot_user_id;
+            tokio::spawn(async move {
+                if let Err(e) = crate::discord_gateway::start_discord_client(token, discord_state, bot_user_id).await {
+                    error!("Discord client error: {}", e);
+                }
+            });
+            info!("Discord Gateway client spawned for employee {}", config.employee_id);
+        } else {
+            info!(
+                "Discord Gateway disabled for employee {} (discord_enabled=false)",
+                config.employee_id
+            );
+        }
     }
 
     let state = AppState {

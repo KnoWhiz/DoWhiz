@@ -48,3 +48,4 @@ agents_path = "employees/boiled_egg/AGENTS.md"
 claude_path = "employees/boiled_egg/CLAUDE.md"
 soul_path = "employees/boiled_egg/SOUL.md"
 skills_dir = "skills"
+discord_enabled = true
