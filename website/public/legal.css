@@ -119,6 +119,8 @@ h1 {
   padding: 2.25rem;
   margin-bottom: 1.75rem;
   backdrop-filter: blur(10px);
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 520px;
 }
 
 .legal-card h2 {
@@ -223,10 +225,18 @@ h1 {
 
   .legal-card {
     padding: 1.5rem;
+    backdrop-filter: none;
   }
 
   .page-footer {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  a,
+  .related-item {
+    transition: none;
   }
 }

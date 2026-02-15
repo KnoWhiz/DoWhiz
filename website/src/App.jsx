@@ -63,6 +63,31 @@ const getNextThemeSwitch = (date = new Date()) => {
   return next;
 };
 
+const shouldEnableMouseField = () => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const matchMedia = window.matchMedia
+    ? (query) => window.matchMedia(query).matches
+    : () => false;
+
+  const prefersReducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  const prefersReducedData = matchMedia('(prefers-reduced-data: reduce)');
+  const smallScreen = matchMedia('(max-width: 768px)');
+
+  const connection =
+    typeof navigator !== 'undefined'
+      ? navigator.connection || navigator.mozConnection || navigator.webkitConnection
+      : null;
+  const saveData = connection?.saveData;
+  const slowConnection = connection?.effectiveType
+    ? ['slow-2g', '2g', '3g'].includes(connection.effectiveType)
+    : false;
+
+  return !(prefersReducedMotion || prefersReducedData || smallScreen || saveData || slowConnection);
+};
+
 const createParticles = (count, width, height) => {
   return Array.from({ length: count }, () => {
     const x = Math.random() * width;
@@ -255,6 +280,7 @@ function MouseField({ theme }) {
 
 function App() {
   const [theme, setTheme] = useState(() => getThemeForLocalTime());
+  const [enableMouseField, setEnableMouseField] = useState(false);
 
   useEffect(() => {
     let timeoutId;
@@ -287,6 +313,35 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (!shouldEnableMouseField()) {
+      return undefined;
+    }
+
+    let idleId;
+    let timeoutId;
+
+    const revealMouseField = () => {
+      setEnableMouseField(true);
+    };
+
+    if ('requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(revealMouseField, { timeout: 1500 });
+      return () => {
+        if (typeof window.cancelIdleCallback === 'function') {
+          window.cancelIdleCallback(idleId);
+        }
+      };
+    }
+
+    timeoutId = window.setTimeout(revealMouseField, 800);
+    return () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, []);
 
   const buildMailtoLink = (email, subject, body) => {
     const encodedSubject = encodeURIComponent(subject);
@@ -452,7 +507,7 @@ function App() {
 
   return (
     <div className="app-container">
-      <MouseField theme={theme} />
+      {enableMouseField ? <MouseField theme={theme} /> : null}
       <div className="content-layer">
         {/* Navigation */}
         <nav className="navbar">
@@ -525,7 +580,16 @@ function App() {
                   >
                     <div className="role-header">
                       <div className="role-profile">
-                        <img src={member.img} alt={member.imgAlt} className="role-avatar" />
+                        <img
+                          src={member.img}
+                          alt={member.imgAlt}
+                          className="role-avatar"
+                          loading="lazy"
+                          decoding="async"
+                          fetchPriority="low"
+                          width="60"
+                          height="60"
+                        />
                         <div>
                           <h3>{member.name}</h3>
                           <div className="role-title">

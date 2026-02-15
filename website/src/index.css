@@ -1,6 +1,3 @@
-/* Google Fonts Import */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
 :root {
   /* Colors */
   --bg-color: #050505;
@@ -235,6 +232,8 @@ ul {
 .section {
   padding: var(--section-padding);
   position: relative;
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 900px;
 }
 
 .section-title {
@@ -1066,6 +1065,24 @@ ul {
 }
 
 @media (max-width: 768px) {
+  .mouse-field {
+    display: none;
+  }
+
+  .navbar {
+    backdrop-filter: none;
+  }
+
+  .feature-card {
+    backdrop-filter: none;
+  }
+
+  .halo-effect {
+    width: 540px;
+    height: 540px;
+    filter: blur(36px);
+  }
+
   .hero-title {
     font-size: 2.5rem;
     padding: 0 1rem;
@@ -1222,5 +1239,22 @@ ul {
     flex-direction: column;
     align-items: center;
     text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .hero-title,
+  .hero-subtitle,
+  .hero-cta {
+    animation: none;
+    opacity: 1;
+  }
+
+  .workflow-line {
+    animation: none;
   }
 }
