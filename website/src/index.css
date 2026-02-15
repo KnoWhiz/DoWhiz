@@ -147,39 +147,6 @@
   }
 }
 
-/* Theme Toggle Button */
-.theme-toggle {
-  position: fixed;
-  bottom: 2rem;
-  right: 2rem;
-  width: 3.5rem;
-  height: 3.5rem;
-  border-radius: 50%;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  backdrop-filter: blur(10px);
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 1001;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.theme-toggle:hover {
-  transform: scale(1.1) rotate(15deg);
-  border-color: var(--accent-color);
-  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.25);
-}
-
-.theme-toggle svg {
-  width: 1.5rem;
-  height: 1.5rem;
-  stroke-width: 2;
-}
-
 /* Reset & Base */
 * {
   box-sizing: border-box;
