@@ -459,8 +459,8 @@ function App() {
           <div className="container nav-content">
             <a href="#" className="logo">Do<span className="text-gradient">Whiz</span></a>
             <div className="nav-links">
-              <a href="#features" className="nav-btn">Features</a>
               <a href="#roles" className="nav-btn">Team</a>
+              <a href="#features" className="nav-btn">Features</a>
               <a href="/user-guide/" className="nav-btn">User Guide</a>
             </div>
             <div className="nav-actions">
@@ -590,6 +590,38 @@ function App() {
                   <p>{feature.desc}</p>
                 </div>
               ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Explore */}
+        <section className="section explore-section">
+          <div className="container">
+            <h2 className="section-title">Keep exploring</h2>
+            <p className="section-intro">
+              Jump to the most helpful pages to understand the team, workflows, and how to get started fast.
+            </p>
+            <div className="explore-grid">
+              <a className="explore-card" href="/user-guide/">
+                <span className="explore-eyebrow">Get started</span>
+                <h3>User guide</h3>
+                <p>Setup tips, request templates, and workflow basics for working with DoWhiz.</p>
+              </a>
+              <a className="explore-card" href="/agents/oliver/">
+                <span className="explore-eyebrow">Writer</span>
+                <h3>Meet Oliver</h3>
+                <p>See how Oliver turns briefs into crisp drafts, summaries, and structured docs.</p>
+              </a>
+              <a className="explore-card" href="/agents/devin/">
+                <span className="explore-eyebrow">Coder</span>
+                <h3>Meet Devin</h3>
+                <p>Ship fixes, review code, and build scripts with a developer-minded teammate.</p>
+              </a>
+              <a className="explore-card" href="/agents/maggie/">
+                <span className="explore-eyebrow">TPM</span>
+                <h3>Meet Maggie</h3>
+                <p>Stay aligned with crisp status updates, risks, and action plans.</p>
+              </a>
             </div>
           </div>
         </section>
