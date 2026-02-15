@@ -643,6 +643,13 @@ ul {
   border-radius: 4px;
   border: 1px solid rgba(59, 130, 246, 0.2);
   transition: all 0.3s ease;
+  text-decoration: none;
+}
+
+.email-tag[aria-disabled='true'] {
+  cursor: default;
+  opacity: 0.7;
+  pointer-events: none;
 }
 
 .nickname-tag {
@@ -659,11 +666,7 @@ ul {
   width: fit-content;
 }
 
-.clickable-card {
-  cursor: pointer;
-}
-
-.clickable-card:hover .email-tag {
+.email-tag[href]:hover {
   background: var(--accent-color);
   color: white;
   box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);

@@ -237,10 +237,10 @@ function App() {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  const handleEmailClick = (email, subject, body) => {
+  const buildMailtoLink = (email, subject, body) => {
     const encodedSubject = encodeURIComponent(subject);
     const encodedBody = encodeURIComponent(body);
-    window.location.href = `mailto:${email}?subject=${encodedSubject}&body=${encodedBody}`;
+    return `mailto:${email}?subject=${encodedSubject}&body=${encodedBody}`;
   };
 
   const features = [
@@ -475,14 +475,13 @@ function App() {
             <div className="roles-grid">
               {teamMembers.map((member) => {
                 const isActive = member.status === 'Active';
-                const cardClasses = `role-card ${isActive ? 'active-role clickable-card' : 'coming-soon'}`;
+                const cardClasses = `role-card ${isActive ? 'active-role' : 'coming-soon'}`;
 
                 return (
                   <div
                     key={member.name}
                     className={cardClasses}
-                    onClick={isActive ? () => handleEmailClick(member.email, member.subject, member.body) : undefined}
-                    title={isActive ? `Click to email ${member.name}` : `${member.name} is coming soon`}
+                    title={isActive ? `Email ${member.name} at ${member.email}` : `${member.name} is coming soon`}
                   >
                     <div className="role-header">
                       <div className="role-profile">
@@ -493,7 +492,21 @@ function App() {
                             <span className="role-title-text">{member.title}</span>
                             <span className="pronoun-tag">{member.pronoun}</span>
                           </div>
-                          <code className="email-tag">{member.email}</code>
+                          {isActive ? (
+                            <a
+                              className="email-tag"
+                              href={buildMailtoLink(member.email, member.subject, member.body)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Email ${member.name}`}
+                            >
+                              {member.email}
+                            </a>
+                          ) : (
+                            <span className="email-tag" aria-disabled="true">
+                              {member.email}
+                            </span>
+                          )}
                           <div className="nickname-tag">{member.nickname}</div>
                         </div>
                       </div>
@@ -508,12 +521,11 @@ function App() {
                       <a
                         href={member.profilePath}
                         className="profile-link"
-                        onClick={(event) => event.stopPropagation()}
                       >
                         View profile
                       </a>
                       <span className="email-hint">
-                        {isActive ? 'Click card to email' : 'Coming soon'}
+                        {isActive ? 'Click email to send' : 'Coming soon'}
                       </span>
                     </div>
                   </div>
