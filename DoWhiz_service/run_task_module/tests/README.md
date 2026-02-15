@@ -60,3 +60,7 @@ workspace/
    - reply_email_draft.html exists in the workspace root.
    - reply_email_attachments/ exists (and contains any generated attachments).
    - Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.
+
+## VM Deployment Workflow
+
+For production VM setup, HTTPS, and systemd service configuration, follow the workflow in `DoWhiz_service/README.md` under “VM Deployment Workflow”.

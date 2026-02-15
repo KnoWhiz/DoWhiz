@@ -59,3 +59,7 @@ println!("Reply saved at: {}", result.reply_html_path.display());
 - When `codex_disabled` is true, it writes a placeholder reply instead of calling Codex (unless `reply_to` is empty).
 - When `reply_to` is empty, the prompt skips email drafting and `reply_email_draft.html` is optional.
 - Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.
+
+## VM Deployment Workflow
+
+For production VM setup, HTTPS, and systemd service configuration, follow the workflow in `DoWhiz_service/README.md` under “VM Deployment Workflow”.

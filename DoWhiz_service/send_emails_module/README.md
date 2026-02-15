@@ -41,3 +41,7 @@ println!("Sent: {}", response.message_id);
 - Tests run live against Postmark and will fail unless `POSTMARK_LIVE_TEST=1` and credentials are set.
 - Use `POSTMARK_TEST_TO` to control the live-test recipient address.
 - Use `POSTMARK_BATCH_COUNT` to control the batch live-test size (capped at 5).
+
+## VM Deployment Workflow
+
+For production VM setup, HTTPS, and systemd service configuration, follow the workflow in `DoWhiz_service/README.md` under “VM Deployment Workflow”.

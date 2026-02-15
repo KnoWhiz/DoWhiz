@@ -47,6 +47,10 @@ curl -fsS -X POST -H "Content-Type: application/json" \
   http://localhost:7071/postmark/inbound
 ```
 
+## VM Deployment Workflow (Non-Azure Functions)
+
+If you are deploying the Rust service directly on a VM (Nginx + systemd), follow the VM deployment workflow in `DoWhiz_service/README.md`. This repo supports both approaches, but the Azure Functions wrapper is not required for VM deployments.
+
 ## Local E2E script
 
 This builds the binary, starts Azurite (if needed), runs `func host start`,
