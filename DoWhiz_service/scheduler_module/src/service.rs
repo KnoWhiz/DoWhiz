@@ -28,7 +28,7 @@ use uuid::Uuid;
 use crate::adapters::discord::DiscordOutboundAdapter;
 use crate::adapters::slack::{is_url_verification, SlackChallengeResponse, SlackEventWrapper};
 use crate::employee_config::{load_employee_directory, EmployeeDirectory, EmployeeProfile};
-use crate::message_router::MessageRouter;
+use crate::message_router::{MessageRouter, RouterDecision};
 use crate::index_store::{IndexStore, TaskRef};
 use crate::mailbox;
 use crate::slack_store::{SlackInstallation, SlackStore};
@@ -258,6 +258,7 @@ struct AppState {
     user_store: Arc<UserStore>,
     index_store: Arc<IndexStore>,
     slack_store: Arc<SlackStore>,
+    message_router: Arc<MessageRouter>,
 }
 
 #[derive(Default)]
@@ -537,6 +538,7 @@ pub async fn run_server(
         user_store,
         index_store,
         slack_store,
+        message_router: Arc::new(MessageRouter::new()),
     };
 
     let host: IpAddr = config
@@ -763,6 +765,69 @@ async fn slack_events(State(state): State<AppState>, body: Bytes) -> impl IntoRe
         if !is_new {
             return (StatusCode::OK, Json(json!({"status": "duplicate"})));
         }
+    }
+
+    // Try to extract message text for router classification
+    let message_text = wrapper
+        .get("event")
+        .and_then(|e| e.get("text"))
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_string());
+
+    let channel_id = wrapper
+        .get("event")
+        .and_then(|e| e.get("channel"))
+        .and_then(|c| c.as_str())
+        .map(|s| s.to_string());
+
+    let thread_ts = wrapper
+        .get("event")
+        .and_then(|e| e.get("thread_ts").or(e.get("ts")))
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_string());
+
+    let bot_id = wrapper
+        .get("event")
+        .and_then(|e| e.get("bot_id"))
+        .and_then(|b| b.as_str());
+
+    // Skip router for bot messages
+    if bot_id.is_none() {
+        if let (Some(ref text), Some(ref channel)) = (&message_text, &channel_id) {
+            // Strip Slack mentions like <@U0AF2E36TED> before classifying
+            let cleaned_text = text
+                .split_whitespace()
+                .filter(|word| !(word.starts_with("<@") && word.ends_with(">")))
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            // Route through local LLM classifier
+            match state.message_router.classify(&cleaned_text).await {
+                RouterDecision::Simple(response) => {
+                    info!("Router decision: Simple (local response) for Slack");
+                    // Send direct reply via Slack API (async)
+                    if let Some(ref token) = state.config.slack_bot_token {
+                        match send_quick_slack_response(token, channel, thread_ts.as_deref(), &response).await {
+                            Ok(_) => {
+                                info!("Sent simple Slack response to channel {}", channel);
+                                return (StatusCode::OK, Json(json!({"status": "simple_response"})));
+                            }
+                            Err(err) => {
+                                error!("Failed to send simple Slack response: {err}");
+                            }
+                        }
+                    }
+                }
+                RouterDecision::Complex => {
+                    info!("Router decision: Complex (forward to pipeline) for Slack");
+                }
+                RouterDecision::Passthrough => {
+                    info!("Router passthrough for Slack");
+                }
+            }
+        }
+    } else {
+        info!("ignoring bot message from user {:?}", wrapper.get("event").and_then(|e| e.get("user")));
     }
 
     // Process Slack event payload similar to postmark_inbound
@@ -1180,6 +1245,59 @@ fn append_slack_message(
         seq,
         incoming_dir.display()
     );
+    Ok(())
+}
+
+/// Send a quick response via Slack for locally-handled queries (async version).
+async fn send_quick_slack_response(
+    bot_token: &str,
+    channel: &str,
+    thread_ts: Option<&str>,
+    response_text: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let api_base = std::env::var("SLACK_API_BASE_URL")
+        .unwrap_or_else(|_| "https://slack.com/api".to_string());
+    let url = format!("{}/chat.postMessage", api_base.trim_end_matches('/'));
+
+    let mut request = serde_json::json!({
+        "channel": channel,
+        "text": response_text,
+        "mrkdwn": true
+    });
+
+    if let Some(ts) = thread_ts {
+        request["thread_ts"] = serde_json::Value::String(ts.to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", bot_token))
+        .header("Content-Type", "application/json")
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Slack API returned {}: {}", status, body).into());
+    }
+
+    let api_response: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    if api_response.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let error = api_response
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("unknown error");
+        return Err(format!("Slack API error: {}", error).into());
+    }
+
     Ok(())
 }
 
