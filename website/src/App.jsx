@@ -254,6 +254,7 @@ function App() {
       example: 'Draft a project update in Notion and summarize it for stakeholders.',
       status: 'Active',
       img: oliverImg,
+      imgAlt: 'Illustration of Oliver the Little-Bear, DoWhiz writer digital employee.',
       subject: 'Office Task Request',
       body: 'Draft a project update in Notion and summarize it for stakeholders.'
     },
@@ -267,6 +268,7 @@ function App() {
       example: "Summarize today's meeting, update action items, and send a daily report.",
       status: 'Active',
       img: miniMouseImg,
+      imgAlt: 'Illustration of Maggie the Mini-Mouse, DoWhiz TPM digital employee.',
       subject: 'TPM Request',
       body: "Summarize today's meeting, turn notes into action items, update the board, and send a daily report."
     },
@@ -280,6 +282,7 @@ function App() {
       example: 'Implement the requested feature and open a PR.',
       status: 'Coming',
       img: stickyOctopusImg,
+      imgAlt: 'Illustration of Devin the Sticky-Octopus, DoWhiz coder digital employee.',
       subject: 'Coding Task',
       body: 'Implement the requested feature and open a PR.'
     },
@@ -293,6 +296,7 @@ function App() {
       example: 'Draft a one-page strategy for Q2 goals.',
       status: 'Coming',
       img: skyDragonImg,
+      imgAlt: 'Illustration of Lumio the Sky-Dragon, DoWhiz CEO digital employee.',
       subject: 'Strategy Request',
       body: 'Draft a one-page strategy for Q2 goals.'
     },
@@ -306,6 +310,7 @@ function App() {
       example: 'Set up a cross-platform workflow for these tasks.',
       status: 'Coming',
       img: cozyLobsterImg,
+      imgAlt: 'Illustration of Claw the Cozy-Lobster, DoWhiz OpenClaw assistant.',
       subject: 'Assistant Request',
       body: 'Set up a cross-platform workflow for these tasks.'
     },
@@ -319,6 +324,7 @@ function App() {
       example: 'Summarize this paper and extract key takeaways.',
       status: 'Coming',
       img: struttonPigeonImg,
+      imgAlt: 'Illustration of Jeffery the Strutton-Pigeon, DoWhiz DeepTutor document helper.',
       subject: 'Document Help',
       body: 'Summarize this paper and extract key takeaways.'
     },
@@ -332,6 +338,7 @@ function App() {
       example: 'TBD.',
       status: 'Coming',
       img: fluffyElephantImg,
+      imgAlt: 'Illustration of Anna the Fluffy-Elephant, DoWhiz role in progress.',
       subject: 'Role Request',
       body: 'Role definition in progress.'
     },
@@ -345,6 +352,7 @@ function App() {
       example: "Prepare and schedule this week's multi-platform launch posts.",
       status: 'Coming',
       img: plushAxolotlImg,
+      imgAlt: 'Illustration of Rachel the Plush-Axolotl, DoWhiz GTM specialist.',
       subject: 'GTM Request',
       body: 'Prepare posts across LinkedIn, Xiaohongshu, Reddit, YouTube, X, Medium, Product Hunt, Hacker News, and WeChat groups.'
     }
@@ -425,7 +433,7 @@ function App() {
                   >
                     <div className="role-header">
                       <div className="role-profile">
-                        <img src={member.img} alt={member.name} className="role-avatar" />
+                        <img src={member.img} alt={member.imgAlt} className="role-avatar" />
                         <div>
                           <h3>{member.name}</h3>
                           <div className="role-title">
