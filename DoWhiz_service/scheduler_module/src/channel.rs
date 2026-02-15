@@ -18,6 +18,8 @@ pub enum Channel {
     Discord,
     /// Telegram (future)
     Telegram,
+    /// Google Docs collaboration via comments
+    GoogleDocs,
 }
 
 impl Default for Channel {
@@ -33,6 +35,7 @@ impl std::fmt::Display for Channel {
             Channel::Slack => write!(f, "slack"),
             Channel::Discord => write!(f, "discord"),
             Channel::Telegram => write!(f, "telegram"),
+            Channel::GoogleDocs => write!(f, "google_docs"),
         }
     }
 }
@@ -46,6 +49,7 @@ impl std::str::FromStr for Channel {
             "slack" => Ok(Channel::Slack),
             "discord" => Ok(Channel::Discord),
             "telegram" => Ok(Channel::Telegram),
+            "google_docs" | "googledocs" => Ok(Channel::GoogleDocs),
             _ => Err(format!("unknown channel: {}", s)),
         }
     }
@@ -113,6 +117,12 @@ pub struct ChannelMetadata {
     pub discord_channel_id: Option<u64>,
     /// Telegram-specific: Chat ID
     pub telegram_chat_id: Option<i64>,
+    /// Google Docs-specific: Document ID
+    pub google_docs_document_id: Option<String>,
+    /// Google Docs-specific: Comment ID to reply to
+    pub google_docs_comment_id: Option<String>,
+    /// Google Docs-specific: Document name/title
+    pub google_docs_document_name: Option<String>,
 }
 
 /// Normalized outbound message to any channel.

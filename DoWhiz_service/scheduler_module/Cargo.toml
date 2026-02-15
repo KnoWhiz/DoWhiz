@@ -8,8 +8,10 @@ axum = "0.7"
 base64 = "0.21"
 chrono = { version = "0.4", features = ["serde"] }
 cron = "0.12"
+dirs = "5"
 dotenvy = "0.15"
 md5 = "0.7"
+regex = "1"
 reqwest = { version = "0.11", features = ["blocking", "json"] }
 rusqlite = "0.31"
 serde = { version = "1", features = ["derive"] }
@@ -19,13 +21,17 @@ thiserror = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
+urlencoding = "2"
 uuid = { version = "1", features = ["serde", "v4"] }
 kuchiki = "0.8"
-urlencoding = "2"
 serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "rustls_backend"] }
 
 send_emails_module = { path = "../send_emails_module" }
 run_task_module = { path = "../run_task_module" }
+
+[[bin]]
+name = "google-docs"
+path = "src/bin/google_docs_cli.rs"
 
 [dev-dependencies]
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder"] }
