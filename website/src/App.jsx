@@ -457,25 +457,6 @@ function App() {
           </div>
         </section>
 
-        {/* Features */}
-        <section id="features" className="section features-section">
-          <div className="container">
-            <h2 className="section-title">The Digital Employee Stack</h2>
-            <p className="section-intro">
-              Built for real teams that live in their inbox. Pick an employee, send a request, and receive finished work with clear next steps.
-            </p>
-            <div className="features-grid">
-              {features.map((feature) => (
-                <div key={feature.tag} className="feature-card">
-                  <span className="feature-tag">{feature.tag}</span>
-                  <h3>{feature.title}</h3>
-                  <p>{feature.desc}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
         {/* Roles & Scenarios */}
         <section id="roles" className="section roles-section">
           <div className="container">
@@ -539,6 +520,25 @@ function App() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        </section>
+
+        {/* Features */}
+        <section id="features" className="section features-section">
+          <div className="container">
+            <h2 className="section-title">The Digital Employee Stack</h2>
+            <p className="section-intro">
+              Built for real teams that live in their inbox. Pick an employee, send a request, and receive finished work with clear next steps.
+            </p>
+            <div className="features-grid">
+              {features.map((feature) => (
+                <div key={feature.tag} className="feature-card">
+                  <span className="feature-tag">{feature.tag}</span>
+                  <h3>{feature.title}</h3>
+                  <p>{feature.desc}</p>
+                </div>
+              ))}
             </div>
           </div>
         </section>
