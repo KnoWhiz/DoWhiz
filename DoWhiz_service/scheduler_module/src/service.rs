@@ -733,6 +733,15 @@ async fn slack_events(State(state): State<AppState>, body: Bytes) -> impl IntoRe
 
     info!("slack event received");
 
+    // Check if this employee handles Slack messages
+    if !state.config.employee_profile.slack_enabled {
+        info!(
+            "Slack disabled for employee {} (slack_enabled=false), ignoring event",
+            state.config.employee_id
+        );
+        return (StatusCode::OK, Json(json!({"status": "ignored"})));
+    }
+
     // Extract event_id for deduplication
     let event_id = wrapper
         .get("event_id")
@@ -2790,6 +2799,7 @@ mod tests {
             soul_path: None,
             skills_dir: None,
             discord_enabled: false,
+            slack_enabled: false,
         };
         let workspace = ensure_thread_workspace(&user_paths, "user123", &thread, &employee, None)
             .expect("create workspace");
