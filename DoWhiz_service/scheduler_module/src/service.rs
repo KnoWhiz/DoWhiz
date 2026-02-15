@@ -28,6 +28,8 @@ use uuid::Uuid;
 use crate::adapters::discord::DiscordOutboundAdapter;
 use crate::adapters::slack::{is_url_verification, SlackChallengeResponse, SlackEventWrapper};
 use crate::employee_config::{load_employee_directory, EmployeeDirectory, EmployeeProfile};
+use crate::google_auth::GoogleAuthConfig;
+use crate::google_docs_poller::GoogleDocsPollerConfig;
 use crate::message_router::MessageRouter;
 use crate::index_store::{IndexStore, TaskRef};
 use crate::mailbox;
@@ -81,6 +83,8 @@ pub struct ServiceConfig {
     pub discord_bot_token: Option<String>,
     /// Discord bot application ID (for filtering out bot's own messages)
     pub discord_bot_user_id: Option<u64>,
+    /// Google Docs polling enabled
+    pub google_docs_enabled: bool,
 }
 
 impl ServiceConfig {
@@ -219,6 +223,11 @@ impl ServiceConfig {
             .ok()
             .and_then(|s| s.parse::<u64>().ok());
 
+        // Google Docs configuration
+        let google_docs_enabled = env::var("GOOGLE_DOCS_ENABLED")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
+
         Ok(Self {
             host,
             port,
@@ -247,6 +256,7 @@ impl ServiceConfig {
             slack_redirect_uri,
             discord_bot_token,
             discord_bot_user_id,
+            google_docs_enabled,
         })
     }
 }
@@ -531,6 +541,61 @@ pub async fn run_server(
         }
     }
 
+    // Start Google Docs polling if enabled
+    if config.google_docs_enabled {
+        let google_auth_config = GoogleAuthConfig::from_env();
+        if google_auth_config.is_valid() {
+            let poller_config = GoogleDocsPollerConfig::from_env();
+            let config_clone = config.clone();
+            let user_store_clone = user_store.clone();
+            let index_store_clone = index_store.clone();
+
+            // Use a dedicated thread for Google Docs polling (blocking operations)
+            let poll_interval = poller_config.poll_interval_secs;
+            std::thread::spawn(move || {
+                info!(
+                    "Starting Google Docs polling for employee {} (interval: {}s)",
+                    config_clone.employee_id, poll_interval
+                );
+
+                match crate::google_docs_poller::GoogleDocsPoller::new(poller_config) {
+                    Ok(poller) => {
+                        loop {
+                            match poll_google_docs_comments(&poller, &config_clone, &user_store_clone, &index_store_clone) {
+                                Ok(count) => {
+                                    if count > 0 {
+                                        info!("Google Docs polling created {} tasks", count);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Google Docs polling error: {}", e);
+                                }
+                            }
+                            std::thread::sleep(Duration::from_secs(poll_interval));
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to create Google Docs poller: {}", e);
+                    }
+                }
+            });
+            info!(
+                "Google Docs polling spawned for employee {}",
+                config.employee_id
+            );
+        } else {
+            warn!(
+                "Google Docs enabled but OAuth credentials not configured for employee {}",
+                config.employee_id
+            );
+        }
+    } else {
+        info!(
+            "Google Docs polling disabled for employee {}",
+            config.employee_id
+        );
+    }
+
     let state = AppState {
         config: config.clone(),
         dedupe_store: Arc::new(AsyncMutex::new(dedupe_store)),
@@ -659,6 +724,8 @@ fn execute_due_task(
             }
         }
     } else {
+        // Task was not executed (disabled or not due), sync index to remove stale entries
+        index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks())?;
         Ok(())
     }
 }
@@ -1108,6 +1175,7 @@ fn process_slack_event(
         thread_state_path: Some(thread_state_path.clone()),
         channel: Channel::Slack,
         slack_team_id: message.metadata.slack_team_id.clone(),
+        employee_id: Some(config.employee_profile.id.clone()),
     };
 
     // Schedule the task
@@ -1131,6 +1199,301 @@ fn process_slack_event(
         thread_state.epoch
     );
 
+    Ok(())
+}
+
+/// Poll Google Docs for new comments and create tasks.
+/// Follows the same pattern as process_slack_event.
+fn poll_google_docs_comments(
+    poller: &crate::google_docs_poller::GoogleDocsPoller,
+    config: &ServiceConfig,
+    user_store: &UserStore,
+    index_store: &IndexStore,
+) -> Result<usize, BoxError> {
+    use crate::adapters::google_docs::GoogleDocsInboundAdapter;
+    use crate::channel::InboundAdapter;
+
+    let adapter = GoogleDocsInboundAdapter::new(
+        poller.auth().clone(),
+        poller.config().employee_emails.clone(),
+    );
+
+    // List all shared documents
+    let documents = adapter.list_shared_documents()?;
+    info!("Google Docs: Found {} shared documents", documents.len());
+
+    let mut tasks_created = 0;
+
+    for doc in documents {
+        let doc_name = doc.name.as_deref().unwrap_or("Untitled");
+        info!("Google Docs: Checking document '{}' ({})", doc_name, doc.id);
+
+        // Register document for tracking
+        let owner_email = doc
+            .owners
+            .as_ref()
+            .and_then(|owners| owners.first())
+            .and_then(|o| o.email_address.as_deref());
+
+        poller.store().register_document(&doc.id, doc.name.as_deref(), owner_email)?;
+
+        // Get comments for this document
+        let comments = match adapter.list_comments(&doc.id) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("Failed to list comments for '{}': {}", doc_name, e);
+                continue;
+            }
+        };
+
+        // Get already processed comments/replies (using tracking IDs)
+        let processed = poller.store().get_processed_ids(&doc.id)?;
+
+        // Filter for actionable comments (returns ActionableComment items)
+        let actionable_items = adapter.filter_actionable_comments(&comments, &processed);
+
+        // Only log if there are new actionable items
+        if !actionable_items.is_empty() {
+            info!(
+                "Google Docs: Found {} new actionable items in '{}' ({} total comments, {} processed)",
+                actionable_items.len(), doc_name, comments.len(), processed.len()
+            );
+        }
+
+        for actionable in actionable_items {
+            // Convert to inbound message using the new method
+            let doc_name = doc.name.as_deref().unwrap_or("Untitled");
+            let message = adapter.actionable_to_inbound_message(&doc.id, doc_name, &actionable);
+
+            let item_type = if actionable.triggering_reply.is_some() { "reply" } else { "comment" };
+            info!(
+                "Google Docs: Processing {} {} on {} from {}",
+                item_type, actionable.tracking_id, doc_name, message.sender
+            );
+
+            // Create user from comment author email
+            let user_email = extract_emails(&message.sender)
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| format!("gdocs_{}@local", message.sender.replace(" ", "_")));
+            let user = user_store.get_or_create_user(&user_email)?;
+            let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+            user_store.ensure_user_dirs(&user_paths)?;
+
+            // Thread key: document_id + comment_id (always use parent comment ID for thread continuity)
+            let thread_key = format!("gdocs:{}:{}", doc.id, actionable.comment.id);
+
+            // Create/get workspace for this thread
+            let workspace = ensure_thread_workspace(
+                &user_paths,
+                &user.user_id,
+                &thread_key,
+                &config.employee_profile,
+                config.skills_source_dir.as_deref(),
+            )?;
+
+            // Bump thread state (use tracking_id for unique message identification)
+            let thread_state_path = default_thread_state_path(&workspace);
+            let thread_state = bump_thread_state(&thread_state_path, &thread_key, Some(actionable.tracking_id.clone()))?;
+
+            // Save the incoming comment to workspace
+            append_google_docs_comment(&workspace, &message, &actionable, thread_state.last_email_seq)?;
+
+            // Fetch and save document content for agent context
+            match adapter.read_document_content(&doc.id) {
+                Ok(doc_content) => {
+                    let doc_content_path = workspace.join("incoming_email").join("document_content.txt");
+                    if let Err(e) = fs::write(&doc_content_path, &doc_content) {
+                        warn!(
+                            "Failed to save document content for {}: {}",
+                            doc.id, e
+                        );
+                    } else {
+                        info!(
+                            "Saved document content ({} chars) to {}",
+                            doc_content.len(),
+                            doc_content_path.display()
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to fetch document content for {}: {}",
+                        doc.id, e
+                    );
+                }
+            }
+
+            // Determine model and runner
+            let model_name = match config.employee_profile.model.clone() {
+                Some(model) => model,
+                None => {
+                    if config.employee_profile.runner.eq_ignore_ascii_case("claude") {
+                        String::new()
+                    } else {
+                        config.codex_model.clone()
+                    }
+                }
+            };
+
+            info!(
+                "workspace ready at {} for user {} thread={} epoch={}",
+                workspace.display(),
+                user.user_id,
+                thread_key,
+                thread_state.epoch
+            );
+
+            // Create RunTask
+            let run_task = RunTaskTask {
+                workspace_dir: workspace.clone(),
+                input_email_dir: PathBuf::from("incoming_email"),
+                input_attachments_dir: PathBuf::from("incoming_attachments"),
+                memory_dir: PathBuf::from("memory"),
+                reference_dir: PathBuf::from("references"),
+                model_name,
+                runner: config.employee_profile.runner.clone(),
+                codex_disabled: config.codex_disabled,
+                reply_to: vec![message.sender.clone()],
+                reply_from: config.employee_profile.addresses.first().cloned(),
+                archive_root: None,
+                thread_id: Some(format!("{}:{}", doc.id, actionable.comment.id)), // document_id:comment_id for reply
+                thread_epoch: Some(thread_state.epoch),
+                thread_state_path: Some(thread_state_path.clone()),
+                channel: Channel::GoogleDocs,
+                slack_team_id: None,
+                employee_id: Some(config.employee_profile.id.clone()),
+            };
+
+            let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+            let task_id = scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
+            index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
+
+            // Mark as processed using the tracking_id
+            poller.store().mark_processed_id(&doc.id, &actionable.tracking_id)?;
+
+            tasks_created += 1;
+            info!(
+                "Created task {} for Google Docs {} {} on {} ({}) for user {}",
+                task_id, item_type, actionable.tracking_id, doc_name, doc.id, user.user_id
+            );
+        }
+
+        // Update last checked time
+        poller.store().update_last_checked(&doc.id)?;
+    }
+
+    Ok(tasks_created)
+}
+
+/// Save an incoming Google Docs comment or reply to the workspace.
+fn append_google_docs_comment(
+    workspace: &Path,
+    message: &crate::channel::InboundMessage,
+    actionable: &crate::adapters::google_docs::ActionableComment,
+    seq: u64,
+) -> Result<(), BoxError> {
+    let incoming_dir = workspace.join("incoming_email");
+    fs::create_dir_all(&incoming_dir)?;
+
+    // Save the raw comment JSON (includes all replies)
+    let raw_path = incoming_dir.join(format!("{:05}_gdocs_comment.json", seq));
+    let raw_json = serde_json::to_string_pretty(&actionable.comment)?;
+    fs::write(&raw_path, &raw_json)?;
+
+    // Create HTML representation for the agent
+    let doc_name = message.metadata.google_docs_document_name.as_deref().unwrap_or("Document");
+    let doc_id = message.metadata.google_docs_document_id.as_deref().unwrap_or("");
+    let sender_name = message.sender_name.as_deref().unwrap_or(&message.sender);
+    let quoted_text = actionable.comment.quoted_file_content.as_ref()
+        .and_then(|q| q.value.as_deref())
+        .unwrap_or("");
+
+    let item_type = if actionable.triggering_reply.is_some() { "Reply" } else { "Comment" };
+
+    // Build conversation thread HTML if this is a reply
+    let thread_html = if let Some(ref reply) = actionable.triggering_reply {
+        let original_author = actionable.comment.author.as_ref()
+            .and_then(|a| a.display_name.as_deref())
+            .unwrap_or("Someone");
+
+        format!(
+            r#"<h3>Conversation Thread:</h3>
+<div style="margin-bottom: 10px;">
+    <p><strong>{} (original comment):</strong></p>
+    <p>{}</p>
+</div>
+<div style="margin-left: 20px; border-left: 2px solid #ccc; padding-left: 10px;">
+    <p><strong>{} (reply that mentions you):</strong></p>
+    <p>{}</p>
+</div>"#,
+            original_author,
+            actionable.comment.content,
+            sender_name,
+            reply.content
+        )
+    } else {
+        format!(
+            r#"<h3>Comment:</h3>
+<p>{}</p>"#,
+            actionable.comment.content
+        )
+    };
+
+    let html_content = format!(
+        r#"<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Google Docs {}</title></head>
+<body>
+<h2>{} on: {}</h2>
+<p><strong>Document ID:</strong> {}</p>
+<p><strong>From:</strong> {} ({})</p>
+<p><strong>Comment ID:</strong> {}</p>
+<p><strong>Tracking ID:</strong> {}</p>
+{}
+{}
+<hr>
+<h3>Document Content:</h3>
+<p>The full document content is available in: <code>incoming_email/document_content.txt</code></p>
+<p>Read this file to understand the document context and make appropriate edits or suggestions.</p>
+<hr>
+<p><em>Respond by writing to reply_email_draft.html</em></p>
+</body>
+</html>"#,
+        item_type, item_type, doc_name, doc_id, sender_name, message.sender,
+        actionable.comment.id, actionable.tracking_id,
+        if quoted_text.is_empty() {
+            String::new()
+        } else {
+            format!("<h3>Quoted text:</h3><blockquote>{}</blockquote>", quoted_text)
+        },
+        thread_html
+    );
+
+    let html_path = incoming_dir.join(format!("{:05}_email.html", seq));
+    fs::write(&html_path, &html_content)?;
+
+    // Create metadata file
+    let meta_path = incoming_dir.join(format!("{:05}_gdocs_meta.json", seq));
+    let meta = serde_json::json!({
+        "channel": "google_docs",
+        "sender": message.sender,
+        "sender_name": message.sender_name,
+        "document_id": doc_id,
+        "document_name": doc_name,
+        "comment_id": actionable.comment.id,
+        "tracking_id": actionable.tracking_id,
+        "is_reply": actionable.triggering_reply.is_some(),
+        "thread_id": message.thread_id,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    });
+    fs::write(&meta_path, serde_json::to_string_pretty(&meta)?)?;
+
+    let item_type_lower = if actionable.triggering_reply.is_some() { "reply" } else { "comment" };
+    info!(
+        "saved Google Docs {} seq={} tracking_id={} to {}",
+        item_type_lower, seq, actionable.tracking_id, incoming_dir.display()
+    );
     Ok(())
 }
 
@@ -1286,6 +1649,7 @@ pub fn process_inbound_payload(
         thread_state_path: Some(thread_state_path.clone()),
         channel: Channel::Email,
         slack_team_id: None,
+        employee_id: Some(config.employee_profile.id.clone()),
     };
 
     let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
