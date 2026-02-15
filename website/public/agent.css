@@ -189,6 +189,8 @@ h1 {
 
 .section {
   margin-top: 3.5rem;
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 700px;
 }
 
 .section h2 {
@@ -474,6 +476,10 @@ h1 {
     grid-template-columns: 1fr;
   }
 
+  .hero-card {
+    backdrop-filter: none;
+  }
+
   .info-grid,
   .examples-grid,
   .flow-track {
@@ -499,5 +505,13 @@ h1 {
   .hero-cta {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow-track::before,
+  .step-dot,
+  .output-preview::after {
+    animation: none;
   }
 }
