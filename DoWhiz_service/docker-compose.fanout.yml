@@ -6,7 +6,7 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags | grep -q phi3 || exit 1"]
+      test: ["CMD-SHELL", "ollama list | grep -q '^phi3:mini' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 30
