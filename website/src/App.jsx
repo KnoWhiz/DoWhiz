@@ -9,6 +9,8 @@ import fluffyElephantImg from './assets/Fluffy-Elephant.jpg';
 import plushAxolotlImg from './assets/Plush-Axolotl.jpg';
 
 const WAITLIST_FORM_URL = 'https://docs.google.com/forms/d/1UgZpFgYxq0uSjmVdai1mpjbfj2GxcWakFt3YKL8by34/viewform';
+const DAY_START_HOUR = 7;
+const NIGHT_START_HOUR = 19;
 
 const lerp = (start, end, t) => start + (end - start) * t;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -38,6 +40,52 @@ const pickColor = (t, palette) => {
     return blendColor(palette[0], palette[1], scaled * 2);
   }
   return blendColor(palette[1], palette[2], (scaled - 0.5) * 2);
+};
+
+const getThemeForLocalTime = (date = new Date()) => {
+  const hour = date.getHours();
+  return hour >= DAY_START_HOUR && hour < NIGHT_START_HOUR ? 'light' : 'dark';
+};
+
+const getNextThemeSwitch = (date = new Date()) => {
+  const next = new Date(date);
+  const hour = date.getHours();
+
+  if (hour >= DAY_START_HOUR && hour < NIGHT_START_HOUR) {
+    next.setHours(NIGHT_START_HOUR, 0, 0, 0);
+    return next;
+  }
+
+  next.setHours(DAY_START_HOUR, 0, 0, 0);
+  if (hour >= NIGHT_START_HOUR) {
+    next.setDate(next.getDate() + 1);
+  }
+  return next;
+};
+
+const shouldEnableMouseField = () => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const matchMedia = window.matchMedia
+    ? (query) => window.matchMedia(query).matches
+    : () => false;
+
+  const prefersReducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  const prefersReducedData = matchMedia('(prefers-reduced-data: reduce)');
+  const smallScreen = matchMedia('(max-width: 768px)');
+
+  const connection =
+    typeof navigator !== 'undefined'
+      ? navigator.connection || navigator.mozConnection || navigator.webkitConnection
+      : null;
+  const saveData = connection?.saveData;
+  const slowConnection = connection?.effectiveType
+    ? ['slow-2g', '2g', '3g'].includes(connection.effectiveType)
+    : false;
+
+  return !(prefersReducedMotion || prefersReducedData || smallScreen || saveData || slowConnection);
 };
 
 const createParticles = (count, width, height) => {
@@ -231,17 +279,108 @@ function MouseField({ theme }) {
 }
 
 function App() {
-  const [theme, setTheme] = useState('dark');
+  const [theme, setTheme] = useState(() => getThemeForLocalTime());
+  const [enableMouseField, setEnableMouseField] = useState(false);
+
+  useEffect(() => {
+    let timeoutId;
+
+    const updateTheme = () => {
+      setTheme(getThemeForLocalTime());
+    };
+
+    const scheduleNextSwitch = () => {
+      const now = new Date();
+      const nextSwitch = getNextThemeSwitch(now);
+      const delay = Math.max(nextSwitch.getTime() - now.getTime(), 0);
+
+      timeoutId = window.setTimeout(() => {
+        updateTheme();
+        scheduleNextSwitch();
+      }, delay);
+    };
+
+    updateTheme();
+    scheduleNextSwitch();
+
+    return () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  const handleEmailClick = (email, subject, body) => {
+  useEffect(() => {
+    if (!shouldEnableMouseField()) {
+      return undefined;
+    }
+
+    let idleId;
+    let timeoutId;
+
+    const revealMouseField = () => {
+      setEnableMouseField(true);
+    };
+
+    if ('requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(revealMouseField, { timeout: 1500 });
+      return () => {
+        if (typeof window.cancelIdleCallback === 'function') {
+          window.cancelIdleCallback(idleId);
+        }
+      };
+    }
+
+    timeoutId = window.setTimeout(revealMouseField, 800);
+    return () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, []);
+
+  const buildMailtoLink = (email, subject, body) => {
     const encodedSubject = encodeURIComponent(subject);
     const encodedBody = encodeURIComponent(body);
-    window.location.href = `mailto:${email}?subject=${encodedSubject}&body=${encodedBody}`;
+    return `mailto:${email}?subject=${encodedSubject}&body=${encodedBody}`;
   };
+
+  const features = [
+    {
+      tag: '01',
+      title: 'Inbox-native delegation',
+      desc: 'Send requests the way you already work: email a digital employee, attach files, and get finished results back in-thread.'
+    },
+    {
+      tag: '02',
+      title: 'Specialized agent playbooks',
+      desc: 'Each employee is trained for a role (Writer, TPM, Coder, CEO, and more) so outputs are tailored, not generic.'
+    },
+    {
+      tag: '03',
+      title: 'Visible, step-by-step delivery',
+      desc: 'Expect a clear flow: brief intake, execution, and a tidy handoff with next steps for your team.'
+    },
+    {
+      tag: '04',
+      title: 'Multi-format outputs',
+      desc: 'Documents, spreadsheets, summaries, posts, and code—delivered in formats your team can immediately reuse.'
+    },
+    {
+      tag: '05',
+      title: 'Multi-channel roadmap',
+      desc: 'Email first today. Slack, phone, Discord, WhatsApp, and more are coming as we expand access.'
+    },
+    {
+      tag: '06',
+      title: 'Privacy-first foundation',
+      desc: 'Clear data boundaries with a focus on practical, secure workflows for real business tasks.'
+    }
+  ];
 
   const teamMembers = [
     {
@@ -254,8 +393,10 @@ function App() {
       example: 'Draft a project update in Notion and summarize it for stakeholders.',
       status: 'Active',
       img: oliverImg,
+      imgAlt: 'Illustration of Oliver the Little-Bear, DoWhiz writer digital employee.',
       subject: 'Office Task Request',
-      body: 'Draft a project update in Notion and summarize it for stakeholders.'
+      body: 'Draft a project update in Notion and summarize it for stakeholders.',
+      profilePath: '/agents/oliver/'
     },
     {
       name: 'Maggie',
@@ -267,8 +408,10 @@ function App() {
       example: "Summarize today's meeting, update action items, and send a daily report.",
       status: 'Active',
       img: miniMouseImg,
+      imgAlt: 'Illustration of Maggie the Mini-Mouse, DoWhiz TPM digital employee.',
       subject: 'TPM Request',
-      body: "Summarize today's meeting, turn notes into action items, update the board, and send a daily report."
+      body: "Summarize today's meeting, turn notes into action items, update the board, and send a daily report.",
+      profilePath: '/agents/maggie/'
     },
     {
       name: 'Devin',
@@ -280,8 +423,10 @@ function App() {
       example: 'Implement the requested feature and open a PR.',
       status: 'Coming',
       img: stickyOctopusImg,
+      imgAlt: 'Illustration of Devin the Sticky-Octopus, DoWhiz coder digital employee.',
       subject: 'Coding Task',
-      body: 'Implement the requested feature and open a PR.'
+      body: 'Implement the requested feature and open a PR.',
+      profilePath: '/agents/devin/'
     },
     {
       name: 'Lumio',
@@ -293,8 +438,10 @@ function App() {
       example: 'Draft a one-page strategy for Q2 goals.',
       status: 'Coming',
       img: skyDragonImg,
+      imgAlt: 'Illustration of Lumio the Sky-Dragon, DoWhiz CEO digital employee.',
       subject: 'Strategy Request',
-      body: 'Draft a one-page strategy for Q2 goals.'
+      body: 'Draft a one-page strategy for Q2 goals.',
+      profilePath: '/agents/lumio/'
     },
     {
       name: 'Claw',
@@ -306,8 +453,10 @@ function App() {
       example: 'Set up a cross-platform workflow for these tasks.',
       status: 'Coming',
       img: cozyLobsterImg,
+      imgAlt: 'Illustration of Claw the Cozy-Lobster, DoWhiz OpenClaw assistant.',
       subject: 'Assistant Request',
-      body: 'Set up a cross-platform workflow for these tasks.'
+      body: 'Set up a cross-platform workflow for these tasks.',
+      profilePath: '/agents/claw/'
     },
     {
       name: 'Jeffery',
@@ -319,8 +468,10 @@ function App() {
       example: 'Summarize this paper and extract key takeaways.',
       status: 'Coming',
       img: struttonPigeonImg,
+      imgAlt: 'Illustration of Jeffery the Strutton-Pigeon, DoWhiz DeepTutor document helper.',
       subject: 'Document Help',
-      body: 'Summarize this paper and extract key takeaways.'
+      body: 'Summarize this paper and extract key takeaways.',
+      profilePath: '/agents/jeffery/'
     },
     {
       name: 'Anna',
@@ -332,8 +483,10 @@ function App() {
       example: 'TBD.',
       status: 'Coming',
       img: fluffyElephantImg,
+      imgAlt: 'Illustration of Anna the Fluffy-Elephant, DoWhiz role in progress.',
       subject: 'Role Request',
-      body: 'Role definition in progress.'
+      body: 'Role definition in progress.',
+      profilePath: '/agents/anna/'
     },
     {
       name: 'Rachel',
@@ -345,14 +498,16 @@ function App() {
       example: "Prepare and schedule this week's multi-platform launch posts.",
       status: 'Coming',
       img: plushAxolotlImg,
+      imgAlt: 'Illustration of Rachel the Plush-Axolotl, DoWhiz GTM specialist.',
       subject: 'GTM Request',
-      body: 'Prepare posts across LinkedIn, Xiaohongshu, Reddit, YouTube, X, Medium, Product Hunt, Hacker News, and WeChat groups.'
+      body: 'Prepare posts across LinkedIn, Xiaohongshu, Reddit, YouTube, X, Medium, Product Hunt, Hacker News, and WeChat groups.',
+      profilePath: '/agents/rachel/'
     }
   ];
 
   return (
     <div className="app-container">
-      <MouseField theme={theme} />
+      {enableMouseField ? <MouseField theme={theme} /> : null}
       <div className="content-layer">
         {/* Navigation */}
         <nav className="navbar">
@@ -360,6 +515,7 @@ function App() {
             <a href="#" className="logo">Do<span className="text-gradient">Whiz</span></a>
             <div className="nav-links">
               <a href="#roles" className="nav-btn">Team</a>
+              <a href="#features" className="nav-btn">Features</a>
               <a href="/user-guide/" className="nav-btn">User Guide</a>
             </div>
             <div className="nav-actions">
@@ -414,25 +570,47 @@ function App() {
             <div className="roles-grid">
               {teamMembers.map((member) => {
                 const isActive = member.status === 'Active';
-                const cardClasses = `role-card ${isActive ? 'active-role clickable-card' : 'coming-soon'}`;
+                const cardClasses = `role-card ${isActive ? 'active-role' : 'coming-soon'}`;
 
                 return (
                   <div
                     key={member.name}
                     className={cardClasses}
-                    onClick={isActive ? () => handleEmailClick(member.email, member.subject, member.body) : undefined}
-                    title={isActive ? `Click to email ${member.name}` : `${member.name} is coming soon`}
+                    title={isActive ? `Email ${member.name} at ${member.email}` : `${member.name} is coming soon`}
                   >
                     <div className="role-header">
                       <div className="role-profile">
-                        <img src={member.img} alt={member.name} className="role-avatar" />
+                        <img
+                          src={member.img}
+                          alt={member.imgAlt}
+                          className="role-avatar"
+                          loading="lazy"
+                          decoding="async"
+                          fetchPriority="low"
+                          width="60"
+                          height="60"
+                        />
                         <div>
                           <h3>{member.name}</h3>
                           <div className="role-title">
                             <span className="role-title-text">{member.title}</span>
                             <span className="pronoun-tag">{member.pronoun}</span>
                           </div>
-                          <code className="email-tag">{member.email}</code>
+                          {isActive ? (
+                            <a
+                              className="email-tag"
+                              href={buildMailtoLink(member.email, member.subject, member.body)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Email ${member.name}`}
+                            >
+                              {member.email}
+                            </a>
+                          ) : (
+                            <span className="email-tag" aria-disabled="true">
+                              {member.email}
+                            </span>
+                          )}
                           <div className="nickname-tag">{member.nickname}</div>
                         </div>
                       </div>
@@ -443,9 +621,39 @@ function App() {
                       <span className="example-label">Example Task</span>
                       <p>"{member.example}"</p>
                     </div>
+                    <div className="role-actions">
+                      <a
+                        href={member.profilePath}
+                        className="profile-link"
+                      >
+                        View profile
+                      </a>
+                      <span className="email-hint">
+                        {isActive ? 'Click email to send' : 'Coming soon'}
+                      </span>
+                    </div>
                   </div>
                 );
               })}
+            </div>
+          </div>
+        </section>
+
+        {/* Features */}
+        <section id="features" className="section features-section">
+          <div className="container">
+            <h2 className="section-title">The Digital Employee Stack</h2>
+            <p className="section-intro">
+              Built for real teams that live in their inbox. Pick an employee, send a request, and receive finished work with clear next steps.
+            </p>
+            <div className="features-grid">
+              {features.map((feature) => (
+                <div key={feature.tag} className="feature-card">
+                  <span className="feature-tag">{feature.tag}</span>
+                  <h3>{feature.title}</h3>
+                  <p>{feature.desc}</p>
+                </div>
+              ))}
             </div>
           </div>
         </section>
@@ -478,30 +686,6 @@ function App() {
           </div>
         </footer>
 
-        {/* Theme Toggle */}
-        <button
-          className="theme-toggle"
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          aria-label="Toggle theme"
-        >
-          {theme === 'dark' ? (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="5"></circle>
-              <line x1="12" y1="1" x2="12" y2="3"></line>
-              <line x1="12" y1="21" x2="12" y2="23"></line>
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-              <line x1="1" y1="12" x2="3" y2="12"></line>
-              <line x1="21" y1="12" x2="23" y2="12"></line>
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-            </svg>
-          ) : (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-            </svg>
-          )}
-        </button>
       </div>
     </div>
   );

@@ -37,8 +37,16 @@ Nginx example:
 ```nginx
 server {
     listen 80;
-    server_name www.dowhiz.com;
+    server_name dowhiz.com www.dowhiz.com;
 
+    return 301 https://dowhiz.com$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name dowhiz.com www.dowhiz.com;
+
+    # SSL config omitted; use certbot or your provider's recommendations.
     root /home/azureuser/DoWhiz/website/dist;
     try_files $uri /index.html;
 }
