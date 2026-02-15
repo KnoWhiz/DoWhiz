@@ -488,6 +488,48 @@ ul {
   line-height: 1.7;
 }
 
+/* Explore */
+.explore-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.5rem;
+}
+
+.explore-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 2.25rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 1.4rem;
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+}
+
+.explore-card:hover {
+  border-color: var(--card-hover-border);
+  background: rgba(255, 255, 255, 0.06);
+  transform: translateY(-4px);
+}
+
+.explore-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.explore-card h3 {
+  font-size: 1.4rem;
+}
+
+.explore-card p {
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
 /* Roles */
 .roles-grid {
   display: grid;
@@ -1014,6 +1056,10 @@ ul {
     grid-template-columns: 1fr 1fr;
   }
 
+  .explore-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .roles-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -1101,6 +1147,7 @@ ul {
 
   /* Card Spacing */
   .features-grid,
+  .explore-grid,
   .roles-grid,
   .security-grid {
     grid-template-columns: 1fr;
@@ -1108,6 +1155,7 @@ ul {
   }
 
   .feature-card,
+  .explore-card,
   .role-card,
   .security-card {
     padding: 1.5rem;

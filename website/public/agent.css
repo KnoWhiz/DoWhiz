@@ -196,6 +196,51 @@ h1 {
   margin-bottom: 1.5rem;
 }
 
+.related-section {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 1.5rem;
+  padding: 2rem;
+}
+
+.related-intro {
+  color: var(--muted);
+  margin-bottom: 1.5rem;
+  max-width: 720px;
+}
+
+.related-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.related-link {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem 1.2rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  transition: all 0.2s ease;
+}
+
+.related-link:hover {
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.08);
+  transform: translateY(-2px);
+}
+
+.related-link-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.related-link-desc {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
 .info-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
