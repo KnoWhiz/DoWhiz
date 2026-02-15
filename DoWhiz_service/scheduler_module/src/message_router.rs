@@ -51,7 +51,19 @@ ONLY output "FORWARD_TO_AGENT" for:
 - Research tasks requiring search
 - Multi-step technical tasks
 
+NEVER output error messages, retry messages, or phrases like "could not complete" or "attempts".
+NEVER output "---" or anything after it. Stop immediately after your response.
 Keep responses brief and friendly. Output ONLY your response, nothing else."#;
+
+/// Known hallucination patterns to filter from responses
+const HALLUCINATION_PATTERNS: &[&str] = &[
+    "could not complete your request",
+    "after 3 attempts",
+    "after three attempts",
+    "please resend your request",
+    "request failed",
+    "---", // Training data separator - indicates model is leaking fine-tuning examples
+];
 
 /// Result of routing a message
 #[derive(Debug, Clone)]
@@ -149,6 +161,19 @@ impl MessageRouter {
         match self.call_ollama(message).await {
             Ok(response) => {
                 let trimmed = response.trim();
+
+                // Check for hallucination patterns - if detected, forward to pipeline
+                let lower = trimmed.to_lowercase();
+                for pattern in HALLUCINATION_PATTERNS {
+                    if lower.contains(pattern) {
+                        warn!(
+                            "Router detected hallucination pattern '{}', forwarding to pipeline",
+                            pattern
+                        );
+                        return RouterDecision::Complex;
+                    }
+                }
+
                 if trimmed.contains(FORWARD_MARKER) {
                     info!("Router decision: Complex (forward to pipeline)");
                     RouterDecision::Complex
