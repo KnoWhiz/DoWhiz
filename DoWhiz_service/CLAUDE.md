@@ -2,139 +2,143 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Try to keep the whole codebase modular and easy to maintain. If a file is too long (say more than 500 / 1000 lines), consider separate the code file into separate code files and make sure each one has its own well defined functionality.
+## Code Style Guidelines
 
-## Overview
+**Modularity**: Keep the codebase modular and maintainable. If a file exceeds 500-1000 lines, split it into separate files with well-defined, single-purpose functionality.
 
-DoWhiz Service is a Rust-based email processing and task scheduling system. It receives inbound email webhooks from Postmark, runs AI agent tasks (via Codex CLI) to process emails, and sends reply emails back via Postmark. The system uses SQLite for persistence with per-user task isolation.
-
-## Build and Test Commands
+## Build & Test Commands
 
 ```bash
-# Build all modules
-cargo build
+# Build
+cargo build                                    # Debug build
+cargo build --release                          # Release build
+cargo build -p scheduler_module --release      # Build specific module
 
-# Run main HTTP server
-cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
+# Test
+cargo test                                     # All tests
+cargo test -p scheduler_module                 # Module-specific tests
+cargo test -p scheduler_module --test scheduler_basic  # Single test file
 
-# Run all tests
-cargo test
+# Lint & Format
+cargo fmt --check                              # Check formatting
+cargo fmt                                      # Auto-format
+cargo clippy --all-targets --all-features      # Run linter
 
-# Run tests for a specific module
-cargo test -p scheduler_module
-cargo test -p send_emails_module
-cargo test -p run_task_module
-
-# Run a single test
-cargo test -p scheduler_module --test scheduler_basic
-
-# Lint
-cargo clippy --all-targets --all-features
-cargo fmt --check
+# E2E Tests (requires environment setup)
+RUST_SERVICE_LIVE_TEST=1 cargo test -p scheduler_module --test service_real_email -- --nocapture
+RUN_CODEX_E2E=1 cargo test -p scheduler_module --test scheduler_agent_e2e -- --nocapture
 ```
 
-### Live Tests (require credentials)
+## Running the Service
+
 ```bash
-# Live Postmark email test
-POSTMARK_LIVE_TEST=1 cargo test -p send_emails_module
+# Single employee with ngrok auto-exposure
+./scripts/run_employee.sh little_bear 9001
 
-# Full E2E test with real Postmark
-RUST_SERVICE_LIVE_TEST=1 \
-POSTMARK_INBOUND_HOOK_URL=https://YOUR-NGROK-URL.ngrok-free.dev \
-POSTMARK_TEST_FROM=you@example.com \
-cargo test -p scheduler_module --test service_real_email -- --nocapture
+# Manual start
+EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 \
+  cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
+
+# Docker (all employees)
+docker-compose -f docker-compose.fanout.yml up
 ```
 
-## Architecture
+## Architecture Overview
 
-### Workspace Structure (Cargo workspace with 3 modules)
-
-- **scheduler_module**: Core task scheduler, HTTP server (Axum), SQLite persistence, webhook handling
-- **send_emails_module**: Postmark API wrapper for sending emails with attachments
-- **run_task_module**: Codex CLI runner for AI-generated email replies
-
-### Data Flow
-
-1. **Inbound email** → `POST /postmark/inbound` webhook
-2. **Deduplication** → Check processed IDs in `postmark_processed_ids.txt`
-3. **User registration** → Get/create user in `users.db`
-4. **RunTask scheduled** → Creates task in user's `tasks.db` with `next_run = now`
-5. **Scheduler loop** → Polls `task_index.db` for due tasks (every 1 sec)
-6. **Task execution** → Runs Codex CLI, generates reply HTML
-7. **SendEmail scheduled** → Queues email task (immediate or delayed)
-8. **Email sent** → Postmark API, then archived to user's `mail/` directory
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `scheduler_module/src/bin/rust_service.rs` | Main HTTP server entry point |
-| `scheduler_module/src/service.rs` | Webhook handler, scheduler loop |
-| `scheduler_module/src/lib.rs` | Core Scheduler, TaskKind, Schedule definitions |
-| `scheduler_module/src/user_store/mod.rs` | Per-user data management |
-| `scheduler_module/src/index_store/mod.rs` | Global task index |
-| `send_emails_module/src/lib.rs` | Postmark API wrapper |
-| `run_task_module/src/lib.rs` | Codex CLI invocation |
-
-### Runtime State (`.workspace/run_task/`)
+This is a Rust microservice managing AI agent-driven email and chat workflows.
 
 ```
-.workspace/run_task/
-├── state/
-│   ├── tasks.db              # Global scheduler state
-│   ├── users.db              # User registry
-│   ├── task_index.db         # Index for due task polling
-│   └── postmark_processed_ids.txt
-├── workspaces/               # Per-task execution directories
-└── users/<user_id>/
-    ├── state/tasks.db        # User's task queue
-    ├── memory/               # Agent context
-    └── mail/                 # Email archive
+Inbound Webhooks (Postmark/Slack/Discord/Google Docs)
+                    ↓
+           Axum HTTP Server (service.rs)
+                    ↓
+    ┌───────────────┼───────────────┬──────────────┐
+    ↓               ↓               ↓              ↓
+Scheduler       Run Task        Send Emails    Adapters
+(lib.rs)        (Codex/Claude)  (Postmark)     (Slack/Discord)
+    ↓               ↓               ↓
+ SQLite         Subprocess      HTTP Client
+(tasks.db)      Execution
+```
+
+### Workspace Structure
+
+| Module | Purpose |
+|--------|---------|
+| `scheduler_module/` | Core HTTP service, task scheduling, persistence, adapters |
+| `run_task_module/` | Codex/Claude CLI subprocess execution |
+| `send_emails_module/` | Postmark email API client |
+| `skills/` | 21 agent skill modules (pdf, playwright-cli, google-docs, etc.) |
+| `employees/` | Agent personas and configurations |
+| `scripts/` | Deployment and automation scripts |
+
+### Key Source Files
+
+- `scheduler_module/src/service.rs` - Axum HTTP server, webhook handlers
+- `scheduler_module/src/lib.rs` - Core scheduler, task types, SQLite persistence
+- `scheduler_module/src/employee_config.rs` - Employee profile loading from TOML
+- `scheduler_module/src/adapters/` - Channel-specific adapters (postmark, slack, discord, google_docs)
+- `scheduler_module/src/bin/rust_service.rs` - Main service entry point
+- `scheduler_module/src/bin/inbound_fanout.rs` - Multi-agent gateway
+- `employee.toml` - Employee/agent profiles (addresses, runners, models, skills)
+
+## Key Patterns
+
+### Multi-Employee Architecture
+- Each `EMPLOYEE_ID` has isolated workspace, database, and configuration
+- `employee.toml` defines all profiles (little_bear/Oliver, mini_mouse/Maggie, etc.)
+- Fanout gateway routes inbound messages to all employees; each processes its own addresses
+
+### Task Types
+```rust
+enum TaskKind {
+    SendReply(SendReplyTask),   // Send email, Slack msg, etc.
+    RunTask(RunTaskTask),       // Invoke Codex/Claude to generate reply
+    Noop,                       // Testing placeholder
+}
+```
+
+### Agent Runners
+- **Codex** (default): `@openai/codex` CLI, subprocess-based
+- **Claude**: `@anthropic-ai/claude-code` CLI, subprocess-based
+- Workspace passed via `--cd` argument; output files at known paths
+- Skills copied to `.agents/skills` in workspace before execution
+
+### Cron Scheduling
+- 6-field format with seconds: `sec min hour day month weekday`
+- UTC-based scheduling
+- One-shot tasks converted to UTC timestamp
+
+### Channel Abstraction
+`Channel` enum (Email, Slack, Discord, Telegram) allows same task types across platforms.
+
+## Runtime State
+
+Default location: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/`
+
+```
+state/
+├── tasks.db              # Scheduler state
+├── users.db              # User registry
+└── task_index.db         # Due task index
+workspaces/<message_id>/
+├── workspace/            # Agent workspace
+├── references/           # Email history
+└── reply_email_draft.html
+users/<user_id>/
+├── state/tasks.db        # Per-user task queue
+├── memory/               # Agent context
+└── mail/                 # Email archive
 ```
 
 ## Environment Variables
 
-Required in `.env`:
-- `POSTMARK_SERVER_TOKEN` - Postmark API key
-
-Replies are sent from the inbound service address detected in the received email.
-
-For Codex AI:
-- `AZURE_OPENAI_API_KEY_BACKUP`, `AZURE_OPENAI_ENDPOINT_BACKUP`
-- `CODEX_MODEL` - Model name
-- `CODEX_DISABLED=1` - Bypass Codex (uses placeholder replies)
-
-Scheduler tuning:
-- `SCHEDULER_POLL_INTERVAL_SECS` (default: 1)
-- `SCHEDULER_MAX_CONCURRENCY` (default: 10) - Global max concurrent tasks
-- `SCHEDULER_USER_MAX_CONCURRENCY` (default: 3) - Per-user limit
-
-## Key Concepts
-
-### Task Kinds
-- **SendEmail**: Send HTML email with attachments
-- **RunTask**: Invoke Codex CLI to generate reply
-- **Noop**: Testing placeholder
-
-### Schedules
-- **Cron**: 6-field format `sec min hour day month weekday` (UTC)
-- **OneShot**: Single execution at specific DateTime
-
-### Follow-up Scheduling
-Agents emit scheduled tasks in stdout:
-```
-SCHEDULED_TASKS_JSON_BEGIN
-[{"type":"send_email","delay_minutes":15,"subject":"...","html_path":"...","to":[...]}]
-SCHEDULED_TASKS_JSON_END
-```
-
-### Per-User Isolation
-Each user gets separate SQLite databases and workspace directories. Concurrency is enforced at both global and per-user levels.
-
-### Email Blacklist
-Inbound emails from `little-bear@dowhiz.com`, `agent@dowhiz.com`, `oliver@dowhiz.com`, `mini-mouse@dowhiz.com`, `maggie@dowhiz.com`, `devin@dowhiz.com`, `sticky-octopus@dowhiz.com`, `coder@dowhiz.com`, `proto@dowhiz.com`, and `boiled-egg@dowhiz.com` are ignored (prevents loops).
-
-<SOUL>
-Your name is Oliver, a little bear, who is cute and smart and capable. You always get task done.
-Go bears!
-</SOUL>
+Critical variables in `.env`:
+- `EMPLOYEE_ID` - Which employee to run
+- `RUST_SERVICE_HOST`, `RUST_SERVICE_PORT` - Server binding
+- `POSTMARK_SERVER_TOKEN` - Email API
+- `AZURE_OPENAI_API_KEY_BACKUP`, `AZURE_OPENAI_ENDPOINT_BACKUP` - Codex
+- `ANTHROPIC_API_KEY` - Claude
+- `SLACK_BOT_TOKEN`, `DISCORD_BOT_TOKEN` - Chat integrations
+- `RUN_TASK_DOCKER_IMAGE` - Per-task Docker execution
+- `OLLAMA_URL`, `OLLAMA_MODEL`, `OLLAMA_ENABLED` - Local LLM routing
