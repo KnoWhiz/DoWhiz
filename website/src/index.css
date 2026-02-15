@@ -277,6 +277,14 @@ ul {
   letter-spacing: -0.03em;
 }
 
+.section-intro {
+  max-width: 760px;
+  margin: -3rem auto 4rem;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 1.15rem;
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;
@@ -478,6 +486,22 @@ ul {
   border-radius: 1.5rem;
   transition: all 0.4s ease;
   backdrop-filter: blur(10px);
+}
+
+.feature-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--accent-color);
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  margin-bottom: 1.5rem;
+  border: 1px solid rgba(59, 130, 246, 0.35);
 }
 
 .feature-card:hover {
@@ -696,6 +720,36 @@ ul {
   font-style: italic;
   color: #e4e4e7;
   /* Classy touch for quotes */
+}
+
+.role-actions {
+  margin-top: 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.profile-link {
+  color: var(--text-primary);
+  font-weight: 600;
+  text-decoration: none;
+  padding: 0.4rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.04);
+  transition: all 0.3s ease;
+}
+
+.profile-link:hover {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.25);
+}
+
+.email-hint {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
 }
 
 /* Workflow */
@@ -1013,6 +1067,12 @@ ul {
     margin-bottom: 3rem;
   }
 
+  .section-intro {
+    margin: -2rem auto 3rem;
+    font-size: 1rem;
+    padding: 0 0.5rem;
+  }
+
   .container {
     padding: 0 1.25rem;
   }
@@ -1090,6 +1150,11 @@ ul {
   .role-avatar {
     width: 50px;
     height: 50px;
+  }
+
+  .role-actions {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   /* Workflow Mobile */

@@ -243,6 +243,39 @@ function App() {
     window.location.href = `mailto:${email}?subject=${encodedSubject}&body=${encodedBody}`;
   };
 
+  const features = [
+    {
+      tag: '01',
+      title: 'Inbox-native delegation',
+      desc: 'Send requests the way you already work: email a digital employee, attach files, and get finished results back in-thread.'
+    },
+    {
+      tag: '02',
+      title: 'Specialized agent playbooks',
+      desc: 'Each employee is trained for a role (Writer, TPM, Coder, CEO, and more) so outputs are tailored, not generic.'
+    },
+    {
+      tag: '03',
+      title: 'Visible, step-by-step delivery',
+      desc: 'Expect a clear flow: brief intake, execution, and a tidy handoff with next steps for your team.'
+    },
+    {
+      tag: '04',
+      title: 'Multi-format outputs',
+      desc: 'Documents, spreadsheets, summaries, posts, and code—delivered in formats your team can immediately reuse.'
+    },
+    {
+      tag: '05',
+      title: 'Multi-channel roadmap',
+      desc: 'Email first today. Slack, phone, Discord, WhatsApp, and more are coming as we expand access.'
+    },
+    {
+      tag: '06',
+      title: 'Privacy-first foundation',
+      desc: 'Clear data boundaries with a focus on practical, secure workflows for real business tasks.'
+    }
+  ];
+
   const teamMembers = [
     {
       name: 'Oliver',
@@ -255,7 +288,8 @@ function App() {
       status: 'Active',
       img: oliverImg,
       subject: 'Office Task Request',
-      body: 'Draft a project update in Notion and summarize it for stakeholders.'
+      body: 'Draft a project update in Notion and summarize it for stakeholders.',
+      profilePath: '/agents/oliver/'
     },
     {
       name: 'Maggie',
@@ -268,7 +302,8 @@ function App() {
       status: 'Active',
       img: miniMouseImg,
       subject: 'TPM Request',
-      body: "Summarize today's meeting, turn notes into action items, update the board, and send a daily report."
+      body: "Summarize today's meeting, turn notes into action items, update the board, and send a daily report.",
+      profilePath: '/agents/maggie/'
     },
     {
       name: 'Devin',
@@ -281,7 +316,8 @@ function App() {
       status: 'Coming',
       img: stickyOctopusImg,
       subject: 'Coding Task',
-      body: 'Implement the requested feature and open a PR.'
+      body: 'Implement the requested feature and open a PR.',
+      profilePath: '/agents/devin/'
     },
     {
       name: 'Lumio',
@@ -294,7 +330,8 @@ function App() {
       status: 'Coming',
       img: skyDragonImg,
       subject: 'Strategy Request',
-      body: 'Draft a one-page strategy for Q2 goals.'
+      body: 'Draft a one-page strategy for Q2 goals.',
+      profilePath: '/agents/lumio/'
     },
     {
       name: 'Claw',
@@ -307,7 +344,8 @@ function App() {
       status: 'Coming',
       img: cozyLobsterImg,
       subject: 'Assistant Request',
-      body: 'Set up a cross-platform workflow for these tasks.'
+      body: 'Set up a cross-platform workflow for these tasks.',
+      profilePath: '/agents/claw/'
     },
     {
       name: 'Jeffery',
@@ -320,7 +358,8 @@ function App() {
       status: 'Coming',
       img: struttonPigeonImg,
       subject: 'Document Help',
-      body: 'Summarize this paper and extract key takeaways.'
+      body: 'Summarize this paper and extract key takeaways.',
+      profilePath: '/agents/jeffery/'
     },
     {
       name: 'Anna',
@@ -333,7 +372,8 @@ function App() {
       status: 'Coming',
       img: fluffyElephantImg,
       subject: 'Role Request',
-      body: 'Role definition in progress.'
+      body: 'Role definition in progress.',
+      profilePath: '/agents/anna/'
     },
     {
       name: 'Rachel',
@@ -346,7 +386,8 @@ function App() {
       status: 'Coming',
       img: plushAxolotlImg,
       subject: 'GTM Request',
-      body: 'Prepare posts across LinkedIn, Xiaohongshu, Reddit, YouTube, X, Medium, Product Hunt, Hacker News, and WeChat groups.'
+      body: 'Prepare posts across LinkedIn, Xiaohongshu, Reddit, YouTube, X, Medium, Product Hunt, Hacker News, and WeChat groups.',
+      profilePath: '/agents/rachel/'
     }
   ];
 
@@ -359,6 +400,7 @@ function App() {
           <div className="container nav-content">
             <a href="#" className="logo">Do<span className="text-gradient">Whiz</span></a>
             <div className="nav-links">
+              <a href="#features" className="nav-btn">Features</a>
               <a href="#roles" className="nav-btn">Team</a>
               <a href="/user-guide/" className="nav-btn">User Guide</a>
             </div>
@@ -407,6 +449,25 @@ function App() {
           </div>
         </section>
 
+        {/* Features */}
+        <section id="features" className="section features-section">
+          <div className="container">
+            <h2 className="section-title">The Digital Employee Stack</h2>
+            <p className="section-intro">
+              Built for real teams that live in their inbox. Pick an employee, send a request, and receive finished work with clear next steps.
+            </p>
+            <div className="features-grid">
+              {features.map((feature) => (
+                <div key={feature.tag} className="feature-card">
+                  <span className="feature-tag">{feature.tag}</span>
+                  <h3>{feature.title}</h3>
+                  <p>{feature.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
         {/* Roles & Scenarios */}
         <section id="roles" className="section roles-section">
           <div className="container">
@@ -442,6 +503,18 @@ function App() {
                     <div className="role-example">
                       <span className="example-label">Example Task</span>
                       <p>"{member.example}"</p>
+                    </div>
+                    <div className="role-actions">
+                      <a
+                        href={member.profilePath}
+                        className="profile-link"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        View profile
+                      </a>
+                      <span className="email-hint">
+                        {isActive ? 'Click card to email' : 'Coming soon'}
+                      </span>
                     </div>
                   </div>
                 );
