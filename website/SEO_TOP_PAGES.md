@@ -5,7 +5,7 @@ As of 2026-02-15, the website repo exposes 12 indexable pages. This list documen
 1. https://dowhiz.com/
 H1 count: 1
 H1: Empower Everyone with A Digital Employee Team
-H2: The Digital Employee Stack, Meet Your Digital Employee Team
+H2: Meet Your Digital Employee Team, The Digital Employee Stack
 
 2. https://dowhiz.com/privacy/
 H1 count: 1
