@@ -23,6 +23,29 @@ Open the local URL shown in the terminal (defaults to http://localhost:5173).
 
 Build output goes to `website/dist/`.
 
+## VM Deployment Workflow
+
+If you host the website on a VM (instead of Vercel), build the static assets and serve `website/dist` from Nginx.
+
+```bash
+cd website
+npm install
+npm run build
+```
+
+Nginx example:
+```nginx
+server {
+    listen 80;
+    server_name www.dowhiz.com;
+
+    root /home/azureuser/DoWhiz/website/dist;
+    try_files $uri /index.html;
+}
+```
+
+If you are using a dedicated API subdomain (example: `api.dowhiz.com`) for the Rust service, you can keep the website hosted on Vercel and only run the API on the VM.
+
 ## Project structure
 - `website/src/`: React components and app code.
 - `website/public/`: Static assets copied as-is.

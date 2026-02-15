@@ -52,3 +52,7 @@ scheduler.run_loop(Duration::from_secs(1), &stop_flag)?;
 - Tasks are stored in a SQLite database at the provided storage path and reloaded on startup.
 - Execution attempts are recorded in the `task_executions` table with status and error details.
 - Use `add_one_shot_in` to schedule “N minutes from now” tasks based on local time converted to UTC.
+
+## VM Deployment Workflow
+
+For production VM setup, HTTPS, and systemd service configuration, follow the workflow in `DoWhiz_service/README.md` under “VM Deployment Workflow”.
