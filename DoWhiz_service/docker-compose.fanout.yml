@@ -6,11 +6,12 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags | grep -q phi3 || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 5
-    # Once the container is created, run docker exec dowhiz_service-ollama-1 ollama pull phi3:mini
+      retries: 30
+      start_period: 60s
+    entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 5 && ollama pull phi3:mini && wait"]
 
   fanout:
     build:
