@@ -71,6 +71,8 @@ pub struct RunTaskParams {
     pub codex_disabled: bool,
     /// Channel for the reply: "email", "slack", "telegram", etc.
     pub channel: String,
+    /// Pre-generated Google access token (for sandbox environments without network access)
+    pub google_access_token: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +85,7 @@ struct RunTaskRequest<'a> {
     model_name: &'a str,
     reply_to: &'a [String],
     channel: &'a str,
+    google_access_token: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -295,6 +298,7 @@ pub fn run_task(params: &RunTaskParams) -> Result<RunTaskOutput, RunTaskError> {
         model_name: params.model_name.as_str(),
         reply_to: &params.reply_to,
         channel: &params.channel,
+        google_access_token: params.google_access_token.as_deref(),
     };
 
     let (reply_html_path, reply_attachments_dir) = prepare_workspace(&request)?;
@@ -385,7 +389,10 @@ fn run_codex_task(
     };
 
     let sandbox_mode = codex_sandbox_mode();
-    let bypass_sandbox = codex_bypass_sandbox() || use_docker;
+    // Bypass sandbox for GoogleDocs tasks to allow network access for Google APIs
+    let channel_lower = request.channel.to_lowercase();
+    let is_google_docs = channel_lower == "google_docs" || channel_lower == "googledocs";
+    let bypass_sandbox = codex_bypass_sandbox() || use_docker || is_google_docs;
     if use_docker {
         let codex_home = host_workspace_dir
             .as_ref()
@@ -466,6 +473,16 @@ fn run_codex_task(
             .arg(format!("AZURE_OPENAI_API_KEY_BACKUP={}", api_key))
             .arg("-e")
             .arg(format!("AZURE_OPENAI_ENDPOINT_BACKUP={}", azure_endpoint));
+        // Write Google access token to file for sandbox environments without network access
+        // (Codex sandbox may not pass environment variables to tools it spawns)
+        if let Some(ref token) = request.google_access_token {
+            cmd.arg("-e").arg(format!("GOOGLE_ACCESS_TOKEN={}", token));
+            // Also write to file as backup since Codex sandbox may strip env vars
+            let token_file = host_workspace_dir.join(".google_access_token");
+            if let Err(e) = std::fs::write(&token_file, token) {
+                eprintln!("[run_task] Warning: Failed to write Google access token file: {}", e);
+            }
+        }
         for (key, value) in &github_auth.env_overrides {
             cmd.arg("-e").arg(format!("{}={}", key, value));
         }
@@ -535,6 +552,28 @@ fn run_codex_task(
             .arg(prompt)
             .env("AZURE_OPENAI_API_KEY_BACKUP", api_key)
             .current_dir(request.workspace_dir);
+        // Extend PATH with DoWhiz bin directory for tools like google-docs
+        let current_path = env::var("PATH").unwrap_or_default();
+        let dowhiz_bin_dir = env::var("DOWHIZ_BIN_DIR")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| {
+                let manifest_dir = env!("CARGO_MANIFEST_DIR");
+                let parent = Path::new(manifest_dir).parent().unwrap_or(Path::new("."));
+                parent.join("bin").to_string_lossy().into_owned()
+            });
+        let extended_path = format!("{}:{}", dowhiz_bin_dir, current_path);
+        cmd.env("PATH", extended_path);
+        // Write Google access token to file for sandbox environments without network access
+        // (Codex sandbox may not pass environment variables to tools it spawns)
+        if let Some(ref token) = request.google_access_token {
+            cmd.env("GOOGLE_ACCESS_TOKEN", token);
+            // Also write to file as backup since Codex sandbox may strip env vars
+            let token_file = request.workspace_dir.join(".google_access_token");
+            if let Err(e) = std::fs::write(&token_file, token) {
+                eprintln!("[run_task] Warning: Failed to write Google access token file: {}", e);
+            }
+        }
         for (key, value) in github_auth.env_overrides {
             cmd.env(key, value);
         }
@@ -716,6 +755,20 @@ fn prepare_claude_env(
         &default_haiku,
     )?;
 
+    // Get current PATH and prepend our custom bin directory for tools like google-docs
+    let current_path = env::var("PATH").unwrap_or_default();
+    // Look for DOWHIZ_BIN_DIR env var, or use default location relative to crate
+    let dowhiz_bin_dir = env::var("DOWHIZ_BIN_DIR")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| {
+            // Default: assume bin/ is sibling to scheduler_module
+            let manifest_dir = env!("CARGO_MANIFEST_DIR");
+            let parent = Path::new(manifest_dir).parent().unwrap_or(Path::new("."));
+            parent.join("bin").to_string_lossy().into_owned()
+        });
+    let extended_path = format!("{}:{}", dowhiz_bin_dir, current_path);
+
     Ok(vec![
         (
             "AZURE_OPENAI_API_KEY_BACKUP".to_string(),
@@ -727,6 +780,7 @@ fn prepare_claude_env(
         ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), default_opus),
         ("ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(), default_sonnet),
         ("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(), default_haiku),
+        ("PATH".to_string(), extended_path),
     ])
 }
 
