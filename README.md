@@ -75,6 +75,118 @@ This single command starts ngrok, updates the Postmark hook, and runs the servic
 
 Now send an email to `oliver@dowhiz.com` (or any employee) and watch the magic happen!
 
+## VM Deployment Workflow (Production)
+
+This workflow deploys a single employee per VM with HTTPS and systemd. Repeat these steps on a new VM and subdomain for each employee.
+
+1. Provision an Ubuntu VM and open inbound TCP ports `22`, `80`, `443`.
+For live email E2E tests, request outbound TCP `25` from your cloud provider.
+
+2. Create a DNS A record for an API subdomain (example: `api.dowhiz.com`) that points to the VM public IP.
+
+3. Install dependencies on the VM.
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates libsqlite3-dev libssl-dev pkg-config curl git python3
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+curl https://sh.rustup.rs -sSf | sh -s -- -y
+sudo npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest @playwright/cli@latest
+sudo npx playwright install --with-deps chromium
+```
+
+4. Clone the repo and configure `.env`.
+```bash
+git clone https://github.com/KnoWhiz/DoWhiz.git
+cd DoWhiz
+cp .env.example .env
+```
+Set at least:
+```
+EMPLOYEE_ID=little_bear
+RUST_SERVICE_HOST=127.0.0.1
+RUST_SERVICE_PORT=9001
+POSTMARK_INBOUND_HOOK_URL=https://api.dowhiz.com/postmark/inbound
+SLACK_REDIRECT_URI=https://api.dowhiz.com/slack/oauth/callback
+```
+
+5. Build the service.
+```bash
+source ~/.cargo/env
+cd DoWhiz/DoWhiz_service
+cargo build -p scheduler_module --release
+```
+
+6. Configure Nginx reverse proxy for `/postmark/inbound`, `/slack/`, and `/health`.
+```nginx
+server {
+    listen 80;
+    server_name api.dowhiz.com;
+
+    location /postmark/inbound {
+        proxy_pass http://127.0.0.1:9001/postmark/inbound;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /slack/ {
+        proxy_pass http://127.0.0.1:9001/slack/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /health {
+        proxy_pass http://127.0.0.1:9001/health;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+7. Enable HTTPS with Let's Encrypt.
+```bash
+sudo apt-get install -y nginx certbot python3-certbot-nginx
+sudo certbot --nginx -d api.dowhiz.com
+```
+
+8. Create a systemd service (example).
+```ini
+[Unit]
+Description=DoWhiz Rust Service (Oliver)
+After=network.target
+
+[Service]
+Type=simple
+User=azureuser
+Group=azureuser
+WorkingDirectory=/home/azureuser/DoWhiz/DoWhiz_service
+EnvironmentFile=/home/azureuser/DoWhiz/.env
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/azureuser/DoWhiz/DoWhiz_service/target/release/rust_service --host 127.0.0.1 --port 9001
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+9. Update the Postmark inbound hook.
+```bash
+set -a; source /home/azureuser/DoWhiz/.env; set +a
+/home/azureuser/DoWhiz/DoWhiz_service/target/release/set_postmark_inbound_hook \
+  --hook-url https://api.dowhiz.com/postmark/inbound
+```
+
+10. Configure Slack and Discord.
+- Slack Event URL: `https://api.dowhiz.com/slack/events`
+- Slack OAuth Redirect: `https://api.dowhiz.com/slack/oauth/callback`
+- For Discord, set `discord_enabled = true` for the employee in `DoWhiz_service/employee.toml`.
+
+Slack and Discord tokens only support one active connection at a time. Use one VM per employee, or a fanout gateway VM if you want a shared Slack/Discord entry point.
+
 ## Architecture
 
 ```

@@ -23,7 +23,7 @@ const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 const DEFAULT_OLLAMA_MODEL: &str = "phi3:mini";
 
 /// Timeout for Ollama requests
-const OLLAMA_TIMEOUT: Duration = Duration::from_secs(30);
+const OLLAMA_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Magic string that indicates the query should be forwarded to the full pipeline
 const FORWARD_MARKER: &str = "FORWARD_TO_AGENT";
@@ -31,6 +31,19 @@ const FORWARD_MARKER: &str = "FORWARD_TO_AGENT";
 /// Maximum message length (in chars) to consider for local routing.
 /// Messages longer than this are automatically forwarded to the full pipeline.
 const MAX_SIMPLE_MESSAGE_LENGTH: usize = 300;
+
+/// Patterns that indicate phi3:mini is hallucinating/leaking training data.
+/// If the response contains any of these, we forward to the full pipeline instead.
+const HALLUCINATION_PATTERNS: &[&str] = &[
+    "could not complete your request",
+    "after 3 attempts",
+    "after three attempts",
+    "please resend your request",
+    "request failed",
+    "---",              // Training data separator
+    "@unknown-user",    // Training data leakage
+    "Instruction:",     // Training data leakage
+];
 
 /// System prompt for the classifier/responder
 const SYSTEM_PROMPT: &str = r#"You are Boiled-Egg, a calm local-testing specialist who is thorough and reliable. You always get tasks done. Go eggs!
@@ -50,6 +63,10 @@ ONLY output "FORWARD_TO_AGENT" for:
 - File/document operations
 - Research tasks requiring search
 - Multi-step technical tasks
+
+NEVER output error messages, retry messages, or phrases like "could not complete" or "attempts".
+NEVER output "---" or anything after it. Stop immediately after your response.
+NEVER output text like "@unknown-user" or "Instruction:".
 
 Keep responses brief and friendly. Output ONLY your response, nothing else."#;
 
@@ -152,6 +169,9 @@ impl MessageRouter {
                 if trimmed.contains(FORWARD_MARKER) {
                     info!("Router decision: Complex (forward to pipeline)");
                     RouterDecision::Complex
+                } else if Self::contains_hallucination(trimmed) {
+                    warn!("Router detected hallucination in response, forwarding to pipeline");
+                    RouterDecision::Complex
                 } else {
                     info!("Router decision: Simple (local response)");
                     RouterDecision::Simple(trimmed.to_string())
@@ -162,6 +182,17 @@ impl MessageRouter {
                 RouterDecision::Passthrough
             }
         }
+    }
+
+    /// Check if the response contains any hallucination patterns
+    fn contains_hallucination(response: &str) -> bool {
+        let lower = response.to_lowercase();
+        for pattern in HALLUCINATION_PATTERNS {
+            if lower.contains(&pattern.to_lowercase()) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Make a request to the Ollama API (async)
