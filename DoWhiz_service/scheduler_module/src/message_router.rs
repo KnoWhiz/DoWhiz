@@ -23,7 +23,7 @@ const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 const DEFAULT_OLLAMA_MODEL: &str = "phi3:mini";
 
 /// Timeout for Ollama requests
-const OLLAMA_TIMEOUT: Duration = Duration::from_secs(30);
+const OLLAMA_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Magic string that indicates the query should be forwarded to the full pipeline
 const FORWARD_MARKER: &str = "FORWARD_TO_AGENT";
