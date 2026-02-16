@@ -645,7 +645,6 @@ cd DoWhiz_service && cargo build --release
 4. After OAuth, invite the bot to the channel:
    - In Slack, go to the channel and type `/invite @DoWhiz` (or click the channel settings → Integrations → Add apps)
 
----
 ### Discord Local Testing
 
 1. Set up the ngrok tunnel on port 9004:
@@ -661,7 +660,16 @@ cd DoWhiz_service && cargo build --release
 
 3. Add the bot to server by going to this URL:
    - https://discord.com/oauth2/authorize?client_id=1472013251553525983&permissions=0&integration_type=0&scope=bot
-  
+
+### iMessage Local Testing via BlueBubbles
+1. Download BlueBubbles (e.g. ```brew install --cask bluebubbles```)
+2. In API & WebHooks, create a new webhook at http://127.0.0.1:9001/bluebubbles/webhook. Give it the New Messages Event Subscription.
+3. Start the dev employee (`boiled_egg`):
+```bash
+cd DoWhiz_service && cargo build --release
+./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004 --public-url https://YOUR-DOMAIN.ngrok.app --skip-hook
+```
+---
 ## Message Router (Ollama)
 
 The service includes a local LLM message router that classifies incoming Discord messages using Ollama. Simple queries (greetings, casual chat) are handled directly by a local model (phi3:mini), while complex queries are forwarded to the full Codex/Claude pipeline.
