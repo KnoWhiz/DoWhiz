@@ -17,6 +17,8 @@ pub mod discord_gateway;
 pub mod employee_config;
 pub mod google_auth;
 pub mod google_docs_poller;
+pub mod ingestion;
+pub mod ingestion_queue;
 pub mod mailbox;
 pub mod message_router;
 pub mod slack_store;
@@ -238,12 +240,15 @@ impl TaskExecutor for ModuleExecutor {
                     Channel::GoogleDocs => {
                         execute_google_docs_send(task)?;
                     }
-                    Channel::Email | Channel::Telegram => {
-                        // Email (and Telegram as fallback) use Postmark
-                        execute_email_send(task)?;
+                    Channel::Sms => {
+                        execute_sms_send(task)?;
                     }
                     Channel::BlueBubbles => {
                         execute_bluebubbles_send(task)?;
+                    }
+                    Channel::Email | Channel::Telegram => {
+                        // Email (and Telegram as fallback) use Postmark
+                        execute_email_send(task)?;
                     }
                 }
                 Ok(TaskExecution::empty())
@@ -521,6 +526,64 @@ fn execute_bluebubbles_send(task: &SendReplyTask) -> Result<(), SchedulerError> 
         "sent BlueBubbles message to {:?}, message_id={}",
         task.to, result.message_id
     );
+    Ok(())
+}
+
+/// Execute a SendReplyTask via SMS (Twilio).
+fn execute_sms_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
+    dotenvy::dotenv().ok();
+
+    let account_sid = std::env::var("TWILIO_ACCOUNT_SID")
+        .map_err(|_| SchedulerError::TaskFailed("TWILIO_ACCOUNT_SID not set".to_string()))?;
+    let auth_token = std::env::var("TWILIO_AUTH_TOKEN")
+        .map_err(|_| SchedulerError::TaskFailed("TWILIO_AUTH_TOKEN not set".to_string()))?;
+
+    let from = task
+        .from
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| SchedulerError::TaskFailed("SMS from number missing".to_string()))?;
+
+    let to = task
+        .to
+        .first()
+        .map(|value| value.as_str())
+        .ok_or_else(|| SchedulerError::TaskFailed("SMS to number missing".to_string()))?;
+
+    let text_body = if task.html_path.exists() {
+        fs::read_to_string(&task.html_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let url = format!(
+        "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json",
+        account_sid
+    );
+
+    let client = reqwest::blocking::Client::new();
+    let response = client
+        .post(&url)
+        .basic_auth(&account_sid, Some(&auth_token))
+        .form(&[
+            ("To", to),
+            ("From", from),
+            ("Body", text_body.trim()),
+        ])
+        .send()
+        .map_err(|err| SchedulerError::TaskFailed(format!("Twilio send failed: {}", err)))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(SchedulerError::TaskFailed(format!(
+            "Twilio API error {}: {}",
+            status, body
+        )));
+    }
+
+    info!("sent SMS message to {}", to);
     Ok(())
 }
 
@@ -1075,6 +1138,16 @@ CREATE TABLE IF NOT EXISTS send_slack_tasks (
     workspace_dir TEXT
 );
 
+CREATE TABLE IF NOT EXISTS send_sms_tasks (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    from_number TEXT,
+    to_number TEXT NOT NULL,
+    text_path TEXT NOT NULL,
+    thread_id TEXT,
+    thread_epoch INTEGER,
+    thread_state_path TEXT
+);
+
 CREATE TABLE IF NOT EXISTS send_bluebubbles_tasks (
     task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
     chat_guid TEXT NOT NULL,
@@ -1204,6 +1277,22 @@ fn ensure_send_discord_tasks_table(conn: &Connection) -> Result<(), SchedulerErr
             thread_id TEXT,
             text_path TEXT NOT NULL,
             workspace_dir TEXT
+        )",
+        [],
+    )?;
+    Ok(())
+}
+
+fn ensure_send_sms_tasks_table(conn: &Connection) -> Result<(), SchedulerError> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS send_sms_tasks (
+            task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+            from_number TEXT,
+            to_number TEXT NOT NULL,
+            text_path TEXT NOT NULL,
+            thread_id TEXT,
+            thread_epoch INTEGER,
+            thread_state_path TEXT
         )",
         [],
     )?;
@@ -1355,12 +1444,15 @@ impl SqliteSchedulerStore {
                 "send_email" => {
                     // Dispatch to appropriate loader based on channel
                     let send_task = match channel {
-                        Channel::Slack => self.load_send_slack_task(&conn, &id_raw)?,
+                        Channel::Slack => {
+                            self.load_send_slack_task(&conn, &id_raw, channel.clone())?
+                        }
                         Channel::Discord => self.load_send_discord_task(&conn, &id_raw)?,
                         Channel::GoogleDocs => {
                             // Google Docs uses a similar format to email for now
                             self.load_send_email_task(&conn, &id_raw, channel.clone())?
                         }
+                        Channel::Sms => self.load_send_sms_task(&conn, &id_raw)?,
                         Channel::Email | Channel::Telegram => {
                             self.load_send_email_task(&conn, &id_raw, channel.clone())?
                         }
@@ -1426,6 +1518,9 @@ impl SqliteSchedulerStore {
                     Channel::GoogleDocs => {
                         // Google Docs uses the email table format for now
                         self.insert_send_email_task(&tx, &task.id.to_string(), send)?;
+                    }
+                    Channel::Sms => {
+                        self.insert_send_sms_task(&tx, &task.id.to_string(), send)?;
                     }
                     Channel::Email | Channel::Telegram => {
                         self.insert_send_email_task(&tx, &task.id.to_string(), send)?;
@@ -1620,6 +1715,31 @@ impl SqliteSchedulerStore {
         Ok(())
     }
 
+    fn insert_send_sms_task(
+        &self,
+        tx: &Transaction,
+        task_id: &str,
+        send: &SendReplyTask,
+    ) -> Result<(), SchedulerError> {
+        let to_number = send.to.first().cloned().unwrap_or_default();
+        tx.execute(
+            "INSERT INTO send_sms_tasks (task_id, from_number, to_number, text_path, thread_id, thread_epoch, thread_state_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                task_id,
+                send.from.as_deref(),
+                to_number,
+                send.html_path.to_string_lossy().into_owned(),
+                send.in_reply_to.as_deref(),
+                send.thread_epoch.map(|value| value as i64),
+                send.thread_state_path
+                    .as_ref()
+                    .map(|value| value.to_string_lossy().into_owned()),
+            ],
+        )?;
+        Ok(())
+    }
+
     fn insert_send_bluebubbles_task(
         &self,
         tx: &Transaction,
@@ -1728,6 +1848,7 @@ impl SqliteSchedulerStore {
         &self,
         conn: &Connection,
         task_id: &str,
+        channel: Channel,
     ) -> Result<SendReplyTask, SchedulerError> {
         let row = conn
             .query_row(
@@ -1750,7 +1871,7 @@ impl SqliteSchedulerStore {
         })?;
 
         Ok(SendReplyTask {
-            channel: Channel::Slack,
+            channel,
             subject: String::new(), // Slack doesn't use subject
             html_path: PathBuf::from(text_path),
             attachments_dir: PathBuf::new(), // Slack attachments handled differently
@@ -1805,6 +1926,51 @@ impl SqliteSchedulerStore {
             archive_root: workspace_dir.map(PathBuf::from),
             thread_epoch: None,
             thread_state_path: None,
+        })
+    }
+
+    fn load_send_sms_task(
+        &self,
+        conn: &Connection,
+        task_id: &str,
+    ) -> Result<SendReplyTask, SchedulerError> {
+        let row = conn
+            .query_row(
+                "SELECT from_number, to_number, text_path, thread_id, thread_epoch, thread_state_path
+                 FROM send_sms_tasks
+                 WHERE task_id = ?1",
+                params![task_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let (from_number, to_number, text_path, thread_id, thread_epoch_raw, thread_state_path) =
+            row.ok_or_else(|| {
+                SchedulerError::Storage(format!("missing send_sms_tasks row for task {}", task_id))
+            })?;
+
+        Ok(SendReplyTask {
+            channel: Channel::Sms,
+            subject: String::new(),
+            html_path: PathBuf::from(text_path),
+            attachments_dir: PathBuf::new(),
+            from: normalize_header_value(from_number),
+            to: vec![to_number],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            in_reply_to: normalize_header_value(thread_id),
+            references: None,
+            archive_root: None,
+            thread_epoch: thread_epoch_raw.map(|value| value as u64),
+            thread_state_path: normalize_optional_path(thread_state_path),
         })
     }
 
@@ -1941,6 +2107,7 @@ impl SqliteSchedulerStore {
         ensure_send_email_task_columns(&conn)?;
         ensure_send_slack_tasks_table(&conn)?;
         ensure_send_discord_tasks_table(&conn)?;
+        ensure_send_sms_tasks_table(&conn)?;
         ensure_send_bluebubbles_tasks_table(&conn)?;
         ensure_run_task_task_columns(&conn)?;
         Ok(conn)
@@ -2354,33 +2521,25 @@ fn schedule_auto_reply<E: TaskExecutor>(
 
     // Non-email channels use plain text reply_message.txt
     // Email and GoogleDocs use HTML reply_email_draft.html
-    let (reply_path, reply_file_name) = match task.channel {
-        Channel::Slack | Channel::Discord | Channel::BlueBubbles | Channel::Telegram => {
-            (task.workspace_dir.join("reply_message.txt"), "reply_message.txt")
+    let (reply_filename, attachments_dirname) = match task.channel {
+        Channel::Slack | Channel::Discord | Channel::BlueBubbles | Channel::Telegram | Channel::Sms => {
+            ("reply_message.txt", "reply_attachments")
         }
         Channel::Email | Channel::GoogleDocs => {
-            (task.workspace_dir.join("reply_email_draft.html"), "reply_email_draft.html")
+            ("reply_email_draft.html", "reply_email_attachments")
         }
     };
 
-    if !reply_path.exists() {
+    let html_path = task.workspace_dir.join(reply_filename);
+    if !html_path.exists() {
         warn!(
             "auto reply missing {} in workspace {}",
-            reply_file_name,
+            reply_filename,
             task.workspace_dir.display()
         );
         return Ok(false);
     }
-    let html_path = reply_path;
-    // Non-email channels use reply_attachments/, email uses reply_email_attachments/
-    let attachments_dir = match task.channel {
-        Channel::Slack | Channel::Discord | Channel::BlueBubbles | Channel::Telegram => {
-            task.workspace_dir.join("reply_attachments")
-        }
-        Channel::Email | Channel::GoogleDocs => {
-            task.workspace_dir.join("reply_email_attachments")
-        }
-    };
+    let attachments_dir = task.workspace_dir.join(attachments_dirname);
     let reply_context = load_reply_context(&task.workspace_dir);
     let reply_from = task.reply_from.clone().or(reply_context.from.clone());
 

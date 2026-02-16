@@ -126,7 +126,7 @@ pub struct QuotedFileContent {
 
 /// Represents an actionable item from Google Docs (either a comment or a reply).
 /// This structure helps track whether a parent comment or a specific reply triggered the action.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionableComment {
     /// The parent comment
     pub comment: GoogleDocsComment,
