@@ -1,0 +1,92 @@
+name: CICD_production
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: production
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+
+    defaults:
+      run:
+        working-directory: DoWhiz_service
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Build
+        run: cargo build --verbose
+
+      - name: Run tests (scheduler_module)
+        run: cargo test -p scheduler_module --verbose
+
+      - name: Run tests (run_task_module)
+        run: cargo test -p run_task_module --verbose
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment: production
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create SSH Directory
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+      - name: Decode SSH Private Key
+        run: |
+          echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/private_key.pem
+          chmod 600 ~/.ssh/private_key.pem
+
+      - name: Add Azure VM to known_hosts
+        run: |
+          ssh-keyscan -H ${{ secrets.PROD_AZURE_VM_IP }} >> ~/.ssh/known_hosts
+
+      - name: Create SSH config file
+        run: |
+          echo "Host azureproduction" >> ~/.ssh/config
+          echo "  HostName ${{ secrets.PROD_AZURE_VM_IP }}" >> ~/.ssh/config
+          echo "  User ${{ secrets.PROD_AZURE_VM_USER }}" >> ~/.ssh/config
+          echo "  Port 22" >> ~/.ssh/config
+          echo "  IdentityFile ~/.ssh/private_key.pem" >> ~/.ssh/config
+
+      - name: Write production .env on Azure VM
+        run: |
+          ssh -F ~/.ssh/config azureproduction << 'EOF'
+          mkdir -p /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
+          cat << 'ENVEOF' > /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/.env
+          ${{ secrets.COMMON_ENV }}
+          ENVEOF
+          chmod 600 /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/.env
+          EOF
+
+      - name: Update repo and build on Azure VM
+        run: |
+          ssh -F ~/.ssh/config azureproduction << 'EOF'
+          cd /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz
+          git checkout -f
+          git checkout production
+          git pull
+          cd DoWhiz_service
+          cargo build -p scheduler_module --bins
+          EOF
+
+      - name: Restart DoWhiz services
+        run: |
+          ssh -F ~/.ssh/config azureproduction << 'EOF'
+          pm2 restart dowhiz_rust_service dowhiz_gateway dowhiz_ngrok dowhiz_ngrok_inbound_hook
+          EOF
