@@ -646,7 +646,22 @@ cd DoWhiz_service && cargo build --release
    - In Slack, go to the channel and type `/invite @DoWhiz` (or click the channel settings → Integrations → Add apps)
 
 ---
+### Discord Local Testing
 
+1. Set up the ngrok tunnel on port 9004:
+```bash
+ngrok http 9004 --authtoken=${NGROK_AUTHTOKEN} --url https://YOUR-DOMAIN.ngrok.app
+```
+
+2. Start the dev employee (`boiled_egg`):
+```bash
+cd DoWhiz_service && cargo build --release
+./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004 --public-url https://YOUR-DOMAIN.ngrok.app --skip-hook
+```
+
+3. Add the bot to server by going to this URL:
+   - https://discord.com/oauth2/authorize?client_id=1472013251553525983&permissions=0&integration_type=0&scope=bot
+  
 ## Message Router (Ollama)
 
 The service includes a local LLM message router that classifies incoming Discord messages using Ollama. Simple queries (greetings, casual chat) are handled directly by a local model (phi3:mini), while complex queries are forwarded to the full Codex/Claude pipeline.
