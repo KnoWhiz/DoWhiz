@@ -39,8 +39,8 @@ sudo npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest
 ### 2. Configure Environment
 
 ```bash
-cp .env.example .env
-# Edit .env and add your POSTMARK_SERVER_TOKEN
+cp .env.example DoWhiz_service/.env
+# Edit DoWhiz_service/.env and add your POSTMARK_SERVER_TOKEN
 ```
 
 ### 3. Start Service
@@ -55,7 +55,7 @@ docker run --rm -p 9001:9001 \
   -e EMPLOYEE_ID=little_bear \
   -e RUST_SERVICE_PORT=9001 \
   -e RUN_TASK_DOCKER_IMAGE= \
-  -v \"$PWD/.env:/app/.env:ro\" \
+  -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
   -v dowhiz-workspace-oliver:/app/.workspace \
   dowhiz-service
 
@@ -64,11 +64,9 @@ docker run --rm -p 9002:9001 \
   -e EMPLOYEE_ID=mini_mouse \
   -e RUST_SERVICE_PORT=9001 \
   -e RUN_TASK_DOCKER_IMAGE= \
-  -v \"$PWD/.env:/app/.env:ro\" \
+  -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
   -v dowhiz-workspace-maggie:/app/.workspace \
   dowhiz-service
-
-Note: when running workers inside Docker, clear `RUN_TASK_DOCKER_IMAGE` to avoid nested Docker usage.
 
 # Terminal 4: Gateway (host)
 cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
@@ -76,12 +74,14 @@ cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
 ./DoWhiz_service/scripts/run_gateway_local.sh
 
 # Terminal 5: Expose the gateway
-ngrok http 9100
+ngrok http 9100 --url https://YOUR-DOMAIN.ngrok.app
 
 # Terminal 6: Point Postmark at the gateway
 cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
-  --hook-url https://YOUR-NGROK-URL.ngrok-free.dev/postmark/inbound
+  --hook-url https://YOUR-DOMAIN.ngrok.app/postmark/inbound
 ```
+
+Note: when running workers inside Docker, clear `RUN_TASK_DOCKER_IMAGE` to avoid nested Docker usage.
 
 **Option B: Start Single Employee (auto ngrok + hook)**
 ```bash
@@ -100,117 +100,62 @@ This single command starts ngrok, updates the Postmark hook, and runs the servic
 
 Now send an email to `oliver@dowhiz.com` (or any employee) and watch the magic happen!
 
-## VM Deployment Workflow (Production)
+## VM Deployment (Gateway + ngrok)
 
-This workflow deploys a single employee per VM with HTTPS and systemd. Repeat these steps on a new VM and subdomain for each employee.
+This is the production flow we used for `oliver` on `dowhizprod1`: run a single worker behind the inbound gateway and expose the gateway with ngrok.
 
 1. Provision an Ubuntu VM and open inbound TCP ports `22`, `80`, `443`.
-For live email E2E tests, request outbound TCP `25` from your cloud provider.
+Outbound SMTP (`25`) is often blocked on cloud VMs; run E2E senders from your local machine if needed.
 
-2. Create a DNS A record for an API subdomain (example: `api.dowhiz.com`) that points to the VM public IP.
-
-3. Install dependencies on the VM.
+2. Install dependencies and ngrok:
 ```bash
 sudo apt-get update
 sudo apt-get install -y ca-certificates libsqlite3-dev libssl-dev pkg-config curl git python3
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 curl https://sh.rustup.rs -sSf | sh -s -- -y
-sudo npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest @playwright/cli@latest
-sudo npx playwright install --with-deps chromium
+sudo snap install ngrok
 ```
 
-4. Clone the repo and configure `.env`.
+3. Clone repo and place `.env`:
 ```bash
 git clone https://github.com/KnoWhiz/DoWhiz.git
 cd DoWhiz
-cp .env.example .env
-```
-Set at least:
-```
-EMPLOYEE_ID=little_bear
-RUST_SERVICE_HOST=127.0.0.1
-RUST_SERVICE_PORT=9001
-POSTMARK_INBOUND_HOOK_URL=https://api.dowhiz.com/postmark/inbound
-SLACK_REDIRECT_URI=https://api.dowhiz.com/slack/oauth/callback
+cp .env.example DoWhiz_service/.env
+# Fill in secrets inside DoWhiz_service/.env
 ```
 
-5. Build the service.
+4. Configure gateway targets:
 ```bash
-source ~/.cargo/env
-cd DoWhiz/DoWhiz_service
-cargo build -p scheduler_module --release
+cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
+cat > DoWhiz_service/gateway.toml <<'EOF'
+[targets]
+little_bear = "http://127.0.0.1:9001"
+EOF
 ```
 
-6. Configure Nginx reverse proxy for `/postmark/inbound`, `/slack/`, and `/health`.
-```nginx
-server {
-    listen 80;
-    server_name api.dowhiz.com;
-
-    location /postmark/inbound {
-        proxy_pass http://127.0.0.1:9001/postmark/inbound;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /slack/ {
-        proxy_pass http://127.0.0.1:9001/slack/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /health {
-        proxy_pass http://127.0.0.1:9001/health;
-        proxy_set_header Host $host;
-    }
-}
-```
-
-7. Enable HTTPS with Let's Encrypt.
+5. Start services (tmux):
 ```bash
-sudo apt-get install -y nginx certbot python3-certbot-nginx
-sudo certbot --nginx -d api.dowhiz.com
+tmux new-session -d -s oliver "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 RUN_TASK_DOCKER_IMAGE= cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001'"
+tmux new-session -d -s gateway "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && ./scripts/run_gateway_local.sh'"
+ngrok config add-authtoken "$NGROK_AUTHTOKEN"
+tmux new-session -d -s ngrok "ngrok http 9100 --url https://oliver.dowhiz.prod.ngrok.app"
 ```
 
-8. Create a systemd service (example).
-```ini
-[Unit]
-Description=DoWhiz Rust Service (Oliver)
-After=network.target
-
-[Service]
-Type=simple
-User=azureuser
-Group=azureuser
-WorkingDirectory=/home/azureuser/DoWhiz/DoWhiz_service
-EnvironmentFile=/home/azureuser/DoWhiz/.env
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/home/azureuser/DoWhiz/DoWhiz_service/target/release/rust_service --host 127.0.0.1 --port 9001
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-```
-
-9. Update the Postmark inbound hook.
+6. Point Postmark to the gateway:
 ```bash
-set -a; source /home/azureuser/DoWhiz/.env; set +a
-/home/azureuser/DoWhiz/DoWhiz_service/target/release/set_postmark_inbound_hook \
-  --hook-url https://api.dowhiz.com/postmark/inbound
+cd ~/DoWhiz/DoWhiz_service
+cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
+  --hook-url https://oliver.dowhiz.prod.ngrok.app/postmark/inbound
 ```
 
-10. Configure Slack and Discord.
-- Slack Event URL: `https://api.dowhiz.com/slack/events`
-- Slack OAuth Redirect: `https://api.dowhiz.com/slack/oauth/callback`
-- For Discord, set `discord_enabled = true` for the employee in `DoWhiz_service/employee.toml`.
-
-Slack and Discord tokens only support one active connection at a time. Use one VM per employee, or a dedicated inbound gateway VM if you want a shared Slack/Discord entry point.
+7. Run E2E from your local machine (recommended if VM blocks SMTP 25):
+```
+POSTMARK_INBOUND_HOOK_URL=https://oliver.dowhiz.prod.ngrok.app/postmark/inbound
+POSTMARK_TEST_FROM=mini-mouse@deep-tutor.com
+POSTMARK_TEST_SERVICE_ADDRESS=oliver@dowhiz.com
+```
+See `DoWhiz_service/README.md` for the full E2E driver script.
 
 ## Architecture
 
