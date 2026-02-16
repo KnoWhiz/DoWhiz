@@ -45,15 +45,40 @@ cp .env.example .env
 
 ### 3. Start Service
 
-**Option A: Start All Employees (Docker, recommended)**
+**Option A: Start Inbound Gateway + Workers (recommended)**
 ```bash
-# Terminal 1: Start all services (Ollama + fanout + 4 employees)
-./DoWhiz_service/scripts/run_all_employees_docker.sh
+# Terminal 1: Build image (once)
+docker build -t dowhiz-service .
 
-# Terminal 2: Expose fanout to the internet
+# Terminal 2: Oliver worker (Docker)
+docker run --rm -p 9001:9001 \
+  -e EMPLOYEE_ID=little_bear \
+  -e RUST_SERVICE_PORT=9001 \
+  -e RUN_TASK_DOCKER_IMAGE= \
+  -v \"$PWD/.env:/app/.env:ro\" \
+  -v dowhiz-workspace-oliver:/app/.workspace \
+  dowhiz-service
+
+# Terminal 3: Maggie worker (Docker)
+docker run --rm -p 9002:9001 \
+  -e EMPLOYEE_ID=mini_mouse \
+  -e RUST_SERVICE_PORT=9001 \
+  -e RUN_TASK_DOCKER_IMAGE= \
+  -v \"$PWD/.env:/app/.env:ro\" \
+  -v dowhiz-workspace-maggie:/app/.workspace \
+  dowhiz-service
+
+Note: when running workers inside Docker, clear `RUN_TASK_DOCKER_IMAGE` to avoid nested Docker usage.
+
+# Terminal 4: Gateway (host)
+cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
+# Edit gateway.toml targets to match the workers you started.
+./DoWhiz_service/scripts/run_gateway_local.sh
+
+# Terminal 5: Expose the gateway
 ngrok http 9100
 
-# Terminal 3: Set Postmark webhook to ngrok URL
+# Terminal 6: Point Postmark at the gateway
 cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
   --hook-url https://YOUR-NGROK-URL.ngrok-free.dev/postmark/inbound
 ```
@@ -185,7 +210,7 @@ set -a; source /home/azureuser/DoWhiz/.env; set +a
 - Slack OAuth Redirect: `https://api.dowhiz.com/slack/oauth/callback`
 - For Discord, set `discord_enabled = true` for the employee in `DoWhiz_service/employee.toml`.
 
-Slack and Discord tokens only support one active connection at a time. Use one VM per employee, or a fanout gateway VM if you want a shared Slack/Discord entry point.
+Slack and Discord tokens only support one active connection at a time. Use one VM per employee, or a dedicated inbound gateway VM if you want a shared Slack/Discord entry point.
 
 ## Architecture
 

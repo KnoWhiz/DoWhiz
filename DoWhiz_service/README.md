@@ -10,8 +10,9 @@ Rust service for inbound webhooks (Postmark, Slack, Discord), task scheduling, A
 - [Running the Service](#running-the-service)
   - [One-Command Local Run](#one-command-local-run)
   - [Manual Multi-Employee Setup](#manual-multi-employee-setup)
+  - [Inbound Gateway (Recommended)](#inbound-gateway-recommended)
   - [VM Deployment Workflow](#vm-deployment-workflow)
-  - [Fanout Gateway](#fanout-gateway)
+  - [Fanout Gateway (Legacy)](#fanout-gateway-legacy)
   - [Docker Production](#docker-production)
 - [Per-Task Docker Execution](#per-task-docker-execution)
 - [Testing](#testing)
@@ -140,6 +141,8 @@ Requires `POSTMARK_SERVER_TOKEN` in your repo-root `.env`, plus `ngrok` and `pyt
 - `--skip-hook` leaves the Postmark hook unchanged
 - `--skip-ngrok` disables ngrok (requires `--public-url` or `--skip-hook`)
 
+When running with the inbound gateway, start workers with `--skip-hook` so they do not overwrite the gateway's Postmark hook.
+
 **Full usage:**
 ```
 scripts/run_employee.sh <employee_id> [port]
@@ -190,9 +193,97 @@ Outputs appear under:
 - `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces/<message_id>/reply_email_attachments/`
 - Scheduler state: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/tasks.db`
 
+### Inbound Gateway (Recommended)
+
+The inbound gateway (`inbound_gateway`) is the recommended way to run multiple employees without webhook collisions. It accepts inbound webhooks, deduplicates, routes to a single employee worker, and returns immediately. Each worker sends the actual reply back to the channel.
+
+**Phase 1 local gateway test (2 Docker workers + 1 local worker)**
+
+This matches the staging/dev flow with Oliver + Maggie in Docker and Proto on your host:
+
+**Step 1: Build the Docker image (once)**
+```bash
+docker build -t dowhiz-service .
+```
+
+**Step 2: Start Oliver worker (Docker)**
+```bash
+docker run --rm -p 9001:9001 \
+  -e EMPLOYEE_ID=little_bear \
+  -e RUST_SERVICE_PORT=9001 \
+  -e RUN_TASK_DOCKER_IMAGE= \
+  -v \"$PWD/.env:/app/.env:ro\" \
+  -v dowhiz-workspace-oliver:/app/.workspace \
+  dowhiz-service
+```
+
+**Step 3: Start Maggie worker (Docker)**
+```bash
+docker run --rm -p 9002:9001 \
+  -e EMPLOYEE_ID=mini_mouse \
+  -e RUST_SERVICE_PORT=9001 \
+  -e RUN_TASK_DOCKER_IMAGE= \
+  -v \"$PWD/.env:/app/.env:ro\" \
+  -v dowhiz-workspace-maggie:/app/.workspace \
+  dowhiz-service
+
+Note: when running workers inside Docker, clear `RUN_TASK_DOCKER_IMAGE` to avoid nested Docker usage.
+```
+
+**Step 4: Start Proto worker (host)**
+```bash
+EMPLOYEE_ID=boiled_egg RUST_SERVICE_PORT=9004 \
+  cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9004
+```
+
+**Step 5: Configure the gateway**
+```bash
+cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
+```
+Edit `DoWhiz_service/gateway.toml` to point at your local ports:
+```toml
+[targets]
+little_bear = \"http://127.0.0.1:9001\"
+mini_mouse  = \"http://127.0.0.1:9002\"
+boiled_egg  = \"http://127.0.0.1:9004\"
+
+[slack]
+default_employee_id = \"boiled_egg\"
+```
+
+**Step 6: Start the gateway (host)**
+```bash
+./DoWhiz_service/scripts/run_gateway_local.sh
+```
+
+**Step 7: Expose the gateway with ngrok**
+```bash
+ngrok http 9100
+```
+
+**Step 8: Point Postmark to the gateway**
+```bash
+cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
+  --hook-url https://YOUR-NGROK-URL.ngrok-free.dev/postmark/inbound
+```
+
+**Step 9: Send test emails**
+Use Postmark inbound with the test sender identities:
+- From: `mini-mouse@deep-tutor.com` → To: `mini-mouse@dowhiz.com`
+- From: `deep-tutor@deep-tutor.com` → To: `proto@dowhiz.com`
+
+If you want a scripted smoke test, reuse the live Postmark script below and set:
+```
+POSTMARK_INBOUND_HOOK_URL=http://127.0.0.1:9100/postmark/inbound
+POSTMARK_TEST_FROM=mini-mouse@deep-tutor.com
+POSTMARK_TEST_SERVICE_ADDRESS=mini-mouse@dowhiz.com
+```
+Repeat with `POSTMARK_TEST_FROM=deep-tutor@deep-tutor.com` and `POSTMARK_TEST_SERVICE_ADDRESS=proto@dowhiz.com`.
+
 ### VM Deployment Workflow
 
 Use one VM per employee. The service stays on `127.0.0.1` and Nginx terminates HTTPS.
+If you deploy the inbound gateway, run it on a dedicated VM (or alongside a worker) and point Postmark/Slack at the gateway URL; the gateway forwards to the worker URLs defined in `gateway.toml`.
 
 1. Provision an Ubuntu VM and open inbound TCP ports `22`, `80`, `443`.
 For live email E2E tests, request outbound TCP `25` from your cloud provider.
@@ -291,11 +382,11 @@ set -a; source /home/azureuser/DoWhiz/.env; set +a
 - Slack OAuth Redirect: `https://api.dowhiz.com/slack/oauth/callback`
 - For Discord, set `discord_enabled = true` for the employee in `employee.toml`.
 
-Slack and Discord tokens only support one active connection at a time. Use one VM per employee, or a fanout gateway VM if you want a shared Slack/Discord entry point.
+Slack and Discord tokens only support one active connection at a time. Use one VM per employee, or a dedicated inbound gateway VM if you want a shared Slack/Discord entry point.
 
-### Fanout Gateway
+### Fanout Gateway (Legacy)
 
-If you want **one Postmark server** to deliver inbound messages to multiple employee services, run the fanout gateway and point Postmark/Slack at the fanout URL. The gateway forwards every inbound request to **all** employee services; each service ignores non-matching addresses.
+If you need a broadcast-style gateway that forwards every inbound request to **all** employee services, use the legacy fanout gateway. For most deployments, prefer the inbound gateway so each message is routed to a single worker.
 
 **Local (fanout only):**
 ```bash
@@ -647,7 +738,15 @@ This reduces API costs and latency for simple interactions while preserving full
 | `RUN_TASK_DOCKER_DNS_SEARCH` | - | Add DNS search domains (comma/space-separated) |
 | `RUN_TASK_SKIP_WORKSPACE_REMAP` | `0` | Disable legacy workspace path migration |
 
-### Fanout Gateway
+### Inbound Gateway
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GATEWAY_CONFIG_PATH` | `gateway.toml` | Path to gateway config file |
+| `GATEWAY_DEDUPE_PATH` | `$HOME/.dowhiz/DoWhiz/gateway/state/processed_ids.txt` | Gateway dedupe file |
+| `GATEWAY_HOST` | `0.0.0.0` | Gateway bind host |
+| `GATEWAY_PORT` | `9100` | Gateway bind port |
+
+### Fanout Gateway (Legacy)
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `FANOUT_HOST` | - | Gateway host |
