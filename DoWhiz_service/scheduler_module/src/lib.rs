@@ -1282,7 +1282,6 @@ fn ensure_send_discord_tasks_table(conn: &Connection) -> Result<(), SchedulerErr
     )?;
     Ok(())
 }
-
 fn ensure_send_sms_tasks_table(conn: &Connection) -> Result<(), SchedulerError> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS send_sms_tasks (
@@ -1714,7 +1713,6 @@ impl SqliteSchedulerStore {
         )?;
         Ok(())
     }
-
     fn insert_send_sms_task(
         &self,
         tx: &Transaction,
@@ -1928,7 +1926,6 @@ impl SqliteSchedulerStore {
             thread_state_path: None,
         })
     }
-
     fn load_send_sms_task(
         &self,
         conn: &Connection,
@@ -2522,12 +2519,12 @@ fn schedule_auto_reply<E: TaskExecutor>(
     // Non-email channels use plain text reply_message.txt
     // Email and GoogleDocs use HTML reply_email_draft.html
     let (reply_filename, attachments_dirname) = match task.channel {
-        Channel::Slack | Channel::Discord | Channel::BlueBubbles | Channel::Telegram | Channel::Sms => {
-            ("reply_message.txt", "reply_attachments")
-        }
-        Channel::Email | Channel::GoogleDocs => {
-            ("reply_email_draft.html", "reply_email_attachments")
-        }
+        Channel::Slack
+        | Channel::Discord
+        | Channel::BlueBubbles
+        | Channel::Telegram
+        | Channel::Sms => ("reply_message.txt", "reply_attachments"),
+        Channel::Email | Channel::GoogleDocs => ("reply_email_draft.html", "reply_email_attachments"),
     };
 
     let html_path = task.workspace_dir.join(reply_filename);

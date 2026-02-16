@@ -715,7 +715,6 @@ pub async fn run_server(
             info!("Task watchdog stopped");
         });
     }
-
     info!(
         "Inbound webhooks are handled by the ingestion gateway; worker {} will only consume queued messages",
         config.employee_id
@@ -2256,7 +2255,7 @@ fn process_sms_message(
     let thread_key = format!(
         "sms:{}:{}",
         normalize_phone_number(&message.recipient),
-        normalize_phone_number(&message.sender)
+        normalized_from
     );
 
     let workspace = ensure_thread_workspace(
