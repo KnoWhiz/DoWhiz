@@ -281,6 +281,7 @@ fn run_task_rejects_absolute_input_dir() {
         runner: "codex".to_string(),
         codex_disabled: false,
         channel: "email".to_string(),
+        google_access_token: std::env::var("GOOGLE_ACCESS_TOKEN").ok(),
     };
 
     let err = run_task(&request).unwrap_err();

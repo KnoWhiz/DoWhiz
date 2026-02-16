@@ -2,7 +2,7 @@ use chrono::{DateTime, Local, Utc};
 use cron::Schedule as CronSchedule;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
@@ -32,6 +32,11 @@ use crate::thread_state::{
 };
 
 use crate::channel::Channel;
+
+const RUN_TASK_FAILURE_LIMIT: u32 = 3;
+const RUN_TASK_FAILURE_NOTICE: &str = "We could not complete your request";
+const RUN_TASK_FAILURE_DIR: &str = "failure_notifications";
+const RUN_TASK_FAILURE_REPORT_DIR: &str = "dowhiz_failure_reports";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -110,6 +115,25 @@ pub struct RunTaskTask {
 
 fn default_runner() -> String {
     "codex".to_string()
+}
+
+pub fn load_google_access_token_from_service_env() -> Option<String> {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let service_root = manifest_dir.parent().unwrap_or(manifest_dir);
+    let env_path = service_root.join(".env");
+    let iter = dotenvy::from_path_iter(&env_path).ok()?;
+    for item in iter {
+        if let Ok((key, value)) = item {
+            if key == "GOOGLE_ACCESS_TOKEN" {
+                let value = value.trim();
+                if value.is_empty() {
+                    return None;
+                }
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -264,7 +288,7 @@ impl TaskExecutor for ModuleExecutor {
                     runner: task.runner.clone(),
                     codex_disabled: task.codex_disabled,
                     channel: task.channel.to_string(),
-                    google_access_token: None,
+                    google_access_token: load_google_access_token_from_service_env(),
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -599,10 +623,118 @@ fn execute_google_docs_send(task: &SendReplyTask) -> Result<(), SchedulerError> 
     Ok(())
 }
 
+fn notify_run_task_failure(
+    task_id: Uuid,
+    task: &RunTaskTask,
+    error_message: &str,
+) -> Result<(), SchedulerError> {
+    let failure_dir = task.workspace_dir.join(RUN_TASK_FAILURE_DIR);
+    fs::create_dir_all(&failure_dir)?;
+
+    let is_slack = matches!(task.channel, Channel::Slack);
+    let (notice_path, notice_body) = if is_slack {
+        (
+            failure_dir.join(format!("task_failure_{}.txt", task_id)),
+            RUN_TASK_FAILURE_NOTICE.to_string(),
+        )
+    } else {
+        (
+            failure_dir.join(format!("task_failure_{}.html", task_id)),
+            format!("<p>{}</p>", RUN_TASK_FAILURE_NOTICE),
+        )
+    };
+    fs::write(&notice_path, notice_body)?;
+
+    let notice_attachments = failure_dir.join(format!("task_failure_{}_attachments", task_id));
+    fs::create_dir_all(&notice_attachments)?;
+
+    if !task.reply_to.is_empty() {
+        if is_slack {
+            let send_task = SendReplyTask {
+                channel: Channel::Slack,
+                subject: RUN_TASK_FAILURE_NOTICE.to_string(),
+                html_path: notice_path.clone(),
+                attachments_dir: notice_attachments.clone(),
+                from: None,
+                to: task.reply_to.clone(),
+                cc: vec![],
+                bcc: vec![],
+                in_reply_to: task.thread_id.clone(),
+                references: None,
+                archive_root: None,
+                thread_epoch: None,
+                thread_state_path: None,
+            };
+            execute_slack_send(&send_task)?;
+        } else {
+            let from = task
+                .reply_from
+                .clone()
+                .or_else(|| std::env::var("ADMIN_EMAIL").ok())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    SchedulerError::TaskFailed("from address missing for failure notice".to_string())
+                })?;
+            let params = send_emails_module::SendEmailParams {
+                subject: RUN_TASK_FAILURE_NOTICE.to_string(),
+                html_path: notice_path.clone(),
+                attachments_dir: notice_attachments.clone(),
+                from: Some(from),
+                to: task.reply_to.clone(),
+                cc: vec![],
+                bcc: vec![],
+                in_reply_to: None,
+                references: None,
+            };
+            send_emails_module::send_email(&params)
+                .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
+        }
+    } else {
+        warn!("no reply_to recipients for task failure notice {}", task_id);
+    }
+
+    let admin_email = std::env::var("ADMIN_EMAIL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if let Some(admin_email) = admin_email {
+        let report_dir = std::env::temp_dir().join(RUN_TASK_FAILURE_REPORT_DIR);
+        fs::create_dir_all(&report_dir)?;
+        let report_path = report_dir.join(format!("task_failure_{}.html", task_id));
+        let report_body = format!(
+            "<p>{}</p><p>Task ID: {}</p><pre>{}</pre>",
+            RUN_TASK_FAILURE_NOTICE, task_id, error_message
+        );
+        fs::write(&report_path, report_body)?;
+
+        let report_attachments = report_dir.join(format!("attachments_{}", task_id));
+        fs::create_dir_all(&report_attachments)?;
+        let params = send_emails_module::SendEmailParams {
+            subject: format!("Task failure: {}", task_id),
+            html_path: report_path,
+            attachments_dir: report_attachments,
+            from: Some(admin_email.clone()),
+            to: vec![admin_email],
+            cc: vec![],
+            bcc: vec![],
+            in_reply_to: None,
+            references: None,
+        };
+        send_emails_module::send_email(&params)
+            .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
+    } else {
+        warn!("ADMIN_EMAIL not set; skipping failure report {}", task_id);
+    }
+
+    Ok(())
+}
+
 pub struct Scheduler<E: TaskExecutor> {
     tasks: Vec<ScheduledTask>,
     executor: E,
     store: SqliteSchedulerStore,
+    failure_counts: HashMap<Uuid, u32>,
 }
 
 impl<E: TaskExecutor> Scheduler<E> {
@@ -614,6 +746,7 @@ impl<E: TaskExecutor> Scheduler<E> {
             tasks,
             executor,
             store,
+            failure_counts: HashMap::new(),
         })
     }
 
@@ -758,6 +891,7 @@ impl<E: TaskExecutor> Scheduler<E> {
 
         match result {
             Ok(execution) => {
+                self.failure_counts.remove(&task_id);
                 self.store
                     .record_execution_finish(execution_id, executed_at, "success", None)?;
                 self.tasks[index].last_run = Some(executed_at);
@@ -815,15 +949,30 @@ impl<E: TaskExecutor> Scheduler<E> {
                     "failed",
                     Some(&message),
                 )?;
-                // Disable one-shot tasks on failure to prevent infinite retries
+                // Disable one-shot tasks on failure, but allow a few retries for RunTask.
                 if matches!(self.tasks[index].schedule, Schedule::OneShot { .. }) {
-                    self.tasks[index].enabled = false;
-                    let updated_task = self.tasks[index].clone();
-                    self.store.update_task(&updated_task)?;
-                    warn!(
-                        "disabled one-shot task {} after failure: {}",
-                        task_id, message
-                    );
+                    let mut should_disable = true;
+                    if let TaskKind::RunTask(task) = &self.tasks[index].kind {
+                        let failures = self.failure_counts.entry(task_id).or_insert(0);
+                        *failures += 1;
+                        if *failures < RUN_TASK_FAILURE_LIMIT {
+                            should_disable = false;
+                        } else {
+                            if let Err(err) = notify_run_task_failure(task_id, task, &message) {
+                                warn!("failed to notify run_task failure: {}", err);
+                            }
+                            self.failure_counts.remove(&task_id);
+                        }
+                    }
+                    if should_disable {
+                        self.tasks[index].enabled = false;
+                        let updated_task = self.tasks[index].clone();
+                        self.store.update_task(&updated_task)?;
+                        warn!(
+                            "disabled one-shot task {} after failure: {}",
+                            task_id, message
+                        );
+                    }
                 }
                 return Err(err);
             }

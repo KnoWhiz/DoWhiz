@@ -251,5 +251,6 @@ pub fn build_params(workspace: &Path) -> RunTaskParams {
         runner: "codex".to_string(),
         codex_disabled: false,
         channel: "email".to_string(),
+        google_access_token: std::env::var("GOOGLE_ACCESS_TOKEN").ok(),
     }
 }
