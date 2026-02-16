@@ -27,6 +27,7 @@
 - Single test example: `cargo test -p scheduler_module --test scheduler_basic`.
 - Live E2E (email + ngrok + Postmark) requires `RUST_SERVICE_LIVE_TEST=1` and often `RUN_CODEX_E2E=1` plus Postmark credentials; see `DoWhiz_service/README.md` before running.
 - Website: `npm run lint` (no dedicated test runner currently).
+- After completing code changes, you must design targeted, detailed unit tests and end-to-end tests to ensure both new and existing functionality behave as expected. Debug and resolve any issues found during test runs. If certain issues require manual intervention, provide a detailed report and follow-up steps.
 
 ## Commit & Pull Request Guidelines
 - Commit messages are short and imperative; conventional prefixes appear occasionally (e.g., `feat:`/`fix:`) and PR/issue numbers are sometimes appended, e.g., `feat: Add Google Docs collaboration support for digital employees (#238)`.

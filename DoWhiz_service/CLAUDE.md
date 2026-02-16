@@ -29,6 +29,10 @@ RUST_SERVICE_LIVE_TEST=1 cargo test -p scheduler_module --test service_real_emai
 RUN_CODEX_E2E=1 cargo test -p scheduler_module --test scheduler_agent_e2e -- --nocapture
 ```
 
+## Testing Expectations
+
+After completing code changes, you must design targeted, detailed unit tests and end-to-end tests to ensure both new and existing functionality behave as expected. Debug and resolve any issues found during test runs. If certain issues require manual intervention, provide a detailed report and follow-up steps.
+
 ## Running the Service
 
 ```bash

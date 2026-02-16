@@ -137,3 +137,7 @@ RUST_SERVICE_LIVE_TEST=1 \
 POSTMARK_INBOUND_HOOK_URL=https://YOUR-NGROK-URL.ngrok-free.dev \
 cargo test -p scheduler_module --test service_real_email -- --nocapture
 ```
+
+## Testing Expectations
+
+After completing code changes, you must design targeted, detailed unit tests and end-to-end tests to ensure both new and existing functionality behave as expected. Debug and resolve any issues found during test runs. If certain issues require manual intervention, provide a detailed report and follow-up steps.

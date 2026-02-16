@@ -30,6 +30,7 @@
 - Primary framework is Rust’s built-in test runner (`cargo test`).
 - Integration/E2E tests live under `*/tests/*.rs` (e.g., `scheduler_module/tests/service_real_email.rs`).
 - Live E2E flows require Postmark credentials, ngrok, and optional AI keys; keep them opt-in and document required env vars when adding new ones.
+- After completing code changes, you must design targeted, detailed unit tests and end-to-end tests to ensure both new and existing functionality behave as expected. Debug and resolve any issues found during test runs. If certain issues require manual intervention, provide a detailed report and follow-up steps.
 
 ## Commit & Pull Request Guidelines
 - Recent history shows short, imperative commit summaries; some use Conventional Commit prefixes like `feat:`. Follow that pattern when appropriate and include issue/PR numbers if relevant.
