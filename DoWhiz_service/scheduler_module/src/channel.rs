@@ -20,6 +20,8 @@ pub enum Channel {
     Telegram,
     /// Google Docs collaboration via comments
     GoogleDocs,
+    /// iMessage via BlueBubbles bridge
+    BlueBubbles,
 }
 
 impl Default for Channel {
@@ -36,6 +38,7 @@ impl std::fmt::Display for Channel {
             Channel::Discord => write!(f, "discord"),
             Channel::Telegram => write!(f, "telegram"),
             Channel::GoogleDocs => write!(f, "google_docs"),
+            Channel::BlueBubbles => write!(f, "bluebubbles"),
         }
     }
 }
@@ -50,6 +53,7 @@ impl std::str::FromStr for Channel {
             "discord" => Ok(Channel::Discord),
             "telegram" => Ok(Channel::Telegram),
             "google_docs" | "googledocs" => Ok(Channel::GoogleDocs),
+            "bluebubbles" | "imessage" => Ok(Channel::BlueBubbles),
             _ => Err(format!("unknown channel: {}", s)),
         }
     }
@@ -123,6 +127,8 @@ pub struct ChannelMetadata {
     pub google_docs_comment_id: Option<String>,
     /// Google Docs-specific: Document name/title
     pub google_docs_document_name: Option<String>,
+    /// BlueBubbles-specific: Chat GUID (e.g., "iMessage;-;+1234567890")
+    pub bluebubbles_chat_guid: Option<String>,
 }
 
 /// Normalized outbound message to any channel.

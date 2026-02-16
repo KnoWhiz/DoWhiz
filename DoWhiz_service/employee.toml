@@ -50,3 +50,4 @@ soul_path = "employees/boiled_egg/SOUL.md"
 skills_dir = "skills"
 discord_enabled = true
 slack_enabled = true
+bluebubbles_enabled = true

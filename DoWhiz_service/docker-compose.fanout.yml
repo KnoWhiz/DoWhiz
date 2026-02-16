@@ -114,6 +114,9 @@ services:
       OLLAMA_URL: "http://ollama:11434"
       OLLAMA_MODEL: "phi3:mini"
       OLLAMA_ENABLED: "true"
+      # BlueBubbles iMessage bridge (host.docker.internal reaches Mac host from container)
+      BLUEBUBBLES_URL: "http://host.docker.internal:1234"
+      BLUEBUBBLES_PASSWORD: "dowhiz-proto"
     ports:
       - "9004:9001"
     volumes:
