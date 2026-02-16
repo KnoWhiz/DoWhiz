@@ -87,6 +87,122 @@ Inbound message -> Scheduler -> Task runner -> Tools -> Outbound message
 - Scheduling and orchestration for long-running or recurring work
 - Tool-backed execution for reliable outputs
 
+## Google Docs Integration
+
+Digital employees can collaborate on Google Docs with color-coded revision marks (suggesting mode).
+
+### Features
+- **@Mention Detection**: Employees detect when mentioned in document comments
+- **Suggesting Mode**: Edits appear as color-coded revisions:
+  - 🔴 **Red strikethrough** = Deletions
+  - 🔵 **Blue text** = Insertions
+- **Apply/Discard**: Users can accept or reject all suggestions in batch
+- **Comment Replies**: Employees can respond to document comments
+
+### Quick Setup
+
+#### Step 1: Create Google Cloud Project
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com)
+2. Create a new project or select existing
+3. Enable APIs:
+   - Google Docs API
+   - Google Drive API
+4. Create OAuth 2.0 credentials:
+   - Go to **APIs & Services → Credentials**
+   - Click **Create Credentials → OAuth client ID**
+   - Select **Desktop app** type
+   - Download the credentials JSON
+
+#### Step 2: Configure Redirect URI
+
+In Google Cloud Console → Credentials → Your OAuth Client:
+- Add `http://localhost:8085` to **Authorized redirect URIs**
+
+#### Step 3: Get Refresh Token
+
+```bash
+# Set your credentials
+export GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+export GOOGLE_CLIENT_SECRET="your-client-secret"
+
+# Run the token generator script
+cd DoWhiz_service
+./scripts/get_google_refresh_token.sh
+```
+
+The script will:
+1. Open browser for Google OAuth consent
+2. Catch the callback on localhost:8085
+3. Exchange code for refresh token
+4. Print the token to add to your `.env`
+
+#### Step 4: Add to .env
+
+```bash
+# Google OAuth credentials
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+
+# Per-employee refresh tokens (replace EMPLOYEE_ID with uppercase ID)
+GOOGLE_REFRESH_TOKEN_BOILED_EGG=your-refresh-token-here
+GOOGLE_REFRESH_TOKEN_LITTLE_BEAR=your-refresh-token-here
+
+# Enable Google Docs polling
+GOOGLE_DOCS_ENABLED=true
+GOOGLE_DOCS_POLL_INTERVAL_SECS=30
+```
+
+### Testing
+
+#### Manual CLI Test
+```bash
+cd DoWhiz_service
+
+# Build the CLI
+cargo build --release --bin google-docs
+
+# List accessible documents
+./target/release/google-docs list-documents
+
+# Read a document
+./target/release/google-docs read-document <doc_id>
+
+# Test suggesting mode (find and replace with revision marks)
+./target/release/google-docs suggest-replace <doc_id> --find="old text" --replace="new text"
+
+# Apply all suggestions (removes red, normalizes blue)
+./target/release/google-docs apply-suggestions <doc_id>
+
+# Discard all suggestions (removes blue, restores red)
+./target/release/google-docs discard-suggestions <doc_id>
+```
+
+#### E2E Tests
+```bash
+cargo test --package scheduler_module --test google_docs_cli_e2e
+```
+
+### Multi-Employee Setup
+
+Each employee needs their own Google account and refresh token:
+
+| Employee | Env Variable | Google Account |
+|----------|-------------|----------------|
+| Proto (boiled_egg) | `GOOGLE_REFRESH_TOKEN_BOILED_EGG` | proto@dowhiz.com |
+| Oliver (little_bear) | `GOOGLE_REFRESH_TOKEN_LITTLE_BEAR` | oliver@dowhiz.com |
+
+Run `get_google_refresh_token.sh` once per employee, logging into the appropriate Google account each time.
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| `DNS lookup failed` | Ensure sandbox bypass is enabled for GoogleDocs tasks |
+| `Token refresh failed` | Re-run `get_google_refresh_token.sh` to get a new token |
+| `\n` appearing literally | Upgrade to latest CLI with escape sequence support |
+| `Permission denied` | Share the document with the employee's Google account |
+
 ## Repository Layout
 
 | Directory | Description |
