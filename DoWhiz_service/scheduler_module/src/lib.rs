@@ -975,6 +975,31 @@ impl<E: TaskExecutor> Scheduler<E> {
         }
         Ok(())
     }
+
+    /// Get the current retry count for a task
+    pub fn get_retry_count(&self, task_id: &str) -> Result<u32, SchedulerError> {
+        self.store.get_retry_count(task_id)
+    }
+
+    /// Increment the retry count for a task and return the new count
+    pub fn increment_retry_count(&self, task_id: &str) -> Result<u32, SchedulerError> {
+        self.store.increment_retry_count(task_id)
+    }
+
+    /// Reset the retry count for a task (after successful execution)
+    pub fn reset_retry_count(&self, task_id: &str) -> Result<(), SchedulerError> {
+        self.store.reset_retry_count(task_id)
+    }
+
+    /// Disable a task by its ID (used when max retries exceeded)
+    pub fn disable_task_by_id(&mut self, task_id: &str) -> Result<(), SchedulerError> {
+        // Update in-memory task list
+        if let Some(task) = self.tasks.iter_mut().find(|t| t.id.to_string() == task_id) {
+            task.enabled = false;
+        }
+        // Update in database
+        self.store.disable_task_by_id(task_id)
+    }
 }
 
 impl ScheduledTask {
@@ -1018,7 +1043,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     schedule_type TEXT NOT NULL,
     cron_expression TEXT,
     next_run TEXT,
-    run_at TEXT
+    run_at TEXT,
+    retry_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS send_email_tasks (
@@ -1143,6 +1169,13 @@ fn ensure_tasks_columns(conn: &Connection) -> Result<(), SchedulerError> {
     if !columns.contains("channel") {
         conn.execute(
             "ALTER TABLE tasks ADD COLUMN channel TEXT NOT NULL DEFAULT 'email'",
+            [],
+        )?;
+    }
+
+    if !columns.contains("retry_count") {
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
             [],
         )?;
     }
@@ -1326,10 +1359,10 @@ impl SqliteSchedulerStore {
                         Channel::Discord => self.load_send_discord_task(&conn, &id_raw)?,
                         Channel::GoogleDocs => {
                             // Google Docs uses a similar format to email for now
-                            self.load_send_email_task(&conn, &id_raw)?
+                            self.load_send_email_task(&conn, &id_raw, channel.clone())?
                         }
                         Channel::Email | Channel::Telegram => {
-                            self.load_send_email_task(&conn, &id_raw)?
+                            self.load_send_email_task(&conn, &id_raw, channel.clone())?
                         }
                         Channel::BlueBubbles => {
                             self.load_send_bluebubbles_task(&conn, &id_raw)?
@@ -1615,6 +1648,7 @@ impl SqliteSchedulerStore {
         &self,
         conn: &Connection,
         task_id: &str,
+        channel: Channel,
     ) -> Result<SendReplyTask, SchedulerError> {
         let row = conn
             .query_row(
@@ -1674,7 +1708,7 @@ impl SqliteSchedulerStore {
         }
 
         Ok(SendReplyTask {
-            channel: Channel::Email,
+            channel,
             subject,
             html_path: PathBuf::from(html_path),
             attachments_dir: PathBuf::from(attachments_dir),
@@ -1910,6 +1944,52 @@ impl SqliteSchedulerStore {
         ensure_send_bluebubbles_tasks_table(&conn)?;
         ensure_run_task_task_columns(&conn)?;
         Ok(conn)
+    }
+
+    /// Get the current retry count for a task
+    pub fn get_retry_count(&self, task_id: &str) -> Result<u32, SchedulerError> {
+        let conn = self.open()?;
+        let count: i64 = conn.query_row(
+            "SELECT retry_count FROM tasks WHERE id = ?1",
+            params![task_id],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        Ok(count as u32)
+    }
+
+    /// Increment the retry count for a task and return the new count
+    pub fn increment_retry_count(&self, task_id: &str) -> Result<u32, SchedulerError> {
+        let conn = self.open()?;
+        conn.execute(
+            "UPDATE tasks SET retry_count = retry_count + 1 WHERE id = ?1",
+            params![task_id],
+        )?;
+        let count: i64 = conn.query_row(
+            "SELECT retry_count FROM tasks WHERE id = ?1",
+            params![task_id],
+            |row| row.get(0),
+        )?;
+        Ok(count as u32)
+    }
+
+    /// Reset the retry count for a task (after successful execution)
+    pub fn reset_retry_count(&self, task_id: &str) -> Result<(), SchedulerError> {
+        let conn = self.open()?;
+        conn.execute(
+            "UPDATE tasks SET retry_count = 0 WHERE id = ?1",
+            params![task_id],
+        )?;
+        Ok(())
+    }
+
+    /// Disable a task by its ID (used when max retries exceeded)
+    pub fn disable_task_by_id(&self, task_id: &str) -> Result<(), SchedulerError> {
+        let conn = self.open()?;
+        conn.execute(
+            "UPDATE tasks SET enabled = 0 WHERE id = ?1",
+            params![task_id],
+        )?;
+        Ok(())
     }
 }
 

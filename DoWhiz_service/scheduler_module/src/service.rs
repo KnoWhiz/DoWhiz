@@ -284,9 +284,26 @@ struct AppState {
     message_router: Arc<MessageRouter>,
 }
 
+/// Information about a running task for monitoring
+#[derive(Clone, Debug)]
+struct TaskClaim {
+    task_id: String,
+    user_id: String,
+    started_at: DateTime<Utc>,
+    thread_id: Option<String>,
+    retry_count: u32,
+}
+
+/// Default task timeout in seconds (10 minutes)
+const DEFAULT_TASK_TIMEOUT_SECS: u64 = 600;
+/// Maximum number of retries before giving up
+const MAX_TASK_RETRIES: u32 = 3;
+/// Watchdog check interval in seconds
+const WATCHDOG_INTERVAL_SECS: u64 = 30;
+
 #[derive(Default)]
 struct SchedulerClaims {
-    running_tasks: HashSet<String>,
+    running_tasks: HashMap<String, TaskClaim>,
     running_users: HashMap<String, usize>,
 }
 
@@ -297,7 +314,7 @@ enum ClaimResult {
 }
 
 impl SchedulerClaims {
-    fn try_claim(&mut self, task_ref: &TaskRef, user_limit: usize) -> ClaimResult {
+    fn try_claim(&mut self, task_ref: &TaskRef, user_limit: usize, retry_count: u32) -> ClaimResult {
         let active = self
             .running_users
             .get(&task_ref.user_id)
@@ -306,12 +323,19 @@ impl SchedulerClaims {
         if active >= user_limit {
             return ClaimResult::UserBusy;
         }
-        if self.running_tasks.contains(&task_ref.task_id) {
+        if self.running_tasks.contains_key(&task_ref.task_id) {
             return ClaimResult::TaskBusy;
         }
         self.running_users
             .insert(task_ref.user_id.clone(), active + 1);
-        self.running_tasks.insert(task_ref.task_id.clone());
+        let claim = TaskClaim {
+            task_id: task_ref.task_id.clone(),
+            user_id: task_ref.user_id.clone(),
+            started_at: Utc::now(),
+            thread_id: None, // TaskRef doesn't have thread_id; it's tracked in the task itself
+            retry_count,
+        };
+        self.running_tasks.insert(task_ref.task_id.clone(), claim);
         ClaimResult::Claimed
     }
 
@@ -324,6 +348,33 @@ impl SchedulerClaims {
             }
         }
         self.running_tasks.remove(&task_ref.task_id);
+    }
+
+    /// Find tasks that have been running longer than the timeout
+    fn find_stale_tasks(&self, timeout_secs: u64) -> Vec<TaskClaim> {
+        let now = Utc::now();
+        let timeout = chrono::Duration::seconds(timeout_secs as i64);
+        self.running_tasks
+            .values()
+            .filter(|claim| now - claim.started_at > timeout)
+            .cloned()
+            .collect()
+    }
+
+    /// Force release a task by task_id (used by watchdog)
+    fn force_release(&mut self, task_id: &str) -> Option<TaskClaim> {
+        if let Some(claim) = self.running_tasks.remove(task_id) {
+            if let Some(active) = self.running_users.get_mut(&claim.user_id) {
+                if *active <= 1 {
+                    self.running_users.remove(&claim.user_id);
+                } else {
+                    *active -= 1;
+                }
+            }
+            Some(claim)
+        } else {
+            None
+        }
     }
 }
 
@@ -456,7 +507,8 @@ pub async fn run_server(
                             let claim_result = {
                                 let mut claims =
                                     claims.lock().unwrap_or_else(|poison| poison.into_inner());
-                                claims.try_claim(&task_ref, scheduler_user_max_concurrency)
+                                // TODO: Get retry_count from task metadata in the future
+                                claims.try_claim(&task_ref, scheduler_user_max_concurrency, 0)
                             };
                             match claim_result {
                                 ClaimResult::Claimed => {
@@ -521,6 +573,114 @@ pub async fn run_server(
                 }
                 thread::sleep(scheduler_poll_interval);
             }
+        });
+    }
+
+    // Start task watchdog thread to detect and recover from stuck/crashed tasks
+    {
+        let claims = claims.clone();
+        let scheduler_stop = scheduler_stop.clone();
+        let user_store = user_store.clone();
+        let users_root = config.users_root.clone();
+        let task_timeout_secs = std::env::var("TASK_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_TASK_TIMEOUT_SECS);
+
+        thread::spawn(move || {
+            info!(
+                "Task watchdog started (timeout={}s, check_interval={}s)",
+                task_timeout_secs, WATCHDOG_INTERVAL_SECS
+            );
+
+            while !scheduler_stop.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_secs(WATCHDOG_INTERVAL_SECS));
+
+                let stale_tasks = {
+                    let claims = claims.lock().unwrap_or_else(|poison| poison.into_inner());
+                    claims.find_stale_tasks(task_timeout_secs)
+                };
+
+                for stale_claim in stale_tasks {
+                    warn!(
+                        "Watchdog detected stale task: task_id={} user_id={} thread_id={:?} started_at={} retry_count={}",
+                        stale_claim.task_id,
+                        stale_claim.user_id,
+                        stale_claim.thread_id,
+                        stale_claim.started_at,
+                        stale_claim.retry_count
+                    );
+
+                    // Force release the stale task from claims
+                    let released = {
+                        let mut claims = claims.lock().unwrap_or_else(|poison| poison.into_inner());
+                        claims.force_release(&stale_claim.task_id)
+                    };
+
+                    if released.is_some() {
+                        // Load scheduler to manage retry count
+                        let user_paths = user_store.user_paths(&users_root, &stale_claim.user_id);
+                        let scheduler_result = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default());
+
+                        match scheduler_result {
+                            Ok(mut scheduler) => {
+                                // Increment retry count in database
+                                match scheduler.increment_retry_count(&stale_claim.task_id) {
+                                    Ok(new_count) => {
+                                        if new_count < MAX_TASK_RETRIES {
+                                            warn!(
+                                                "Watchdog released stale task {} (will be retried, attempt {}/{})",
+                                                stale_claim.task_id,
+                                                new_count,
+                                                MAX_TASK_RETRIES
+                                            );
+                                            // Task will be re-picked up by scheduler on next tick
+                                        } else {
+                                            error!(
+                                                "Watchdog: Task {} exceeded max retries ({}), disabling task",
+                                                stale_claim.task_id, MAX_TASK_RETRIES
+                                            );
+
+                                            // Disable the task in database
+                                            if let Err(err) = scheduler.disable_task_by_id(&stale_claim.task_id) {
+                                                error!(
+                                                    "Failed to disable task {}: {}",
+                                                    stale_claim.task_id, err
+                                                );
+                                            }
+
+                                            // Notify user about the failure
+                                            if let Err(err) = notify_task_failure(
+                                                &user_store,
+                                                &users_root,
+                                                &stale_claim,
+                                            ) {
+                                                error!(
+                                                    "Failed to notify user about task failure {}: {}",
+                                                    stale_claim.task_id, err
+                                                );
+                                            }
+                                        }
+                                    }
+                                    Err(err) => {
+                                        error!(
+                                            "Failed to increment retry count for task {}: {}",
+                                            stale_claim.task_id, err
+                                        );
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                error!(
+                                    "Watchdog failed to load scheduler for user {}: {}",
+                                    stale_claim.user_id, err
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            info!("Task watchdog stopped");
         });
     }
 
@@ -645,6 +805,71 @@ pub async fn run_server(
     Ok(())
 }
 
+/// Notify user that a task has failed after max retries
+fn notify_task_failure(
+    user_store: &UserStore,
+    users_root: &Path,
+    stale_claim: &TaskClaim,
+) -> Result<(), BoxError> {
+    let user_paths = user_store.user_paths(users_root, &stale_claim.user_id);
+
+    // Create a failure notification file in the user's workspace root
+    let notification_dir = user_paths.workspaces_root.join("_notifications");
+    fs::create_dir_all(&notification_dir)?;
+
+    let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let notification_file = notification_dir.join(format!("task_failure_{}.txt", timestamp));
+
+    let notification_content = format!(
+        "Task Failure Notification\n\
+        ==========================\n\
+        \n\
+        Task ID: {}\n\
+        User ID: {}\n\
+        Thread ID: {:?}\n\
+        Started at: {}\n\
+        Failed at: {}\n\
+        Retry count: {} (max: {})\n\
+        \n\
+        The task has been automatically disabled after exceeding the maximum retry attempts.\n\
+        \n\
+        Possible causes:\n\
+        - The task timed out (took longer than {} seconds)\n\
+        - The processing service crashed or became unresponsive\n\
+        - Network or external service issues\n\
+        \n\
+        Recommended actions:\n\
+        - Check the service logs for more details\n\
+        - Try the operation again by creating a new request\n\
+        - Contact support if the issue persists\n",
+        stale_claim.task_id,
+        stale_claim.user_id,
+        stale_claim.thread_id,
+        stale_claim.started_at,
+        Utc::now(),
+        stale_claim.retry_count,
+        MAX_TASK_RETRIES,
+        DEFAULT_TASK_TIMEOUT_SECS,
+    );
+
+    fs::write(&notification_file, &notification_content)?;
+    info!(
+        "Task failure notification written to: {}",
+        notification_file.display()
+    );
+
+    // Log the failure for monitoring
+    error!(
+        "TASK_FAILURE_ALERT: task_id={} user_id={} thread_id={:?} retries={}",
+        stale_claim.task_id,
+        stale_claim.user_id,
+        stale_claim.thread_id,
+        stale_claim.retry_count
+    );
+
+    Ok(())
+}
+
 fn execute_due_task(
     config: &ServiceConfig,
     user_store: &UserStore,
@@ -716,6 +941,15 @@ fn execute_due_task(
             "scheduler task completed task_id={} user_id={} status=success",
             task_ref.task_id, task_ref.user_id
         );
+
+        // Reset retry count on successful execution
+        if let Err(err) = scheduler.reset_retry_count(&task_ref.task_id) {
+            warn!(
+                "Failed to reset retry count for task {}: {}",
+                task_ref.task_id, err
+            );
+        }
+
         let refreshed_scheduler = Scheduler::load(&tasks_db_path, ModuleExecutor::default());
         match refreshed_scheduler {
             Ok(refreshed_scheduler) => {
