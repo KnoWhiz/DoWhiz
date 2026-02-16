@@ -1326,10 +1326,10 @@ impl SqliteSchedulerStore {
                         Channel::Discord => self.load_send_discord_task(&conn, &id_raw)?,
                         Channel::GoogleDocs => {
                             // Google Docs uses a similar format to email for now
-                            self.load_send_email_task(&conn, &id_raw)?
+                            self.load_send_email_task(&conn, &id_raw, channel.clone())?
                         }
                         Channel::Email | Channel::Telegram => {
-                            self.load_send_email_task(&conn, &id_raw)?
+                            self.load_send_email_task(&conn, &id_raw, channel.clone())?
                         }
                         Channel::BlueBubbles => {
                             self.load_send_bluebubbles_task(&conn, &id_raw)?
@@ -1615,6 +1615,7 @@ impl SqliteSchedulerStore {
         &self,
         conn: &Connection,
         task_id: &str,
+        channel: Channel,
     ) -> Result<SendReplyTask, SchedulerError> {
         let row = conn
             .query_row(
@@ -1674,7 +1675,7 @@ impl SqliteSchedulerStore {
         }
 
         Ok(SendReplyTask {
-            channel: Channel::Email,
+            channel,
             subject,
             html_path: PathBuf::from(html_path),
             attachments_dir: PathBuf::from(attachments_dir),
