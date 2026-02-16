@@ -13,7 +13,8 @@ pub struct UserStore {
 #[derive(Debug, Clone)]
 pub struct UserRecord {
     pub user_id: String,
-    pub email: String,
+    pub identifier_type: String,
+    pub identifier: String,
     pub created_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
 }
@@ -35,8 +36,8 @@ pub enum UserStoreError {
     Sqlite(#[from] rusqlite::Error),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("invalid email: {0}")]
-    InvalidEmail(String),
+    #[error("invalid identifier: {0}")]
+    InvalidIdentifier(String),
     #[error("datetime parse error: {0}")]
     DateTimeParse(#[from] chrono::ParseError),
 }
@@ -48,29 +49,34 @@ impl UserStore {
         Ok(store)
     }
 
-    pub fn get_or_create_user(&self, email: &str) -> Result<UserRecord, UserStoreError> {
-        let normalized = normalize_email(email)
-            .ok_or_else(|| UserStoreError::InvalidEmail(email.to_string()))?;
+    pub fn get_or_create_user(
+        &self,
+        identifier_type: &str,
+        identifier: &str,
+    ) -> Result<UserRecord, UserStoreError> {
+        let normalized = normalize_identifier(identifier_type, identifier)
+            .ok_or_else(|| UserStoreError::InvalidIdentifier(identifier.to_string()))?;
         let conn = self.open()?;
         let now = Utc::now();
         let row = conn
             .query_row(
-                "SELECT id, email, created_at, last_seen_at
+                "SELECT id, identifier_type, identifier, created_at, last_seen_at
                  FROM users
-                 WHERE email = ?1",
-                params![normalized.as_str()],
+                 WHERE identifier_type = ?1 AND identifier = ?2",
+                params![identifier_type, normalized.as_str()],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
                     ))
                 },
             )
             .optional()?;
 
-        if let Some((id, email, created_at, _last_seen_at)) = row {
+        if let Some((id, id_type, id_value, created_at, _last_seen_at)) = row {
             let last_seen_at = now;
             conn.execute(
                 "UPDATE users SET last_seen_at = ?1 WHERE id = ?2",
@@ -78,7 +84,8 @@ impl UserStore {
             )?;
             return Ok(UserRecord {
                 user_id: id,
-                email,
+                identifier_type: id_type,
+                identifier: id_value,
                 created_at: parse_datetime(&created_at)?,
                 last_seen_at,
             });
@@ -86,10 +93,11 @@ impl UserStore {
 
         let user_id = Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO users (id, email, created_at, last_seen_at)
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO users (id, identifier_type, identifier, created_at, last_seen_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 user_id.as_str(),
+                identifier_type,
                 normalized.as_str(),
                 format_datetime(now),
                 format_datetime(now)
@@ -97,7 +105,8 @@ impl UserStore {
         )?;
         Ok(UserRecord {
             user_id,
-            email: normalized,
+            identifier_type: identifier_type.to_string(),
+            identifier: normalized,
             created_at: now,
             last_seen_at: now,
         })
@@ -150,6 +159,52 @@ impl UserStore {
         let conn = Connection::open(&self.path)?;
         conn.execute_batch(USERS_SCHEMA)?;
         Ok(conn)
+    }
+}
+
+/// Normalize an identifier based on its type.
+pub fn normalize_identifier(identifier_type: &str, raw: &str) -> Option<String> {
+    match identifier_type {
+        "email" => normalize_email(raw),
+        "phone" => normalize_phone(raw),
+        "slack" => normalize_slack_id(raw),
+        // For unknown types, just trim and lowercase
+        _ => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_lowercase())
+            }
+        }
+    }
+}
+
+/// Normalize a phone number (strip non-digits, keep leading +).
+pub fn normalize_phone(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let has_plus = trimmed.starts_with('+');
+    let digits: String = trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    if has_plus {
+        Some(format!("+{}", digits))
+    } else {
+        Some(digits)
+    }
+}
+
+/// Normalize a Slack user ID (just trim and uppercase).
+pub fn normalize_slack_id(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_uppercase())
     }
 }
 
@@ -215,9 +270,11 @@ pub fn extract_emails(raw: &str) -> Vec<String> {
 const USERS_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
-    email TEXT NOT NULL UNIQUE,
+    identifier_type TEXT NOT NULL,
+    identifier TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL
+    last_seen_at TEXT NOT NULL,
+    UNIQUE(identifier_type, identifier)
 );
 "#;
 

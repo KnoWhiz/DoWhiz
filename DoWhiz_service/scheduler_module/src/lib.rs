@@ -242,10 +242,6 @@ impl TaskExecutor for ModuleExecutor {
                         // Email (and Telegram as fallback) use Postmark
                         execute_email_send(task)?;
                     }
-                    Channel::Discord => {
-                        // Discord handles replies via its gateway
-                        info!("SendReply for Discord channel - handled by gateway");
-                    }
                     Channel::BlueBubbles => {
                         execute_bluebubbles_send(task)?;
                     }
@@ -482,22 +478,9 @@ fn execute_bluebubbles_send(task: &SendReplyTask) -> Result<(), SchedulerError> 
 
     let adapter = BlueBubblesOutboundAdapter::new(server_url, password);
 
-    // Read text content from html_path if it exists, strip HTML tags for plain text iMessage
+    // Read plain text content from reply_message.txt (html_path field reused for simplicity)
     let text_body = if task.html_path.exists() {
-        let html_content = fs::read_to_string(&task.html_path).unwrap_or_default();
-        // Strip HTML tags for plain text messaging
-        let mut out = String::with_capacity(html_content.len());
-        let mut in_tag = false;
-        for ch in html_content.chars() {
-            match ch {
-                '<' => in_tag = true,
-                '>' => in_tag = false,
-                _ if !in_tag => out.push(ch),
-                _ => {}
-            }
-        }
-        // Collapse whitespace
-        out.split_whitespace().collect::<Vec<_>>().join(" ")
+        fs::read_to_string(&task.html_path).unwrap_or_default()
     } else {
         String::new()
     };
@@ -1180,6 +1163,20 @@ fn ensure_send_slack_tasks_table(conn: &Connection) -> Result<(), SchedulerError
     Ok(())
 }
 
+fn ensure_send_discord_tasks_table(conn: &Connection) -> Result<(), SchedulerError> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS send_discord_tasks (
+            task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+            discord_channel_id TEXT NOT NULL,
+            thread_id TEXT,
+            text_path TEXT NOT NULL,
+            workspace_dir TEXT
+        )",
+        [],
+    )?;
+    Ok(())
+}
+
 fn ensure_send_bluebubbles_tasks_table(conn: &Connection) -> Result<(), SchedulerError> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS send_bluebubbles_tasks (
@@ -1326,16 +1323,12 @@ impl SqliteSchedulerStore {
                     // Dispatch to appropriate loader based on channel
                     let send_task = match channel {
                         Channel::Slack => self.load_send_slack_task(&conn, &id_raw)?,
-                        Channel::Discord => self.load_send_slack_task(&conn, &id_raw)?,
+                        Channel::Discord => self.load_send_discord_task(&conn, &id_raw)?,
                         Channel::GoogleDocs => {
                             // Google Docs uses a similar format to email for now
                             self.load_send_email_task(&conn, &id_raw)?
                         }
                         Channel::Email | Channel::Telegram => {
-                            self.load_send_email_task(&conn, &id_raw)?
-                        }
-                        Channel::Discord => {
-                            // Discord uses similar format to email
                             self.load_send_email_task(&conn, &id_raw)?
                         }
                         Channel::BlueBubbles => {
@@ -1395,17 +1388,13 @@ impl SqliteSchedulerStore {
                         self.insert_send_slack_task(&tx, &task.id.to_string(), send)?;
                     }
                     Channel::Discord => {
-                        self.insert_send_slack_task(&tx, &task.id.to_string(), send)?;
+                        self.insert_send_discord_task(&tx, &task.id.to_string(), send)?;
                     }
                     Channel::GoogleDocs => {
                         // Google Docs uses the email table format for now
                         self.insert_send_email_task(&tx, &task.id.to_string(), send)?;
                     }
                     Channel::Email | Channel::Telegram => {
-                        self.insert_send_email_task(&tx, &task.id.to_string(), send)?;
-                    }
-                    Channel::Discord => {
-                        // Discord uses the email table format for now
                         self.insert_send_email_task(&tx, &task.id.to_string(), send)?;
                     }
                     Channel::BlueBubbles => {
@@ -1571,6 +1560,33 @@ impl SqliteSchedulerStore {
         Ok(())
     }
 
+    fn insert_send_discord_task(
+        &self,
+        tx: &Transaction,
+        task_id: &str,
+        send: &SendReplyTask,
+    ) -> Result<(), SchedulerError> {
+        // For Discord, we use to[0] as channel_id and html_path as text_path
+        let discord_channel_id = send.to.first().cloned().unwrap_or_default();
+        let thread_id = send.in_reply_to.clone();
+        let workspace_dir = send
+            .archive_root
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned());
+        tx.execute(
+            "INSERT INTO send_discord_tasks (task_id, discord_channel_id, thread_id, text_path, workspace_dir)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                task_id,
+                discord_channel_id,
+                thread_id,
+                send.html_path.to_string_lossy().into_owned(),
+                workspace_dir,
+            ],
+        )?;
+        Ok(())
+    }
+
     fn insert_send_bluebubbles_task(
         &self,
         tx: &Transaction,
@@ -1716,6 +1732,48 @@ impl SqliteSchedulerStore {
         })
     }
 
+    fn load_send_discord_task(
+        &self,
+        conn: &Connection,
+        task_id: &str,
+    ) -> Result<SendReplyTask, SchedulerError> {
+        let row = conn
+            .query_row(
+                "SELECT discord_channel_id, thread_id, text_path, workspace_dir
+                 FROM send_discord_tasks
+                 WHERE task_id = ?1",
+                params![task_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let (discord_channel_id, thread_id, text_path, workspace_dir) = row.ok_or_else(|| {
+            SchedulerError::Storage(format!("missing send_discord_tasks row for task {}", task_id))
+        })?;
+
+        Ok(SendReplyTask {
+            channel: Channel::Discord,
+            subject: String::new(), // Discord doesn't use subject
+            html_path: PathBuf::from(text_path),
+            attachments_dir: PathBuf::new(), // Discord attachments handled differently
+            from: None,
+            to: vec![discord_channel_id], // channel_id stored in to[0]
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            in_reply_to: thread_id, // thread_id stored in in_reply_to
+            references: None,
+            archive_root: workspace_dir.map(PathBuf::from),
+            thread_epoch: None,
+            thread_state_path: None,
+        })
+    }
+
     fn load_send_bluebubbles_task(
         &self,
         conn: &Connection,
@@ -1848,6 +1906,7 @@ impl SqliteSchedulerStore {
         ensure_tasks_columns(&conn)?;
         ensure_send_email_task_columns(&conn)?;
         ensure_send_slack_tasks_table(&conn)?;
+        ensure_send_discord_tasks_table(&conn)?;
         ensure_send_bluebubbles_tasks_table(&conn)?;
         ensure_run_task_task_columns(&conn)?;
         Ok(conn)
@@ -2213,15 +2272,35 @@ fn schedule_auto_reply<E: TaskExecutor>(
         return Ok(false);
     }
 
-    let html_path = task.workspace_dir.join("reply_email_draft.html");
-    if !html_path.exists() {
+    // Non-email channels use plain text reply_message.txt
+    // Email and GoogleDocs use HTML reply_email_draft.html
+    let (reply_path, reply_file_name) = match task.channel {
+        Channel::Slack | Channel::Discord | Channel::BlueBubbles | Channel::Telegram => {
+            (task.workspace_dir.join("reply_message.txt"), "reply_message.txt")
+        }
+        Channel::Email | Channel::GoogleDocs => {
+            (task.workspace_dir.join("reply_email_draft.html"), "reply_email_draft.html")
+        }
+    };
+
+    if !reply_path.exists() {
         warn!(
-            "auto reply missing reply_email_draft.html in workspace {}",
+            "auto reply missing {} in workspace {}",
+            reply_file_name,
             task.workspace_dir.display()
         );
         return Ok(false);
     }
-    let attachments_dir = task.workspace_dir.join("reply_email_attachments");
+    let html_path = reply_path;
+    // Non-email channels use reply_attachments/, email uses reply_email_attachments/
+    let attachments_dir = match task.channel {
+        Channel::Slack | Channel::Discord | Channel::BlueBubbles | Channel::Telegram => {
+            task.workspace_dir.join("reply_attachments")
+        }
+        Channel::Email | Channel::GoogleDocs => {
+            task.workspace_dir.join("reply_email_attachments")
+        }
+    };
     let reply_context = load_reply_context(&task.workspace_dir);
     let reply_from = task.reply_from.clone().or(reply_context.from.clone());
 

@@ -1331,9 +1331,7 @@ fn process_slack_event(
         .as_ref()
         .ok_or("missing slack_channel_id")?;
 
-    // Use Slack user ID as fake email (user_store requires email format)
-    let slack_user_email = format!("{}@slack.local", message.sender);
-    let user = user_store.get_or_create_user(&slack_user_email)?;
+    let user = user_store.get_or_create_user("slack", &message.sender)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     user_store.ensure_user_dirs(&user_paths)?;
 
@@ -1457,9 +1455,7 @@ fn process_bluebubbles_event(
         .as_ref()
         .ok_or("missing bluebubbles_chat_guid")?;
 
-    // Use phone number/email as fake email for now (TODO: refactor user_store for multi-channel)
-    let imessage_user_email = format!("{}@imessage.local", message.sender.replace('+', ""));
-    let user = user_store.get_or_create_user(&imessage_user_email)?;
+    let user = user_store.get_or_create_user("phone", &message.sender)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     user_store.ensure_user_dirs(&user_paths)?;
 
@@ -1666,12 +1662,8 @@ fn poll_google_docs_comments(
                 item_type, actionable.tracking_id, doc_name, message.sender
             );
 
-            // Create user from comment author email
-            let user_email = extract_emails(&message.sender)
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| format!("gdocs_{}@local", message.sender.replace(" ", "_")));
-            let user = user_store.get_or_create_user(&user_email)?;
+            // Create user from comment author
+            let user = user_store.get_or_create_user("google_docs", &message.sender)?;
             let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
             user_store.ensure_user_dirs(&user_paths)?;
 
@@ -2004,7 +1996,7 @@ pub fn process_inbound_payload(
         .into_iter()
         .next()
         .ok_or_else(|| "missing sender email".to_string())?;
-    let user = user_store.get_or_create_user(&user_email)?;
+    let user = user_store.get_or_create_user("email", &user_email)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     user_store.ensure_user_dirs(&user_paths)?;
 

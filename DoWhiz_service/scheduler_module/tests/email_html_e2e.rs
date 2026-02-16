@@ -160,7 +160,7 @@ fn inbound_email_html_is_sanitized() -> Result<(), Box<dyn std::error::Error + S
         inbound_raw.as_bytes(),
     )?;
 
-    let user = user_store.get_or_create_user("alice@example.com")?;
+    let user = user_store.get_or_create_user("email", "alice@example.com")?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     let workspace = first_dir(&user_paths.workspaces_root);
 

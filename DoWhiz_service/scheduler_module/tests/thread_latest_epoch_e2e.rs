@@ -258,7 +258,7 @@ fn thread_latest_epoch_end_to_end() {
     .expect("process inbound 1");
 
     let user = user_store
-        .get_or_create_user("alice@example.com")
+        .get_or_create_user("email", "alice@example.com")
         .expect("user lookup");
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
 
