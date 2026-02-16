@@ -2249,8 +2249,7 @@ fn process_sms_message(
     raw_payload: &[u8],
 ) -> Result<(), BoxError> {
     let normalized_from = normalize_phone_number(&message.sender);
-    let user_email = format!("sms_{}@local", normalized_from.trim_start_matches('+'));
-    let user = user_store.get_or_create_user(&user_email)?;
+    let user = user_store.get_or_create_user("phone", &message.sender)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     user_store.ensure_user_dirs(&user_paths)?;
 
@@ -2406,7 +2405,7 @@ fn process_google_docs_message(
         .into_iter()
         .next()
         .unwrap_or_else(|| format!("gdocs_{}@local", message.sender.replace(' ', "_")));
-    let user = user_store.get_or_create_user(&user_email)?;
+    let user = user_store.get_or_create_user("google_docs", &user_email)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     user_store.ensure_user_dirs(&user_paths)?;
 
@@ -4707,12 +4706,7 @@ mod tests {
 
         process_sms_message(&config, &user_store, &index_store, &message, &raw_payload)?;
 
-        let normalized_from = normalize_phone_number(&sender);
-        let user_email = format!(
-            "sms_{}@local",
-            normalized_from.trim_start_matches('+')
-        );
-        let user = user_store.get_or_create_user(&user_email)?;
+        let user = user_store.get_or_create_user("phone", &sender)?;
         let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
         let scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
 
