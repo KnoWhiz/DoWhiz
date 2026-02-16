@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY DoWhiz_service/ DoWhiz_service/
 
-RUN cargo build --locked -p scheduler_module --bin rust_service --bin inbound_fanout --release \
+RUN cargo build --locked -p scheduler_module --bin rust_service --bin inbound_fanout --bin inbound_gateway --release \
   --manifest-path DoWhiz_service/Cargo.toml
 
 FROM debian:bookworm-slim AS runtime
@@ -72,6 +72,7 @@ RUN useradd -r -u 10001 -g nogroup app && \
 
 COPY --from=builder /app/DoWhiz_service/target/release/rust_service /app/rust_service
 COPY --from=builder /app/DoWhiz_service/target/release/inbound_fanout /app/inbound_fanout
+COPY --from=builder /app/DoWhiz_service/target/release/inbound_gateway /app/inbound_gateway
 
 # Copy employee configuration and personas
 COPY DoWhiz_service/employee.toml /app/DoWhiz_service/employee.toml

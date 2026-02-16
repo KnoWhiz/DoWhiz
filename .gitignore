@@ -3,6 +3,7 @@
 .env.script
 .gmail_client_secret.json
 .gmail_token.json
+DoWhiz_service/gateway.toml
 
 # Local IDE settings
 .vscode/

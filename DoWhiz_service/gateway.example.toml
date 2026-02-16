@@ -1,0 +1,23 @@
+# Example inbound gateway configuration.
+# Copy to gateway.toml and adjust target URLs.
+
+[server]
+# host = "0.0.0.0"
+# port = 9100
+
+[dedupe]
+# path = "/home/azureuser/.dowhiz/DoWhiz/gateway/state/processed_ids.txt"
+
+[targets]
+# Employee id -> base URL for that worker (no trailing slash)
+little_bear = "http://127.0.0.1:9001"
+mini_mouse  = "http://127.0.0.1:9002"
+boiled_egg  = "http://127.0.0.1:9004"
+
+[slack]
+# All Slack events route here unless overridden by team id mapping.
+default_employee_id = "boiled_egg"
+
+# Map Slack team_id -> employee_id (optional)
+# [slack.team_to_employee]
+# T12345678 = "boiled_egg"
