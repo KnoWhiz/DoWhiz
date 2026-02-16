@@ -141,7 +141,9 @@ impl EventHandler for DiscordEventHandler {
                         &inbound,
                         &msg,
                         &response,
-                    ).await {
+                    )
+                    .await
+                    {
                         error!("failed to send quick Discord response: {}", e);
                     }
                     return;
@@ -252,6 +254,7 @@ fn process_discord_message(
         thread_state_path: Some(thread_state_path.clone()),
         channel: Channel::Discord,
         slack_team_id: None,
+        employee_id: None,
     };
 
     // Schedule the task using guild-based scheduler

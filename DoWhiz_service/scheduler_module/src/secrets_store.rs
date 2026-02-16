@@ -79,6 +79,7 @@ mod tests {
             thread_state_path: None,
             channel: crate::channel::Channel::default(),
             slack_team_id: None,
+            employee_id: None,
         }
     }
 

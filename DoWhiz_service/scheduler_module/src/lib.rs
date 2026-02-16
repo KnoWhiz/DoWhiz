@@ -11,13 +11,16 @@ use std::time::Duration;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-pub(crate) mod thread_state;
-pub(crate) mod mailbox;
-pub mod employee_config;
-pub mod channel;
 pub mod adapters;
+pub mod channel;
+pub mod discord_gateway;
+pub mod employee_config;
 pub mod google_auth;
 pub mod google_docs_poller;
+pub mod mailbox;
+pub mod message_router;
+pub mod slack_store;
+pub(crate) mod thread_state;
 use crate::memory_store::{
     resolve_user_memory_dir, sync_user_memory_to_workspace, sync_workspace_memory_to_user,
 };
@@ -97,6 +100,12 @@ pub struct RunTaskTask {
     /// The channel to reply on (Email, Slack, etc.)
     #[serde(default)]
     pub channel: Channel,
+    /// Slack-specific: Team ID for routing replies
+    #[serde(default)]
+    pub slack_team_id: Option<String>,
+    /// Employee ID for per-employee credentials (optional)
+    #[serde(default)]
+    pub employee_id: Option<String>,
 }
 
 fn default_runner() -> String {
@@ -199,6 +208,9 @@ impl TaskExecutor for ModuleExecutor {
                     Channel::Slack => {
                         execute_slack_send(task)?;
                     }
+                    Channel::Discord => {
+                        execute_discord_send(task)?;
+                    }
                     Channel::GoogleDocs => {
                         execute_google_docs_send(task)?;
                     }
@@ -224,9 +236,10 @@ impl TaskExecutor for ModuleExecutor {
                     );
                 }
                 if let Some(user_secrets_path) = user_secrets_path.as_ref() {
-                    sync_user_secrets_to_workspace(user_secrets_path, &task.workspace_dir).map_err(
-                        |err| SchedulerError::TaskFailed(format!("secrets sync failed: {}", err)),
-                    )?;
+                    sync_user_secrets_to_workspace(user_secrets_path, &task.workspace_dir)
+                        .map_err(|err| {
+                            SchedulerError::TaskFailed(format!("secrets sync failed: {}", err))
+                        })?;
                 } else {
                     warn!(
                         "unable to resolve user secrets for workspace {}",
@@ -243,6 +256,8 @@ impl TaskExecutor for ModuleExecutor {
                     model_name: task.model_name.clone(),
                     runner: task.runner.clone(),
                     codex_disabled: task.codex_disabled,
+                    channel: task.channel.to_string(),
+                    google_access_token: None,
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -252,9 +267,10 @@ impl TaskExecutor for ModuleExecutor {
                     )?;
                 }
                 if let Some(user_secrets_path) = user_secrets_path.as_ref() {
-                    sync_workspace_secrets_to_user(&task.workspace_dir, user_secrets_path).map_err(
-                        |err| SchedulerError::TaskFailed(format!("secrets sync failed: {}", err)),
-                    )?;
+                    sync_workspace_secrets_to_user(&task.workspace_dir, user_secrets_path)
+                        .map_err(|err| {
+                            SchedulerError::TaskFailed(format!("secrets sync failed: {}", err))
+                        })?;
                 }
                 Ok(TaskExecution {
                     follow_up_tasks: output.scheduled_tasks,
@@ -348,9 +364,9 @@ fn execute_slack_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
         },
     };
 
-    let result = adapter.send(&message).map_err(|err| {
-        SchedulerError::TaskFailed(format!("Slack send failed: {}", err))
-    })?;
+    let result = adapter
+        .send(&message)
+        .map_err(|err| SchedulerError::TaskFailed(format!("Slack send failed: {}", err)))?;
 
     if !result.success {
         return Err(SchedulerError::TaskFailed(format!(
@@ -361,6 +377,61 @@ fn execute_slack_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
 
     info!(
         "sent Slack message to {:?}, message_id={}",
+        task.to, result.message_id
+    );
+    Ok(())
+}
+
+/// Execute a SendReplyTask via Discord.
+fn execute_discord_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
+    use crate::adapters::discord::DiscordOutboundAdapter;
+    use crate::channel::{ChannelMetadata, OutboundAdapter, OutboundMessage};
+
+    dotenvy::dotenv().ok();
+    let bot_token = std::env::var("DISCORD_BOT_TOKEN")
+        .map_err(|_| SchedulerError::TaskFailed("DISCORD_BOT_TOKEN not set".to_string()))?;
+
+    let adapter = DiscordOutboundAdapter::new(bot_token);
+
+    let text_body = if task.html_path.exists() {
+        fs::read_to_string(&task.html_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let channel_id = task.to.first().and_then(|value| value.parse::<u64>().ok());
+
+    let message = OutboundMessage {
+        channel: Channel::Discord,
+        from: task.from.clone(),
+        to: task.to.clone(),
+        cc: vec![],
+        bcc: vec![],
+        subject: task.subject.clone(),
+        text_body,
+        html_body: String::new(),
+        html_path: Some(task.html_path.clone()),
+        attachments_dir: Some(task.attachments_dir.clone()),
+        thread_id: task.in_reply_to.clone(),
+        metadata: ChannelMetadata {
+            discord_channel_id: channel_id,
+            ..Default::default()
+        },
+    };
+
+    let result = adapter
+        .send(&message)
+        .map_err(|err| SchedulerError::TaskFailed(format!("Discord send failed: {}", err)))?;
+
+    if !result.success {
+        return Err(SchedulerError::TaskFailed(format!(
+            "Discord API error: {}",
+            result.error.unwrap_or_default()
+        )));
+    }
+
+    info!(
+        "sent Discord message to {:?}, message_id={}",
         task.to, result.message_id
     );
     Ok(())
@@ -430,9 +501,9 @@ fn execute_google_docs_send(task: &SendReplyTask) -> Result<(), SchedulerError> 
         },
     };
 
-    let result = adapter.send(&message).map_err(|err| {
-        SchedulerError::TaskFailed(format!("Google Docs send failed: {}", err))
-    })?;
+    let result = adapter
+        .send(&message)
+        .map_err(|err| SchedulerError::TaskFailed(format!("Google Docs send failed: {}", err)))?;
 
     if !result.success {
         return Err(SchedulerError::TaskFailed(format!(
@@ -877,16 +948,10 @@ fn ensure_run_task_task_columns(conn: &Connection) -> Result<(), SchedulerError>
         )?;
     }
     if !columns.contains("runner") {
-        conn.execute(
-            "ALTER TABLE run_task_tasks ADD COLUMN runner TEXT",
-            [],
-        )?;
+        conn.execute("ALTER TABLE run_task_tasks ADD COLUMN runner TEXT", [])?;
     }
     if !columns.contains("reply_from") {
-        conn.execute(
-            "ALTER TABLE run_task_tasks ADD COLUMN reply_from TEXT",
-            [],
-        )?;
+        conn.execute("ALTER TABLE run_task_tasks ADD COLUMN reply_from TEXT", [])?;
     }
     if !columns.contains("thread_id") {
         conn.execute("ALTER TABLE run_task_tasks ADD COLUMN thread_id TEXT", [])?;
@@ -1000,6 +1065,7 @@ impl SqliteSchedulerStore {
                     // Dispatch to appropriate loader based on channel
                     let send_task = match channel {
                         Channel::Slack => self.load_send_slack_task(&conn, &id_raw)?,
+                        Channel::Discord => self.load_send_slack_task(&conn, &id_raw)?,
                         Channel::GoogleDocs => {
                             // Google Docs uses a similar format to email for now
                             self.load_send_email_task(&conn, &id_raw)?
@@ -1058,6 +1124,9 @@ impl SqliteSchedulerStore {
                 // Dispatch to appropriate child table based on channel
                 match send.channel {
                     Channel::Slack => {
+                        self.insert_send_slack_task(&tx, &task.id.to_string(), send)?;
+                    }
+                    Channel::Discord => {
                         self.insert_send_slack_task(&tx, &task.id.to_string(), send)?;
                     }
                     Channel::GoogleDocs => {
@@ -1209,7 +1278,10 @@ impl SqliteSchedulerStore {
         // For Slack, we use to[0] as channel_id and html_path as text_path
         let slack_channel_id = send.to.first().cloned().unwrap_or_default();
         let thread_ts = send.in_reply_to.clone();
-        let workspace_dir = send.archive_root.as_ref().map(|p| p.to_string_lossy().into_owned());
+        let workspace_dir = send
+            .archive_root
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned());
         tx.execute(
             "INSERT INTO send_slack_tasks (task_id, slack_channel_id, thread_ts, text_path, workspace_dir)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -1417,6 +1489,8 @@ impl SqliteSchedulerStore {
             thread_epoch: thread_epoch_raw.map(|value| value as u64),
             thread_state_path: normalize_optional_path(thread_state_path),
             channel,
+            slack_team_id: None,
+            employee_id: None,
         })
     }
 
@@ -1945,9 +2019,11 @@ fn schedule_send_email<E: TaskExecutor>(
         }
     }
 
-    let delay_seconds = request
-        .delay_seconds
-        .or_else(|| request.delay_minutes.map(|value: i64| value.saturating_mul(60)));
+    let delay_seconds = request.delay_seconds.or_else(|| {
+        request
+            .delay_minutes
+            .map(|value: i64| value.saturating_mul(60))
+    });
     let delay_seconds: u64 = match delay_seconds {
         Some(value) => value.max(0) as u64,
         None => {
@@ -2307,6 +2383,8 @@ mod tests {
             thread_epoch: Some(1),
             thread_state_path: Some(workspace.join("thread_state.json")),
             channel: Channel::default(),
+            slack_team_id: None,
+            employee_id: None,
         }
     }
 

@@ -106,6 +106,7 @@ fn run_task_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Err
         thread_state_path: None,
         channel: Channel::Email,
         slack_team_id: None,
+        employee_id: None,
     };
 
     let db_path = temp.path().join("tasks.db");
