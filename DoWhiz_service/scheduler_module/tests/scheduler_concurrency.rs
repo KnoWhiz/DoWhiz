@@ -87,7 +87,7 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
 
     for i in 0..TASK_COUNT {
         let email = format!("user{}@example.com", i);
-        let user = user_store.get_or_create_user(&email)?;
+        let user = user_store.get_or_create_user("email", &email)?;
         let paths = user_store.user_paths(&users_root, &user.user_id);
         user_store.ensure_user_dirs(&paths)?;
         let workspace = paths.workspaces_root.join(format!("workspace_{i}"));
