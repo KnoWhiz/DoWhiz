@@ -254,7 +254,7 @@ fn process_discord_message(
         thread_state_path: Some(thread_state_path.clone()),
         channel: Channel::Discord,
         slack_team_id: None,
-        employee_id: None,
+        employee_id: Some(config.employee_id.clone()),
     };
 
     // Schedule the task using guild-based scheduler

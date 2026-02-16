@@ -218,6 +218,13 @@ impl TaskExecutor for ModuleExecutor {
                         // Email (and Telegram as fallback) use Postmark
                         execute_email_send(task)?;
                     }
+                    Channel::Discord => {
+                        // Discord handles replies via its gateway
+                        info!("SendReply for Discord channel - handled by gateway");
+                    }
+                    Channel::BlueBubbles => {
+                        execute_bluebubbles_send(task)?;
+                    }
                 }
                 Ok(TaskExecution::empty())
             }
@@ -432,6 +439,79 @@ fn execute_discord_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
 
     info!(
         "sent Discord message to {:?}, message_id={}",
+        task.to, result.message_id
+    );
+    Ok(())
+}
+
+/// Execute a SendReplyTask via BlueBubbles (iMessage).
+fn execute_bluebubbles_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
+    use crate::adapters::bluebubbles::BlueBubblesOutboundAdapter;
+    use crate::channel::{ChannelMetadata, OutboundAdapter, OutboundMessage};
+
+    dotenvy::dotenv().ok();
+    let server_url = std::env::var("BLUEBUBBLES_URL")
+        .or_else(|_| std::env::var("BLUEBUBBLES_SERVER_URL"))
+        .map_err(|_| SchedulerError::TaskFailed("BLUEBUBBLES_URL not set".to_string()))?;
+    let password = std::env::var("BLUEBUBBLES_PASSWORD")
+        .map_err(|_| SchedulerError::TaskFailed("BLUEBUBBLES_PASSWORD not set".to_string()))?;
+
+    let adapter = BlueBubblesOutboundAdapter::new(server_url, password);
+
+    // Read text content from html_path if it exists, strip HTML tags for plain text iMessage
+    let text_body = if task.html_path.exists() {
+        let html_content = fs::read_to_string(&task.html_path).unwrap_or_default();
+        // Strip HTML tags for plain text messaging
+        let mut out = String::with_capacity(html_content.len());
+        let mut in_tag = false;
+        for ch in html_content.chars() {
+            match ch {
+                '<' => in_tag = true,
+                '>' => in_tag = false,
+                _ if !in_tag => out.push(ch),
+                _ => {}
+            }
+        }
+        // Collapse whitespace
+        out.split_whitespace().collect::<Vec<_>>().join(" ")
+    } else {
+        String::new()
+    };
+
+    // For BlueBubbles, to[0] contains the chat_guid
+    let chat_guid = task.to.first().cloned();
+
+    let message = OutboundMessage {
+        channel: Channel::BlueBubbles,
+        from: task.from.clone(),
+        to: task.to.clone(),
+        cc: vec![],
+        bcc: vec![],
+        subject: task.subject.clone(),
+        text_body,
+        html_body: String::new(),
+        html_path: Some(task.html_path.clone()),
+        attachments_dir: Some(task.attachments_dir.clone()),
+        thread_id: task.in_reply_to.clone(),
+        metadata: ChannelMetadata {
+            bluebubbles_chat_guid: chat_guid,
+            ..Default::default()
+        },
+    };
+
+    let result = adapter.send(&message).map_err(|err| {
+        SchedulerError::TaskFailed(format!("BlueBubbles send failed: {}", err))
+    })?;
+
+    if !result.success {
+        return Err(SchedulerError::TaskFailed(format!(
+            "BlueBubbles API error: {}",
+            result.error.unwrap_or_default()
+        )));
+    }
+
+    info!(
+        "sent BlueBubbles message to {:?}, message_id={}",
         task.to, result.message_id
     );
     Ok(())
@@ -735,6 +815,16 @@ impl<E: TaskExecutor> Scheduler<E> {
                     "failed",
                     Some(&message),
                 )?;
+                // Disable one-shot tasks on failure to prevent infinite retries
+                if matches!(self.tasks[index].schedule, Schedule::OneShot { .. }) {
+                    self.tasks[index].enabled = false;
+                    let updated_task = self.tasks[index].clone();
+                    self.store.update_task(&updated_task)?;
+                    warn!(
+                        "disabled one-shot task {} after failure: {}",
+                        task_id, message
+                    );
+                }
                 return Err(err);
             }
         }
@@ -825,6 +915,14 @@ CREATE TABLE IF NOT EXISTS send_slack_tasks (
     thread_ts TEXT,
     text_path TEXT NOT NULL,
     workspace_dir TEXT
+);
+
+CREATE TABLE IF NOT EXISTS send_bluebubbles_tasks (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    chat_guid TEXT NOT NULL,
+    text_path TEXT NOT NULL,
+    thread_epoch INTEGER,
+    thread_state_path TEXT
 );
 
 CREATE TABLE IF NOT EXISTS run_task_tasks (
@@ -927,6 +1025,20 @@ fn ensure_send_slack_tasks_table(conn: &Connection) -> Result<(), SchedulerError
             thread_ts TEXT,
             text_path TEXT NOT NULL,
             workspace_dir TEXT
+        )",
+        [],
+    )?;
+    Ok(())
+}
+
+fn ensure_send_bluebubbles_tasks_table(conn: &Connection) -> Result<(), SchedulerError> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS send_bluebubbles_tasks (
+            task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+            chat_guid TEXT NOT NULL,
+            text_path TEXT NOT NULL,
+            thread_epoch INTEGER,
+            thread_state_path TEXT
         )",
         [],
     )?;
@@ -1073,6 +1185,13 @@ impl SqliteSchedulerStore {
                         Channel::Email | Channel::Telegram => {
                             self.load_send_email_task(&conn, &id_raw)?
                         }
+                        Channel::Discord => {
+                            // Discord uses similar format to email
+                            self.load_send_email_task(&conn, &id_raw)?
+                        }
+                        Channel::BlueBubbles => {
+                            self.load_send_bluebubbles_task(&conn, &id_raw)?
+                        }
                     };
                     TaskKind::SendReply(send_task)
                 }
@@ -1135,6 +1254,13 @@ impl SqliteSchedulerStore {
                     }
                     Channel::Email | Channel::Telegram => {
                         self.insert_send_email_task(&tx, &task.id.to_string(), send)?;
+                    }
+                    Channel::Discord => {
+                        // Discord uses the email table format for now
+                        self.insert_send_email_task(&tx, &task.id.to_string(), send)?;
+                    }
+                    Channel::BlueBubbles => {
+                        self.insert_send_bluebubbles_task(&tx, &task.id.to_string(), send)?;
                     }
                 }
             }
@@ -1296,6 +1422,30 @@ impl SqliteSchedulerStore {
         Ok(())
     }
 
+    fn insert_send_bluebubbles_task(
+        &self,
+        tx: &Transaction,
+        task_id: &str,
+        send: &SendReplyTask,
+    ) -> Result<(), SchedulerError> {
+        // For BlueBubbles, we use to[0] as chat_guid and html_path as text_path
+        let chat_guid = send.to.first().cloned().unwrap_or_default();
+        tx.execute(
+            "INSERT INTO send_bluebubbles_tasks (task_id, chat_guid, text_path, thread_epoch, thread_state_path)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                task_id,
+                chat_guid,
+                send.html_path.to_string_lossy().into_owned(),
+                send.thread_epoch.map(|value| value as i64),
+                send.thread_state_path
+                    .as_ref()
+                    .map(|value| value.to_string_lossy().into_owned()),
+            ],
+        )?;
+        Ok(())
+    }
+
     fn load_send_email_task(
         &self,
         conn: &Connection,
@@ -1417,6 +1567,51 @@ impl SqliteSchedulerStore {
         })
     }
 
+    fn load_send_bluebubbles_task(
+        &self,
+        conn: &Connection,
+        task_id: &str,
+    ) -> Result<SendReplyTask, SchedulerError> {
+        let row = conn
+            .query_row(
+                "SELECT chat_guid, text_path, thread_epoch, thread_state_path
+                 FROM send_bluebubbles_tasks
+                 WHERE task_id = ?1",
+                params![task_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let (chat_guid, text_path, thread_epoch_raw, thread_state_path) = row.ok_or_else(|| {
+            SchedulerError::Storage(format!(
+                "missing send_bluebubbles_tasks row for task {}",
+                task_id
+            ))
+        })?;
+
+        Ok(SendReplyTask {
+            channel: Channel::BlueBubbles,
+            subject: String::new(), // BlueBubbles doesn't use subject
+            html_path: PathBuf::from(text_path),
+            attachments_dir: PathBuf::new(), // BlueBubbles attachments handled differently
+            from: None,
+            to: vec![chat_guid], // chat_guid stored in to[0]
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            in_reply_to: None,
+            references: None,
+            archive_root: None,
+            thread_epoch: thread_epoch_raw.map(|value| value as u64),
+            thread_state_path: normalize_optional_path(thread_state_path),
+        })
+    }
+
     fn load_run_task_task(
         &self,
         conn: &Connection,
@@ -1504,6 +1699,7 @@ impl SqliteSchedulerStore {
         ensure_tasks_columns(&conn)?;
         ensure_send_email_task_columns(&conn)?;
         ensure_send_slack_tasks_table(&conn)?;
+        ensure_send_bluebubbles_tasks_table(&conn)?;
         ensure_run_task_task_columns(&conn)?;
         Ok(conn)
     }

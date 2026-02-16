@@ -25,6 +25,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+use crate::adapters::bluebubbles::send_quick_bluebubbles_response;
 use crate::adapters::discord::DiscordOutboundAdapter;
 use crate::adapters::slack::{is_url_verification, SlackChallengeResponse, SlackEventWrapper};
 use crate::employee_config::{load_employee_directory, EmployeeDirectory, EmployeeProfile};
@@ -85,6 +86,10 @@ pub struct ServiceConfig {
     pub discord_bot_user_id: Option<u64>,
     /// Google Docs polling enabled
     pub google_docs_enabled: bool,
+    /// BlueBubbles server URL (e.g., http://localhost:1234)
+    pub bluebubbles_url: Option<String>,
+    /// BlueBubbles server password
+    pub bluebubbles_password: Option<String>,
 }
 
 impl ServiceConfig {
@@ -228,6 +233,12 @@ impl ServiceConfig {
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
 
+        // BlueBubbles configuration
+        let bluebubbles_url = env::var("BLUEBUBBLES_URL").ok().filter(|s| !s.is_empty());
+        let bluebubbles_password = env::var("BLUEBUBBLES_PASSWORD")
+            .ok()
+            .filter(|s| !s.is_empty());
+
         Ok(Self {
             host,
             port,
@@ -257,6 +268,8 @@ impl ServiceConfig {
             discord_bot_token,
             discord_bot_user_id,
             google_docs_enabled,
+            bluebubbles_url,
+            bluebubbles_password,
         })
     }
 }
@@ -620,6 +633,7 @@ pub async fn run_server(
         .route("/slack/events", post(slack_events))
         .route("/slack/install", get(slack_install))
         .route("/slack/oauth/callback", get(slack_oauth_callback))
+        .route("/bluebubbles/webhook", post(bluebubbles_webhook))
         .with_state(state)
         .layer(DefaultBodyLimit::max(config.inbound_body_max_bytes));
 
@@ -1126,6 +1140,147 @@ async fn slack_oauth_callback(
     (StatusCode::OK, axum::response::Html(html)).into_response()
 }
 
+/// Handle BlueBubbles webhook for iMessage integration.
+/// POST /bluebubbles/webhook
+async fn bluebubbles_webhook(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
+    // Parse the webhook payload
+    let wrapper: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"})));
+        }
+    };
+
+    info!("BlueBubbles webhook received");
+
+    // Check if this employee handles BlueBubbles messages
+    if !state.config.employee_profile.bluebubbles_enabled {
+        info!(
+            "BlueBubbles disabled for employee {} (bluebubbles_enabled=false), ignoring event",
+            state.config.employee_id
+        );
+        return (StatusCode::OK, Json(json!({"status": "ignored"})));
+    }
+
+    // Check if BlueBubbles is configured
+    let (server_url, password) = match (
+        &state.config.bluebubbles_url,
+        &state.config.bluebubbles_password,
+    ) {
+        (Some(url), Some(pwd)) => (url.clone(), pwd.clone()),
+        _ => {
+            info!("BlueBubbles not configured, ignoring webhook");
+            return (StatusCode::OK, Json(json!({"status": "not_configured"})));
+        }
+    };
+
+    // Extract event type
+    let event_type = wrapper
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("");
+
+    // Only handle new-message events
+    if event_type != "new-message" {
+        info!("Ignoring BlueBubbles event type: {}", event_type);
+        return (StatusCode::OK, Json(json!({"status": "ignored"})));
+    }
+
+    // Extract message data for deduplication
+    let message_guid = wrapper
+        .get("data")
+        .and_then(|d| d.get("guid"))
+        .and_then(|g| g.as_str())
+        .unwrap_or("");
+
+    if !message_guid.is_empty() {
+        let is_new = {
+            let mut store = state.dedupe_store.lock().await;
+            match store.mark_if_new(&[message_guid.to_string()]) {
+                Ok(value) => value,
+                Err(err) => {
+                    error!("dedupe store error: {err}");
+                    true
+                }
+            }
+        };
+
+        if !is_new {
+            return (StatusCode::OK, Json(json!({"status": "duplicate"})));
+        }
+    }
+
+    // Check if message is from us (outgoing)
+    let is_from_me = wrapper
+        .get("data")
+        .and_then(|d| d.get("isFromMe"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if is_from_me {
+        info!("Ignoring outgoing iMessage (isFromMe=true)");
+        return (StatusCode::OK, Json(json!({"status": "ignored_outgoing"})));
+    }
+
+    // Extract message text and chat GUID for router
+    let message_text = wrapper
+        .get("data")
+        .and_then(|d| d.get("text"))
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_string());
+
+    let chat_guid = wrapper
+        .get("data")
+        .and_then(|d| d.get("chats"))
+        .and_then(|c| c.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|chat| chat.get("guid"))
+        .and_then(|g| g.as_str())
+        .map(|s| s.to_string());
+
+    // Route through local LLM classifier
+    if let (Some(ref text), Some(ref chat)) = (&message_text, &chat_guid) {
+        match state.message_router.classify(text).await {
+            RouterDecision::Simple(response) => {
+                info!("Router decision: Simple (local response) for BlueBubbles");
+                match send_quick_bluebubbles_response(&server_url, &password, chat, &response).await
+                {
+                    Ok(_) => {
+                        info!("Sent simple BlueBubbles response to chat {}", chat);
+                        return (
+                            StatusCode::OK,
+                            Json(json!({"status": "simple_response"})),
+                        );
+                    }
+                    Err(err) => {
+                        error!("Failed to send simple BlueBubbles response: {err}");
+                    }
+                }
+            }
+            RouterDecision::Complex => {
+                info!("Router decision: Complex (forward to pipeline) for BlueBubbles");
+            }
+            RouterDecision::Passthrough => {
+                info!("Router passthrough for BlueBubbles");
+            }
+        }
+    }
+
+    // Process BlueBubbles event payload
+    let config = state.config.clone();
+    let user_store = state.user_store.clone();
+    let index_store = state.index_store.clone();
+    let body_bytes = body.to_vec();
+    tokio::task::spawn_blocking(move || {
+        if let Err(err) = process_bluebubbles_event(&config, &user_store, &index_store, &body_bytes)
+        {
+            error!("failed to process BlueBubbles event: {err}");
+        }
+    });
+
+    (StatusCode::OK, Json(json!({"status": "accepted"})))
+}
+
 fn process_slack_event(
     config: &ServiceConfig,
     user_store: &UserStore,
@@ -1273,6 +1428,172 @@ fn process_slack_event(
         thread_state.epoch
     );
 
+    Ok(())
+}
+
+fn process_bluebubbles_event(
+    config: &ServiceConfig,
+    user_store: &UserStore,
+    index_store: &IndexStore,
+    raw_payload: &[u8],
+) -> Result<(), BoxError> {
+    use crate::adapters::bluebubbles::BlueBubblesInboundAdapter;
+    use crate::channel::InboundAdapter;
+
+    info!("processing BlueBubbles event");
+
+    let adapter = BlueBubblesInboundAdapter::new();
+    let message = adapter.parse(raw_payload)?;
+
+    info!(
+        "iMessage from {} in chat {:?}: {:?}",
+        message.sender, message.metadata.bluebubbles_chat_guid, message.text_body
+    );
+
+    // Get chat GUID (required for BlueBubbles)
+    let chat_guid = message
+        .metadata
+        .bluebubbles_chat_guid
+        .as_ref()
+        .ok_or("missing bluebubbles_chat_guid")?;
+
+    // Use phone number/email as fake email for now (TODO: refactor user_store for multi-channel)
+    let imessage_user_email = format!("{}@imessage.local", message.sender.replace('+', ""));
+    let user = user_store.get_or_create_user(&imessage_user_email)?;
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+    user_store.ensure_user_dirs(&user_paths)?;
+
+    // Thread key: chat_guid for grouping conversations
+    let thread_key = format!("imessage:{}", chat_guid);
+
+    // Create/get workspace for this thread
+    let workspace = ensure_thread_workspace(
+        &user_paths,
+        &user.user_id,
+        &thread_key,
+        &config.employee_profile,
+        config.skills_source_dir.as_deref(),
+    )?;
+
+    // Bump thread state
+    let thread_state_path = default_thread_state_path(&workspace);
+    let thread_state =
+        bump_thread_state(&thread_state_path, &thread_key, message.message_id.clone())?;
+
+    // Save the incoming BlueBubbles message to workspace
+    append_bluebubbles_message(
+        &workspace,
+        &message,
+        raw_payload,
+        thread_state.last_email_seq.try_into().unwrap_or(u32::MAX),
+    )?;
+
+    // Determine model and runner
+    let model_name = match config.employee_profile.model.clone() {
+        Some(model) => model,
+        None => {
+            if config
+                .employee_profile
+                .runner
+                .eq_ignore_ascii_case("claude")
+            {
+                String::new()
+            } else {
+                config.codex_model.clone()
+            }
+        }
+    };
+
+    info!(
+        "workspace ready at {} for user {} thread={} epoch={}",
+        workspace.display(),
+        user.user_id,
+        thread_key,
+        thread_state.epoch
+    );
+
+    // Create RunTask to process the message
+    let run_task = RunTaskTask {
+        workspace_dir: workspace.clone(),
+        input_email_dir: PathBuf::from("incoming_email"),
+        input_attachments_dir: PathBuf::from("incoming_attachments"),
+        memory_dir: PathBuf::from("memory"),
+        reference_dir: PathBuf::from("references"),
+        model_name,
+        runner: config.employee_profile.runner.clone(),
+        codex_disabled: config.codex_disabled,
+        reply_to: vec![chat_guid.clone()],
+        reply_from: None,
+        archive_root: Some(user_paths.mail_root.clone()),
+        thread_id: Some(thread_key.clone()),
+        thread_epoch: Some(thread_state.epoch),
+        thread_state_path: Some(thread_state_path.clone()),
+        channel: Channel::BlueBubbles,
+        slack_team_id: None,
+        employee_id: Some(config.employee_profile.id.clone()),
+    };
+
+    // Schedule the task
+    let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+    if let Err(err) = cancel_pending_thread_tasks(&mut scheduler, &workspace, thread_state.epoch) {
+        warn!(
+            "failed to cancel pending thread tasks for {}: {}",
+            workspace.display(),
+            err
+        );
+    }
+    let task_id = scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
+    index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
+
+    info!(
+        "scheduler tasks enqueued user_id={} task_id={} message_id={:?} workspace={} thread_epoch={}",
+        user.user_id,
+        task_id,
+        message.message_id,
+        workspace.display(),
+        thread_state.epoch
+    );
+
+    Ok(())
+}
+
+/// Append a BlueBubbles message to the workspace inbox.
+fn append_bluebubbles_message(
+    workspace: &Path,
+    message: &crate::channel::InboundMessage,
+    raw_payload: &[u8],
+    seq: u32,
+) -> Result<(), BoxError> {
+    let incoming_dir = workspace.join("incoming_email");
+    fs::create_dir_all(&incoming_dir)?;
+
+    // Save raw payload for debugging/archival
+    let raw_path = incoming_dir.join(format!("{:05}_bluebubbles_raw.json", seq));
+    fs::write(&raw_path, raw_payload)?;
+
+    // Save message text as a simple text file
+    let text_path = incoming_dir.join(format!("{:05}_bluebubbles_message.txt", seq));
+    let text_content = message.text_body.clone().unwrap_or_default();
+    fs::write(&text_path, &text_content)?;
+
+    // Create a metadata file with sender info
+    let meta_path = incoming_dir.join(format!("{:05}_bluebubbles_meta.json", seq));
+    let meta = serde_json::json!({
+        "channel": "bluebubbles",
+        "sender": message.sender,
+        "sender_name": message.sender_name,
+        "chat_guid": message.metadata.bluebubbles_chat_guid,
+        "thread_id": message.thread_id,
+        "message_id": message.message_id,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    });
+    fs::write(&meta_path, serde_json::to_string_pretty(&meta)?)?;
+
+    info!(
+        "saved BlueBubbles message seq={} to {}",
+        seq,
+        incoming_dir.display()
+    );
     Ok(())
 }
 
@@ -3282,6 +3603,7 @@ mod tests {
             skills_dir: None,
             discord_enabled: false,
             slack_enabled: false,
+            bluebubbles_enabled: false,
         };
         let workspace = ensure_thread_workspace(&user_paths, "user123", &thread, &employee, None)
             .expect("create workspace");

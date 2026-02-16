@@ -74,6 +74,7 @@ fn test_employee_directory(root: &Path) -> (EmployeeProfile, EmployeeDirectory) 
         skills_dir: None,
         discord_enabled: false,
         slack_enabled: false,
+        bluebubbles_enabled: false,
     };
     let mut employee_by_id = HashMap::new();
     employee_by_id.insert(employee.id.clone(), employee.clone());
@@ -230,6 +231,9 @@ fn thread_latest_epoch_end_to_end() {
         slack_redirect_uri: None,
         discord_bot_token: None,
         discord_bot_user_id: None,
+        google_docs_enabled: false,
+        bluebubbles_url: None,
+        bluebubbles_password: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
