@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+`external/` folder contains information about other projects that we can use as reference bu we never need to touch the code in it.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview

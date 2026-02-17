@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+`external/` folder contains information about other projects that we can use as reference bu we never need to touch the code in it.
+
 ## Project Structure & Module Organization
 - `DoWhiz_service/`: Rust backend (scheduler, task runner, email/webhook handling). Modules live under `*_module/`, with shared assets in `skills/` and employee configs in `employees/` plus `employee.toml`.
 - `website/`: React 19 + Vite marketing site (`src/`, `public/`, `eslint.config.js`).
