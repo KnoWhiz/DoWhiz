@@ -46,13 +46,36 @@ Your job is to classify messages:
 1. RESPOND DIRECTLY to questions you can answer quickly (greetings, casual chat, simple questions, thank you messages)
 2. Output ONLY "FORWARD_TO_AGENT" for tasks that require tools, code, file operations, research, or multi-step work
 
+When responding directly:
+- Use the user's memory context (if provided) to personalize responses
+- IMPORTANT: When the user tells you something about themselves (name, school, job, preferences, etc.), you MUST append a <MEMORY_UPDATE> block to save it
+
+Memory update format:
+<MEMORY_UPDATE>
+## Section
+- Fact
+</MEMORY_UPDATE>
+
+Example - if user says "I go to Stanford":
+Great! I'll remember that.
+
+<MEMORY_UPDATE>
+## Profile
+- Goes to Stanford University
+</MEMORY_UPDATE>
+
+Valid sections: Profile, Preferences, Projects, Contacts, Decisions, Processes
+
 Keep responses brief and friendly."#;
 
 /// Result of routing a message
 #[derive(Debug, Clone)]
 pub enum RouterDecision {
-    /// Message was handled by local LLM, contains the response
-    Simple(String),
+    /// Message was handled by local LLM, contains the response and optional memory update
+    Simple {
+        response: String,
+        memory_update: Option<String>,
+    },
     /// Message should be forwarded to full pipeline
     Complex,
     /// Router is disabled or encountered an error, forward to pipeline
@@ -152,11 +175,15 @@ impl MessageRouter {
 
     /// Classify and potentially respond to a message (async version)
     ///
+    /// Arguments:
+    /// - `message`: The user's message
+    /// - `memory`: Optional memory context (contents of memo.md)
+    ///
     /// Returns:
-    /// - `Simple(response)` if the local LLM handled the query
+    /// - `Simple { response, memory_update }` if the local LLM handled the query
     /// - `Complex` if the query should go to the full pipeline
     /// - `Passthrough` if routing is disabled or failed
-    pub async fn classify(&self, message: &str) -> RouterDecision {
+    pub async fn classify(&self, message: &str, memory: Option<&str>) -> RouterDecision {
         if !self.config.enabled {
             debug!("Router disabled, passing through");
             return RouterDecision::Passthrough;
@@ -177,19 +204,24 @@ impl MessageRouter {
         }
 
         let result = match self.config.provider {
-            RouterProvider::OpenAI => self.call_openai(message).await,
-            RouterProvider::Ollama => self.call_ollama(message).await,
+            RouterProvider::OpenAI => self.call_openai(message, memory).await,
+            RouterProvider::Ollama => self.call_ollama(message, memory).await,
         };
 
         match result {
             Ok(response) => {
                 let trimmed = response.trim();
+                debug!("Router raw response: {}", trimmed);
                 if trimmed.contains(FORWARD_MARKER) {
                     info!("Router decision: Complex (forward to pipeline)");
                     RouterDecision::Complex
                 } else {
-                    info!("Router decision: Simple (local response)");
-                    RouterDecision::Simple(trimmed.to_string())
+                    let (reply, memory_update) = Self::parse_response(trimmed);
+                    info!("Router decision: Simple (local response, memory_update={})", memory_update.is_some());
+                    if let Some(ref update) = memory_update {
+                        debug!("Memory update content: {}", update);
+                    }
+                    RouterDecision::Simple { response: reply, memory_update }
                 }
             }
             Err(e) => {
@@ -199,8 +231,29 @@ impl MessageRouter {
         }
     }
 
+    /// Parse response to extract reply and optional memory update
+    fn parse_response(response: &str) -> (String, Option<String>) {
+        const MEMORY_START: &str = "<MEMORY_UPDATE>";
+        const MEMORY_END: &str = "</MEMORY_UPDATE>";
+
+        if let Some(start_idx) = response.find(MEMORY_START) {
+            let reply = response[..start_idx].trim().to_string();
+            let update_start = start_idx + MEMORY_START.len();
+            let update_end = response.find(MEMORY_END).unwrap_or(response.len());
+            let memory_update = response[update_start..update_end].trim().to_string();
+
+            if memory_update.is_empty() {
+                (reply, None)
+            } else {
+                (reply, Some(memory_update))
+            }
+        } else {
+            (response.to_string(), None)
+        }
+    }
+
     /// Make a request to the OpenAI API (async)
-    async fn call_openai(&self, message: &str) -> Result<String, String> {
+    async fn call_openai(&self, message: &str, memory: Option<&str>) -> Result<String, String> {
         let api_key = self
             .config
             .openai_api_key
@@ -208,6 +261,17 @@ impl MessageRouter {
             .ok_or("OPENAI_API_KEY not set")?;
 
         let url = format!("{}/chat/completions", self.config.openai_url);
+
+        // Build user message with optional memory context
+        let user_content = if let Some(mem) = memory {
+            if mem.trim().is_empty() {
+                message.to_string()
+            } else {
+                format!("User memory:\n```\n{}\n```\n\nMessage: {}", mem.trim(), message)
+            }
+        } else {
+            message.to_string()
+        };
 
         let request = OpenAIChatRequest {
             model: self.config.model.clone(),
@@ -218,7 +282,7 @@ impl MessageRouter {
                 },
                 OpenAIChatMessage {
                     role: "user".to_string(),
-                    content: message.to_string(),
+                    content: user_content,
                 },
             ],
             max_completion_tokens: 1024,
@@ -262,12 +326,23 @@ impl MessageRouter {
     }
 
     /// Make a request to the Ollama API (async)
-    async fn call_ollama(&self, message: &str) -> Result<String, String> {
+    async fn call_ollama(&self, message: &str, memory: Option<&str>) -> Result<String, String> {
         let url = format!("{}/api/generate", self.config.ollama_url);
+
+        // Build prompt with optional memory context
+        let prompt = if let Some(mem) = memory {
+            if mem.trim().is_empty() {
+                message.to_string()
+            } else {
+                format!("User memory:\n```\n{}\n```\n\nMessage: {}", mem.trim(), message)
+            }
+        } else {
+            message.to_string()
+        };
 
         let request = OllamaGenerateRequest {
             model: self.config.model.clone(),
-            prompt: message.to_string(),
+            prompt,
             system: Some(SYSTEM_PROMPT.to_string()),
             stream: false,
             temperature: 0.3, // Low temp for consistent classification, some variety in responses

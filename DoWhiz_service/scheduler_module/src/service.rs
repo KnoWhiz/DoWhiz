@@ -1025,6 +1025,7 @@ fn process_ingestion_envelope(
             let message = envelope.to_inbound_message();
             if try_quick_response_slack(
                 config,
+                user_store,
                 slack_store,
                 message_router,
                 runtime,
@@ -1042,6 +1043,7 @@ fn process_ingestion_envelope(
             let message = envelope.to_inbound_message();
             if try_quick_response_bluebubbles(
                 config,
+                user_store,
                 message_router,
                 runtime,
                 &message,
@@ -1058,6 +1060,7 @@ fn process_ingestion_envelope(
             let message = envelope.to_inbound_message();
             if try_quick_response_discord(
                 config,
+                user_store,
                 message_router,
                 runtime,
                 &message,
@@ -1081,8 +1084,28 @@ fn process_ingestion_envelope(
     }
 }
 
+/// Read memo.md from a user's memory directory
+fn read_user_memo(memory_dir: &Path) -> Option<String> {
+    let memo_path = memory_dir.join("memo.md");
+    fs::read_to_string(&memo_path).ok()
+}
+
+/// Append memory update to a user's memo.md
+fn append_user_memo(memory_dir: &Path, update: &str) -> io::Result<()> {
+    fs::create_dir_all(memory_dir)?;
+    let memo_path = memory_dir.join("memo.md");
+    let existing = fs::read_to_string(&memo_path).unwrap_or_default();
+    let new_content = if existing.trim().is_empty() {
+        format!("# Memo\n\n{}\n", update.trim())
+    } else {
+        format!("{}\n\n{}\n", existing.trim_end(), update.trim())
+    };
+    fs::write(&memo_path, new_content)
+}
+
 fn try_quick_response_slack(
     config: &ServiceConfig,
+    user_store: &UserStore,
     slack_store: &SlackStore,
     message_router: &MessageRouter,
     runtime: &tokio::runtime::Handle,
@@ -1096,15 +1119,29 @@ fn try_quick_response_slack(
         None => return Ok(false),
     };
 
+    // Look up user and get memory
+    let user = user_store.get_or_create_user("slack", &message.sender)?;
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+    let memory = read_user_memo(&user_paths.memory_dir);
+
     let cleaned_text = text
         .split_whitespace()
         .filter(|word| !(word.starts_with("<@") && word.ends_with(">")))
         .collect::<Vec<_>>()
         .join(" ");
 
-    let decision = runtime.block_on(message_router.classify(&cleaned_text));
+    let decision = runtime.block_on(message_router.classify(&cleaned_text, memory.as_deref()));
     match decision {
-        RouterDecision::Simple(response) => {
+        RouterDecision::Simple { response, memory_update } => {
+            // Write memory update if present
+            if let Some(update) = memory_update {
+                if let Err(e) = append_user_memo(&user_paths.memory_dir, &update) {
+                    warn!("Failed to write memory update: {}", e);
+                } else {
+                    info!("Updated memory for user {}", user.user_id);
+                }
+            }
+
             let token = resolve_slack_bot_token(config, slack_store, message.metadata.slack_team_id.as_deref());
             if let Some(token) = token {
                 let thread_ts = Some(message.thread_id.as_str());
@@ -1138,6 +1175,7 @@ fn resolve_slack_bot_token(
 
 fn try_quick_response_bluebubbles(
     config: &ServiceConfig,
+    user_store: &UserStore,
     message_router: &MessageRouter,
     runtime: &tokio::runtime::Handle,
     message: &crate::channel::InboundMessage,
@@ -1155,9 +1193,23 @@ fn try_quick_response_bluebubbles(
         return Ok(false);
     };
 
-    let decision = runtime.block_on(message_router.classify(text));
+    // Look up user and get memory
+    let user = user_store.get_or_create_user("phone", &message.sender)?;
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+    let memory = read_user_memo(&user_paths.memory_dir);
+
+    let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
     match decision {
-        RouterDecision::Simple(response) => {
+        RouterDecision::Simple { response, memory_update } => {
+            // Write memory update if present
+            if let Some(update) = memory_update {
+                if let Err(e) = append_user_memo(&user_paths.memory_dir, &update) {
+                    warn!("Failed to write memory update: {}", e);
+                } else {
+                    info!("Updated memory for user {}", user.user_id);
+                }
+            }
+
             if runtime
                 .block_on(send_quick_bluebubbles_response(url, password, chat_guid, &response))
                 .is_ok()
@@ -1172,6 +1224,7 @@ fn try_quick_response_bluebubbles(
 
 fn try_quick_response_discord(
     config: &ServiceConfig,
+    user_store: &UserStore,
     message_router: &MessageRouter,
     runtime: &tokio::runtime::Handle,
     message: &crate::channel::InboundMessage,
@@ -1189,9 +1242,23 @@ fn try_quick_response_discord(
         None => return Ok(false),
     };
 
-    let decision = runtime.block_on(message_router.classify(text));
+    // Look up user and get memory
+    let user = user_store.get_or_create_user("discord", &message.sender)?;
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+    let memory = read_user_memo(&user_paths.memory_dir);
+
+    let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
     match decision {
-        RouterDecision::Simple(response) => {
+        RouterDecision::Simple { response, memory_update } => {
+            // Write memory update if present
+            if let Some(update) = memory_update {
+                if let Err(e) = append_user_memo(&user_paths.memory_dir, &update) {
+                    warn!("Failed to write memory update: {}", e);
+                } else {
+                    info!("Updated memory for user {}", user.user_id);
+                }
+            }
+
             if send_quick_discord_response_simple(token, channel_id, message_id, &response).is_ok()
             {
                 return Ok(true);
