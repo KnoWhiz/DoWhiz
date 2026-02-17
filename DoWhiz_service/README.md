@@ -865,6 +865,7 @@ This reduces API costs and latency for simple interactions while preserving full
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RUN_TASK_DOCKER_IMAGE` | - | Enable per-task containers |
+| `RUN_TASK_DOCKER_REQUIRED` | `0` | Fail when Docker CLI is missing instead of falling back to host execution |
 | `RUN_TASK_DOCKER_AUTO_BUILD` | `1` | Auto-build missing images |
 | `RUN_TASK_DOCKERFILE` | - | Override Dockerfile path |
 | `RUN_TASK_DOCKER_BUILD_CONTEXT` | - | Override build context directory |
