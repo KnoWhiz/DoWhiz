@@ -23,6 +23,7 @@ use scheduler_module::adapters::bluebubbles::BlueBubblesInboundAdapter;
 use scheduler_module::adapters::discord::DiscordInboundAdapter;
 use scheduler_module::adapters::postmark::PostmarkInboundPayload;
 use scheduler_module::adapters::slack::{is_url_verification, SlackChallengeResponse, SlackInboundAdapter};
+use scheduler_module::adapters::telegram::TelegramInboundAdapter;
 use scheduler_module::channel::{Channel, ChannelMetadata, InboundAdapter, InboundMessage};
 use scheduler_module::employee_config::{load_employee_directory, EmployeeDirectory};
 use scheduler_module::google_auth::GoogleAuthConfig;
@@ -177,6 +178,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/postmark/inbound", post(ingest_postmark))
         .route("/slack/events", post(ingest_slack))
         .route("/bluebubbles/webhook", post(ingest_bluebubbles))
+        .route("/telegram/webhook", post(ingest_telegram))
         .route("/sms/twilio", post(ingest_sms))
         .with_state(state)
         .layer(DefaultBodyLimit::max(max_body_bytes));
@@ -382,6 +384,35 @@ async fn ingest_sms(
     };
 
     let envelope = build_envelope(route, Channel::Sms, message_sid, &message, &body);
+    enqueue_envelope(state.queue.clone(), envelope).await
+}
+
+async fn ingest_telegram(
+    State(state): State<Arc<GatewayState>>,
+    body: Bytes,
+) -> impl IntoResponse {
+    let adapter = TelegramInboundAdapter::new();
+    let message = match adapter.parse(&body) {
+        Ok(message) => message,
+        Err(err) => {
+            debug!("gateway ignoring telegram event: {}", err);
+            return (StatusCode::OK, Json(json!({"status": "ignored"})));
+        }
+    };
+
+    let chat_id = message
+        .metadata
+        .telegram_chat_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let Some(route) = resolve_route(Channel::Telegram, &chat_id, &state) else {
+        info!("gateway no route for telegram chat_id={}", chat_id);
+        return (StatusCode::OK, Json(json!({"status": "no_route"})));
+    };
+
+    let external_message_id = message.message_id.clone();
+    let envelope = build_envelope(route, Channel::Telegram, external_message_id, &message, &body);
     enqueue_envelope(state.queue.clone(), envelope).await
 }
 
