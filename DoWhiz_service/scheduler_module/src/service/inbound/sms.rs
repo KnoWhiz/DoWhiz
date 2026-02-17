@@ -225,7 +225,7 @@ mod tests {
             scheduler_poll_interval: Duration::from_millis(50),
             scheduler_max_concurrency: 1,
             scheduler_user_max_concurrency: 1,
-            inbound_body_max_bytes: super::super::config::DEFAULT_INBOUND_BODY_MAX_BYTES,
+            inbound_body_max_bytes: crate::service::DEFAULT_INBOUND_BODY_MAX_BYTES,
             skills_source_dir: None,
             slack_bot_token: None,
             slack_bot_user_id: None,

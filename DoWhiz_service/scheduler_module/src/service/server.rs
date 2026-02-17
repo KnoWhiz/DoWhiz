@@ -51,7 +51,7 @@ pub async fn run_server(
         }
     }
 
-    let scheduler_control = start_scheduler_threads(
+    let mut scheduler_control = start_scheduler_threads(
         config.clone(),
         user_store.clone(),
         index_store.clone(),
@@ -62,7 +62,7 @@ pub async fn run_server(
         config.employee_id
     );
 
-    spawn_ingestion_consumer(
+    let mut ingestion_control = spawn_ingestion_consumer(
         config.clone(),
         ingestion_queue.clone(),
         user_store.clone(),
@@ -92,10 +92,12 @@ pub async fn run_server(
         .layer(DefaultBodyLimit::max(config.inbound_body_max_bytes));
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
+    let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
-        .await?;
-    scheduler_control.stop();
+        .await;
+    ingestion_control.stop_and_join();
+    scheduler_control.stop_and_join();
+    serve_result?;
     Ok(())
 }
 

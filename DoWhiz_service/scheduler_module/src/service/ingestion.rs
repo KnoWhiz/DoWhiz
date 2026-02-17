@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 
 use tracing::{error, warn};
@@ -21,6 +23,20 @@ use super::inbound::{
 };
 use super::BoxError;
 
+pub(super) struct IngestionControl {
+    stop: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl IngestionControl {
+    pub(super) fn stop_and_join(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 pub(super) fn spawn_ingestion_consumer(
     config: std::sync::Arc<ServiceConfig>,
     queue: std::sync::Arc<IngestionQueue>,
@@ -28,13 +44,15 @@ pub(super) fn spawn_ingestion_consumer(
     index_store: std::sync::Arc<IndexStore>,
     slack_store: std::sync::Arc<SlackStore>,
     message_router: std::sync::Arc<MessageRouter>,
-) -> Result<(), BoxError> {
+) -> Result<IngestionControl, BoxError> {
     let poll_interval = config.ingestion_poll_interval;
     let employee_id = config.employee_id.clone();
     let dedupe_path = config.ingestion_dedupe_path.clone();
     let runtime = tokio::runtime::Handle::current();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_thread = stop.clone();
 
-    thread::spawn(move || {
+    let handle = thread::spawn(move || {
         let mut dedupe_store = match ProcessedMessageStore::load(&dedupe_path) {
             Ok(store) => store,
             Err(err) => {
@@ -44,6 +62,9 @@ pub(super) fn spawn_ingestion_consumer(
         };
 
         loop {
+            if stop_thread.load(Ordering::Relaxed) {
+                break;
+            }
             match queue.claim_next(&employee_id) {
                 Ok(Some(item)) => {
                     let is_new = match dedupe_store.mark_if_new(&[item.envelope.dedupe_key.clone()])
@@ -86,9 +107,15 @@ pub(super) fn spawn_ingestion_consumer(
                     }
                 }
                 Ok(None) => {
+                    if stop_thread.load(Ordering::Relaxed) {
+                        break;
+                    }
                     thread::sleep(poll_interval);
                 }
                 Err(err) => {
+                    if stop_thread.load(Ordering::Relaxed) {
+                        break;
+                    }
                     warn!("ingestion queue claim error: {}", err);
                     thread::sleep(poll_interval);
                 }
@@ -96,7 +123,10 @@ pub(super) fn spawn_ingestion_consumer(
         }
     });
 
-    Ok(())
+    Ok(IngestionControl {
+        stop,
+        handle: Some(handle),
+    })
 }
 
 fn process_ingestion_envelope(
