@@ -1,38 +1,55 @@
 # Repository Guidelines
 
-**Contributor principle:** Keep the codebase modular and easy to maintain. If a file grows too large (roughly 500–1000 lines), consider splitting it into smaller, well-defined modules with clear responsibilities.
-
-## Project Structure
-- `DoWhiz_service/`: Rust backend (scheduler, run_task, email handling, agents). Key config: `DoWhiz_service/employee.toml`, skills in `DoWhiz_service/skills/`, personas in `DoWhiz_service/employees/`.
-- `website/`: Vite + React product site (`website/src/`, `website/public/`, `website/eslint.config.js`).
-- `external/openclaw/`: Reference implementation for multi-agent patterns (treat as vendor/reference unless a change is explicitly needed).
-- `assets/`, `api_reference_documentation/`, `example_files/`: Static assets and docs/examples.
-- Root files: `.env.example`, `Dockerfile`, `README.md`.
+## Project Structure & Module Organization
+- `DoWhiz_service/`: Rust backend (scheduler, task runner, email/webhook handling). Modules live under `*_module/`, with shared assets in `skills/` and employee configs in `employees/` plus `employee.toml`.
+- `website/`: React 19 + Vite marketing site (`src/`, `public/`, `eslint.config.js`).
+- `function_app/`: Azure Functions custom-handler wrapper for the Rust service (build scripts, `host.json`, `HttpEntry/`).
+- `assets/`, `api_reference_documentation/`, `example_files/`, `external/openclaw/`: supporting docs, reference material, and design assets.
 
 ## Build, Test, and Development Commands
-- `./DoWhiz_service/scripts/run_employee.sh little_bear 9001`: One-command local run (starts ngrok, updates Postmark hook, launches service).
-- `cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001`: Manual service run.
-- `cargo build -p scheduler_module --release`: Production build for the Rust service.
-- `docker build -t dowhiz-service .`: Build the service container.
-- `cd website && npm install && npm run dev`: Start the website dev server.
-- `cd website && npm run build`: Production website build (output in `website/dist/`).
+Backend (from repo root):
+```bash
+./DoWhiz_service/scripts/run_employee.sh little_bear 9001
+# or manual
+EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 \
+  cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
+```
+Frontend:
+```bash
+cd website
+npm install
+npm run dev
+```
+Azure Functions wrapper:
+```bash
+./function_app/scripts/build_binary.sh
+cd function_app && func host start --port 7071
+```
+Docker image (service):
+```bash
+docker build -t dowhiz-service .
+```
+For gateway and multi-employee setups, see `DoWhiz_service/README.md`.
 
 ## Coding Style & Naming Conventions
-- Rust: follow `rustfmt` and `clippy` (`cargo fmt --check`, `cargo clippy --all-targets --all-features`). Modules/crates use `snake_case` (e.g., `scheduler_module`).
-- Web: follow ESLint rules in `website/eslint.config.js` (`npm run lint`). Keep JSX/components consistent with existing patterns.
-- Config: environment variables are uppercase with underscores; employee IDs match `employee.toml` (e.g., `little_bear`).
+- Rust: format with `cargo fmt`, lint with `cargo clippy --all-targets --all-features`. Use `snake_case` for modules/functions, `CamelCase` for types, and `SCREAMING_SNAKE_CASE` for constants.
+- Web: run `npm run lint` (ESLint config in `website/eslint.config.js`). Use `PascalCase` for React components and `camelCase` for variables.
 
 ## Testing Guidelines
-- Unit tests: `cargo test` (or module-specific with `-p scheduler_module`, `-p send_emails_module`, `-p run_task_module`).
-- Single test example: `cargo test -p scheduler_module --test scheduler_basic`.
-- Live E2E (email + ngrok + Postmark) requires `RUST_SERVICE_LIVE_TEST=1` and often `RUN_CODEX_E2E=1` plus Postmark credentials; see `DoWhiz_service/README.md` before running.
-- Website: `npm run lint` (no dedicated test runner currently).
-- After completing code changes, you must design targeted, detailed unit tests and end-to-end tests to ensure both new and existing functionality behave as expected. Debug and resolve any issues found during test runs. If certain issues require manual intervention, provide a detailed report and follow-up steps.
+- Rust unit/integration tests live under `DoWhiz_service/*_module/tests` and inline `#[cfg(test)]` modules. Run all tests with `cargo test` or module-specific with `cargo test -p run_task_module`.
+- Live E2E (Postmark + ngrok) is documented in `DoWhiz_service/README.md` and `DoWhiz_service/run_task_module/tests/README.md`.
+- Azure Functions local E2E: `./function_app/scripts/e2e_local.sh`.
+
+## Testing Expectations
+After completing code changes, you must design targeted, detailed unit tests and end-to-end tests to ensure both new and existing functionality behave as expected. Debug and resolve any issues found during test runs. If certain issues require manual intervention, provide a detailed report and follow-up steps.
 
 ## Commit & Pull Request Guidelines
-- Commit messages are short and imperative; conventional prefixes appear occasionally (e.g., `feat:`/`fix:`) and PR/issue numbers are sometimes appended, e.g., `feat: Add Google Docs collaboration support for digital employees (#238)`.
-- PRs must include a short summary, tests run, and screenshots for UI changes (`CONTRIBUTING.md`).
+- Commit history favors short, imperative summaries; optional Conventional prefixes appear (e.g., `feat:`, `fix(scope):`). Keep messages concise and scoped.
+- PRs should include a short summary, tests run, and screenshots for UI changes (per `CONTRIBUTING.md`).
 
 ## Configuration & Secrets
-- Start from `.env.example` and keep secrets out of git.
-- Runtime state lives under `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/` and local workspaces may appear under `.workspace/`; do not commit generated data.
+- Service secrets live in `DoWhiz_service/.env` (copy from `.env.example`).
+- Azure Functions uses `function_app/local.settings.json` for local-only settings.
+- Never commit tokens, API keys, or Postmark credentials.
+
+**Contributor principle:** Keep the codebase modular and easy to maintain. If a file grows too large (roughly 500–1000 lines), consider splitting it into smaller, well-defined modules with clear responsibilities.
