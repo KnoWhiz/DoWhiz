@@ -27,11 +27,19 @@ const WATCHDOG_INTERVAL_SECS: u64 = 30;
 
 pub(super) struct SchedulerControl {
     stop: Arc<AtomicBool>,
+    handles: Vec<thread::JoinHandle<()>>,
 }
 
 impl SchedulerControl {
     pub(super) fn stop(&self) {
         self.stop.store(true, Ordering::Relaxed);
+    }
+
+    pub(super) fn stop_and_join(&mut self) {
+        self.stop();
+        for handle in self.handles.drain(..) {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -48,6 +56,8 @@ pub(super) fn start_scheduler_threads(
     let running_threads = Arc::new(Mutex::new(HashSet::new()));
     let limiter = Arc::new(ConcurrencyLimiter::new(scheduler_max_concurrency));
 
+    let mut handles = Vec::with_capacity(2);
+
     {
         let config = config.clone();
         let user_store = user_store.clone();
@@ -57,7 +67,7 @@ pub(super) fn start_scheduler_threads(
         let running_threads = running_threads.clone();
         let limiter = limiter.clone();
         let query_limit = scheduler_max_concurrency.saturating_mul(4).max(1);
-        thread::spawn(move || {
+        let handle = thread::spawn(move || {
             let mut last_due_tasks: HashSet<String> = HashSet::new();
             let mut logged_user_busy: HashSet<String> = HashSet::new();
             let mut logged_task_busy: HashSet<String> = HashSet::new();
@@ -174,6 +184,7 @@ pub(super) fn start_scheduler_threads(
                 thread::sleep(scheduler_poll_interval);
             }
         });
+        handles.push(handle);
     }
 
     // Start task watchdog thread to detect and recover from stuck/crashed tasks
@@ -187,7 +198,7 @@ pub(super) fn start_scheduler_threads(
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_TASK_TIMEOUT_SECS);
 
-        thread::spawn(move || {
+        let handle = thread::spawn(move || {
             info!(
                 "Task watchdog started (timeout={}s, check_interval={}s)",
                 task_timeout_secs, WATCHDOG_INTERVAL_SECS
@@ -285,9 +296,13 @@ pub(super) fn start_scheduler_threads(
             }
             info!("Task watchdog stopped");
         });
+        handles.push(handle);
     }
 
-    SchedulerControl { stop: scheduler_stop }
+    SchedulerControl {
+        stop: scheduler_stop,
+        handles,
+    }
 }
 
 /// Notify user that a task has failed after max retries
