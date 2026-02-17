@@ -1,21 +1,23 @@
 use lettre::message::header::{HeaderName, HeaderValue};
 use lettre::Transport;
 use rusqlite::OptionalExtension;
-use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
+use scheduler_module::employee_config::{load_employee_directory, EmployeeDirectory, EmployeeProfile};
 use scheduler_module::service::{run_server, ServiceConfig, DEFAULT_INBOUND_BODY_MAX_BYTES};
 use scheduler_module::user_store::normalize_email;
 use scheduler_module::{
     ScheduledTask, Scheduler, SchedulerError, TaskExecution, TaskExecutor, TaskKind,
 };
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Clone, Default)]
 struct NoopExecutor;
@@ -26,38 +28,44 @@ impl TaskExecutor for NoopExecutor {
     }
 }
 
-fn test_employee_directory(addresses: Vec<String>) -> (EmployeeProfile, EmployeeDirectory) {
-    let address_set: HashSet<String> = addresses
+fn resolve_employee_config_path() -> PathBuf {
+    env::var("EMPLOYEE_CONFIG_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            let local = manifest_dir.join("employee.toml");
+            if local.exists() {
+                return local;
+            }
+            manifest_dir
+                .parent()
+                .unwrap_or(&manifest_dir)
+                .join("employee.toml")
+        })
+}
+
+fn load_employee_for_address(
+    service_address: &str,
+) -> Result<(EmployeeProfile, EmployeeDirectory, PathBuf), BoxError> {
+    let config_path = resolve_employee_config_path();
+    let directory = load_employee_directory(&config_path)?;
+    let normalized = service_address.trim();
+
+    let employee = directory
+        .employees
         .iter()
-        .map(|value| value.to_ascii_lowercase())
-        .collect();
-    let employee = EmployeeProfile {
-        id: "test-employee".to_string(),
-        display_name: None,
-        runner: "codex".to_string(),
-        model: None,
-        addresses: addresses.clone(),
-        address_set: address_set.clone(),
-        runtime_root: None,
-        agents_path: None,
-        claude_path: None,
-        soul_path: None,
-        skills_dir: None,
-        discord_enabled: false,
-        slack_enabled: false,
-        bluebubbles_enabled: false,
-    };
-    let mut employee_by_id = HashMap::new();
-    employee_by_id.insert(employee.id.clone(), employee.clone());
-    let mut service_addresses = HashSet::new();
-    service_addresses.extend(address_set);
-    let directory = EmployeeDirectory {
-        employees: vec![employee.clone()],
-        employee_by_id,
-        default_employee_id: Some(employee.id.clone()),
-        service_addresses,
-    };
-    (employee, directory)
+        .find(|emp| emp.matches_address(normalized))
+        .cloned()
+        .or_else(|| {
+            directory
+                .default_employee_id
+                .as_ref()
+                .and_then(|id| directory.employee(id))
+                .cloned()
+        })
+        .ok_or("no employee matches service address and no default employee")?;
+
+    Ok((employee, directory, config_path))
 }
 
 fn load_env_from_repo() {
@@ -91,6 +99,121 @@ impl Drop for HookRestore {
     }
 }
 
+struct ChildGuard {
+    child: Child,
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn write_gateway_config(
+    path: &Path,
+    host: &str,
+    port: u16,
+    db_path: &Path,
+    service_address: &str,
+    employee_id: &str,
+) -> Result<(), BoxError> {
+    let contents = format!(
+        r#"[server]
+host = "{host}"
+port = {port}
+
+[storage]
+db_path = "{db_path}"
+
+[defaults]
+tenant_id = "default"
+employee_id = "{employee_id}"
+
+[[routes]]
+channel = "email"
+key = "{service_address}"
+employee_id = "{employee_id}"
+tenant_id = "default"
+"#,
+        host = host,
+        port = port,
+        db_path = db_path.display(),
+        service_address = service_address,
+        employee_id = employee_id,
+    );
+    fs::write(path, contents)?;
+    Ok(())
+}
+
+fn spawn_gateway(
+    gateway_config_path: &Path,
+    ingestion_db_path: &Path,
+    employee_config_path: &Path,
+    host: &str,
+    port: u16,
+) -> Result<ChildGuard, BoxError> {
+    let gateway_bin = env::var("CARGO_BIN_EXE_inbound_gateway")
+        .ok()
+        .map(PathBuf::from)
+        .filter(|path| path.exists())
+        .unwrap_or_else(|| {
+            let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            manifest_dir
+                .parent()
+                .unwrap_or(&manifest_dir)
+                .join("target")
+                .join("debug")
+                .join("inbound_gateway")
+        });
+    if !gateway_bin.exists() {
+        return Err(format!(
+            "inbound_gateway binary not found at {}",
+            gateway_bin.display()
+        )
+        .into());
+    }
+
+    let child = Command::new(gateway_bin)
+        .env("GATEWAY_CONFIG_PATH", gateway_config_path)
+        .env("INGESTION_DB_PATH", ingestion_db_path)
+        .env("EMPLOYEE_CONFIG_PATH", employee_config_path)
+        .env("GATEWAY_HOST", host)
+        .env("GATEWAY_PORT", port.to_string())
+        .env("GOOGLE_DOCS_ENABLED", "false")
+        .env("DISCORD_BOT_TOKEN", "")
+        .env("DISCORD_BOT_USER_ID", "")
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()?;
+
+    Ok(ChildGuard { child })
+}
+
+fn wait_for_local_health(
+    host: &str,
+    port: u16,
+    timeout: Duration,
+) -> Result<(), BoxError> {
+    let client = reqwest::blocking::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()?;
+    let start = SystemTime::now();
+    let url = format!("http://{}:{}/health", host, port);
+    loop {
+        match client.get(&url).send() {
+            Ok(response) if response.status().is_success() => return Ok(()),
+            Ok(_) | Err(_) => {
+                if start.elapsed().unwrap_or_default() >= timeout {
+                    return Err(format!("gateway health check timed out: {}", url).into());
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        }
+    }
+}
+
 fn env_enabled(key: &str) -> bool {
     matches!(env::var(key).as_deref(), Ok("1"))
 }
@@ -102,12 +225,7 @@ fn timestamp_suffix() -> u64 {
         .as_secs()
 }
 
-fn postmark_request(
-    method: &str,
-    url: &str,
-    token: &str,
-    payload: Option<Value>,
-) -> Result<Value, Box<dyn std::error::Error>> {
+fn postmark_request(method: &str, url: &str, token: &str, payload: Option<Value>) -> Result<Value, BoxError> {
     let client = reqwest::blocking::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(30))
@@ -136,7 +254,7 @@ fn poll_outbound(
     recipient: &str,
     subject_hint: &str,
     timeout: Duration,
-) -> Result<Option<Value>, Box<dyn std::error::Error>> {
+) -> Result<Option<Value>, BoxError> {
     let client = reqwest::blocking::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(20))
@@ -186,11 +304,7 @@ fn poll_outbound(
     }
 }
 
-fn check_public_health(
-    base_url: &str,
-    local_host: &str,
-    port: u16,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn check_public_health(base_url: &str, local_host: &str, port: u16) -> Result<(), BoxError> {
     let client = reqwest::blocking::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(10))
@@ -220,7 +334,7 @@ fn send_smtp_inbound(
     to_addr: &str,
     subject: &str,
     original_to: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), BoxError> {
     let mut builder = lettre::Message::builder()
         .from(from_addr.parse()?)
         .to(to_addr.parse()?)
@@ -258,10 +372,7 @@ fn wait_for_workspace(root: &Path, timeout: Duration) -> Option<PathBuf> {
     }
 }
 
-fn wait_for_tasks_complete(
-    tasks_path: &Path,
-    timeout: Duration,
-) -> Result<Vec<ScheduledTask>, Box<dyn std::error::Error>> {
+fn wait_for_tasks_complete(tasks_path: &Path, timeout: Duration) -> Result<Vec<ScheduledTask>, BoxError> {
     let start = SystemTime::now();
     loop {
         if tasks_path.exists() {
@@ -282,7 +393,12 @@ fn wait_for_tasks_complete(
     }
 }
 
-fn wait_for_user_id(users_db_path: &Path, email: &str, timeout: Duration) -> Option<String> {
+fn wait_for_user_id(
+    users_db_path: &Path,
+    users_root: &Path,
+    email: &str,
+    timeout: Duration,
+) -> Option<String> {
     let normalized = normalize_email(email)?;
     let start = SystemTime::now();
     loop {
@@ -302,6 +418,16 @@ fn wait_for_user_id(users_db_path: &Path, email: &str, timeout: Duration) -> Opt
                 }
             }
         }
+        if let Ok(entries) = fs::read_dir(users_root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Some(name) = path.file_name().and_then(|value| value.to_str()) {
+                        return Some(name.to_string());
+                    }
+                }
+            }
+        }
         if start.elapsed().unwrap_or_default() >= timeout {
             return None;
         }
@@ -310,7 +436,7 @@ fn wait_for_user_id(users_db_path: &Path, email: &str, timeout: Duration) -> Opt
 }
 
 #[test]
-fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
+fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
     let _ = tracing_subscriber::fmt().with_target(false).try_init();
     load_env_from_repo();
     if !env_enabled("RUST_SERVICE_LIVE_TEST") {
@@ -326,6 +452,19 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         env::var("POSTMARK_TEST_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
     let service_address = env::var("POSTMARK_TEST_SERVICE_ADDRESS")
         .unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
+    let (employee_profile, employee_directory, employee_config_path) =
+        load_employee_for_address(&service_address)?;
+    let gateway_bind_host =
+        env::var("GATEWAY_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let gateway_health_host = if gateway_bind_host == "0.0.0.0" {
+        "127.0.0.1".to_string()
+    } else {
+        gateway_bind_host.clone()
+    };
+    let gateway_port = env::var("GATEWAY_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(9100);
 
     let server_info = postmark_request("GET", "https://api.postmarkapp.com/server", &token, None)?;
     let inbound_address = server_info
@@ -350,6 +489,10 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
     let workspace_root = temp.path().join("workspaces");
     let state_dir = temp.path().join("state");
     let users_root = temp.path().join("users");
+    let ingestion_db_path = state_dir.join("ingestion.db");
+    fs::create_dir_all(&workspace_root)?;
+    fs::create_dir_all(&state_dir)?;
+    fs::create_dir_all(&users_root)?;
 
     let test_host = env::var("RUST_SERVICE_TEST_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port = env::var("RUST_SERVICE_PORT")
@@ -358,18 +501,20 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         .unwrap_or(9001);
 
     let codex_disabled = !env_enabled("RUN_CODEX_E2E");
-    let (employee_profile, employee_directory) =
-        test_employee_directory(vec![service_address.clone()]);
+    let employee_id = employee_profile.id.clone();
     let config = ServiceConfig {
         host: test_host.clone(),
         port,
-        employee_id: employee_profile.id.clone(),
-        employee_config_path: workspace_root.join("employee.toml"),
+        employee_id: employee_id.clone(),
+        employee_config_path: employee_config_path.clone(),
         employee_profile,
         employee_directory,
         workspace_root: workspace_root.clone(),
         scheduler_state_path: state_dir.join("tasks.db"),
         processed_ids_path: state_dir.join("postmark_processed_ids.txt"),
+        ingestion_db_path: ingestion_db_path.clone(),
+        ingestion_dedupe_path: state_dir.join("ingestion_processed_ids.txt"),
+        ingestion_poll_interval: Duration::from_millis(50),
         users_root: users_root.clone(),
         users_db_path: state_dir.join("users.db"),
         task_index_path: state_dir.join("task_index.db"),
@@ -393,6 +538,24 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         bluebubbles_password: None,
     };
 
+    let gateway_config_path = state_dir.join("gateway.toml");
+    write_gateway_config(
+        &gateway_config_path,
+        &gateway_bind_host,
+        gateway_port,
+        &ingestion_db_path,
+        &service_address,
+        &employee_id,
+    )?;
+    let _gateway = spawn_gateway(
+        &gateway_config_path,
+        &ingestion_db_path,
+        &employee_config_path,
+        &gateway_bind_host,
+        gateway_port,
+    )?;
+    wait_for_local_health(&gateway_health_host, gateway_port, Duration::from_secs(15))?;
+
     let rt = Runtime::new()?;
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let server_handle = rt.spawn(async move {
@@ -410,7 +573,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
     let base_url = base_url
         .strip_suffix("/postmark/inbound")
         .unwrap_or(base_url);
-    check_public_health(base_url, &test_host, port)?;
+    check_public_health(base_url, &gateway_health_host, gateway_port)?;
     let hook_url = format!("{}/postmark/inbound", base_url);
     println!("Setting Postmark inbound hook to {}", hook_url);
     postmark_request(
@@ -436,9 +599,17 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
         Duration::from_secs(120)
     };
 
-    let user_id = wait_for_user_id(&state_dir.join("users.db"), &from_addr, workspace_timeout)
+    println!("Waiting for user record...");
+    let user_id = wait_for_user_id(
+        &state_dir.join("users.db"),
+        &users_root,
+        &from_addr,
+        workspace_timeout,
+    )
         .ok_or("timed out waiting for user record")?;
+    println!("User id resolved: {}", user_id);
     let workspace_root = users_root.join(&user_id).join("workspaces");
+    println!("Waiting for workspace output...");
     let workspace = wait_for_workspace(&workspace_root, workspace_timeout)
         .ok_or("timed out waiting for workspace output")?;
     let reply_path = workspace.join("reply_email_draft.html");
@@ -452,6 +623,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
     } else {
         Duration::from_secs(120)
     };
+    println!("Polling outbound for subject hint: {}", reply_subject);
     let outbound = poll_outbound(&token, &from_addr, &reply_subject, outbound_timeout)?
         .ok_or("timed out waiting for outbound reply")?;
     let status = outbound
@@ -468,6 +640,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), Box<dyn std::error::Error>
     } else {
         Duration::from_secs(120)
     };
+    println!("Waiting for tasks to complete...");
     let tasks = wait_for_tasks_complete(&tasks_path, tasks_timeout)?;
     if tasks.len() < 2 {
         return Err("expected at least two scheduled tasks".into());

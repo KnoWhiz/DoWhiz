@@ -225,6 +225,13 @@ fn email_flow_injects_github_env() {
     fs::create_dir_all(&bin_root).expect("bin root");
     fs::create_dir_all(&home_root).expect("home root");
 
+    let _docker_guard = EnvUnsetGuard::remove(&[
+        "RUN_TASK_DOCKER_IMAGE",
+        "RUN_TASK_USE_DOCKER",
+        "RUN_TASK_DOCKERFILE",
+        "RUN_TASK_DOCKER_AUTO_BUILD",
+    ]);
+
     fs::write(
         root.join(".env"),
         "GITHUB_USERNAME=octo-user\nGITHUB_PERSONAL_ACCESS_TOKEN=pat-test-token\n",
@@ -258,6 +265,9 @@ fn email_flow_injects_github_env() {
         workspace_root: root.join("workspaces"),
         scheduler_state_path: state_root.join("tasks.db"),
         processed_ids_path: state_root.join("processed_ids.txt"),
+        ingestion_db_path: state_root.join("ingestion.db"),
+        ingestion_dedupe_path: state_root.join("ingestion_processed_ids.txt"),
+        ingestion_poll_interval: Duration::from_millis(50),
         users_root: users_root.clone(),
         users_db_path: state_root.join("users.db"),
         task_index_path: state_root.join("task_index.db"),
@@ -338,6 +348,13 @@ fn email_flow_injects_employee_github_env() {
     fs::create_dir_all(&bin_root).expect("bin root");
     fs::create_dir_all(&home_root).expect("home root");
 
+    let _docker_guard = EnvUnsetGuard::remove(&[
+        "RUN_TASK_DOCKER_IMAGE",
+        "RUN_TASK_USE_DOCKER",
+        "RUN_TASK_DOCKERFILE",
+        "RUN_TASK_DOCKER_AUTO_BUILD",
+    ]);
+
     fs::write(
         root.join(".env"),
         "MAGGIE_GITHUB_USERNAME=octo-user\nMAGGIE_GITHUB_PERSONAL_ACCESS_TOKEN=pat-test-token\n",
@@ -372,6 +389,9 @@ fn email_flow_injects_employee_github_env() {
         workspace_root: root.join("workspaces"),
         scheduler_state_path: state_root.join("tasks.db"),
         processed_ids_path: state_root.join("processed_ids.txt"),
+        ingestion_db_path: state_root.join("ingestion.db"),
+        ingestion_dedupe_path: state_root.join("ingestion_processed_ids.txt"),
+        ingestion_poll_interval: Duration::from_millis(50),
         users_root: users_root.clone(),
         users_db_path: state_root.join("users.db"),
         task_index_path: state_root.join("task_index.db"),

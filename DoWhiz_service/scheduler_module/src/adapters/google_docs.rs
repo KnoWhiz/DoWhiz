@@ -8,7 +8,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::LazyLock;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info};
 
 use crate::channel::{
     AdapterError, Channel, ChannelMetadata, InboundAdapter, InboundMessage,
@@ -126,7 +126,7 @@ pub struct QuotedFileContent {
 
 /// Represents an actionable item from Google Docs (either a comment or a reply).
 /// This structure helps track whether a parent comment or a specific reply triggered the action.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionableComment {
     /// The parent comment
     pub comment: GoogleDocsComment,
@@ -488,7 +488,7 @@ impl GoogleDocsInboundAdapter {
 impl InboundAdapter for GoogleDocsInboundAdapter {
     fn parse(&self, raw_payload: &[u8]) -> Result<InboundMessage, AdapterError> {
         // This adapter is poll-based, so parse is used to convert a comment to InboundMessage
-        let comment: GoogleDocsComment =
+        let _comment: GoogleDocsComment =
             serde_json::from_slice(raw_payload).map_err(|e| AdapterError::ParseError(e.to_string()))?;
 
         // We need document info which isn't in the raw payload

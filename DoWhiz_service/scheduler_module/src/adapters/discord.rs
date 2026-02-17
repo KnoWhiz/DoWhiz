@@ -5,6 +5,7 @@
 //! - `DiscordOutboundAdapter`: Sends messages via Discord REST API
 
 use std::collections::HashSet;
+use std::env;
 
 use crate::channel::{
     AdapterError, Attachment, Channel, ChannelMetadata, InboundMessage, OutboundAdapter,
@@ -147,12 +148,17 @@ impl OutboundAdapter for DiscordOutboundAdapter {
         };
 
         // Send via Discord REST API
+        let api_base = env::var("DISCORD_API_BASE_URL")
+            .unwrap_or_else(|_| "https://discord.com/api/v10".to_string());
+        let url = format!(
+            "{}/channels/{}/messages",
+            api_base.trim_end_matches('/'),
+            channel_id
+        );
+
         let client = reqwest::blocking::Client::new();
         let response = client
-            .post(format!(
-                "https://discord.com/api/v10/channels/{}/messages",
-                channel_id
-            ))
+            .post(url)
             .header("Authorization", format!("Bot {}", self.bot_token))
             .header("Content-Type", "application/json")
             .json(&request)

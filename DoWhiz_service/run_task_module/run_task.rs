@@ -1060,7 +1060,7 @@ fn prepare_workspace(request: &RunTaskRequest<'_>) -> Result<(PathBuf, PathBuf),
     // Non-email channels use plain text reply_message.txt
     // Email and GoogleDocs use HTML reply_email_draft.html
     let (reply_path, reply_attachments_dir) = match request.channel.to_lowercase().as_str() {
-        "slack" | "discord" | "telegram" | "bluebubbles" => (
+        "slack" | "discord" | "telegram" | "sms" | "bluebubbles" => (
             request.workspace_dir.join("reply_message.txt"),
             request.workspace_dir.join("reply_attachments"),
         ),
@@ -1880,6 +1880,9 @@ fn build_prompt(
             }
             "telegram" => {
                 "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Use Telegram MarkdownV2 formatting. Keep the reply concise. Do not use HTML. If there are files to attach, put them in reply_attachments/. Do not pretend the job has been done without actually doing it."
+            }
+            "sms" => {
+                "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Keep the reply concise and conversational. Do not use HTML. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."
             }
             "bluebubbles" => {
                 "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Keep the reply concise and conversational. Do not use HTML or markdown. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."

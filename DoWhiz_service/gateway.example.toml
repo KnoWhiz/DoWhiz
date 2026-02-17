@@ -1,23 +1,64 @@
-# Example inbound gateway configuration.
-# Copy to gateway.toml and adjust target URLs.
+# Example ingestion gateway configuration.
+# Copy to gateway.toml and adjust routes for your tenants/channels.
 
 [server]
 # host = "0.0.0.0"
 # port = 9100
 
-[dedupe]
-# path = "/home/azureuser/.dowhiz/DoWhiz/gateway/state/processed_ids.txt"
+[storage]
+# db_path = "/home/azureuser/.dowhiz/DoWhiz/gateway/state/ingestion.db"
 
-[targets]
-# Employee id -> base URL for that worker (no trailing slash)
-little_bear = "http://127.0.0.1:9001"
-mini_mouse  = "http://127.0.0.1:9002"
-boiled_egg  = "http://127.0.0.1:9004"
+[defaults]
+# Global fallback route if no channel-specific rule matches.
+# tenant_id = "default"
+# employee_id = "little_bear"
 
-[slack]
-# All Slack events route here unless overridden by team id mapping.
-default_employee_id = "boiled_egg"
+# Route rules: channel + key -> employee/tenant
+# Use key = "*" to define a channel default.
+[[routes]]
+channel = "slack"
+key = "*"
+employee_id = "boiled_egg"
+tenant_id = "default"
 
-# Map Slack team_id -> employee_id (optional)
-# [slack.team_to_employee]
-# T12345678 = "boiled_egg"
+# Email routing by service address
+[[routes]]
+channel = "email"
+key = "oliver@dowhiz.com"
+employee_id = "little_bear"
+tenant_id = "default"
+
+# Slack routing by team_id
+[[routes]]
+channel = "slack"
+key = "T12345678"
+employee_id = "boiled_egg"
+tenant_id = "acme"
+
+# Discord routing by guild_id (use "dm" for direct messages)
+[[routes]]
+channel = "discord"
+key = "123456789012345678"
+employee_id = "boiled_egg"
+tenant_id = "acme"
+
+# SMS routing by inbound phone number (To)
+[[routes]]
+channel = "sms"
+key = "+15551234567"
+employee_id = "little_bear"
+tenant_id = "default"
+
+# BlueBubbles routing by chat_guid
+[[routes]]
+channel = "bluebubbles"
+key = "iMessage;-;+15551234567"
+employee_id = "boiled_egg"
+tenant_id = "default"
+
+# Google Docs routing by document_id
+[[routes]]
+channel = "google_docs"
+key = "1AbCdEfGhIjKlMnOpQrStUvWxYz"
+employee_id = "little_bear"
+tenant_id = "default"

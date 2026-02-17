@@ -30,6 +30,32 @@ impl Drop for EnvGuard {
     }
 }
 
+struct EnvUnsetGuard {
+    saved: Vec<(String, Option<String>)>,
+}
+
+impl EnvUnsetGuard {
+    fn remove(keys: &[&str]) -> Self {
+        let mut saved = Vec::with_capacity(keys.len());
+        for key in keys {
+            saved.push((key.to_string(), env::var(key).ok()));
+            env::remove_var(key);
+        }
+        Self { saved }
+    }
+}
+
+impl Drop for EnvUnsetGuard {
+    fn drop(&mut self) {
+        for (key, value) in self.saved.drain(..) {
+            match value {
+                Some(value) => env::set_var(&key, value),
+                None => env::remove_var(&key),
+            }
+        }
+    }
+}
+
 #[cfg(unix)]
 fn write_fake_codex(dir: &Path) -> std::io::Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
@@ -64,6 +90,13 @@ fn memory_sync_roundtrip_via_run_task() -> Result<(), Box<dyn std::error::Error>
     fs::create_dir_all(&home_dir)?;
     fs::create_dir_all(&bin_dir)?;
     write_fake_codex(&bin_dir)?;
+
+    let _unset = EnvUnsetGuard::remove(&[
+        "RUN_TASK_DOCKER_IMAGE",
+        "RUN_TASK_USE_DOCKER",
+        "RUN_TASK_DOCKERFILE",
+        "RUN_TASK_DOCKER_AUTO_BUILD",
+    ]);
 
     let old_path = env::var("PATH").unwrap_or_default();
     let new_path = format!("{}:{}", bin_dir.display(), old_path);
