@@ -627,17 +627,17 @@ cargo test -p scheduler_module --test service_real_email -- --nocapture
 
 ### Slack Local Testing
 
-1. Set up the ngrok tunnel on port 9004:
+1. Set up the ngrok tunnel on port 9100:
 ```bash
-ngrok http 9004 --authtoken=${NGROK_AUTHTOKEN} --url https://YOUR-DOMAIN.ngrok.app
+ngrok http 9100 --authtoken=${NGROK_AUTHTOKEN} --url https://YOUR-DOMAIN.ngrok.app
 ```
 
 2. Start the dev employee (`boiled_egg`):
 ```bash
-cd DoWhiz_service && cargo build --release
-./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004 --public-url https://YOUR-DOMAIN.ngrok.app --skip-hook
+cargo build
+cd DoWhiz/DoWhiz_service && cargo run --bin inbound_gateway --release
+./DoWhiz_service/scripts/run_employee.sh boiled_egg 9001 --public-url https://YOUR-DOMAIN.ngrok.app --skip-hook
 ```
-
 3. Go to OAuth URL: `https://YOUR-DOMAIN.ngrok.app/slack/oauth/callback`
    - This endpoint may be unreachable on workstations with SafeBrowse
    - To bypass this, go to this URL on your mobile device with Wi-Fi turned off (use mobile data)
@@ -647,27 +647,24 @@ cd DoWhiz_service && cargo build --release
 
 ### Discord Local Testing
 
-1. Set up the ngrok tunnel on port 9004:
+1. Start the dev employee (`boiled_egg`):
 ```bash
-ngrok http 9004 --authtoken=${NGROK_AUTHTOKEN} --url https://YOUR-DOMAIN.ngrok.app
+cargo build
+cd DoWhiz/DoWhiz_service && cargo run --bin inbound_gateway --release
+./DoWhiz_service/scripts/run_employee.sh boiled_egg 9001 --public-url https://YOUR-DOMAIN.ngrok.app --skip-hook
 ```
 
-2. Start the dev employee (`boiled_egg`):
-```bash
-cd DoWhiz_service && cargo build --release
-./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004 --public-url https://YOUR-DOMAIN.ngrok.app --skip-hook
-```
-
-3. Add the bot to server by going to this URL:
+2. Add the bot to server by going to this URL:
    - https://discord.com/oauth2/authorize?client_id=1472013251553525983&permissions=0&integration_type=0&scope=bot
 
 ### iMessage Local Testing via BlueBubbles
 1. Download BlueBubbles (e.g. ```brew install --cask bluebubbles```)
-2. In API & WebHooks, create a new webhook at http://127.0.0.1:9001/bluebubbles/webhook. Give it the New Messages Event Subscription.
+2. In API & WebHooks, create a new webhook at http://127.0.0.1:9100/bluebubbles/webhook. Give it the New Messages Event Subscription.
 3. Start the dev employee (`boiled_egg`):
 ```bash
-cd DoWhiz_service && cargo build --release
-./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004 --public-url https://YOUR-DOMAIN.ngrok.app --skip-hook
+cargo build
+cd DoWhiz/DoWhiz_service && cargo run --bin inbound_gateway --release
+./DoWhiz_service/scripts/run_employee.sh boiled_egg 9001 --public-url https://YOUR-DOMAIN.ngrok.app --skip-hook
 ```
 
 ### Google Docs Integration
