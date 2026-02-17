@@ -93,16 +93,47 @@ jobs:
           mkdir -p /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
           EOF
 
-      - name: Upload rust binaries to Azure VM
-        run: |
-          scp -F ~/.ssh/config ./rust-binaries/* azureproduction:/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release/
-
-      - name: Ensure rust binaries are executable
+      - name: Ensure release directory is writable
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'
-          chmod 755 /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release/rust_service
-          chmod 755 /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release/inbound_gateway
-          chmod 755 /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release/set_postmark_inbound_hook
+          set -e
+          RELEASE_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
+          mkdir -p "$RELEASE_DIR"
+          chmod u+rwx "$RELEASE_DIR"
+          EOF
+
+      - name: Inspect release directory (debug)
+        run: |
+          ssh -F ~/.ssh/config azureproduction << 'EOF'
+          RELEASE_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
+          echo "== whoami =="
+          whoami
+          echo "== id =="
+          id
+          echo "== ls -ald =="
+          ls -ald "$RELEASE_DIR"
+          echo "== ls -al =="
+          ls -al "$RELEASE_DIR"
+          echo "== stat =="
+          stat "$RELEASE_DIR" || true
+          echo "== df -h =="
+          df -h "$RELEASE_DIR" || true
+          EOF
+
+      - name: Upload rust binaries to Azure VM (tmp)
+        run: |
+          ssh -F ~/.ssh/config azureproduction "mkdir -p /tmp/dowhiz-release"
+          scp -F ~/.ssh/config ./rust-binaries/* azureproduction:/tmp/dowhiz-release/
+
+      - name: Install rust binaries on Azure VM
+        run: |
+          ssh -F ~/.ssh/config azureproduction << 'EOF'
+          set -e
+          RELEASE_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
+          install -m 755 /tmp/dowhiz-release/rust_service "$RELEASE_DIR/rust_service"
+          install -m 755 /tmp/dowhiz-release/inbound_gateway "$RELEASE_DIR/inbound_gateway"
+          install -m 755 /tmp/dowhiz-release/set_postmark_inbound_hook "$RELEASE_DIR/set_postmark_inbound_hook"
+          rm -rf /tmp/dowhiz-release
           EOF
 
       - name: Write production .env on Azure VM
