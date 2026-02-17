@@ -42,12 +42,14 @@ Rust service for inbound webhooks (Postmark, Slack, Discord), task scheduling, A
 
 **Required in `.env`** (copy from repo-root `.env.example` to `DoWhiz_service/.env`):
 - `POSTMARK_SERVER_TOKEN`
-- `AZURE_OPENAI_API_KEY_BACKUP` and `AZURE_OPENAI_ENDPOINT_BACKUP` (required when Codex is enabled)
+- `AZURE_OPENAI_API_KEY_BACKUP` (required for Codex and Claude runners)
+- `AZURE_OPENAI_ENDPOINT_BACKUP` (required for Codex runner)
 
 **Optional in `.env`**:
-- `GITHUB_USERNAME` + `GITHUB_PERSONAL_ACCESS_TOKEN` (enables Codex/agent GitHub access via `GH_TOKEN`/`GITHUB_TOKEN` + git askpass)
+- GitHub auth: `GH_TOKEN`/`GITHUB_TOKEN`/`GITHUB_PERSONAL_ACCESS_TOKEN` + `GITHUB_USERNAME`. Per-employee prefixes are supported (`OLIVER_`, `MAGGIE_`, `DEVIN_`, `PROTO_`) and can be overridden with `EMPLOYEE_GITHUB_ENV_PREFIX` or `GITHUB_ENV_PREFIX`.
 - `RUN_TASK_DOCKER_IMAGE` (run each task inside a disposable Docker container; use `dowhiz-service` for the repo image)
 - `RUN_TASK_DOCKER_AUTO_BUILD=1` to auto-build the image when missing (set `0` to disable)
+- `INGESTION_DB_PATH` + `INGESTION_DEDUPE_PATH` (shared queue for the inbound gateway + workers)
 
 ---
 
@@ -123,25 +125,24 @@ Skills are copied per workspace: the base repo skills are always included, and `
 
 From the repo root:
 ```bash
-./DoWhiz_service/scripts/run_employee.sh little_bear 9001
-./DoWhiz_service/scripts/run_employee.sh mini_mouse 9002
-./DoWhiz_service/scripts/run_employee.sh sticky_octopus 9003
-./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004
+./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
+./DoWhiz_service/scripts/run_employee.sh mini_mouse 9002 --skip-hook --skip-ngrok
+./DoWhiz_service/scripts/run_employee.sh sticky_octopus 9003 --skip-hook --skip-ngrok
+./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004 --skip-hook --skip-ngrok
 ```
 
 This command:
-- Starts ngrok and discovers the public URL
-- Updates the Postmark inbound hook to `https://.../postmark/inbound`
-- Runs the Rust service bound to the selected host/port
+- Starts a worker process (the Rust service bound to the selected host/port).
+- (Legacy) Can start ngrok and update the Postmark inbound hook, but the worker no longer serves `/postmark/inbound`.
 
-Requires `POSTMARK_SERVER_TOKEN` in `DoWhiz_service/.env`, plus `ngrok` and `python3` installed.
+For the current inbound flow, run the inbound gateway separately and use `--skip-hook --skip-ngrok` so workers do not overwrite the gateway hook.
 
 **Optional flags:**
 - `--public-url https://example.com` uses an existing public URL and skips ngrok
 - `--skip-hook` leaves the Postmark hook unchanged
 - `--skip-ngrok` disables ngrok (requires `--public-url` or `--skip-hook`)
 
-When running with the inbound gateway, start workers with `--skip-hook` so they do not overwrite the gateway's Postmark hook.
+When running with the inbound gateway, start workers with `--skip-hook --skip-ngrok`.
 
 **Full usage:**
 ```
@@ -151,8 +152,19 @@ scripts/run_employee.sh --employee <id> --port <port> [--public-url <url>] [--sk
 
 ### Manual Multi-Employee Setup
 
-**Step 1: Start the Rust service (Terminal 1)**
+**Step 0: Choose a shared ingestion queue (same for gateway + all workers)**
+Add these to `DoWhiz_service/.env` (recommended) or export in each terminal before starting gateway/workers.
 ```bash
+export INGESTION_DB_PATH="$HOME/.dowhiz/DoWhiz/ingestion/ingestion.db"
+export INGESTION_DEDUPE_PATH="$HOME/.dowhiz/DoWhiz/ingestion/ingestion_processed_ids.txt"
+mkdir -p "$(dirname "$INGESTION_DB_PATH")"
+```
+
+**Step 1: Start workers (one per employee)**
+Run each worker in its own terminal.
+```bash
+cd DoWhiz_service
+
 # Oliver / Little-Bear (Codex)
 EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 \
   cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
@@ -170,23 +182,47 @@ EMPLOYEE_ID=boiled_egg RUST_SERVICE_PORT=9004 \
   cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9004
 ```
 
-**Step 2: Expose the service with ngrok (Terminal 2)**
+**Step 2: Configure the gateway routes**
 ```bash
-ngrok http 9001   # or 9002 for mini_mouse
+cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
+# Edit gateway.toml to map service addresses to employees. Example:
+cat > DoWhiz_service/gateway.toml <<'EOF'
+[defaults]
+tenant_id = "default"
+employee_id = "little_bear"
+
+[[routes]]
+channel = "email"
+key = "oliver@dowhiz.com"
+employee_id = "little_bear"
+tenant_id = "default"
+EOF
 ```
 
-**Step 3: Set the Postmark inbound hook (Terminal 3)**
+**Step 3: Start the inbound gateway (Terminal 2)**
 ```bash
+# Ensure INGESTION_DB_PATH/INGESTION_DEDUPE_PATH are set in this terminal
+./DoWhiz_service/scripts/run_gateway_local.sh
+```
+
+**Step 4: Expose the gateway with ngrok (Terminal 3)**
+```bash
+ngrok http 9100
+```
+
+**Step 5: Set the Postmark inbound hook to the gateway**
+```bash
+cd DoWhiz_service
 cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
   --hook-url https://YOUR-DOMAIN.ngrok.app/postmark/inbound
 ```
 
-**Step 4: Send an email**
+**Step 6: Send an email**
 ```
 oliver@dowhiz.com   # or mini-mouse@dowhiz.com, devin@dowhiz.com, proto@dowhiz.com
 ```
 
-**Step 5: Watch logs for task execution**
+**Step 7: Watch logs for task execution**
 
 Outputs appear under:
 - `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces/<message_id>/reply_email_draft.html`
@@ -195,82 +231,83 @@ Outputs appear under:
 
 ### Inbound Gateway (Recommended)
 
-The inbound gateway (`inbound_gateway`) is the recommended way to run multiple employees without webhook collisions. It accepts inbound webhooks, deduplicates, routes to a single employee worker, and returns immediately. Each worker sends the actual reply back to the channel.
+The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio/Google Docs inbound traffic, deduplicates it, and enqueues messages into a shared ingestion queue. Workers poll that queue and send replies. Workers no longer expose `/postmark/inbound`.
 
-**Phase 1 local gateway test (2 Docker workers + 1 local worker)**
+Optional webhook verification:
+- `POSTMARK_INBOUND_TOKEN` (validates `X-Postmark-Token`)
+- `SLACK_SIGNING_SECRET`
+- `BLUEBUBBLES_WEBHOOK_TOKEN`
+- `TWILIO_AUTH_TOKEN` + `TWILIO_WEBHOOK_URL`
+- `GATEWAY_MAX_BODY_BYTES` to override the default 25MB request limit
 
-This matches the staging/dev flow with Oliver + Maggie in Docker and Proto on your host:
+**Local gateway + Docker workers (shared ingestion queue)**
 
 **Step 1: Build the Docker image (once)**
 ```bash
 docker build -t dowhiz-service .
 ```
 
-**Step 2: Start Oliver worker (Docker)**
+**Step 2: Prepare a shared ingestion directory**
+```bash
+export INGESTION_DIR="$HOME/.dowhiz/DoWhiz/ingestion"
+mkdir -p "$INGESTION_DIR"
+```
+
+**Step 3: Start workers in Docker (mount shared ingestion dir)**
 ```bash
 docker run --rm -p 9001:9001 \
   -e EMPLOYEE_ID=little_bear \
   -e RUST_SERVICE_PORT=9001 \
   -e RUN_TASK_DOCKER_IMAGE= \
+  -e INGESTION_DB_PATH=/ingestion/ingestion.db \
+  -e INGESTION_DEDUPE_PATH=/ingestion/ingestion_processed_ids.txt \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
+  -v "$INGESTION_DIR:/ingestion" \
   -v dowhiz-workspace-oliver:/app/.workspace \
   dowhiz-service
-```
 
-**Step 3: Start Maggie worker (Docker)**
-```bash
 docker run --rm -p 9002:9001 \
   -e EMPLOYEE_ID=mini_mouse \
   -e RUST_SERVICE_PORT=9001 \
   -e RUN_TASK_DOCKER_IMAGE= \
+  -e INGESTION_DB_PATH=/ingestion/ingestion.db \
+  -e INGESTION_DEDUPE_PATH=/ingestion/ingestion_processed_ids.txt \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
+  -v "$INGESTION_DIR:/ingestion" \
   -v dowhiz-workspace-maggie:/app/.workspace \
   dowhiz-service
 ```
 
 Note: when running workers inside Docker, clear `RUN_TASK_DOCKER_IMAGE` to avoid nested Docker usage.
 
-**Step 4: Start Proto worker (host)**
-```bash
-EMPLOYEE_ID=boiled_egg RUST_SERVICE_PORT=9004 \
-  cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9004
-```
-
-**Step 5: Configure the gateway**
+**Step 4: Configure the gateway routes**
 ```bash
 cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
-```
-Edit `DoWhiz_service/gateway.toml` to point at your local ports:
-```toml
-[targets]
-little_bear = "http://127.0.0.1:9001"
-mini_mouse  = "http://127.0.0.1:9002"
-boiled_egg  = "http://127.0.0.1:9004"
-
-[slack]
-default_employee_id = "boiled_egg"
+# Edit gateway.toml routes to map service addresses to employees.
 ```
 
-**Step 6: Start the gateway (host)**
+**Step 5: Start the gateway (host)**
 ```bash
-./DoWhiz_service/scripts/run_gateway_local.sh
+INGESTION_DB_PATH="$INGESTION_DIR/ingestion.db" \
+INGESTION_DEDUPE_PATH="$INGESTION_DIR/ingestion_processed_ids.txt" \
+  ./DoWhiz_service/scripts/run_gateway_local.sh
 ```
 
-**Step 7: Expose the gateway with ngrok**
+**Step 6: Expose the gateway with ngrok**
 ```bash
 ngrok http 9100
 ```
 
-**Step 8: Point Postmark to the gateway**
+**Step 7: Point Postmark to the gateway**
 ```bash
+cd DoWhiz_service
 cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
   --hook-url https://YOUR-DOMAIN.ngrok.app/postmark/inbound
 ```
 
-**Step 9: Send test emails**
+**Step 8: Send test emails**
 Use Postmark inbound with the test sender identities:
 - From: `mini-mouse@deep-tutor.com` → To: `mini-mouse@dowhiz.com`
-- From: `deep-tutor@deep-tutor.com` → To: `proto@dowhiz.com`
 
 If you want a scripted smoke test, reuse the live Postmark script below and set:
 ```
@@ -278,7 +315,6 @@ POSTMARK_INBOUND_HOOK_URL=http://127.0.0.1:9100/postmark/inbound
 POSTMARK_TEST_FROM=mini-mouse@deep-tutor.com
 POSTMARK_TEST_SERVICE_ADDRESS=mini-mouse@dowhiz.com
 ```
-Repeat with `POSTMARK_TEST_FROM=deep-tutor@deep-tutor.com` and `POSTMARK_TEST_SERVICE_ADDRESS=proto@dowhiz.com`.
 
 ### VM Deployment (Gateway + ngrok)
 
@@ -303,6 +339,10 @@ git clone https://github.com/KnoWhiz/DoWhiz.git
 cd DoWhiz
 cp .env.example DoWhiz_service/.env
 # Edit DoWhiz_service/.env with production secrets
+# Add shared ingestion paths (used by gateway + worker):
+# INGESTION_DB_PATH=/home/azureuser/.dowhiz/DoWhiz/ingestion/ingestion.db
+# INGESTION_DEDUPE_PATH=/home/azureuser/.dowhiz/DoWhiz/ingestion/ingestion_processed_ids.txt
+mkdir -p /home/azureuser/.dowhiz/DoWhiz/ingestion
 ```
 
 Optional: copy your local `.env` directly to the VM:
@@ -314,8 +354,15 @@ scp /path/to/DoWhiz_service/.env azureuser@<vm>:/home/azureuser/DoWhiz/DoWhiz_se
 ```bash
 cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
 cat > DoWhiz_service/gateway.toml <<'EOF'
-[targets]
-little_bear = "http://127.0.0.1:9001"
+[defaults]
+tenant_id = "default"
+employee_id = "little_bear"
+
+[[routes]]
+channel = "email"
+key = "oliver@dowhiz.com"
+employee_id = "little_bear"
+tenant_id = "default"
 EOF
 ```
 
@@ -351,17 +398,39 @@ Use the Live E2E driver script in [Live E2E Tests](#live-e2e-tests).
 
 #### Nginx + systemd (optional)
 
-If you prefer terminating HTTPS on the VM directly (no ngrok), use Nginx + systemd and point Postmark to the VM domain.
+If you prefer terminating HTTPS on the VM directly (no ngrok), run both the inbound gateway and a worker behind Nginx and point Postmark to the gateway URL.
 
-Environment file path (update to match current layout):
+Environment file path (update to match current layout). Ensure it includes the shared ingestion paths:
 ```
 EnvironmentFile=/home/azureuser/DoWhiz/DoWhiz_service/.env
 ```
 
-Example systemd service:
+Example systemd services:
+Build binaries first: `cargo build -p scheduler_module --bin rust_service --bin inbound_gateway --release`.
+
 ```ini
 [Unit]
-Description=DoWhiz Rust Service (Oliver)
+Description=DoWhiz Inbound Gateway
+After=network.target
+
+[Service]
+Type=simple
+User=azureuser
+Group=azureuser
+WorkingDirectory=/home/azureuser/DoWhiz/DoWhiz_service
+EnvironmentFile=/home/azureuser/DoWhiz/DoWhiz_service/.env
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/azureuser/DoWhiz/DoWhiz_service/target/release/inbound_gateway
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```ini
+[Unit]
+Description=DoWhiz Worker (Oliver)
 After=network.target
 
 [Service]
@@ -381,38 +450,12 @@ WantedBy=multi-user.target
 
 ### Fanout Gateway (Legacy)
 
-If you need a broadcast-style gateway that forwards every inbound request to **all** employee services, use the legacy fanout gateway. For most deployments, prefer the inbound gateway so each message is routed to a single worker.
+The fanout gateway predates the ingestion-queue architecture and expects workers to accept inbound HTTP routes. Current workers do not expose `/postmark/inbound`, so the fanout flow is not compatible with the default setup.
 
-**Local (fanout only):**
-```bash
-./DoWhiz_service/scripts/run_fanout_local.sh
-```
-
-**Override targets/port:**
-```bash
-FANOUT_TARGETS="http://127.0.0.1:9001,http://127.0.0.1:9002,http://127.0.0.1:9003" \
-FANOUT_PORT=9100 \
-./DoWhiz_service/scripts/run_fanout_local.sh
-```
-
-**Docker (fanout + all employees in one command):**
-```bash
-./DoWhiz_service/scripts/run_all_employees_docker.sh
-```
-
-Point Postmark inbound hook and Slack event subscriptions at the **fanout** URL:
-- `https://<ngrok>.ngrok.app/postmark/inbound`
-- `https://<ngrok>.ngrok.app/slack/events`
-
-**Proto (boiled_egg) debug:**
-```bash
-./DoWhiz_service/scripts/run_proto_docker.sh
-```
-
-**Local (no Docker):**
-```bash
-./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004 --skip-hook
-```
+Use the inbound gateway instead. Legacy scripts remain for reference:
+- `./DoWhiz_service/scripts/run_fanout_local.sh`
+- `./DoWhiz_service/scripts/run_all_employees_docker.sh`
+- `./DoWhiz_service/scripts/run_proto_docker.sh`
 
 ### Docker Production
 
@@ -420,9 +463,27 @@ Build the image from the repo root and run it with the same `.env` file mounted:
 
 ```bash
 docker build -t dowhiz-service .
+export INGESTION_DIR="$HOME/.dowhiz/DoWhiz/ingestion"
+mkdir -p "$INGESTION_DIR"
 docker run --rm -p 9001:9001 \
+  -e INGESTION_DB_PATH=/ingestion/ingestion.db \
+  -e INGESTION_DEDUPE_PATH=/ingestion/ingestion_processed_ids.txt \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
+  -v "$INGESTION_DIR:/ingestion" \
   -v dowhiz-workspace:/app/.workspace \
+  dowhiz-service
+```
+
+This runs a worker only. For inbound webhooks, run the inbound gateway separately and point it at the same ingestion queue:
+```bash
+docker run --rm -p 9100:9100 \
+  --entrypoint /app/inbound_gateway \
+  -e GATEWAY_PORT=9100 \
+  -e INGESTION_DB_PATH=/ingestion/ingestion.db \
+  -e INGESTION_DEDUPE_PATH=/ingestion/ingestion_processed_ids.txt \
+  -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
+  -v "$PWD/DoWhiz_service/gateway.toml:/app/DoWhiz_service/gateway.toml:ro" \
+  -v "$INGESTION_DIR:/ingestion" \
   dowhiz-service
 ```
 
@@ -493,28 +554,43 @@ cargo fmt --check
 - `POSTMARK_SERVER_TOKEN`, `POSTMARK_TEST_FROM`, `AZURE_OPENAI_API_KEY_BACKUP`, and `AZURE_OPENAI_ENDPOINT_BACKUP` set
 - `RUN_CODEX_E2E=1` if you want Codex to execute real tasks (otherwise it is disabled in the live test)
 
-**Docker flow (run service in Docker, then drive the live email from the host):**
+**Docker flow (worker in Docker, gateway on host):**
 
-1. Start ngrok:
+1. Prepare a shared ingestion directory:
 ```bash
-ngrok http 9002   # mini_mouse
-ngrok http 9001   # little_bear
+export INGESTION_DIR="$HOME/.dowhiz/DoWhiz/ingestion"
+mkdir -p "$INGESTION_DIR"
 ```
 
-2. Start the container (match the same port you exposed with ngrok):
+2. Start the worker container:
 ```bash
 docker run --rm -p 9002:9002 \
   -e EMPLOYEE_ID=mini_mouse \
   -e RUST_SERVICE_PORT=9002 \
   -e RUN_TASK_SKIP_WORKSPACE_REMAP=1 \
+  -e INGESTION_DB_PATH=/ingestion/ingestion.db \
+  -e INGESTION_DEDUPE_PATH=/ingestion/ingestion_processed_ids.txt \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
+  -v "$INGESTION_DIR:/ingestion" \
   -v dowhiz-workspace:/app/.workspace \
   dowhiz-service
 ```
 
 For `little_bear` (Codex), add `-e CODEX_BYPASS_SANDBOX=1` if Codex fails with Landlock sandbox errors inside Docker.
 
-3. Run the live driver:
+3. Ensure `DoWhiz_service/gateway.toml` routes the test address to your worker, then start the inbound gateway on the host:
+```bash
+INGESTION_DB_PATH="$INGESTION_DIR/ingestion.db" \
+INGESTION_DEDUPE_PATH="$INGESTION_DIR/ingestion_processed_ids.txt" \
+  ./DoWhiz_service/scripts/run_gateway_local.sh
+```
+
+4. Start ngrok (gateway port):
+```bash
+ngrok http 9100
+```
+
+5. Run the live driver:
 ```bash
 POSTMARK_INBOUND_HOOK_URL="https://<ngrok>.ngrok.app/postmark/inbound" \
 POSTMARK_TEST_SERVICE_ADDRESS="mini-mouse@dowhiz.com" \
@@ -603,8 +679,7 @@ PY
 
 1. Start ngrok:
 ```bash
-ngrok http 9002   # mini_mouse
-ngrok http 9001   # little_bear
+ngrok http 9100
 ```
 
 2. Run the live test (do not start `rust_service` separately; the test binds to the port itself):
@@ -627,45 +702,32 @@ cargo test -p scheduler_module --test service_real_email -- --nocapture
 
 ### Slack Local Testing
 
-1. Set up the ngrok tunnel on port 9100:
-```bash
-ngrok http 9100 --authtoken=${NGROK_AUTHTOKEN} --url https://YOUR-DOMAIN.ngrok.app
-```
+Slack events are handled by the inbound gateway (`/slack/events`); OAuth callbacks are handled by the worker (`/slack/oauth/callback`). You need two public URLs (or a reverse proxy that splits paths).
 
-2. Start the dev employee (`boiled_egg`):
+1. Start a worker (typically `boiled_egg`) and the inbound gateway with a shared ingestion queue.
+2. Start two ngrok tunnels:
 ```bash
-cargo build
-cd DoWhiz/DoWhiz_service && cargo run --bin inbound_gateway --release
-./DoWhiz_service/scripts/run_employee.sh boiled_egg 9001 --public-url https://YOUR-DOMAIN.ngrok.app --skip-hook
+ngrok http 9100  # gateway events
+ngrok http 9004  # worker OAuth/install
 ```
-3. Go to OAuth URL: `https://YOUR-DOMAIN.ngrok.app/slack/oauth/callback`
-   - This endpoint may be unreachable on workstations with SafeBrowse
-   - To bypass this, go to this URL on your mobile device with Wi-Fi turned off (use mobile data)
-
-4. After OAuth, invite the bot to the channel:
-   - In Slack, go to the channel and type `/invite @DoWhiz` (or click the channel settings → Integrations → Add apps)
+3. Configure your Slack app:
+Event Subscriptions Request URL: `https://<gateway-ngrok>.ngrok.app/slack/events`
+OAuth Redirect URL: `https://<worker-ngrok>.ngrok.app/slack/oauth/callback`
+Set `SLACK_REDIRECT_URI` in `.env` to the OAuth Redirect URL.
+4. Visit `https://<worker-ngrok>.ngrok.app/slack/install` to authorize.
+5. Invite the bot to a channel (`/invite @DoWhiz`).
 
 ### Discord Local Testing
 
-1. Start the dev employee (`boiled_egg`):
-```bash
-cargo build
-cd DoWhiz/DoWhiz_service && cargo run --bin inbound_gateway --release
-./DoWhiz_service/scripts/run_employee.sh boiled_egg 9001 --public-url https://YOUR-DOMAIN.ngrok.app --skip-hook
-```
-
-2. Add the bot to server by going to this URL:
-   - https://discord.com/oauth2/authorize?client_id=1472013251553525983&permissions=0&integration_type=0&scope=bot
+1. Set `DISCORD_BOT_TOKEN` and `DISCORD_BOT_USER_ID` in `.env`.
+2. Start a worker and the inbound gateway with a shared ingestion queue.
+3. Add the bot to your server:
+`https://discord.com/oauth2/authorize?client_id=1472013251553525983&permissions=0&integration_type=0&scope=bot`
 
 ### iMessage Local Testing via BlueBubbles
-1. Download BlueBubbles (e.g. ```brew install --cask bluebubbles```)
-2. In API & WebHooks, create a new webhook at http://127.0.0.1:9100/bluebubbles/webhook. Give it the New Messages Event Subscription.
-3. Start the dev employee (`boiled_egg`):
-```bash
-cargo build
-cd DoWhiz/DoWhiz_service && cargo run --bin inbound_gateway --release
-./DoWhiz_service/scripts/run_employee.sh boiled_egg 9001 --public-url https://YOUR-DOMAIN.ngrok.app --skip-hook
-```
+1. Download BlueBubbles (e.g. `brew install --cask bluebubbles`).
+2. Start a worker and the inbound gateway with a shared ingestion queue.
+3. In BlueBubbles → API & WebHooks, create a webhook at `http://127.0.0.1:9100/bluebubbles/webhook` (gateway). If BlueBubbles runs remotely, expose the gateway with ngrok and use that URL.
 
 ### Google Docs Integration
 
@@ -791,9 +853,11 @@ The service includes a local LLM message router that classifies incoming Discord
 ### Configuration
 
 Environment variables:
+- `ROUTER_ENABLED`: Set to `"false"` to disable routing (default: enabled). `OLLAMA_ENABLED` is still honored as a legacy alias.
+- `ROUTER_MODEL`: Model name (default: `phi3:mini` for Ollama, `gpt-5` when `OPENAI_API_KEY` is set).
 - `OLLAMA_URL`: Ollama server URL (default: `http://localhost:11434`)
-- `OLLAMA_MODEL`: Model to use (default: `phi3:mini`)
-- `OLLAMA_ENABLED`: Set to `"false"` to disable routing (default: enabled)
+- `OPENAI_API_KEY`: When set, the router uses OpenAI instead of Ollama.
+- `OPENAI_API_URL`: Override OpenAI base URL (default: `https://api.openai.com/v1`)
 
 ### Docker Setup
 
@@ -842,6 +906,13 @@ This reduces API costs and latency for simple interactions while preserving full
 | `SCHEDULER_MAX_CONCURRENCY` | `10` | Global max concurrent tasks |
 | `SCHEDULER_USER_MAX_CONCURRENCY` | `3` | Per-user max concurrent tasks |
 
+### Ingestion Queue
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `INGESTION_DB_PATH` | `<runtime_root>/state/ingestion.db` (workers) | Shared ingestion queue DB. Gateway default is `$HOME/.dowhiz/DoWhiz/gateway/state/ingestion.db`; set explicitly so gateway and workers share. |
+| `INGESTION_DEDUPE_PATH` | `<runtime_root>/state/ingestion_processed_ids.txt` | Dedupe store for ingestion consumer |
+| `INGESTION_POLL_INTERVAL_SECS` | `1` | Poll interval for ingestion consumer |
+
 ### Codex (OpenAI)
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -875,9 +946,14 @@ This reduces API costs and latency for simple interactions while preserving full
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GATEWAY_CONFIG_PATH` | `gateway.toml` | Path to gateway config file |
-| `GATEWAY_DEDUPE_PATH` | `$HOME/.dowhiz/DoWhiz/gateway/state/processed_ids.txt` | Gateway dedupe file |
 | `GATEWAY_HOST` | `0.0.0.0` | Gateway bind host |
 | `GATEWAY_PORT` | `9100` | Gateway bind port |
+| `GATEWAY_MAX_BODY_BYTES` | `26214400` | Max inbound body size (25MB) |
+| `POSTMARK_INBOUND_TOKEN` | - | Verify Postmark webhook (`X-Postmark-Token`) |
+| `SLACK_SIGNING_SECRET` | - | Verify Slack signatures |
+| `BLUEBUBBLES_WEBHOOK_TOKEN` | - | Verify BlueBubbles webhook token |
+| `TWILIO_AUTH_TOKEN` | - | Verify Twilio signatures |
+| `TWILIO_WEBHOOK_URL` | - | Public URL used to validate Twilio signatures |
 
 ### Fanout Gateway (Legacy)
 | Variable | Default | Description |
@@ -887,12 +963,14 @@ This reduces API costs and latency for simple interactions while preserving full
 | `FANOUT_TARGETS` | - | Comma-separated list of target URLs |
 | `FANOUT_TIMEOUT_SECS` | - | Request timeout |
 
-### Ollama
+### Message Router
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `ROUTER_ENABLED` | `true` | Set to `false` to disable (alias: `OLLAMA_ENABLED`) |
+| `ROUTER_MODEL` | `phi3:mini` | Model name (default is `gpt-5` when `OPENAI_API_KEY` is set) |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_MODEL` | `phi3:mini` | Model to use |
-| `OLLAMA_ENABLED` | `true` | Set to `false` to disable |
+| `OPENAI_API_KEY` | - | When set, router uses OpenAI instead of Ollama |
+| `OPENAI_API_URL` | `https://api.openai.com/v1` | OpenAI base URL |
 
 ### Inbound Blacklist
 Any address listed in `employee.toml` is ignored as a sender (prevents loops; display names and `+tag` aliases are normalized).

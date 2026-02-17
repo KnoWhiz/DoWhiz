@@ -44,7 +44,7 @@ services:
       RUN_TASK_DOCKER_AUTO_BUILD: "0"
       CODEX_BYPASS_SANDBOX: "1"
       OLLAMA_URL: "http://ollama:11434"
-      OLLAMA_MODEL: "phi3:mini"
+      ROUTER_MODEL: "phi3:mini"
       OLLAMA_ENABLED: "true"
     ports:
       - "9001:9001"
@@ -66,7 +66,7 @@ services:
       RUN_TASK_DOCKER_IMAGE: ""
       RUN_TASK_DOCKER_AUTO_BUILD: "0"
       OLLAMA_URL: "http://ollama:11434"
-      OLLAMA_MODEL: "phi3:mini"
+      ROUTER_MODEL: "phi3:mini"
       OLLAMA_ENABLED: "true"
     ports:
       - "9002:9001"
@@ -89,7 +89,7 @@ services:
       RUN_TASK_DOCKER_AUTO_BUILD: "0"
       CODEX_BYPASS_SANDBOX: "1"
       OLLAMA_URL: "http://ollama:11434"
-      OLLAMA_MODEL: "phi3:mini"
+      ROUTER_MODEL: "phi3:mini"
       OLLAMA_ENABLED: "true"
     ports:
       - "9003:9001"
@@ -112,7 +112,7 @@ services:
       RUN_TASK_DOCKER_AUTO_BUILD: "0"
       CODEX_BYPASS_SANDBOX: "1"
       OLLAMA_URL: "http://ollama:11434"
-      OLLAMA_MODEL: "phi3:mini"
+      ROUTER_MODEL: "phi3:mini"
       OLLAMA_ENABLED: "true"
       # BlueBubbles iMessage bridge (host.docker.internal reaches Mac host from container)
       BLUEBUBBLES_URL: "http://host.docker.internal:1234"
