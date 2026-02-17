@@ -246,8 +246,10 @@ impl TaskExecutor for ModuleExecutor {
                     Channel::BlueBubbles => {
                         execute_bluebubbles_send(task)?;
                     }
-                    Channel::Email | Channel::Telegram => {
-                        // Email (and Telegram as fallback) use Postmark
+                    Channel::Telegram => {
+                        execute_telegram_send(task)?;
+                    }
+                    Channel::Email => {
                         execute_email_send(task)?;
                     }
                 }
@@ -524,6 +526,66 @@ fn execute_bluebubbles_send(task: &SendReplyTask) -> Result<(), SchedulerError> 
 
     info!(
         "sent BlueBubbles message to {:?}, message_id={}",
+        task.to, result.message_id
+    );
+    Ok(())
+}
+
+/// Execute a SendReplyTask via Telegram Bot API.
+fn execute_telegram_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
+    use crate::adapters::telegram::TelegramOutboundAdapter;
+    use crate::channel::{ChannelMetadata, OutboundAdapter, OutboundMessage};
+
+    dotenvy::dotenv().ok();
+    let bot_token = std::env::var("TELEGRAM_BOT_TOKEN")
+        .map_err(|_| SchedulerError::TaskFailed("TELEGRAM_BOT_TOKEN not set".to_string()))?;
+
+    let adapter = TelegramOutboundAdapter::new(bot_token);
+
+    // Read plain text content from reply_message.txt (html_path field reused for simplicity)
+    let text_body = if task.html_path.exists() {
+        fs::read_to_string(&task.html_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    // For Telegram, to[0] contains the chat_id as a string
+    let chat_id = task
+        .to
+        .first()
+        .and_then(|s| s.parse::<i64>().ok());
+
+    let message = OutboundMessage {
+        channel: Channel::Telegram,
+        from: task.from.clone(),
+        to: task.to.clone(),
+        cc: vec![],
+        bcc: vec![],
+        subject: task.subject.clone(),
+        text_body,
+        html_body: String::new(),
+        html_path: Some(task.html_path.clone()),
+        attachments_dir: Some(task.attachments_dir.clone()),
+        thread_id: task.in_reply_to.clone(),
+        metadata: ChannelMetadata {
+            telegram_chat_id: chat_id,
+            ..Default::default()
+        },
+    };
+
+    let result = adapter.send(&message).map_err(|err| {
+        SchedulerError::TaskFailed(format!("Telegram send failed: {}", err))
+    })?;
+
+    if !result.success {
+        return Err(SchedulerError::TaskFailed(format!(
+            "Telegram API error: {}",
+            result.error.unwrap_or_default()
+        )));
+    }
+
+    info!(
+        "sent Telegram message to {:?}, message_id={}",
         task.to, result.message_id
     );
     Ok(())
@@ -1159,6 +1221,14 @@ CREATE TABLE IF NOT EXISTS send_bluebubbles_tasks (
     thread_state_path TEXT
 );
 
+CREATE TABLE IF NOT EXISTS send_telegram_tasks (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    chat_id TEXT NOT NULL,
+    text_path TEXT NOT NULL,
+    thread_epoch INTEGER,
+    thread_state_path TEXT
+);
+
 CREATE TABLE IF NOT EXISTS run_task_tasks (
     task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
     workspace_dir TEXT NOT NULL,
@@ -1315,6 +1385,20 @@ fn ensure_send_bluebubbles_tasks_table(conn: &Connection) -> Result<(), Schedule
     Ok(())
 }
 
+fn ensure_send_telegram_tasks_table(conn: &Connection) -> Result<(), SchedulerError> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS send_telegram_tasks (
+            task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+            chat_id TEXT NOT NULL,
+            text_path TEXT NOT NULL,
+            thread_epoch INTEGER,
+            thread_state_path TEXT
+        )",
+        [],
+    )?;
+    Ok(())
+}
+
 fn ensure_run_task_task_columns(conn: &Connection) -> Result<(), SchedulerError> {
     let mut stmt = conn.prepare("PRAGMA table_info(run_task_tasks)")?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
@@ -1455,8 +1539,11 @@ impl SqliteSchedulerStore {
                             self.load_send_email_task(&conn, &id_raw, channel.clone())?
                         }
                         Channel::Sms => self.load_send_sms_task(&conn, &id_raw)?,
-                        Channel::Email | Channel::Telegram => {
+                        Channel::Email => {
                             self.load_send_email_task(&conn, &id_raw, channel.clone())?
+                        }
+                        Channel::Telegram => {
+                            self.load_send_telegram_task(&conn, &id_raw)?
                         }
                         Channel::BlueBubbles => {
                             self.load_send_bluebubbles_task(&conn, &id_raw)?
@@ -1524,8 +1611,11 @@ impl SqliteSchedulerStore {
                     Channel::Sms => {
                         self.insert_send_sms_task(&tx, &task.id.to_string(), send)?;
                     }
-                    Channel::Email | Channel::Telegram => {
+                    Channel::Email => {
                         self.insert_send_email_task(&tx, &task.id.to_string(), send)?;
+                    }
+                    Channel::Telegram => {
+                        self.insert_send_telegram_task(&tx, &task.id.to_string(), send)?;
                     }
                     Channel::BlueBubbles => {
                         self.insert_send_bluebubbles_task(&tx, &task.id.to_string(), send)?;
@@ -1755,6 +1845,30 @@ impl SqliteSchedulerStore {
             params![
                 task_id,
                 chat_guid,
+                send.html_path.to_string_lossy().into_owned(),
+                send.thread_epoch.map(|value| value as i64),
+                send.thread_state_path
+                    .as_ref()
+                    .map(|value| value.to_string_lossy().into_owned()),
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn insert_send_telegram_task(
+        &self,
+        tx: &Transaction,
+        task_id: &str,
+        send: &SendReplyTask,
+    ) -> Result<(), SchedulerError> {
+        // For Telegram, we use to[0] as chat_id and html_path as text_path
+        let chat_id = send.to.first().cloned().unwrap_or_default();
+        tx.execute(
+            "INSERT INTO send_telegram_tasks (task_id, chat_id, text_path, thread_epoch, thread_state_path)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                task_id,
+                chat_id,
                 send.html_path.to_string_lossy().into_owned(),
                 send.thread_epoch.map(|value| value as i64),
                 send.thread_state_path
@@ -2019,6 +2133,51 @@ impl SqliteSchedulerStore {
         })
     }
 
+    fn load_send_telegram_task(
+        &self,
+        conn: &Connection,
+        task_id: &str,
+    ) -> Result<SendReplyTask, SchedulerError> {
+        let row = conn
+            .query_row(
+                "SELECT chat_id, text_path, thread_epoch, thread_state_path
+                 FROM send_telegram_tasks
+                 WHERE task_id = ?1",
+                params![task_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let (chat_id, text_path, thread_epoch_raw, thread_state_path) = row.ok_or_else(|| {
+            SchedulerError::Storage(format!(
+                "missing send_telegram_tasks row for task {}",
+                task_id
+            ))
+        })?;
+
+        Ok(SendReplyTask {
+            channel: Channel::Telegram,
+            subject: String::new(), // Telegram doesn't use subject
+            html_path: PathBuf::from(text_path),
+            attachments_dir: PathBuf::new(), // Telegram attachments handled differently
+            from: None,
+            to: vec![chat_id], // chat_id stored in to[0]
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            in_reply_to: None,
+            references: None,
+            archive_root: None,
+            thread_epoch: thread_epoch_raw.map(|value| value as u64),
+            thread_state_path: normalize_optional_path(thread_state_path),
+        })
+    }
+
     fn load_run_task_task(
         &self,
         conn: &Connection,
@@ -2109,6 +2268,7 @@ impl SqliteSchedulerStore {
         ensure_send_discord_tasks_table(&conn)?;
         ensure_send_sms_tasks_table(&conn)?;
         ensure_send_bluebubbles_tasks_table(&conn)?;
+        ensure_send_telegram_tasks_table(&conn)?;
         ensure_run_task_task_columns(&conn)?;
         Ok(conn)
     }
