@@ -197,15 +197,21 @@ pub(super) fn start_scheduler_threads(
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_TASK_TIMEOUT_SECS);
+        let watchdog_interval_ms = std::env::var("WATCHDOG_INTERVAL_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(WATCHDOG_INTERVAL_SECS * 1000);
+        let watchdog_interval = Duration::from_millis(watchdog_interval_ms);
 
         let handle = thread::spawn(move || {
             info!(
-                "Task watchdog started (timeout={}s, check_interval={}s)",
-                task_timeout_secs, WATCHDOG_INTERVAL_SECS
+                "Task watchdog started (timeout={}s, check_interval={}ms)",
+                task_timeout_secs, watchdog_interval_ms
             );
 
             while !scheduler_stop.load(Ordering::Relaxed) {
-                thread::sleep(Duration::from_secs(WATCHDOG_INTERVAL_SECS));
+                thread::sleep(watchdog_interval);
 
                 let stale_tasks = {
                     let claims = claims.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -619,4 +625,135 @@ pub fn cancel_pending_thread_tasks<E: crate::TaskExecutor>(
             _ => false,
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::employee_config::{EmployeeDirectory, EmployeeProfile};
+    use crate::index_store::IndexStore;
+    use crate::service::DEFAULT_INBOUND_BODY_MAX_BYTES;
+    use crate::user_store::UserStore;
+    use std::collections::{HashMap, HashSet};
+    use std::env;
+    use std::fs;
+    use std::sync::Arc;
+    use std::time::Instant;
+    use tempfile::TempDir;
+
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prev = env::var(key).ok();
+            env::set_var(key, value);
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(value) => env::set_var(self.key, value),
+                None => env::remove_var(self.key),
+            }
+        }
+    }
+
+    fn build_test_config(temp: &TempDir) -> ServiceConfig {
+        let workspace_root = temp.path().join("workspaces");
+        let users_root = temp.path().join("users");
+        let state_dir = temp.path().join("state");
+        fs::create_dir_all(&workspace_root).expect("create workspaces");
+        fs::create_dir_all(&users_root).expect("create users");
+        fs::create_dir_all(&state_dir).expect("create state");
+
+        let addresses = vec!["test@example.com".to_string()];
+        let address_set: HashSet<String> = addresses.iter().cloned().collect();
+        let employee_profile = EmployeeProfile {
+            id: "test-employee".to_string(),
+            display_name: None,
+            runner: "local".to_string(),
+            model: None,
+            addresses,
+            address_set: address_set.clone(),
+            runtime_root: None,
+            agents_path: None,
+            claude_path: None,
+            soul_path: None,
+            skills_dir: None,
+            discord_enabled: false,
+            slack_enabled: false,
+            bluebubbles_enabled: false,
+        };
+        let mut employee_by_id = HashMap::new();
+        employee_by_id.insert(employee_profile.id.clone(), employee_profile.clone());
+        let employee_directory = EmployeeDirectory {
+            employees: vec![employee_profile.clone()],
+            employee_by_id,
+            default_employee_id: Some(employee_profile.id.clone()),
+            service_addresses: address_set,
+        };
+
+        ServiceConfig {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            employee_id: employee_profile.id.clone(),
+            employee_config_path: temp.path().join("employee.toml"),
+            employee_profile,
+            employee_directory,
+            workspace_root: workspace_root.clone(),
+            scheduler_state_path: state_dir.join("tasks.db"),
+            processed_ids_path: state_dir.join("postmark_processed_ids.txt"),
+            ingestion_db_path: state_dir.join("ingestion.db"),
+            ingestion_dedupe_path: state_dir.join("ingestion_processed_ids.txt"),
+            ingestion_poll_interval: Duration::from_millis(50),
+            users_root: users_root.clone(),
+            users_db_path: state_dir.join("users.db"),
+            task_index_path: state_dir.join("task_index.db"),
+            codex_model: "test".to_string(),
+            codex_disabled: true,
+            scheduler_poll_interval: Duration::from_millis(20),
+            scheduler_max_concurrency: 1,
+            scheduler_user_max_concurrency: 1,
+            inbound_body_max_bytes: DEFAULT_INBOUND_BODY_MAX_BYTES,
+            skills_source_dir: None,
+            slack_bot_token: None,
+            slack_bot_user_id: None,
+            slack_store_path: state_dir.join("slack.db"),
+            slack_client_id: None,
+            slack_client_secret: None,
+            slack_redirect_uri: None,
+            discord_bot_token: None,
+            discord_bot_user_id: None,
+            google_docs_enabled: false,
+            bluebubbles_url: None,
+            bluebubbles_password: None,
+            telegram_bot_token: None,
+        }
+    }
+
+    #[test]
+    fn stop_and_join_returns_quickly_with_short_watchdog_interval() {
+        let _guard = EnvGuard::set("WATCHDOG_INTERVAL_MS", "100");
+        let temp = TempDir::new().expect("tempdir");
+        let config = build_test_config(&temp);
+        let user_store = Arc::new(UserStore::new(&config.users_db_path).expect("user store"));
+        let index_store = Arc::new(IndexStore::new(&config.task_index_path).expect("index store"));
+
+        let start = Instant::now();
+        let mut control =
+            start_scheduler_threads(Arc::new(config), user_store.clone(), index_store.clone());
+        control.stop_and_join();
+
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "stop_and_join took too long: {:?}",
+            elapsed
+        );
+    }
 }

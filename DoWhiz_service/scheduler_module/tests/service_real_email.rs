@@ -10,8 +10,10 @@ use scheduler_module::{
 use serde_json::{json, Value};
 use std::env;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
@@ -107,6 +109,37 @@ impl Drop for ChildGuard {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+#[derive(Clone)]
+struct LogCapture {
+    buffer: Arc<Mutex<Vec<u8>>>,
+}
+
+struct LogWriter {
+    buffer: Arc<Mutex<Vec<u8>>>,
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogCapture {
+    type Writer = LogWriter;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        LogWriter {
+            buffer: Arc::clone(&self.buffer),
+        }
+    }
+}
+
+impl Write for LogWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mut guard = self.buffer.lock().unwrap_or_else(|poison| poison.into_inner());
+        guard.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 
@@ -437,12 +470,21 @@ fn wait_for_user_id(
 
 #[test]
 fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
-    let _ = tracing_subscriber::fmt().with_target(false).try_init();
     load_env_from_repo();
     if !env_enabled("RUST_SERVICE_LIVE_TEST") {
         eprintln!("Skipping Rust service live email test. Set RUST_SERVICE_LIVE_TEST=1 to run.");
         return Ok(());
     }
+    let log_buffer = Arc::new(Mutex::new(Vec::new()));
+    let log_capture = LogCapture {
+        buffer: Arc::clone(&log_buffer),
+    };
+    let subscriber = tracing_subscriber::fmt()
+        .with_target(false)
+        .with_writer(log_capture)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("set tracing subscriber");
 
     let token = env::var("POSTMARK_SERVER_TOKEN")
         .map_err(|_| "POSTMARK_SERVER_TOKEN must be set for live tests")?;
@@ -649,6 +691,16 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
 
     let _ = shutdown_tx.send(());
     let _ = rt.block_on(async { server_handle.await })?;
+    drop(_gateway);
+    temp.close()?;
+    std::thread::sleep(Duration::from_millis(200));
+    let log_guard = log_buffer
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let logs = String::from_utf8_lossy(&log_guard);
+    if logs.contains("unable to open database file") {
+        return Err("sqlite warning detected after cleanup".into());
+    }
 
     Ok(())
 }
