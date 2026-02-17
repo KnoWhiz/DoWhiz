@@ -1,13 +1,14 @@
-//! Local LLM message router for classifying and handling simple queries.
+//! LLM message router for classifying and handling simple queries.
 //!
-//! This module provides a message router that uses a local LLM (via Ollama) to classify
+//! This module provides a message router that uses an LLM (OpenAI or Ollama) to classify
 //! incoming messages. Simple queries (greetings, basic questions) are handled directly
-//! by the local model, while complex queries are forwarded to the full Codex/Claude pipeline.
+//! by the model, while complex queries are forwarded to the full Codex/Claude pipeline.
 //!
 //! Configuration:
+//! - `OPENAI_API_KEY`: OpenAI API key (preferred if set)
+//! - `ROUTER_MODEL`: Model to use (default: `gpt-4o-mini` for OpenAI, `phi3:mini` for Ollama)
 //! - `OLLAMA_URL`: Ollama server URL (default: `http://localhost:11434`)
-//! - `OLLAMA_MODEL`: Model to use (default: `phi3:mini`)
-//! - `OLLAMA_ENABLED`: Set to "false" to disable routing (default: enabled)
+//! - `ROUTER_ENABLED`: Set to "false" to disable routing (default: enabled)
 
 use std::env;
 use std::time::Duration;
@@ -16,14 +17,20 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
+/// Default OpenAI API URL
+const DEFAULT_OPENAI_URL: &str = "https://api.openai.com/v1";
+
 /// Default Ollama server URL
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
-/// Default model for classification/response
+/// Default model for OpenAI
+const DEFAULT_OPENAI_MODEL: &str = "gpt-5";
+
+/// Default model for Ollama
 const DEFAULT_OLLAMA_MODEL: &str = "phi3:mini";
 
-/// Timeout for Ollama requests
-const OLLAMA_TIMEOUT: Duration = Duration::from_secs(10);
+/// Timeout for LLM requests
+const LLM_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Magic string that indicates the query should be forwarded to the full pipeline
 const FORWARD_MARKER: &str = "FORWARD_TO_AGENT";
@@ -32,43 +39,14 @@ const FORWARD_MARKER: &str = "FORWARD_TO_AGENT";
 /// Messages longer than this are automatically forwarded to the full pipeline.
 const MAX_SIMPLE_MESSAGE_LENGTH: usize = 300;
 
-/// Patterns that indicate phi3:mini is hallucinating/leaking training data.
-/// If the response contains any of these, we forward to the full pipeline instead.
-const HALLUCINATION_PATTERNS: &[&str] = &[
-    "could not complete your request",
-    "after 3 attempts",
-    "after three attempts",
-    "please resend your request",
-    "request failed",
-    "---",              // Training data separator
-    "@unknown-user",    // Training data leakage
-    "Instruction:",     // Training data leakage
-];
-
 /// System prompt for the classifier/responder
-const SYSTEM_PROMPT: &str = r#"You are Boiled-Egg, a calm local-testing specialist who is thorough and reliable. You always get tasks done. Go eggs!
+const SYSTEM_PROMPT: &str = r#"You are Boiled-Egg, a friendly and helpful assistant.
 
-Your job is to:
-1. RESPOND DIRECTLY to greetings and casual conversation
-2. Output ONLY "FORWARD_TO_AGENT" for technical/complex requests
+Your job is to classify messages:
+1. RESPOND DIRECTLY to questions you can answer quickly (greetings, casual chat, simple questions, thank you messages)
+2. Output ONLY "FORWARD_TO_AGENT" for tasks that require tools, code, file operations, research, or multi-step work
 
-ALWAYS respond directly to:
-- Greetings: "hi", "hello", "hey", "how are you", "what's up"
-- Casual chat: "how's it going", "what are you up to", "nice to meet you"
-- Simple questions about yourself: "what's your name", "what can you do"
-- Thank you messages
-
-ONLY output "FORWARD_TO_AGENT" for:
-- Code or programming requests
-- File/document operations
-- Research tasks requiring search
-- Multi-step technical tasks
-
-NEVER output error messages, retry messages, or phrases like "could not complete" or "attempts".
-NEVER output "---" or anything after it. Stop immediately after your response.
-NEVER output text like "@unknown-user" or "Instruction:".
-
-Keep responses brief and friendly. Output ONLY your response, nothing else."#;
+Keep responses brief and friendly."#;
 
 /// Result of routing a message
 #[derive(Debug, Clone)]
@@ -81,9 +59,22 @@ pub enum RouterDecision {
     Passthrough,
 }
 
+/// LLM provider to use for routing
+#[derive(Debug, Clone, PartialEq)]
+pub enum RouterProvider {
+    OpenAI,
+    Ollama,
+}
+
 /// Configuration for the message router
 #[derive(Debug, Clone)]
 pub struct RouterConfig {
+    /// Which LLM provider to use
+    pub provider: RouterProvider,
+    /// OpenAI API key (required for OpenAI provider)
+    pub openai_api_key: Option<String>,
+    /// OpenAI API URL
+    pub openai_url: String,
     /// Ollama server URL
     pub ollama_url: String,
     /// Model to use
@@ -94,17 +85,34 @@ pub struct RouterConfig {
 
 impl Default for RouterConfig {
     fn default() -> Self {
+        let openai_api_key = env::var("OPENAI_API_KEY").ok();
+        let provider = if openai_api_key.is_some() {
+            RouterProvider::OpenAI
+        } else {
+            RouterProvider::Ollama
+        };
+
+        let default_model = match provider {
+            RouterProvider::OpenAI => DEFAULT_OPENAI_MODEL,
+            RouterProvider::Ollama => DEFAULT_OLLAMA_MODEL,
+        };
+
         Self {
+            provider,
+            openai_api_key,
+            openai_url: env::var("OPENAI_API_URL")
+                .unwrap_or_else(|_| DEFAULT_OPENAI_URL.to_string()),
             ollama_url: env::var("OLLAMA_URL").unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string()),
-            model: env::var("OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_OLLAMA_MODEL.to_string()),
-            enabled: env::var("OLLAMA_ENABLED")
+            model: env::var("ROUTER_MODEL").unwrap_or_else(|_| default_model.to_string()),
+            enabled: env::var("ROUTER_ENABLED")
+                .or_else(|_| env::var("OLLAMA_ENABLED"))
                 .map(|v| v.to_lowercase() != "false")
                 .unwrap_or(true),
         }
     }
 }
 
-/// Message router that uses local LLM for classification
+/// Message router that uses LLM for classification
 #[derive(Debug, Clone)]
 pub struct MessageRouter {
     config: RouterConfig,
@@ -120,13 +128,18 @@ impl MessageRouter {
     /// Create a new message router with custom configuration
     pub fn with_config(config: RouterConfig) -> Self {
         let client = Client::builder()
-            .timeout(OLLAMA_TIMEOUT)
+            .timeout(LLM_TIMEOUT)
             .build()
             .unwrap_or_else(|_| Client::new());
 
+        let provider_info = match config.provider {
+            RouterProvider::OpenAI => format!("OpenAI ({})", config.openai_url),
+            RouterProvider::Ollama => format!("Ollama ({})", config.ollama_url),
+        };
+
         info!(
-            "MessageRouter initialized: url={}, model={}, enabled={}",
-            config.ollama_url, config.model, config.enabled
+            "MessageRouter initialized: provider={}, model={}, enabled={}",
+            provider_info, config.model, config.enabled
         );
 
         Self { config, client }
@@ -163,14 +176,16 @@ impl MessageRouter {
             return RouterDecision::Complex;
         }
 
-        match self.call_ollama(message).await {
+        let result = match self.config.provider {
+            RouterProvider::OpenAI => self.call_openai(message).await,
+            RouterProvider::Ollama => self.call_ollama(message).await,
+        };
+
+        match result {
             Ok(response) => {
                 let trimmed = response.trim();
                 if trimmed.contains(FORWARD_MARKER) {
                     info!("Router decision: Complex (forward to pipeline)");
-                    RouterDecision::Complex
-                } else if Self::contains_hallucination(trimmed) {
-                    warn!("Router detected hallucination in response, forwarding to pipeline");
                     RouterDecision::Complex
                 } else {
                     info!("Router decision: Simple (local response)");
@@ -184,15 +199,66 @@ impl MessageRouter {
         }
     }
 
-    /// Check if the response contains any hallucination patterns
-    fn contains_hallucination(response: &str) -> bool {
-        let lower = response.to_lowercase();
-        for pattern in HALLUCINATION_PATTERNS {
-            if lower.contains(&pattern.to_lowercase()) {
-                return true;
-            }
+    /// Make a request to the OpenAI API (async)
+    async fn call_openai(&self, message: &str) -> Result<String, String> {
+        let api_key = self
+            .config
+            .openai_api_key
+            .as_ref()
+            .ok_or("OPENAI_API_KEY not set")?;
+
+        let url = format!("{}/chat/completions", self.config.openai_url);
+
+        let request = OpenAIChatRequest {
+            model: self.config.model.clone(),
+            messages: vec![
+                OpenAIChatMessage {
+                    role: "system".to_string(),
+                    content: SYSTEM_PROMPT.to_string(),
+                },
+                OpenAIChatMessage {
+                    role: "user".to_string(),
+                    content: message.to_string(),
+                },
+            ],
+            max_completion_tokens: 1024,
+        };
+
+        debug!(
+            "Calling OpenAI: {} with model {}",
+            url, self.config.model
+        );
+
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(format!("OpenAI returned {}: {}", status, body));
         }
-        false
+
+        let openai_response: OpenAIChatResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        let content = openai_response
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .unwrap_or_default();
+
+        debug!("OpenAI response received");
+
+        Ok(content)
     }
 
     /// Make a request to the Ollama API (async)
@@ -244,6 +310,37 @@ impl Default for MessageRouter {
 }
 
 // ============================================================================
+// OpenAI API types
+// ============================================================================
+
+/// Request body for OpenAI chat completions endpoint
+#[derive(Debug, Clone, Serialize)]
+struct OpenAIChatRequest {
+    model: String,
+    messages: Vec<OpenAIChatMessage>,
+    max_completion_tokens: u32,
+}
+
+/// Chat message for OpenAI API
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct OpenAIChatMessage {
+    role: String,
+    content: String,
+}
+
+/// Response from OpenAI chat completions endpoint
+#[derive(Debug, Clone, Deserialize)]
+struct OpenAIChatResponse {
+    choices: Vec<OpenAIChatChoice>,
+}
+
+/// Choice in OpenAI response
+#[derive(Debug, Clone, Deserialize)]
+struct OpenAIChatChoice {
+    message: OpenAIChatMessage,
+}
+
+// ============================================================================
 // Ollama API types
 // ============================================================================
 
@@ -274,11 +371,16 @@ mod tests {
     #[test]
     fn router_config_defaults() {
         // Clear env vars for test
+        env::remove_var("OPENAI_API_KEY");
+        env::remove_var("OPENAI_API_URL");
         env::remove_var("OLLAMA_URL");
-        env::remove_var("OLLAMA_MODEL");
+        env::remove_var("ROUTER_MODEL");
+        env::remove_var("ROUTER_ENABLED");
         env::remove_var("OLLAMA_ENABLED");
 
         let config = RouterConfig::default();
+        // Without OPENAI_API_KEY, should fall back to Ollama
+        assert_eq!(config.provider, RouterProvider::Ollama);
         assert_eq!(config.ollama_url, DEFAULT_OLLAMA_URL);
         assert_eq!(config.model, DEFAULT_OLLAMA_MODEL);
         assert!(config.enabled);
