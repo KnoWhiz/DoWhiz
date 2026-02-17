@@ -536,6 +536,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         google_docs_enabled: false,
         bluebubbles_url: None,
         bluebubbles_password: None,
+        telegram_bot_token: None,
     };
 
     let gateway_config_path = state_dir.join("gateway.toml");

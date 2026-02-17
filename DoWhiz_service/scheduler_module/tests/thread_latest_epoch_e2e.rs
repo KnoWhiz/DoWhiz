@@ -238,6 +238,7 @@ fn thread_latest_epoch_end_to_end() {
         google_docs_enabled: false,
         bluebubbles_url: None,
         bluebubbles_password: None,
+        telegram_bot_token: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");

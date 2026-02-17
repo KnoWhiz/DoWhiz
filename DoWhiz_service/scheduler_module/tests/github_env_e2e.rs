@@ -289,6 +289,7 @@ fn email_flow_injects_github_env() {
         google_docs_enabled: false,
         bluebubbles_url: None,
         bluebubbles_password: None,
+        telegram_bot_token: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
@@ -413,6 +414,7 @@ fn email_flow_injects_employee_github_env() {
         google_docs_enabled: false,
         bluebubbles_url: None,
         bluebubbles_password: None,
+        telegram_bot_token: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
