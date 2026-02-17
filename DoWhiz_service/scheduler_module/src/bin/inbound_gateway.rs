@@ -1,23 +1,34 @@
 use axum::body::Bytes;
-use axum::extract::State;
-use axum::http::{header, HeaderMap, Method, StatusCode, Uri};
-use axum::response::{IntoResponse, Response};
-use axum::routing::any;
-use axum::Router;
+use axum::extract::{DefaultBodyLimit, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::IntoResponse;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use chrono::Utc;
+use base64::Engine;
+use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use serde_json::json;
+use sha1::Sha1;
+use sha2::Sha256;
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::fs;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::Mutex;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
+use scheduler_module::adapters::bluebubbles::BlueBubblesInboundAdapter;
+use scheduler_module::adapters::discord::DiscordInboundAdapter;
 use scheduler_module::adapters::postmark::PostmarkInboundPayload;
+use scheduler_module::adapters::slack::{is_url_verification, SlackChallengeResponse, SlackInboundAdapter};
+use scheduler_module::channel::{Channel, ChannelMetadata, InboundAdapter, InboundMessage};
 use scheduler_module::employee_config::{load_employee_directory, EmployeeDirectory};
+use scheduler_module::google_auth::GoogleAuthConfig;
+use scheduler_module::google_docs_poller::GoogleDocsPollerConfig;
+use scheduler_module::ingestion::{encode_raw_payload, IngestionEnvelope, IngestionPayload};
+use scheduler_module::ingestion_queue::IngestionQueue;
 use scheduler_module::mailbox;
 
 #[derive(Debug, Deserialize, Default)]
@@ -25,11 +36,11 @@ struct GatewayConfigFile {
     #[serde(default)]
     server: GatewayServerConfig,
     #[serde(default)]
-    dedupe: GatewayDedupeConfig,
+    storage: GatewayStorageConfig,
     #[serde(default)]
-    targets: HashMap<String, String>,
+    defaults: GatewayDefaultsConfig,
     #[serde(default)]
-    slack: SlackRouteConfig,
+    routes: Vec<GatewayRouteConfig>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -39,47 +50,56 @@ struct GatewayServerConfig {
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct GatewayDedupeConfig {
-    path: Option<PathBuf>,
+struct GatewayStorageConfig {
+    db_path: Option<PathBuf>,
 }
 
-#[derive(Debug, Deserialize, Default)]
-struct SlackRouteConfig {
-    default_employee_id: Option<String>,
-    #[serde(default)]
-    team_to_employee: HashMap<String, String>,
+#[derive(Debug, Deserialize, Default, Clone)]
+struct GatewayDefaultsConfig {
+    tenant_id: Option<String>,
+    employee_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct GatewayRouteConfig {
+    channel: String,
+    key: String,
+    employee_id: String,
+    tenant_id: Option<String>,
 }
 
 #[derive(Clone)]
 struct GatewayConfig {
-    host: String,
-    port: u16,
-    dedupe_path: PathBuf,
-    targets: HashMap<String, String>,
-    slack_default_employee_id: Option<String>,
-    slack_team_map: HashMap<String, String>,
+    db_path: PathBuf,
+    defaults: GatewayDefaultsConfig,
+    routes: HashMap<RouteKey, RouteTarget>,
+    channel_defaults: HashMap<Channel, RouteTarget>,
 }
 
 #[derive(Clone)]
 struct GatewayState {
-    client: reqwest::Client,
     config: GatewayConfig,
     employee_directory: EmployeeDirectory,
     address_to_employee: HashMap<String, String>,
-    dedupe_store: Arc<Mutex<ProcessedMessageStore>>,
+    queue: Arc<IngestionQueue>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ChannelKind {
-    Email,
-    Slack,
-    Other,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct RouteKey {
+    channel: Channel,
+    key: String,
+}
+
+#[derive(Debug, Clone)]
+struct RouteTarget {
+    tenant_id: Option<String>,
+    employee_id: String,
 }
 
 #[derive(Debug, Clone)]
 struct RouteDecision {
+    tenant_id: String,
     employee_id: String,
-    dedupe_keys: Vec<String>,
 }
 
 #[tokio::main]
@@ -108,51 +128,61 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or_else(|| config_file.server.port.unwrap_or(9100));
 
-    let dedupe_path = env::var("GATEWAY_DEDUPE_PATH")
+    let db_path = env::var("INGESTION_DB_PATH")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| config_file.dedupe.path.unwrap_or_else(default_dedupe_path));
+        .unwrap_or_else(|| {
+            config_file
+                .storage
+                .db_path
+                .unwrap_or_else(default_ingestion_db_path)
+        });
 
-    let targets = normalize_targets(&config_file.targets)?;
-    if targets.is_empty() {
-        return Err("gateway config must include at least one target".into());
-    }
+    let (routes, channel_defaults) = normalize_routes(&config_file.routes)?;
 
-    let dedupe_store = ProcessedMessageStore::load(&dedupe_path)?;
+    let queue = Arc::new(IngestionQueue::new(&db_path)?);
 
     let state = Arc::new(GatewayState {
-        client: reqwest::Client::builder()
-            .timeout(Duration::from_secs(20))
-            .build()?,
         config: GatewayConfig {
-            host: host.clone(),
-            port,
-            dedupe_path,
-            targets,
-            slack_default_employee_id: config_file.slack.default_employee_id,
-            slack_team_map: config_file.slack.team_to_employee,
+            db_path,
+            defaults: config_file.defaults,
+            routes,
+            channel_defaults,
         },
         employee_directory,
         address_to_employee,
-        dedupe_store: Arc::new(Mutex::new(dedupe_store)),
+        queue,
     });
 
     info!(
-        "inbound gateway config path={}, host={}, port={}, dedupe_path={}",
+        "ingestion gateway config path={}, host={}, port={}, db_path={}",
         config_path.display(),
         host,
         port,
-        state.config.dedupe_path.display()
+        state.config.db_path.display()
     );
 
-    let app = Router::new()
-        .route("/health", any(health))
-        .fallback(any(forward_request))
-        .with_state(state);
+    spawn_discord_gateway(state.clone()).await;
+    spawn_google_docs_poller(state.clone());
 
-    let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
-    info!("inbound gateway listening on {}", addr);
+    let max_body_bytes = env::var("GATEWAY_MAX_BODY_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(25 * 1024 * 1024);
+
+    let app = Router::new()
+        .route("/health", get(health))
+        .route("/postmark/inbound", post(ingest_postmark))
+        .route("/slack/events", post(ingest_slack))
+        .route("/bluebubbles/webhook", post(ingest_bluebubbles))
+        .route("/sms/twilio", post(ingest_sms))
+        .with_state(state)
+        .layer(DefaultBodyLimit::max(max_body_bytes));
+
+    let addr: std::net::SocketAddr = format!("{}:{}", host, port).parse()?;
+    info!("ingestion gateway listening on {}", addr);
 
     axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;
 
@@ -163,247 +193,363 @@ async fn health() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
 
-async fn forward_request(
+async fn ingest_postmark(
     State(state): State<Arc<GatewayState>>,
-    method: Method,
-    uri: Uri,
     headers: HeaderMap,
     body: Bytes,
-) -> Response {
-    let path = uri
-        .path_and_query()
-        .map(|value| value.as_str())
-        .unwrap_or(uri.path());
-
-    let channel = channel_from_path(path);
-    if channel == ChannelKind::Other {
-        warn!("gateway unsupported path: {}", path);
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"status":"unsupported_path"})),
-        )
-            .into_response();
+) -> impl IntoResponse {
+    if let Err(reason) = verify_postmark(&headers) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"status": reason})));
     }
 
-    let route = match resolve_route(channel, &state, &body) {
-        Ok(Some(route)) => route,
-        Ok(None) => {
-            return (StatusCode::OK, Json(json!({"status":"no_route"}))).into_response();
-        }
-        Err(err) => {
-            warn!("gateway route error: {}", err);
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"status":"bad_request"})),
-            )
-                .into_response();
-        }
-    };
-
-    if !route.dedupe_keys.is_empty() {
-        let mut store = state.dedupe_store.lock().await;
-        match store.mark_if_new(&route.dedupe_keys) {
-            Ok(true) => {}
-            Ok(false) => {
-                return (StatusCode::OK, Json(json!({"status":"duplicate"}))).into_response();
-            }
-            Err(err) => {
-                warn!("gateway dedupe error: {}", err);
-            }
-        }
-    }
-
-    let target_base = match state.config.targets.get(&route.employee_id) {
-        Some(url) => url,
-        None => {
-            warn!(
-                "gateway missing target for employee_id={}",
-                route.employee_id
-            );
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({"status":"missing_target"})),
-            )
-                .into_response();
-        }
-    };
-
-    let target_url = format!("{}{}", target_base, path);
-
-    info!(
-        "gateway forwarding channel={:?} employee_id={} target={} method={}",
-        channel, route.employee_id, target_url, method
-    );
-
-    forward_to_target(&state.client, method, &target_url, headers, body).await
-}
-
-async fn forward_to_target(
-    client: &reqwest::Client,
-    method: Method,
-    url: &str,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    let req_method = match reqwest::Method::from_bytes(method.as_str().as_bytes()) {
-        Ok(method) => method,
+    let payload: PostmarkInboundPayload = match serde_json::from_slice(&body) {
+        Ok(payload) => payload,
         Err(_) => {
-            warn!("gateway unsupported method {}", method);
-            return (
-                StatusCode::METHOD_NOT_ALLOWED,
-                Json(json!({"status":"bad_method"})),
-            )
-                .into_response();
+            return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"})))
         }
     };
-
-    let mut request = client.request(req_method, url).body(body);
-    for (name, value) in headers.iter() {
-        if should_skip_header(name) {
-            continue;
-        }
-        let header_name = match reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes()) {
-            Ok(name) => name,
-            Err(_) => continue,
-        };
-        let header_value = match reqwest::header::HeaderValue::from_bytes(value.as_bytes()) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-        request = request.header(header_name, header_value);
-    }
-
-    match request.send().await {
-        Ok(response) => {
-            let status =
-                StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-            let content_type = response
-                .headers()
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok())
-                .map(|value| value.to_string());
-            let body = match response.bytes().await {
-                Ok(bytes) => bytes,
-                Err(err) => {
-                    warn!("gateway response read failed: {}", err);
-                    return (
-                        StatusCode::BAD_GATEWAY,
-                        Json(json!({"status":"bad_gateway"})),
-                    )
-                        .into_response();
-                }
-            };
-
-            let mut builder = Response::builder().status(status);
-            if let Some(content_type) = content_type {
-                if let Ok(value) = header::HeaderValue::from_str(&content_type) {
-                    builder = builder.header(header::CONTENT_TYPE, value);
-                }
-            }
-
-            match builder.body(axum::body::Body::from(body)) {
-                Ok(resp) => resp,
-                Err(err) => {
-                    error!("gateway response build failed: {}", err);
-                    StatusCode::BAD_GATEWAY.into_response()
-                }
-            }
-        }
-        Err(err) => {
-            warn!("gateway forward failed: {}", err);
-            (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({"status":"bad_gateway"})),
-            )
-                .into_response()
-        }
-    }
-}
-
-fn resolve_route(
-    channel: ChannelKind,
-    state: &GatewayState,
-    body: &[u8],
-) -> Result<Option<RouteDecision>, String> {
-    match channel {
-        ChannelKind::Email => resolve_email_route(state, body),
-        ChannelKind::Slack => resolve_slack_route(state, body),
-        ChannelKind::Other => Ok(None),
-    }
-}
-
-fn resolve_email_route(state: &GatewayState, body: &[u8]) -> Result<Option<RouteDecision>, String> {
-    let payload: PostmarkInboundPayload =
-        serde_json::from_slice(body).map_err(|err| format!("invalid postmark payload: {}", err))?;
 
     let address = find_service_address(&payload, &state.employee_directory.service_addresses);
     let Some(address) = address else {
         info!("gateway no service address found in postmark payload");
-        return Ok(None);
+        return (StatusCode::OK, Json(json!({"status": "no_route"})));
     };
-    let normalized = address.to_ascii_lowercase();
-    let employee_id = match state.address_to_employee.get(&normalized) {
-        Some(id) => id.clone(),
-        None => {
-            info!("gateway no employee mapped for address={}", normalized);
-            return Ok(None);
+
+    let route_key = normalize_email(&address);
+    let Some(route) = resolve_route(Channel::Email, &route_key, &state) else {
+        info!("gateway no route for email address={}", route_key);
+        return (StatusCode::OK, Json(json!({"status": "no_route"})));
+    };
+
+    let adapter = scheduler_module::adapters::postmark::PostmarkInboundAdapter::new(
+        state.employee_directory.service_addresses.clone(),
+    );
+    let message = match adapter.parse(&body) {
+        Ok(message) => message,
+        Err(err) => {
+            warn!("gateway failed to parse postmark payload: {}", err);
+            return (StatusCode::BAD_REQUEST, Json(json!({"status": "parse_error"})));
         }
     };
 
-    let message_ids = extract_message_ids(&payload, body);
-    let dedupe_keys = message_ids
-        .into_iter()
-        .map(|id| format!("email:{}:{}", employee_id, id))
-        .collect();
+    let external_message_id = payload
+        .header_message_id()
+        .or(payload.message_id.as_deref())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
 
-    Ok(Some(RouteDecision {
-        employee_id,
-        dedupe_keys,
-    }))
+    let envelope = build_envelope(route, Channel::Email, external_message_id, &message, &body);
+    enqueue_envelope(state.queue.clone(), envelope).await
 }
 
-fn resolve_slack_route(state: &GatewayState, body: &[u8]) -> Result<Option<RouteDecision>, String> {
-    let wrapper: serde_json::Value =
-        serde_json::from_slice(body).map_err(|err| format!("invalid slack payload: {}", err))?;
+async fn ingest_slack(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    if let Some(verification) = is_url_verification(&body) {
+        let response = SlackChallengeResponse {
+            challenge: verification.challenge,
+        };
+        return (StatusCode::OK, Json(json!(response)));
+    }
+
+    if let Err(reason) = verify_slack(&headers, &body) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"status": reason})));
+    }
+
+    let wrapper: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"})))
+        }
+    };
+
     let team_id = wrapper
         .get("team_id")
         .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
+        .unwrap_or("");
+    if team_id.is_empty() {
+        return (StatusCode::OK, Json(json!({"status": "no_route"})));
+    }
+
     let event_id = wrapper
         .get("event_id")
         .and_then(|value| value.as_str())
         .map(|value| value.to_string());
 
-    let employee_id = team_id
-        .as_ref()
-        .and_then(|id| state.config.slack_team_map.get(id))
-        .cloned()
-        .or_else(|| state.config.slack_default_employee_id.clone());
-
-    let Some(employee_id) = employee_id else {
-        info!("gateway no slack route configured");
-        return Ok(None);
+    let Some(route) = resolve_route(Channel::Slack, team_id, &state) else {
+        info!("gateway no route for slack team_id={}", team_id);
+        return (StatusCode::OK, Json(json!({"status": "no_route"})));
     };
 
-    let dedupe_keys = event_id
-        .into_iter()
-        .map(|id| format!("slack:{}:{}", employee_id, id))
-        .collect();
+    let adapter = SlackInboundAdapter::new(HashSet::new());
+    let message = match adapter.parse(&body) {
+        Ok(message) => message,
+        Err(err) => {
+            warn!("gateway failed to parse slack payload: {}", err);
+            return (StatusCode::OK, Json(json!({"status": "ignored"})));
+        }
+    };
 
-    Ok(Some(RouteDecision {
-        employee_id,
-        dedupe_keys,
-    }))
+    let envelope = build_envelope(route, Channel::Slack, event_id, &message, &body);
+    enqueue_envelope(state.queue.clone(), envelope).await
 }
 
-fn channel_from_path(path: &str) -> ChannelKind {
-    if path.starts_with("/postmark/inbound") {
-        ChannelKind::Email
-    } else if path.starts_with("/slack/") {
-        ChannelKind::Slack
-    } else {
-        ChannelKind::Other
+async fn ingest_bluebubbles(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    if let Err(reason) = verify_bluebubbles(&headers) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"status": reason})));
     }
+
+    let adapter = BlueBubblesInboundAdapter::new();
+    let message = match adapter.parse(&body) {
+        Ok(message) => message,
+        Err(err) => {
+            warn!("gateway failed to parse bluebubbles payload: {}", err);
+            return (StatusCode::OK, Json(json!({"status": "ignored"})));
+        }
+    };
+
+    let chat_guid = message
+        .metadata
+        .bluebubbles_chat_guid
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let Some(route) = resolve_route(Channel::BlueBubbles, &chat_guid, &state) else {
+        info!("gateway no route for bluebubbles chat_guid={}", chat_guid);
+        return (StatusCode::OK, Json(json!({"status": "no_route"})));
+    };
+
+    let external_message_id = message.message_id.clone();
+    let envelope = build_envelope(route, Channel::BlueBubbles, external_message_id, &message, &body);
+    enqueue_envelope(state.queue.clone(), envelope).await
+}
+
+async fn ingest_sms(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    if let Err(reason) = verify_twilio(&headers, &body) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"status": reason})));
+    }
+
+    let params: HashMap<String, String> = match serde_urlencoded::from_bytes(&body) {
+        Ok(values) => values,
+        Err(_) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_form"})))
+        }
+    };
+
+    let from = params.get("From").cloned().unwrap_or_default();
+    let to = params.get("To").cloned().unwrap_or_default();
+    let body_text = params.get("Body").cloned().unwrap_or_default();
+    let message_sid = params.get("MessageSid").cloned();
+
+    if from.is_empty() || to.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({"status": "missing_fields"})));
+    }
+
+    let route_key = normalize_phone_number(&to);
+    let Some(route) = resolve_route(Channel::Sms, &route_key, &state) else {
+        info!("gateway no route for sms to={}", route_key);
+        return (StatusCode::OK, Json(json!({"status": "no_route"})));
+    };
+
+    let message = InboundMessage {
+        channel: Channel::Sms,
+        sender: from.clone(),
+        sender_name: None,
+        recipient: to.clone(),
+        subject: None,
+        text_body: Some(body_text),
+        html_body: None,
+        thread_id: format!("sms:{}:{}", route_key, normalize_phone_number(&from)),
+        message_id: message_sid.clone(),
+        attachments: Vec::new(),
+        reply_to: vec![from.clone()],
+        raw_payload: body.to_vec(),
+        metadata: ChannelMetadata {
+            sms_from: Some(from.clone()),
+            sms_to: Some(to.clone()),
+            ..Default::default()
+        },
+    };
+
+    let envelope = build_envelope(route, Channel::Sms, message_sid, &message, &body);
+    enqueue_envelope(state.queue.clone(), envelope).await
+}
+
+async fn enqueue_envelope(queue: Arc<IngestionQueue>, envelope: IngestionEnvelope) -> (StatusCode, Json<serde_json::Value>) {
+    match queue.enqueue(&envelope) {
+        Ok(result) => {
+            if result.inserted {
+                (StatusCode::OK, Json(json!({"status": "accepted"})))
+            } else {
+                (StatusCode::OK, Json(json!({"status": "duplicate"})))
+            }
+        }
+        Err(err) => {
+            error!("gateway enqueue error: {}", err);
+            (StatusCode::BAD_GATEWAY, Json(json!({"status": "enqueue_failed"})))
+        }
+    }
+}
+
+fn build_envelope(
+    route: RouteDecision,
+    channel: Channel,
+    external_message_id: Option<String>,
+    message: &InboundMessage,
+    raw_payload: &[u8],
+) -> IngestionEnvelope {
+    let dedupe_key = build_dedupe_key(
+        &route.tenant_id,
+        &route.employee_id,
+        channel,
+        external_message_id.as_deref(),
+        raw_payload,
+    );
+    IngestionEnvelope {
+        envelope_id: Uuid::new_v4(),
+        received_at: Utc::now(),
+        tenant_id: Some(route.tenant_id),
+        employee_id: route.employee_id,
+        channel,
+        external_message_id,
+        dedupe_key,
+        payload: IngestionPayload::from_inbound(message),
+        raw_payload_b64: encode_raw_payload(raw_payload),
+    }
+}
+
+fn resolve_route(channel: Channel, route_key: &str, state: &GatewayState) -> Option<RouteDecision> {
+    let normalized_key = normalize_route_key(channel, route_key);
+    let key = RouteKey {
+        channel,
+        key: normalized_key.clone(),
+    };
+
+    let target = state.config.routes.get(&key).cloned().or_else(|| {
+        state
+            .config
+            .channel_defaults
+            .get(&channel)
+            .cloned()
+            .or_else(|| {
+                if channel == Channel::Email {
+                    state
+                        .address_to_employee
+                        .get(&normalized_key)
+                        .map(|employee_id| RouteTarget {
+                            employee_id: employee_id.clone(),
+                            tenant_id: state.config.defaults.tenant_id.clone(),
+                        })
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                state
+                    .config
+                    .defaults
+                    .employee_id
+                    .as_ref()
+                    .map(|employee_id| RouteTarget {
+                        employee_id: employee_id.clone(),
+                        tenant_id: state.config.defaults.tenant_id.clone(),
+                    })
+            })
+    })?;
+
+    let tenant_id = target
+        .tenant_id
+        .clone()
+        .or_else(|| state.config.defaults.tenant_id.clone())
+        .unwrap_or_else(|| "default".to_string());
+
+    Some(RouteDecision {
+        tenant_id,
+        employee_id: target.employee_id,
+    })
+}
+
+fn build_dedupe_key(
+    tenant_id: &str,
+    employee_id: &str,
+    channel: Channel,
+    external_message_id: Option<&str>,
+    raw_payload: &[u8],
+) -> String {
+    let base = if let Some(id) = external_message_id {
+        id.to_string()
+    } else if !raw_payload.is_empty() {
+        format!("{:x}", md5::compute(raw_payload))
+    } else {
+        Uuid::new_v4().to_string()
+    };
+    format!("{}:{}:{}:{}", tenant_id, employee_id, channel, base)
+}
+
+fn normalize_routes(
+    routes: &[GatewayRouteConfig],
+) -> Result<(HashMap<RouteKey, RouteTarget>, HashMap<Channel, RouteTarget>), String> {
+    let mut map = HashMap::new();
+    let mut defaults = HashMap::new();
+
+    for route in routes {
+        let channel: Channel = route
+            .channel
+            .parse()
+            .map_err(|err| format!("invalid route channel {}: {}", route.channel, err))?;
+        let key = normalize_route_key(channel, route.key.trim());
+        if key.is_empty() {
+            return Err("route key cannot be empty".to_string());
+        }
+        let target = RouteTarget {
+            tenant_id: route.tenant_id.clone(),
+            employee_id: route.employee_id.clone(),
+        };
+        if key == "*" {
+            defaults.insert(channel, target);
+        } else {
+            let route_key = RouteKey {
+                channel,
+                key,
+            };
+            map.insert(route_key, target);
+        }
+    }
+
+    Ok((map, defaults))
+}
+
+fn normalize_route_key(channel: Channel, key: &str) -> String {
+    let trimmed = key.trim();
+    if trimmed == "*" {
+        return "*".to_string();
+    }
+    match channel {
+        Channel::Email => normalize_email(trimmed),
+        Channel::Sms => normalize_phone_number(trimmed),
+        _ => trimmed.to_string(),
+    }
+}
+
+fn normalize_email(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn normalize_phone_number(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_digit() || *ch == '+')
+        .collect::<String>()
 }
 
 fn resolve_gateway_config_path() -> Result<PathBuf, String> {
@@ -448,23 +594,19 @@ fn resolve_employee_config_path() -> PathBuf {
 }
 
 fn load_gateway_config(path: &Path) -> Result<GatewayConfigFile, String> {
-    let content = fs::read_to_string(path)
+    let content = std::fs::read_to_string(path)
         .map_err(|err| format!("failed to read gateway config: {}", err))?;
     toml::from_str::<GatewayConfigFile>(&content)
         .map_err(|err| format!("failed to parse gateway config: {}", err))
 }
 
-fn normalize_targets(raw: &HashMap<String, String>) -> Result<HashMap<String, String>, String> {
-    let mut targets = HashMap::new();
-    for (employee_id, url) in raw {
-        let trimmed = url.trim();
-        if trimmed.is_empty() {
-            return Err(format!("gateway target for {} is empty", employee_id));
-        }
-        let normalized = trimmed.trim_end_matches('/').to_string();
-        targets.insert(employee_id.clone(), normalized);
-    }
-    Ok(targets)
+fn default_ingestion_db_path() -> PathBuf {
+    let base = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    base.join(".dowhiz")
+        .join("DoWhiz")
+        .join("gateway")
+        .join("state")
+        .join("ingestion.db")
 }
 
 fn build_address_map(directory: &EmployeeDirectory) -> HashMap<String, String> {
@@ -533,122 +675,343 @@ fn collect_service_address_candidates(payload: &PostmarkInboundPayload) -> Vec<O
     candidates
 }
 
-fn extract_message_ids(payload: &PostmarkInboundPayload, raw_payload: &[u8]) -> Vec<String> {
-    let mut ids = Vec::new();
-    let mut seen = HashSet::new();
-    if let Some(header_id) = payload.header_message_id().and_then(normalize_message_id) {
-        if seen.insert(header_id.clone()) {
-            ids.push(header_id);
+fn verify_slack(headers: &HeaderMap, body: &[u8]) -> Result<(), &'static str> {
+    let secret = env::var("SLACK_SIGNING_SECRET").ok();
+    let Some(secret) = secret.filter(|value| !value.trim().is_empty()) else {
+        return Ok(());
+    };
+    let signature = headers
+        .get("x-slack-signature")
+        .and_then(|value| value.to_str().ok())
+        .ok_or("missing_signature")?;
+    let timestamp = headers
+        .get("x-slack-request-timestamp")
+        .and_then(|value| value.to_str().ok())
+        .ok_or("missing_timestamp")?;
+    let timestamp_value: i64 = timestamp.parse().map_err(|_| "invalid_timestamp")?;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::from_secs(0))
+        .as_secs() as i64;
+    if (now - timestamp_value).abs() > 60 * 5 {
+        return Err("stale_timestamp");
+    }
+
+    let base = format!("v0:{}:{}", timestamp, String::from_utf8_lossy(body));
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).map_err(|_| "bad_secret")?;
+    mac.update(base.as_bytes());
+    let expected = format!("v0={}", hex::encode(mac.finalize().into_bytes()));
+    if expected != signature {
+        return Err("invalid_signature");
+    }
+    Ok(())
+}
+
+fn verify_postmark(headers: &HeaderMap) -> Result<(), &'static str> {
+    let token = env::var("POSTMARK_INBOUND_TOKEN").ok();
+    let Some(token) = token.filter(|value| !value.trim().is_empty()) else {
+        return Ok(());
+    };
+    let header = headers
+        .get("x-postmark-token")
+        .and_then(|value| value.to_str().ok())
+        .ok_or("missing_token")?;
+    if header != token {
+        return Err("invalid_token");
+    }
+    Ok(())
+}
+
+fn verify_bluebubbles(headers: &HeaderMap) -> Result<(), &'static str> {
+    let token = env::var("BLUEBUBBLES_WEBHOOK_TOKEN").ok();
+    let Some(token) = token.filter(|value| !value.trim().is_empty()) else {
+        return Ok(());
+    };
+    let header = headers
+        .get("x-bluebubbles-token")
+        .and_then(|value| value.to_str().ok())
+        .ok_or("missing_token")?;
+    if header != token {
+        return Err("invalid_token");
+    }
+    Ok(())
+}
+
+fn verify_twilio(headers: &HeaderMap, body: &[u8]) -> Result<(), &'static str> {
+    let token = env::var("TWILIO_AUTH_TOKEN").ok();
+    let url = env::var("TWILIO_WEBHOOK_URL").ok();
+    let (Some(token), Some(url)) = (token, url) else {
+        return Ok(());
+    };
+    if token.trim().is_empty() || url.trim().is_empty() {
+        return Ok(());
+    }
+    let signature = headers
+        .get("x-twilio-signature")
+        .and_then(|value| value.to_str().ok())
+        .ok_or("missing_signature")?;
+
+    let params: HashMap<String, String> =
+        serde_urlencoded::from_bytes(body).map_err(|_| "bad_form")?;
+    let mut keys: Vec<_> = params.keys().cloned().collect();
+    keys.sort();
+    let mut data = url.clone();
+    for key in keys {
+        if let Some(value) = params.get(&key) {
+            data.push_str(&key);
+            data.push_str(value);
         }
     }
-    if let Some(message_id) = payload
-        .message_id
-        .as_ref()
-        .and_then(|value| normalize_message_id(value))
-    {
-        if seen.insert(message_id.clone()) {
-            ids.push(message_id);
+
+    let mut mac = Hmac::<Sha1>::new_from_slice(token.as_bytes()).map_err(|_| "bad_secret")?;
+    mac.update(data.as_bytes());
+    let expected = base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
+
+    if expected != signature {
+        return Err("invalid_signature");
+    }
+    Ok(())
+}
+
+async fn spawn_discord_gateway(state: Arc<GatewayState>) {
+    let token = match env::var("DISCORD_BOT_TOKEN") {
+        Ok(value) if !value.trim().is_empty() => value,
+        _ => return,
+    };
+
+    let bot_user_id = env::var("DISCORD_BOT_USER_ID")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok());
+
+    let mut bot_user_ids = HashSet::new();
+    if let Some(id) = bot_user_id {
+        bot_user_ids.insert(id);
+    }
+
+    let handler_state = DiscordIngressState {
+        state: state.clone(),
+        adapter: DiscordInboundAdapter::new(bot_user_ids.clone()),
+        bot_user_ids,
+    };
+
+    tokio::spawn(async move {
+        if let Err(err) = run_discord_gateway(token, handler_state).await {
+            error!("discord gateway error: {}", err);
+        }
+    });
+}
+
+struct DiscordIngressState {
+    state: Arc<GatewayState>,
+    adapter: DiscordInboundAdapter,
+    bot_user_ids: HashSet<u64>,
+}
+
+struct DiscordIngressHandler {
+    inner: Arc<DiscordIngressState>,
+}
+
+#[serenity::async_trait]
+impl serenity::all::EventHandler for DiscordIngressHandler {
+    async fn ready(&self, _ctx: serenity::all::Context, ready: serenity::all::Ready) {
+        info!("Discord bot connected as {}", ready.user.name);
+    }
+
+    async fn message(&self, _ctx: serenity::all::Context, msg: serenity::all::Message) {
+        let inbound = match self.inner.adapter.from_serenity_message(&msg) {
+            Ok(message) => message,
+            Err(err) => {
+                if !err.to_string().contains("ignoring bot") {
+                    warn!("gateway discord parse error: {}", err);
+                }
+                return;
+            }
+        };
+
+        let is_mention = msg
+            .mentions
+            .iter()
+            .any(|u| self.inner.bot_user_ids.contains(&u.id.get()));
+        let is_reply_to_bot = msg
+            .referenced_message
+            .as_ref()
+            .map(|ref_msg| self.inner.bot_user_ids.contains(&ref_msg.author.id.get()))
+            .unwrap_or(false);
+
+        if !is_mention && !is_reply_to_bot {
+            return;
+        }
+
+        let guild_id = inbound
+            .metadata
+            .discord_guild_id
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "dm".to_string());
+
+        let route_key = guild_id.clone();
+        let Some(route) = resolve_route(Channel::Discord, &route_key, &self.inner.state) else {
+            info!("gateway no route for discord guild_id={}", route_key);
+            return;
+        };
+
+        let external_message_id = inbound.message_id.clone();
+        let envelope = build_envelope(
+            route,
+            Channel::Discord,
+            external_message_id,
+            &inbound,
+            &inbound.raw_payload,
+        );
+
+        match self.inner.state.queue.enqueue(&envelope) {
+            Ok(result) => {
+                if result.inserted {
+                    info!("gateway enqueued discord message {}", envelope.envelope_id);
+                } else {
+                    info!("gateway duplicate discord message {}", envelope.dedupe_key);
+                }
+            }
+            Err(err) => {
+                error!("gateway discord enqueue error: {}", err);
+            }
         }
     }
-    let fallback = format!("{:x}", md5::compute(raw_payload));
-    if seen.insert(fallback.clone()) {
-        ids.push(fallback);
+}
+
+async fn run_discord_gateway(
+    token: String,
+    state: DiscordIngressState,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let intents = serenity::all::GatewayIntents::GUILD_MESSAGES
+        | serenity::all::GatewayIntents::DIRECT_MESSAGES
+        | serenity::all::GatewayIntents::MESSAGE_CONTENT;
+
+    let handler = DiscordIngressHandler {
+        inner: Arc::new(state),
+    };
+
+    let mut client = serenity::Client::builder(&token, intents)
+        .event_handler(handler)
+        .await?;
+
+    info!("Starting Discord Gateway client...");
+    client.start().await?;
+    Ok(())
+}
+
+fn spawn_google_docs_poller(state: Arc<GatewayState>) {
+    let enabled = env::var("GOOGLE_DOCS_ENABLED")
+        .ok()
+        .map(|value| value.to_lowercase() == "true")
+        .unwrap_or(false);
+    if !enabled {
+        return;
     }
-    ids
-}
 
-fn normalize_message_id(raw: &str) -> Option<String> {
-    let trimmed = raw.trim().trim_matches(|ch| matches!(ch, '<' | '>'));
-    if trimmed.is_empty() {
-        return None;
+    let google_auth_config = GoogleAuthConfig::from_env();
+    if !google_auth_config.is_valid() {
+        warn!("Google Docs enabled but OAuth credentials not configured");
+        return;
     }
-    Some(trimmed.to_ascii_lowercase())
-}
 
-fn should_skip_header(name: &header::HeaderName) -> bool {
-    matches!(
-        name.as_str().to_ascii_lowercase().as_str(),
-        "connection" | "host" | "content-length"
-    )
-}
+    let poller_config = GoogleDocsPollerConfig::from_env();
+    let poll_interval = poller_config.poll_interval_secs;
 
-fn default_dedupe_path() -> PathBuf {
-    let base = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.join(".dowhiz")
-        .join("DoWhiz")
-        .join("gateway")
-        .join("state")
-        .join("processed_ids.txt")
-}
-
-struct ProcessedMessageStore {
-    path: PathBuf,
-    seen: HashSet<String>,
-}
-
-impl ProcessedMessageStore {
-    fn load(path: &Path) -> Result<Self, std::io::Error> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+    std::thread::spawn(move || {
+        match scheduler_module::google_docs_poller::GoogleDocsPoller::new(poller_config) {
+            Ok(poller) => loop {
+                match poll_google_docs_comments(&poller, &state) {
+                    Ok(count) => {
+                        if count > 0 {
+                            info!("Google Docs polling enqueued {} items", count);
+                        }
+                    }
+                    Err(err) => {
+                        error!("Google Docs polling error: {}", err);
+                    }
+                }
+                std::thread::sleep(Duration::from_secs(poll_interval));
+            },
+            Err(err) => {
+                error!("Failed to create Google Docs poller: {}", err);
+            }
         }
-        let mut seen = HashSet::new();
-        if path.exists() {
-            for raw in fs::read_to_string(path)?.lines() {
-                let line = raw.trim();
-                if !line.is_empty() {
-                    seen.insert(line.to_string());
+    });
+}
+
+fn poll_google_docs_comments(
+    poller: &scheduler_module::google_docs_poller::GoogleDocsPoller,
+    state: &GatewayState,
+) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+    use scheduler_module::adapters::google_docs::GoogleDocsInboundAdapter;
+
+    let adapter = GoogleDocsInboundAdapter::new(
+        poller.auth().clone(),
+        poller.config().employee_emails.clone(),
+    );
+
+    let documents = adapter.list_shared_documents()?;
+    let mut tasks_created = 0usize;
+
+    for doc in documents {
+        let doc_name = doc.name.as_deref().unwrap_or("Untitled");
+        let owner_email = doc
+            .owners
+            .as_ref()
+            .and_then(|owners| owners.first())
+            .and_then(|o| o.email_address.as_deref());
+
+        poller
+            .store()
+            .register_document(&doc.id, doc.name.as_deref(), owner_email)?;
+
+        let comments = match adapter.list_comments(&doc.id) {
+            Ok(c) => c,
+            Err(err) => {
+                warn!("Failed to list comments for '{}': {}", doc_name, err);
+                continue;
+            }
+        };
+
+        let processed = poller.store().get_processed_ids(&doc.id)?;
+        let actionable_items = adapter.filter_actionable_comments(&comments, &processed);
+
+        for actionable in actionable_items {
+            let message = adapter.actionable_to_inbound_message(&doc.id, doc_name, &actionable);
+            let route_key = doc.id.clone();
+            let Some(route) = resolve_route(Channel::GoogleDocs, &route_key, state) else {
+                info!("gateway no route for google docs doc_id={}", route_key);
+                continue;
+            };
+
+            let external_message_id = Some(actionable.tracking_id.clone());
+            let raw_payload = serde_json::to_vec(&actionable).unwrap_or_default();
+            let envelope = build_envelope(
+                route,
+                Channel::GoogleDocs,
+                external_message_id,
+                &message,
+                &raw_payload,
+            );
+
+            match state.queue.enqueue(&envelope) {
+                Ok(result) => {
+                    if result.inserted {
+                        poller
+                            .store()
+                            .mark_processed_id(&doc.id, &actionable.tracking_id)?;
+                        tasks_created += 1;
+                    }
+                }
+                Err(err) => {
+                    error!("gateway gdocs enqueue error: {}", err);
                 }
             }
         }
-        Ok(Self {
-            path: path.to_path_buf(),
-            seen,
-        })
+
+        poller.store().update_last_checked(&doc.id)?;
     }
 
-    fn mark_if_new(&mut self, ids: &[String]) -> Result<bool, std::io::Error> {
-        let candidates: Vec<_> = ids
-            .iter()
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-            .collect();
-        if candidates.is_empty() {
-            return Ok(true);
-        }
-
-        if candidates.iter().any(|value| self.seen.contains(*value)) {
-            return Ok(false);
-        }
-
-        let mut handle = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)?;
-        for value in candidates {
-            self.seen.insert(value.to_string());
-            use std::io::Write;
-            writeln!(handle, "{}", value)?;
-        }
-        Ok(true)
-    }
-}
-
-#[derive(serde::Serialize)]
-struct Json<T>(T);
-
-impl<T> IntoResponse for Json<T>
-where
-    T: serde::Serialize,
-{
-    fn into_response(self) -> Response {
-        match serde_json::to_vec(&self.0) {
-            Ok(body) => (
-                StatusCode::OK,
-                [(header::CONTENT_TYPE, "application/json")],
-                body,
-            )
-                .into_response(),
-            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        }
-    }
+    Ok(tasks_created)
 }

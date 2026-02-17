@@ -3,7 +3,7 @@
 //! This module provides a background service that polls for Google Docs comments
 //! mentioning the digital employee and creates tasks to handle them.
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use rusqlite::{params, Connection};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -12,9 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
-use crate::adapters::google_docs::{
-    contains_employee_mention, ActionableComment, GoogleDocsComment, GoogleDocsInboundAdapter,
-};
+use crate::adapters::google_docs::{ActionableComment, GoogleDocsInboundAdapter};
 use crate::channel::Channel;
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
 use crate::{RunTaskTask, Scheduler, SchedulerError, TaskExecutor, TaskKind};
@@ -433,28 +431,6 @@ impl GoogleDocsPoller {
         Ok(workspace_dir)
     }
 
-    fn write_incoming_comment(
-        &self,
-        workspace_dir: &Path,
-        message: &crate::channel::InboundMessage,
-        comment: &GoogleDocsComment,
-    ) -> Result<(), SchedulerError> {
-        let incoming_dir = workspace_dir.join("incoming_email");
-
-        // Write raw comment JSON
-        let raw_path = incoming_dir.join("google_docs_comment.json");
-        let raw_json = serde_json::to_string_pretty(comment)
-            .map_err(|e| SchedulerError::TaskFailed(format!("JSON error: {}", e)))?;
-        std::fs::write(&raw_path, raw_json)?;
-
-        // Write HTML representation for the agent
-        let html_content = self.format_comment_as_html(message, comment);
-        let html_path = incoming_dir.join("email.html");
-        std::fs::write(&html_path, html_content)?;
-
-        Ok(())
-    }
-
     fn write_incoming_actionable(
         &self,
         workspace_dir: &Path,
@@ -475,92 +451,6 @@ impl GoogleDocsPoller {
         std::fs::write(&html_path, html_content)?;
 
         Ok(())
-    }
-
-    fn format_comment_as_html(
-        &self,
-        message: &crate::channel::InboundMessage,
-        comment: &GoogleDocsComment,
-    ) -> String {
-        let doc_name = message
-            .metadata
-            .google_docs_document_name
-            .as_deref()
-            .unwrap_or("Document");
-
-        let doc_id = message
-            .metadata
-            .google_docs_document_id
-            .as_deref()
-            .unwrap_or("");
-
-        let sender_name = message.sender_name.as_deref().unwrap_or(&message.sender);
-
-        let quoted_text = comment
-            .quoted_file_content
-            .as_ref()
-            .and_then(|q| q.value.as_deref())
-            .unwrap_or("");
-
-        format!(
-            r#"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>Google Docs Comment</title>
-</head>
-<body>
-    <div class="google-docs-comment">
-        <h2>Comment on: {}</h2>
-        <p><strong>Document ID:</strong> {}</p>
-        <p><strong>From:</strong> {} ({})</p>
-        <p><strong>Comment ID:</strong> {}</p>
-
-        {}
-
-        <div class="comment-content">
-            <h3>Comment:</h3>
-            <p>{}</p>
-        </div>
-
-        <div class="instructions">
-            <h3>Instructions:</h3>
-            <p>This is a comment from a Google Docs document. The user is requesting your help.</p>
-            <p>To respond:</p>
-            <ol>
-                <li>Read the comment and quoted text (if any)</li>
-                <li>Process the user's request</li>
-                <li>Write your response to <code>reply_email_draft.html</code></li>
-                <li>If you need to propose document edits, format them as:
-                    <pre>
-**Original:** "text to replace"
-**Suggested:** "replacement text"
-                    </pre>
-                </li>
-                <li>Ask the user to reply "apply" to confirm edits</li>
-            </ol>
-        </div>
-    </div>
-</body>
-</html>"#,
-            doc_name,
-            doc_id,
-            sender_name,
-            message.sender,
-            comment.id,
-            if quoted_text.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    r#"<div class="quoted-text">
-            <h3>Quoted text from document:</h3>
-            <blockquote>{}</blockquote>
-        </div>"#,
-                    quoted_text
-                )
-            },
-            comment.content
-        )
     }
 
     fn format_actionable_as_html(
@@ -715,7 +605,7 @@ impl GoogleDocsPoller {
 
 /// Start the Google Docs polling thread if enabled.
 pub fn start_google_docs_poller_thread<E: TaskExecutor + Send + 'static>(
-    scheduler: Arc<std::sync::Mutex<Scheduler<E>>>,
+    _scheduler: Arc<std::sync::Mutex<Scheduler<E>>>,
     stop_flag: Arc<AtomicBool>,
 ) -> Option<std::thread::JoinHandle<()>> {
     let config = GoogleDocsPollerConfig::from_env();
@@ -727,7 +617,7 @@ pub fn start_google_docs_poller_thread<E: TaskExecutor + Send + 'static>(
 
     let handle = std::thread::spawn(move || {
         match GoogleDocsPoller::new(config) {
-            Ok(poller) => {
+            Ok(_poller) => {
                 // Note: This simplified version doesn't actually share the scheduler
                 // In a real implementation, you'd need proper synchronization
                 warn!("Google Docs poller started (scheduler sharing not implemented yet)");

@@ -16,6 +16,8 @@ pub enum Channel {
     Slack,
     /// Discord
     Discord,
+    /// SMS (e.g., Twilio)
+    Sms,
     /// Telegram (future)
     Telegram,
     /// Google Docs collaboration via comments
@@ -36,6 +38,7 @@ impl std::fmt::Display for Channel {
             Channel::Email => write!(f, "email"),
             Channel::Slack => write!(f, "slack"),
             Channel::Discord => write!(f, "discord"),
+            Channel::Sms => write!(f, "sms"),
             Channel::Telegram => write!(f, "telegram"),
             Channel::GoogleDocs => write!(f, "google_docs"),
             Channel::BlueBubbles => write!(f, "bluebubbles"),
@@ -51,6 +54,7 @@ impl std::str::FromStr for Channel {
             "email" => Ok(Channel::Email),
             "slack" => Ok(Channel::Slack),
             "discord" => Ok(Channel::Discord),
+            "sms" => Ok(Channel::Sms),
             "telegram" => Ok(Channel::Telegram),
             "google_docs" | "googledocs" => Ok(Channel::GoogleDocs),
             "bluebubbles" | "imessage" => Ok(Channel::BlueBubbles),
@@ -94,7 +98,7 @@ pub struct InboundMessage {
 }
 
 /// Attachment from any channel.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attachment {
     /// Filename
     pub name: String,
@@ -105,7 +109,7 @@ pub struct Attachment {
 }
 
 /// Platform-specific metadata that doesn't fit in the common fields.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChannelMetadata {
     /// Email-specific: In-Reply-To header
     pub in_reply_to: Option<String>,
@@ -121,6 +125,10 @@ pub struct ChannelMetadata {
     pub discord_channel_id: Option<u64>,
     /// Telegram-specific: Chat ID
     pub telegram_chat_id: Option<i64>,
+    /// SMS-specific: From phone number
+    pub sms_from: Option<String>,
+    /// SMS-specific: To phone number
+    pub sms_to: Option<String>,
     /// Google Docs-specific: Document ID
     pub google_docs_document_id: Option<String>,
     /// Google Docs-specific: Comment ID to reply to

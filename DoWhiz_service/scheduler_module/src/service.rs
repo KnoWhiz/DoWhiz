@@ -1,16 +1,14 @@
-use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect};
-use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::routing::get;
+use axum::Router;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use kuchiki::traits::*;
 use kuchiki::NodeRef;
 use serde::Deserialize;
-use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
@@ -21,16 +19,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tokio::sync::Mutex as AsyncMutex;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::adapters::bluebubbles::send_quick_bluebubbles_response;
-use crate::adapters::discord::DiscordOutboundAdapter;
-use crate::adapters::slack::{is_url_verification, SlackChallengeResponse, SlackEventWrapper};
+use crate::adapters::slack::SlackEventWrapper;
 use crate::employee_config::{load_employee_directory, EmployeeDirectory, EmployeeProfile};
-use crate::google_auth::GoogleAuthConfig;
-use crate::google_docs_poller::GoogleDocsPollerConfig;
+use crate::ingestion::IngestionEnvelope;
+use crate::ingestion_queue::IngestionQueue;
 use crate::message_router::{MessageRouter, RouterDecision};
 use crate::index_store::{IndexStore, TaskRef};
 use crate::mailbox;
@@ -58,6 +54,9 @@ pub struct ServiceConfig {
     pub workspace_root: PathBuf,
     pub scheduler_state_path: PathBuf,
     pub processed_ids_path: PathBuf,
+    pub ingestion_db_path: PathBuf,
+    pub ingestion_dedupe_path: PathBuf,
+    pub ingestion_poll_interval: Duration,
     pub users_root: PathBuf,
     pub users_db_path: PathBuf,
     pub task_index_path: PathBuf,
@@ -159,6 +158,22 @@ impl ServiceConfig {
                     .to_string_lossy()
                     .into_owned()
             }))?;
+        let ingestion_db_path =
+            resolve_path(env::var("INGESTION_DB_PATH").unwrap_or_else(|_| {
+                employee_runtime_root
+                    .join("state")
+                    .join("ingestion.db")
+                    .to_string_lossy()
+                    .into_owned()
+            }))?;
+        let ingestion_dedupe_path =
+            resolve_path(env::var("INGESTION_DEDUPE_PATH").unwrap_or_else(|_| {
+                employee_runtime_root
+                    .join("state")
+                    .join("ingestion_processed_ids.txt")
+                    .to_string_lossy()
+                    .into_owned()
+            }))?;
         let users_root = resolve_path(env::var("USERS_ROOT").unwrap_or_else(|_| {
             employee_runtime_root
                 .join("users")
@@ -197,6 +212,12 @@ impl ServiceConfig {
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|value| *value > 0)
             .unwrap_or(3);
+        let ingestion_poll_interval = env::var("INGESTION_POLL_INTERVAL_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .map(Duration::from_secs)
+            .unwrap_or_else(|| Duration::from_secs(1));
         let inbound_body_max_bytes = env::var("POSTMARK_INBOUND_MAX_BYTES")
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
@@ -249,6 +270,9 @@ impl ServiceConfig {
             workspace_root,
             scheduler_state_path,
             processed_ids_path,
+            ingestion_db_path,
+            ingestion_dedupe_path,
+            ingestion_poll_interval,
             users_root,
             users_db_path,
             task_index_path,
@@ -277,11 +301,7 @@ impl ServiceConfig {
 #[derive(Clone)]
 struct AppState {
     config: Arc<ServiceConfig>,
-    dedupe_store: Arc<AsyncMutex<ProcessedMessageStore>>,
-    user_store: Arc<UserStore>,
-    index_store: Arc<IndexStore>,
     slack_store: Arc<SlackStore>,
-    message_router: Arc<MessageRouter>,
 }
 
 /// Information about a running task for monitoring
@@ -421,10 +441,11 @@ pub async fn run_server(
     // Export SLACK_STORE_PATH so execute_slack_send can find the OAuth tokens
     env::set_var("SLACK_STORE_PATH", &config.slack_store_path);
     let config = Arc::new(config);
-    let dedupe_store = ProcessedMessageStore::load(&config.processed_ids_path)?;
     let user_store = Arc::new(UserStore::new(&config.users_db_path)?);
     let index_store = Arc::new(IndexStore::new(&config.task_index_path)?);
     let slack_store = Arc::new(SlackStore::new(&config.slack_store_path)?);
+    let ingestion_queue = Arc::new(IngestionQueue::new(&config.ingestion_db_path)?);
+    let message_router = Arc::new(MessageRouter::new());
     if let Ok(user_ids) = user_store.list_user_ids() {
         for user_id in user_ids {
             let paths = user_store.user_paths(&config.users_root, &user_id);
@@ -620,7 +641,8 @@ pub async fn run_server(
                     if released.is_some() {
                         // Load scheduler to manage retry count
                         let user_paths = user_store.user_paths(&users_root, &stale_claim.user_id);
-                        let scheduler_result = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default());
+                        let scheduler_result =
+                            Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default());
 
                         match scheduler_result {
                             Ok(mut scheduler) => {
@@ -642,7 +664,9 @@ pub async fn run_server(
                                             );
 
                                             // Disable the task in database
-                                            if let Err(err) = scheduler.disable_task_by_id(&stale_claim.task_id) {
+                                            if let Err(err) =
+                                                scheduler.disable_task_by_id(&stale_claim.task_id)
+                                            {
                                                 error!(
                                                     "Failed to disable task {}: {}",
                                                     stale_claim.task_id, err
@@ -683,100 +707,23 @@ pub async fn run_server(
             info!("Task watchdog stopped");
         });
     }
+    info!(
+        "Inbound webhooks are handled by the ingestion gateway; worker {} will only consume queued messages",
+        config.employee_id
+    );
 
-    // Start Discord Gateway client if token is configured and employee has discord_enabled
-    if let Some(ref discord_token) = config.discord_bot_token {
-        if config.employee_profile.discord_enabled {
-            let discord_state = crate::discord_gateway::DiscordHandlerState {
-                config: config.clone(),
-                index_store: index_store.clone(),
-                message_router: Arc::new(MessageRouter::new()),
-                outbound_adapter: DiscordOutboundAdapter::new(discord_token.clone()),
-            };
-            let token = discord_token.clone();
-            let bot_user_id = config.discord_bot_user_id;
-            tokio::spawn(async move {
-                if let Err(e) =
-                    crate::discord_gateway::start_discord_client(token, discord_state, bot_user_id)
-                        .await
-                {
-                    error!("Discord client error: {}", e);
-                }
-            });
-            info!(
-                "Discord Gateway client spawned for employee {}",
-                config.employee_id
-            );
-        } else {
-            info!(
-                "Discord Gateway disabled for employee {} (discord_enabled=false)",
-                config.employee_id
-            );
-        }
-    }
-
-    // Start Google Docs polling if enabled
-    if config.google_docs_enabled {
-        let google_auth_config = GoogleAuthConfig::from_env();
-        if google_auth_config.is_valid() {
-            let poller_config = GoogleDocsPollerConfig::from_env();
-            let config_clone = config.clone();
-            let user_store_clone = user_store.clone();
-            let index_store_clone = index_store.clone();
-
-            // Use a dedicated thread for Google Docs polling (blocking operations)
-            let poll_interval = poller_config.poll_interval_secs;
-            std::thread::spawn(move || {
-                info!(
-                    "Starting Google Docs polling for employee {} (interval: {}s)",
-                    config_clone.employee_id, poll_interval
-                );
-
-                match crate::google_docs_poller::GoogleDocsPoller::new(poller_config) {
-                    Ok(poller) => {
-                        loop {
-                            match poll_google_docs_comments(&poller, &config_clone, &user_store_clone, &index_store_clone) {
-                                Ok(count) => {
-                                    if count > 0 {
-                                        info!("Google Docs polling created {} tasks", count);
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Google Docs polling error: {}", e);
-                                }
-                            }
-                            std::thread::sleep(Duration::from_secs(poll_interval));
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to create Google Docs poller: {}", e);
-                    }
-                }
-            });
-            info!(
-                "Google Docs polling spawned for employee {}",
-                config.employee_id
-            );
-        } else {
-            warn!(
-                "Google Docs enabled but OAuth credentials not configured for employee {}",
-                config.employee_id
-            );
-        }
-    } else {
-        info!(
-            "Google Docs polling disabled for employee {}",
-            config.employee_id
-        );
-    }
+    spawn_ingestion_consumer(
+        config.clone(),
+        ingestion_queue.clone(),
+        user_store.clone(),
+        index_store.clone(),
+        slack_store.clone(),
+        message_router.clone(),
+    )?;
 
     let state = AppState {
         config: config.clone(),
-        dedupe_store: Arc::new(AsyncMutex::new(dedupe_store)),
-        user_store,
-        index_store,
         slack_store,
-        message_router: Arc::new(MessageRouter::new()),
     };
 
     let host: IpAddr = config
@@ -789,11 +736,8 @@ pub async fn run_server(
     let app = Router::new()
         .route("/", get(health))
         .route("/health", get(health))
-        .route("/postmark/inbound", post(postmark_inbound))
-        .route("/slack/events", post(slack_events))
         .route("/slack/install", get(slack_install))
         .route("/slack/oauth/callback", get(slack_oauth_callback))
-        .route("/bluebubbles/webhook", post(bluebubbles_webhook))
         .with_state(state)
         .layer(DefaultBodyLimit::max(config.inbound_body_max_bytes));
 
@@ -984,186 +928,278 @@ async fn health() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
 
-async fn postmark_inbound(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
-    let payload: PostmarkInbound = match serde_json::from_slice(&body) {
-        Ok(payload) => payload,
-        Err(_) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"})));
-        }
-    };
+fn spawn_ingestion_consumer(
+    config: Arc<ServiceConfig>,
+    queue: Arc<IngestionQueue>,
+    user_store: Arc<UserStore>,
+    index_store: Arc<IndexStore>,
+    slack_store: Arc<SlackStore>,
+    message_router: Arc<MessageRouter>,
+) -> Result<(), BoxError> {
+    let poll_interval = config.ingestion_poll_interval;
+    let employee_id = config.employee_id.clone();
+    let dedupe_path = config.ingestion_dedupe_path.clone();
+    let runtime = tokio::runtime::Handle::current();
 
-    info!("postmark inbound payload received");
-
-    let message_ids = extract_message_ids(&payload, &body);
-    let is_new = {
-        let mut store = state.dedupe_store.lock().await;
-        match store.mark_if_new(&message_ids) {
-            Ok(value) => value,
+    thread::spawn(move || {
+        let mut dedupe_store = match ProcessedMessageStore::load(&dedupe_path) {
+            Ok(store) => store,
             Err(err) => {
-                error!("dedupe store error: {err}");
-                true
-            }
-        }
-    };
-
-    if !is_new {
-        return (StatusCode::OK, Json(json!({"status": "duplicate"})));
-    }
-
-    let config = state.config.clone();
-    let user_store = state.user_store.clone();
-    let index_store = state.index_store.clone();
-    let payload_clone = payload.clone();
-    let body_bytes = body.to_vec();
-    tokio::task::spawn_blocking(move || {
-        if let Err(err) = process_inbound_payload(
-            &config,
-            &user_store,
-            &index_store,
-            &payload_clone,
-            &body_bytes,
-        ) {
-            error!("failed to process inbound payload: {err}");
-        }
-    });
-
-    (StatusCode::OK, Json(json!({"status": "accepted"})))
-}
-
-async fn slack_events(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
-    // Check for URL verification challenge first
-    if let Some(verification) = is_url_verification(&body) {
-        info!("slack url verification challenge received");
-        let response = SlackChallengeResponse {
-            challenge: verification.challenge,
-        };
-        return (StatusCode::OK, Json(json!(response)));
-    }
-
-    // Parse the event wrapper to extract event_id for deduplication
-    let wrapper: serde_json::Value = match serde_json::from_slice(&body) {
-        Ok(v) => v,
-        Err(_) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"})));
-        }
-    };
-
-    info!("slack event received");
-
-    // Check if this employee handles Slack messages
-    if !state.config.employee_profile.slack_enabled {
-        info!(
-            "Slack disabled for employee {} (slack_enabled=false), ignoring event",
-            state.config.employee_id
-        );
-        return (StatusCode::OK, Json(json!({"status": "ignored"})));
-    }
-
-    // Extract event_id for deduplication
-    let event_id = wrapper
-        .get("event_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    if !event_id.is_empty() {
-        let is_new = {
-            let mut store = state.dedupe_store.lock().await;
-            match store.mark_if_new(&[event_id.to_string()]) {
-                Ok(value) => value,
-                Err(err) => {
-                    error!("dedupe store error: {err}");
-                    true
-                }
+                error!("ingestion dedupe store load failed: {}", err);
+                return;
             }
         };
 
-        if !is_new {
-            return (StatusCode::OK, Json(json!({"status": "duplicate"})));
-        }
-    }
+        loop {
+            match queue.claim_next(&employee_id) {
+                Ok(Some(item)) => {
+                    let is_new = match dedupe_store.mark_if_new(&[item.envelope.dedupe_key.clone()])
+                    {
+                        Ok(value) => value,
+                        Err(err) => {
+                            error!("ingestion dedupe store error: {}", err);
+                            true
+                        }
+                    };
 
-    // Try to extract message text for router classification
-    let message_text = wrapper
-        .get("event")
-        .and_then(|e| e.get("text"))
-        .and_then(|t| t.as_str())
-        .map(|s| s.to_string());
+                    if !is_new {
+                        if let Err(err) = queue.mark_done(&item.id) {
+                            warn!("failed to mark duplicate envelope done: {}", err);
+                        }
+                        continue;
+                    }
 
-    let channel_id = wrapper
-        .get("event")
-        .and_then(|e| e.get("channel"))
-        .and_then(|c| c.as_str())
-        .map(|s| s.to_string());
-
-    let thread_ts = wrapper
-        .get("event")
-        .and_then(|e| e.get("thread_ts").or(e.get("ts")))
-        .and_then(|t| t.as_str())
-        .map(|s| s.to_string());
-
-    let bot_id = wrapper
-        .get("event")
-        .and_then(|e| e.get("bot_id"))
-        .and_then(|b| b.as_str());
-
-    // Skip router for bot messages
-    if bot_id.is_none() {
-        if let (Some(ref text), Some(ref channel)) = (&message_text, &channel_id) {
-            // Strip Slack mentions like <@U0AF2E36TED> before classifying
-            let cleaned_text = text
-                .split_whitespace()
-                .filter(|word| !(word.starts_with("<@") && word.ends_with(">")))
-                .collect::<Vec<_>>()
-                .join(" ");
-
-            // Route through local LLM classifier
-            match state.message_router.classify(&cleaned_text).await {
-                RouterDecision::Simple(response) => {
-                    info!("Router decision: Simple (local response) for Slack");
-                    // Send direct reply via Slack API (async)
-                    if let Some(ref token) = state.config.slack_bot_token {
-                        match send_quick_slack_response(token, channel, thread_ts.as_deref(), &response).await {
-                            Ok(_) => {
-                                info!("Sent simple Slack response to channel {}", channel);
-                                return (StatusCode::OK, Json(json!({"status": "simple_response"})));
+                    match process_ingestion_envelope(
+                        &config,
+                        &user_store,
+                        &index_store,
+                        &slack_store,
+                        &message_router,
+                        &runtime,
+                        &item.envelope,
+                    ) {
+                        Ok(_) => {
+                            if let Err(err) = queue.mark_done(&item.id) {
+                                warn!("failed to mark envelope done: {}", err);
                             }
-                            Err(err) => {
-                                error!("Failed to send simple Slack response: {err}");
+                        }
+                        Err(err) => {
+                            if let Err(mark_err) =
+                                queue.mark_failed(&item.id, &err.to_string())
+                            {
+                                warn!("failed to mark envelope failed: {}", mark_err);
                             }
                         }
                     }
                 }
-                RouterDecision::Complex => {
-                    info!("Router decision: Complex (forward to pipeline) for Slack");
+                Ok(None) => {
+                    thread::sleep(poll_interval);
                 }
-                RouterDecision::Passthrough => {
-                    info!("Router passthrough for Slack");
+                Err(err) => {
+                    warn!("ingestion queue claim error: {}", err);
+                    thread::sleep(poll_interval);
                 }
             }
         }
-    } else {
-        info!("ignoring bot message from user {:?}", wrapper.get("event").and_then(|e| e.get("user")));
-    }
-
-    // Process Slack event payload similar to postmark_inbound
-    let config = state.config.clone();
-    let user_store = state.user_store.clone();
-    let index_store = state.index_store.clone();
-    let slack_store = state.slack_store.clone();
-    let body_bytes = body.to_vec();
-    tokio::task::spawn_blocking(move || {
-        if let Err(err) = process_slack_event(
-            &config,
-            &user_store,
-            &index_store,
-            &slack_store,
-            &body_bytes,
-        ) {
-            error!("failed to process slack event: {err}");
-        }
     });
 
-    (StatusCode::OK, Json(json!({"status": "accepted"})))
+    Ok(())
+}
+
+fn process_ingestion_envelope(
+    config: &ServiceConfig,
+    user_store: &UserStore,
+    index_store: &IndexStore,
+    slack_store: &SlackStore,
+    message_router: &MessageRouter,
+    runtime: &tokio::runtime::Handle,
+    envelope: &IngestionEnvelope,
+) -> Result<(), BoxError> {
+    match envelope.channel {
+        Channel::Email => {
+            let raw_payload = envelope.raw_payload_bytes();
+            let payload: PostmarkInbound = serde_json::from_slice(&raw_payload)?;
+            process_inbound_payload(config, user_store, index_store, &payload, &raw_payload)
+        }
+        Channel::Slack => {
+            let message = envelope.to_inbound_message();
+            if try_quick_response_slack(
+                config,
+                slack_store,
+                message_router,
+                runtime,
+                &message,
+            )? {
+                return Ok(());
+            }
+            let raw_payload = envelope.raw_payload_bytes();
+            if raw_payload.is_empty() {
+                return Err("missing slack raw payload".into());
+            }
+            process_slack_event(config, user_store, index_store, slack_store, &raw_payload)
+        }
+        Channel::BlueBubbles => {
+            let message = envelope.to_inbound_message();
+            if try_quick_response_bluebubbles(
+                config,
+                message_router,
+                runtime,
+                &message,
+            )? {
+                return Ok(());
+            }
+            let raw_payload = envelope.raw_payload_bytes();
+            if raw_payload.is_empty() {
+                return Err("missing bluebubbles raw payload".into());
+            }
+            process_bluebubbles_event(config, user_store, index_store, &raw_payload)
+        }
+        Channel::Discord => {
+            let message = envelope.to_inbound_message();
+            if try_quick_response_discord(
+                config,
+                message_router,
+                runtime,
+                &message,
+            )? {
+                return Ok(());
+            }
+            let raw_payload = envelope.raw_payload_bytes();
+            process_discord_inbound_message(config, index_store, &message, &raw_payload)
+        }
+        Channel::Sms => {
+            let message = envelope.to_inbound_message();
+            let raw_payload = envelope.raw_payload_bytes();
+            process_sms_message(config, user_store, index_store, &message, &raw_payload)
+        }
+        Channel::GoogleDocs => {
+            let message = envelope.to_inbound_message();
+            let raw_payload = envelope.raw_payload_bytes();
+            process_google_docs_message(config, user_store, index_store, &message, &raw_payload)
+        }
+        Channel::Telegram => Ok(()),
+    }
+}
+
+fn try_quick_response_slack(
+    config: &ServiceConfig,
+    slack_store: &SlackStore,
+    message_router: &MessageRouter,
+    runtime: &tokio::runtime::Handle,
+    message: &crate::channel::InboundMessage,
+) -> Result<bool, BoxError> {
+    let Some(text) = message.text_body.as_deref() else {
+        return Ok(false);
+    };
+    let channel_id = match message.metadata.slack_channel_id.as_deref() {
+        Some(value) => value,
+        None => return Ok(false),
+    };
+
+    let cleaned_text = text
+        .split_whitespace()
+        .filter(|word| !(word.starts_with("<@") && word.ends_with(">")))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let decision = runtime.block_on(message_router.classify(&cleaned_text));
+    match decision {
+        RouterDecision::Simple(response) => {
+            let token = resolve_slack_bot_token(config, slack_store, message.metadata.slack_team_id.as_deref());
+            if let Some(token) = token {
+                let thread_ts = Some(message.thread_id.as_str());
+                if runtime
+                    .block_on(send_quick_slack_response(&token, channel_id, thread_ts, &response))
+                    .is_ok()
+                {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+        RouterDecision::Complex | RouterDecision::Passthrough => Ok(false),
+    }
+}
+
+fn resolve_slack_bot_token(
+    config: &ServiceConfig,
+    slack_store: &SlackStore,
+    team_id: Option<&str>,
+) -> Option<String> {
+    if let Some(team_id) = team_id {
+        if let Ok(installation) = slack_store.get_installation_or_env(team_id) {
+            if !installation.bot_token.trim().is_empty() {
+                return Some(installation.bot_token);
+            }
+        }
+    }
+    config.slack_bot_token.clone()
+}
+
+fn try_quick_response_bluebubbles(
+    config: &ServiceConfig,
+    message_router: &MessageRouter,
+    runtime: &tokio::runtime::Handle,
+    message: &crate::channel::InboundMessage,
+) -> Result<bool, BoxError> {
+    let Some(text) = message.text_body.as_deref() else {
+        return Ok(false);
+    };
+    let Some(chat_guid) = message.metadata.bluebubbles_chat_guid.as_deref() else {
+        return Ok(false);
+    };
+    let Some(url) = config.bluebubbles_url.as_deref() else {
+        return Ok(false);
+    };
+    let Some(password) = config.bluebubbles_password.as_deref() else {
+        return Ok(false);
+    };
+
+    let decision = runtime.block_on(message_router.classify(text));
+    match decision {
+        RouterDecision::Simple(response) => {
+            if runtime
+                .block_on(send_quick_bluebubbles_response(url, password, chat_guid, &response))
+                .is_ok()
+            {
+                return Ok(true);
+            }
+            Ok(false)
+        }
+        RouterDecision::Complex | RouterDecision::Passthrough => Ok(false),
+    }
+}
+
+fn try_quick_response_discord(
+    config: &ServiceConfig,
+    message_router: &MessageRouter,
+    runtime: &tokio::runtime::Handle,
+    message: &crate::channel::InboundMessage,
+) -> Result<bool, BoxError> {
+    let Some(text) = message.text_body.as_deref() else {
+        return Ok(false);
+    };
+    let channel_id = match message.metadata.discord_channel_id {
+        Some(value) => value,
+        None => return Ok(false),
+    };
+    let message_id = message.message_id.as_deref();
+    let token = match config.discord_bot_token.as_deref() {
+        Some(token) => token,
+        None => return Ok(false),
+    };
+
+    let decision = runtime.block_on(message_router.classify(text));
+    match decision {
+        RouterDecision::Simple(response) => {
+            if send_quick_discord_response_simple(token, channel_id, message_id, &response).is_ok()
+            {
+                return Ok(true);
+            }
+            Ok(false)
+        }
+        RouterDecision::Complex | RouterDecision::Passthrough => Ok(false),
+    }
 }
 
 /// Redirect to Slack OAuth authorization page.
@@ -1372,147 +1408,6 @@ async fn slack_oauth_callback(
     );
 
     (StatusCode::OK, axum::response::Html(html)).into_response()
-}
-
-/// Handle BlueBubbles webhook for iMessage integration.
-/// POST /bluebubbles/webhook
-async fn bluebubbles_webhook(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
-    // Parse the webhook payload
-    let wrapper: serde_json::Value = match serde_json::from_slice(&body) {
-        Ok(v) => v,
-        Err(_) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"})));
-        }
-    };
-
-    info!("BlueBubbles webhook received");
-
-    // Check if this employee handles BlueBubbles messages
-    if !state.config.employee_profile.bluebubbles_enabled {
-        info!(
-            "BlueBubbles disabled for employee {} (bluebubbles_enabled=false), ignoring event",
-            state.config.employee_id
-        );
-        return (StatusCode::OK, Json(json!({"status": "ignored"})));
-    }
-
-    // Check if BlueBubbles is configured
-    let (server_url, password) = match (
-        &state.config.bluebubbles_url,
-        &state.config.bluebubbles_password,
-    ) {
-        (Some(url), Some(pwd)) => (url.clone(), pwd.clone()),
-        _ => {
-            info!("BlueBubbles not configured, ignoring webhook");
-            return (StatusCode::OK, Json(json!({"status": "not_configured"})));
-        }
-    };
-
-    // Extract event type
-    let event_type = wrapper
-        .get("type")
-        .and_then(|t| t.as_str())
-        .unwrap_or("");
-
-    // Only handle new-message events
-    if event_type != "new-message" {
-        info!("Ignoring BlueBubbles event type: {}", event_type);
-        return (StatusCode::OK, Json(json!({"status": "ignored"})));
-    }
-
-    // Extract message data for deduplication
-    let message_guid = wrapper
-        .get("data")
-        .and_then(|d| d.get("guid"))
-        .and_then(|g| g.as_str())
-        .unwrap_or("");
-
-    if !message_guid.is_empty() {
-        let is_new = {
-            let mut store = state.dedupe_store.lock().await;
-            match store.mark_if_new(&[message_guid.to_string()]) {
-                Ok(value) => value,
-                Err(err) => {
-                    error!("dedupe store error: {err}");
-                    true
-                }
-            }
-        };
-
-        if !is_new {
-            return (StatusCode::OK, Json(json!({"status": "duplicate"})));
-        }
-    }
-
-    // Check if message is from us (outgoing)
-    let is_from_me = wrapper
-        .get("data")
-        .and_then(|d| d.get("isFromMe"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    if is_from_me {
-        info!("Ignoring outgoing iMessage (isFromMe=true)");
-        return (StatusCode::OK, Json(json!({"status": "ignored_outgoing"})));
-    }
-
-    // Extract message text and chat GUID for router
-    let message_text = wrapper
-        .get("data")
-        .and_then(|d| d.get("text"))
-        .and_then(|t| t.as_str())
-        .map(|s| s.to_string());
-
-    let chat_guid = wrapper
-        .get("data")
-        .and_then(|d| d.get("chats"))
-        .and_then(|c| c.as_array())
-        .and_then(|arr| arr.first())
-        .and_then(|chat| chat.get("guid"))
-        .and_then(|g| g.as_str())
-        .map(|s| s.to_string());
-
-    // Route through local LLM classifier
-    if let (Some(ref text), Some(ref chat)) = (&message_text, &chat_guid) {
-        match state.message_router.classify(text).await {
-            RouterDecision::Simple(response) => {
-                info!("Router decision: Simple (local response) for BlueBubbles");
-                match send_quick_bluebubbles_response(&server_url, &password, chat, &response).await
-                {
-                    Ok(_) => {
-                        info!("Sent simple BlueBubbles response to chat {}", chat);
-                        return (
-                            StatusCode::OK,
-                            Json(json!({"status": "simple_response"})),
-                        );
-                    }
-                    Err(err) => {
-                        error!("Failed to send simple BlueBubbles response: {err}");
-                    }
-                }
-            }
-            RouterDecision::Complex => {
-                info!("Router decision: Complex (forward to pipeline) for BlueBubbles");
-            }
-            RouterDecision::Passthrough => {
-                info!("Router passthrough for BlueBubbles");
-            }
-        }
-    }
-
-    // Process BlueBubbles event payload
-    let config = state.config.clone();
-    let user_store = state.user_store.clone();
-    let index_store = state.index_store.clone();
-    let body_bytes = body.to_vec();
-    tokio::task::spawn_blocking(move || {
-        if let Err(err) = process_bluebubbles_event(&config, &user_store, &index_store, &body_bytes)
-        {
-            error!("failed to process BlueBubbles event: {err}");
-        }
-    });
-
-    (StatusCode::OK, Json(json!({"status": "accepted"})))
 }
 
 fn process_slack_event(
@@ -1827,184 +1722,434 @@ fn append_bluebubbles_message(
     Ok(())
 }
 
-/// Poll Google Docs for new comments and create tasks.
-/// Follows the same pattern as process_slack_event.
-fn poll_google_docs_comments(
-    poller: &crate::google_docs_poller::GoogleDocsPoller,
+fn process_discord_inbound_message(
+    config: &ServiceConfig,
+    index_store: &IndexStore,
+    message: &crate::channel::InboundMessage,
+    raw_payload: &[u8],
+) -> Result<(), BoxError> {
+    use crate::discord_gateway::DiscordGuildPaths;
+
+    let channel_id = message
+        .metadata
+        .discord_channel_id
+        .ok_or("missing discord_channel_id")?;
+    let guild_id = message
+        .metadata
+        .discord_guild_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "dm".to_string());
+
+    let guild_paths = DiscordGuildPaths::new(&config.workspace_root, &guild_id);
+    guild_paths.ensure_dirs()?;
+
+    let thread_key = format!("discord:{}:{}:{}", guild_id, channel_id, message.thread_id);
+
+    let workspace = ensure_discord_workspace(
+        &guild_paths,
+        channel_id,
+        &message.thread_id,
+        &config.employee_profile,
+        config.skills_source_dir.as_deref(),
+    )?;
+
+    let thread_state_path = default_thread_state_path(&workspace);
+    let thread_state =
+        bump_thread_state(&thread_state_path, &thread_key, message.message_id.clone())?;
+
+    append_discord_message_payload(&workspace, message, raw_payload, thread_state.last_email_seq)?;
+
+    let model_name = match config.employee_profile.model.clone() {
+        Some(model) => model,
+        None => {
+            if config
+                .employee_profile
+                .runner
+                .eq_ignore_ascii_case("claude")
+            {
+                String::new()
+            } else {
+                config.codex_model.clone()
+            }
+        }
+    };
+
+    let run_task = RunTaskTask {
+        workspace_dir: workspace.clone(),
+        input_email_dir: PathBuf::from("incoming_email"),
+        input_attachments_dir: PathBuf::from("incoming_attachments"),
+        memory_dir: PathBuf::from("memory"),
+        reference_dir: PathBuf::from("references"),
+        model_name,
+        runner: config.employee_profile.runner.clone(),
+        codex_disabled: config.codex_disabled,
+        reply_to: vec![channel_id.to_string()],
+        reply_from: None,
+        archive_root: None,
+        thread_id: Some(thread_key.clone()),
+        thread_epoch: Some(thread_state.epoch),
+        thread_state_path: Some(thread_state_path.clone()),
+        channel: Channel::Discord,
+        slack_team_id: None,
+        employee_id: Some(config.employee_id.clone()),
+    };
+
+    let mut scheduler = Scheduler::load(&guild_paths.tasks_db_path, ModuleExecutor::default())?;
+    if let Err(err) = cancel_pending_thread_tasks(&mut scheduler, &workspace, thread_state.epoch) {
+        warn!(
+            "failed to cancel pending thread tasks for {}: {}",
+            workspace.display(),
+            err
+        );
+    }
+    let task_id = scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
+
+    let synthetic_user_id = DiscordGuildPaths::user_id(&guild_id);
+    index_store.sync_user_tasks(&synthetic_user_id, scheduler.tasks())?;
+
+    info!(
+        "scheduler tasks enqueued guild={} task_id={} message_id={:?} workspace={} thread_epoch={}",
+        guild_id,
+        task_id,
+        message.message_id,
+        workspace.display(),
+        thread_state.epoch
+    );
+
+    Ok(())
+}
+
+fn ensure_discord_workspace(
+    guild_paths: &crate::discord_gateway::DiscordGuildPaths,
+    channel_id: u64,
+    thread_id: &str,
+    employee_profile: &EmployeeProfile,
+    skills_source_dir: Option<&Path>,
+) -> Result<PathBuf, BoxError> {
+    let thread_hash = &md5::compute(thread_id.as_bytes())
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>()[..8];
+
+    let workspace = guild_paths
+        .workspaces_root
+        .join(channel_id.to_string())
+        .join(thread_hash);
+
+    if !workspace.exists() {
+        fs::create_dir_all(&workspace)?;
+        fs::create_dir_all(workspace.join("incoming_email"))?;
+        fs::create_dir_all(workspace.join("incoming_attachments"))?;
+        fs::create_dir_all(workspace.join("memory"))?;
+        fs::create_dir_all(workspace.join("references"))?;
+
+        ensure_workspace_employee_files(&workspace, employee_profile)?;
+
+        let agents_skills_dir = workspace.join(".agents").join("skills");
+        if let Some(skills_src) = skills_source_dir {
+            if let Err(err) = copy_skills_directory(skills_src, &agents_skills_dir) {
+                error!("failed to copy base skills to workspace: {}", err);
+            }
+        }
+        if let Some(employee_skills) = employee_profile.skills_dir.as_deref() {
+            let should_copy = skills_source_dir
+                .map(|base| base != employee_skills)
+                .unwrap_or(true);
+            if should_copy {
+                if let Err(err) = copy_skills_directory(employee_skills, &agents_skills_dir) {
+                    error!("failed to copy employee skills to workspace: {}", err);
+                }
+            }
+        }
+
+        info!("created Discord workspace at {}", workspace.display());
+    }
+
+    Ok(workspace)
+}
+
+fn append_discord_message_payload(
+    workspace: &Path,
+    message: &crate::channel::InboundMessage,
+    raw_payload: &[u8],
+    seq: u64,
+) -> Result<(), BoxError> {
+    let incoming_dir = workspace.join("incoming_email");
+    fs::create_dir_all(&incoming_dir)?;
+
+    let raw_path = incoming_dir.join(format!("{:05}_discord_raw.json", seq));
+    fs::write(&raw_path, raw_payload)?;
+
+    let text_path = incoming_dir.join(format!("{:05}_discord_message.txt", seq));
+    let text_content = message.text_body.clone().unwrap_or_default();
+    fs::write(&text_path, &text_content)?;
+
+    let meta_path = incoming_dir.join(format!("{:05}_discord_meta.json", seq));
+    let meta = serde_json::json!({
+        "channel": "discord",
+        "sender": message.sender,
+        "sender_name": message.sender_name,
+        "guild_id": message.metadata.discord_guild_id,
+        "channel_id": message.metadata.discord_channel_id,
+        "thread_id": message.thread_id,
+        "message_id": message.message_id,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    });
+    fs::write(&meta_path, serde_json::to_string_pretty(&meta)?)?;
+
+    info!(
+        "saved Discord message seq={} to {}",
+        seq,
+        incoming_dir.display()
+    );
+    Ok(())
+}
+
+fn process_sms_message(
     config: &ServiceConfig,
     user_store: &UserStore,
     index_store: &IndexStore,
-) -> Result<usize, BoxError> {
-    use crate::adapters::google_docs::GoogleDocsInboundAdapter;
-    use crate::channel::InboundAdapter;
+    message: &crate::channel::InboundMessage,
+    raw_payload: &[u8],
+) -> Result<(), BoxError> {
+    let normalized_from = normalize_phone_number(&message.sender);
+    let user = user_store.get_or_create_user("phone", &message.sender)?;
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+    user_store.ensure_user_dirs(&user_paths)?;
 
-    let adapter = GoogleDocsInboundAdapter::new(
-        poller.auth().clone(),
-        poller.config().employee_emails.clone(),
+    let thread_key = format!(
+        "sms:{}:{}",
+        normalize_phone_number(&message.recipient),
+        normalized_from
     );
 
-    // List all shared documents
-    let documents = adapter.list_shared_documents()?;
-    info!("Google Docs: Found {} shared documents", documents.len());
+    let workspace = ensure_thread_workspace(
+        &user_paths,
+        &user.user_id,
+        &thread_key,
+        &config.employee_profile,
+        config.skills_source_dir.as_deref(),
+    )?;
 
-    let mut tasks_created = 0;
+    let thread_state_path = default_thread_state_path(&workspace);
+    let thread_state =
+        bump_thread_state(&thread_state_path, &thread_key, message.message_id.clone())?;
 
-    for doc in documents {
-        let doc_name = doc.name.as_deref().unwrap_or("Untitled");
-        info!("Google Docs: Checking document '{}' ({})", doc_name, doc.id);
+    append_sms_message(&workspace, message, raw_payload, thread_state.last_email_seq)?;
 
-        // Register document for tracking
-        let owner_email = doc
-            .owners
-            .as_ref()
-            .and_then(|owners| owners.first())
-            .and_then(|o| o.email_address.as_deref());
-
-        poller.store().register_document(&doc.id, doc.name.as_deref(), owner_email)?;
-
-        // Get comments for this document
-        let comments = match adapter.list_comments(&doc.id) {
-            Ok(c) => c,
-            Err(e) => {
-                warn!("Failed to list comments for '{}': {}", doc_name, e);
-                continue;
+    let model_name = match config.employee_profile.model.clone() {
+        Some(model) => model,
+        None => {
+            if config
+                .employee_profile
+                .runner
+                .eq_ignore_ascii_case("claude")
+            {
+                String::new()
+            } else {
+                config.codex_model.clone()
             }
-        };
-
-        // Get already processed comments/replies (using tracking IDs)
-        let processed = poller.store().get_processed_ids(&doc.id)?;
-
-        // Filter for actionable comments (returns ActionableComment items)
-        let actionable_items = adapter.filter_actionable_comments(&comments, &processed);
-
-        // Only log if there are new actionable items
-        if !actionable_items.is_empty() {
-            info!(
-                "Google Docs: Found {} new actionable items in '{}' ({} total comments, {} processed)",
-                actionable_items.len(), doc_name, comments.len(), processed.len()
-            );
         }
+    };
 
-        for actionable in actionable_items {
-            // Convert to inbound message using the new method
-            let doc_name = doc.name.as_deref().unwrap_or("Untitled");
-            let message = adapter.actionable_to_inbound_message(&doc.id, doc_name, &actionable);
+    let reply_from = message
+        .metadata
+        .sms_to
+        .clone()
+        .or_else(|| Some(message.recipient.clone()));
 
-            let item_type = if actionable.triggering_reply.is_some() { "reply" } else { "comment" };
-            info!(
-                "Google Docs: Processing {} {} on {} from {}",
-                item_type, actionable.tracking_id, doc_name, message.sender
-            );
+    let run_task = RunTaskTask {
+        workspace_dir: workspace.clone(),
+        input_email_dir: PathBuf::from("incoming_email"),
+        input_attachments_dir: PathBuf::from("incoming_attachments"),
+        memory_dir: PathBuf::from("memory"),
+        reference_dir: PathBuf::from("references"),
+        model_name,
+        runner: config.employee_profile.runner.clone(),
+        codex_disabled: config.codex_disabled,
+        reply_to: vec![message.sender.clone()],
+        reply_from,
+        archive_root: Some(user_paths.mail_root.clone()),
+        thread_id: Some(thread_key.clone()),
+        thread_epoch: Some(thread_state.epoch),
+        thread_state_path: Some(thread_state_path.clone()),
+        channel: Channel::Sms,
+        slack_team_id: None,
+        employee_id: Some(config.employee_profile.id.clone()),
+    };
 
-            // Create user from comment author
-            let user = user_store.get_or_create_user("google_docs", &message.sender)?;
-            let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
-            user_store.ensure_user_dirs(&user_paths)?;
+    let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+    if let Err(err) = cancel_pending_thread_tasks(&mut scheduler, &workspace, thread_state.epoch) {
+        warn!(
+            "failed to cancel pending thread tasks for {}: {}",
+            workspace.display(),
+            err
+        );
+    }
+    let task_id = scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
+    index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
 
-            // Thread key: document_id + comment_id (always use parent comment ID for thread continuity)
-            let thread_key = format!("gdocs:{}:{}", doc.id, actionable.comment.id);
+    info!(
+        "scheduler tasks enqueued user_id={} task_id={} message_id={:?} workspace={} thread_epoch={}",
+        user.user_id,
+        task_id,
+        message.message_id,
+        workspace.display(),
+        thread_state.epoch
+    );
 
-            // Create/get workspace for this thread
-            let workspace = ensure_thread_workspace(
-                &user_paths,
-                &user.user_id,
-                &thread_key,
-                &config.employee_profile,
-                config.skills_source_dir.as_deref(),
-            )?;
+    Ok(())
+}
 
-            // Bump thread state (use tracking_id for unique message identification)
-            let thread_state_path = default_thread_state_path(&workspace);
-            let thread_state = bump_thread_state(&thread_state_path, &thread_key, Some(actionable.tracking_id.clone()))?;
+fn append_sms_message(
+    workspace: &Path,
+    message: &crate::channel::InboundMessage,
+    raw_payload: &[u8],
+    seq: u64,
+) -> Result<(), BoxError> {
+    let incoming_dir = workspace.join("incoming_email");
+    fs::create_dir_all(&incoming_dir)?;
 
-            // Save the incoming comment to workspace
-            append_google_docs_comment(&workspace, &message, &actionable, thread_state.last_email_seq)?;
+    let raw_path = incoming_dir.join(format!("{:05}_sms_raw.txt", seq));
+    fs::write(&raw_path, raw_payload)?;
 
-            // Fetch and save document content for agent context
-            match adapter.read_document_content(&doc.id) {
-                Ok(doc_content) => {
-                    let doc_content_path = workspace.join("incoming_email").join("document_content.txt");
-                    if let Err(e) = fs::write(&doc_content_path, &doc_content) {
-                        warn!(
-                            "Failed to save document content for {}: {}",
-                            doc.id, e
-                        );
-                    } else {
-                        info!(
-                            "Saved document content ({} chars) to {}",
-                            doc_content.len(),
-                            doc_content_path.display()
-                        );
-                    }
-                }
-                Err(e) => {
+    let text_path = incoming_dir.join(format!("{:05}_sms_message.txt", seq));
+    let text_content = message.text_body.clone().unwrap_or_default();
+    fs::write(&text_path, &text_content)?;
+
+    let meta_path = incoming_dir.join(format!("{:05}_sms_meta.json", seq));
+    let meta = serde_json::json!({
+        "channel": "sms",
+        "sender": message.sender,
+        "recipient": message.recipient,
+        "thread_id": message.thread_id,
+        "message_id": message.message_id,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    });
+    fs::write(&meta_path, serde_json::to_string_pretty(&meta)?)?;
+
+    info!(
+        "saved SMS message seq={} to {}",
+        seq,
+        incoming_dir.display()
+    );
+    Ok(())
+}
+
+fn normalize_phone_number(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_digit() || *ch == '+')
+        .collect()
+}
+
+fn process_google_docs_message(
+    config: &ServiceConfig,
+    user_store: &UserStore,
+    index_store: &IndexStore,
+    message: &crate::channel::InboundMessage,
+    raw_payload: &[u8],
+) -> Result<(), BoxError> {
+    use crate::adapters::google_docs::{ActionableComment, GoogleDocsInboundAdapter};
+    use crate::google_auth::GoogleAuth;
+
+    let actionable: ActionableComment = serde_json::from_slice(raw_payload)?;
+    let document_id = message
+        .metadata
+        .google_docs_document_id
+        .as_deref()
+        .ok_or("missing google_docs_document_id")?;
+    let user_email = extract_emails(&message.sender)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| format!("gdocs_{}@local", message.sender.replace(' ', "_")));
+    let user = user_store.get_or_create_user("google_docs", &user_email)?;
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+    user_store.ensure_user_dirs(&user_paths)?;
+
+    let thread_key = format!("gdocs:{}:{}", document_id, actionable.comment.id);
+
+    let workspace = ensure_thread_workspace(
+        &user_paths,
+        &user.user_id,
+        &thread_key,
+        &config.employee_profile,
+        config.skills_source_dir.as_deref(),
+    )?;
+
+    let thread_state_path = default_thread_state_path(&workspace);
+    let thread_state = bump_thread_state(
+        &thread_state_path,
+        &thread_key,
+        Some(actionable.tracking_id.clone()),
+    )?;
+
+    append_google_docs_comment(&workspace, message, &actionable, thread_state.last_email_seq)?;
+
+    if let Ok(auth) = GoogleAuth::from_env() {
+        let adapter = GoogleDocsInboundAdapter::new(auth, HashSet::new());
+        match adapter.read_document_content(document_id) {
+            Ok(doc_content) => {
+                let doc_content_path =
+                    workspace.join("incoming_email").join("document_content.txt");
+                if let Err(e) = fs::write(&doc_content_path, &doc_content) {
                     warn!(
-                        "Failed to fetch document content for {}: {}",
-                        doc.id, e
+                        "Failed to save document content for {}: {}",
+                        document_id, e
                     );
                 }
             }
-
-            // Determine model and runner
-            let model_name = match config.employee_profile.model.clone() {
-                Some(model) => model,
-                None => {
-                    if config.employee_profile.runner.eq_ignore_ascii_case("claude") {
-                        String::new()
-                    } else {
-                        config.codex_model.clone()
-                    }
-                }
-            };
-
-            info!(
-                "workspace ready at {} for user {} thread={} epoch={}",
-                workspace.display(),
-                user.user_id,
-                thread_key,
-                thread_state.epoch
-            );
-
-            // Create RunTask
-            let run_task = RunTaskTask {
-                workspace_dir: workspace.clone(),
-                input_email_dir: PathBuf::from("incoming_email"),
-                input_attachments_dir: PathBuf::from("incoming_attachments"),
-                memory_dir: PathBuf::from("memory"),
-                reference_dir: PathBuf::from("references"),
-                model_name,
-                runner: config.employee_profile.runner.clone(),
-                codex_disabled: config.codex_disabled,
-                reply_to: vec![message.sender.clone()],
-                reply_from: config.employee_profile.addresses.first().cloned(),
-                archive_root: None,
-                thread_id: Some(format!("{}:{}", doc.id, actionable.comment.id)), // document_id:comment_id for reply
-                thread_epoch: Some(thread_state.epoch),
-                thread_state_path: Some(thread_state_path.clone()),
-                channel: Channel::GoogleDocs,
-                slack_team_id: None,
-                employee_id: Some(config.employee_profile.id.clone()),
-            };
-
-            let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
-            let task_id = scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
-            index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
-
-            // Mark as processed using the tracking_id
-            poller.store().mark_processed_id(&doc.id, &actionable.tracking_id)?;
-
-            tasks_created += 1;
-            info!(
-                "Created task {} for Google Docs {} {} on {} ({}) for user {}",
-                task_id, item_type, actionable.tracking_id, doc_name, doc.id, user.user_id
-            );
+            Err(e) => {
+                warn!("Failed to fetch document content for {}: {}", document_id, e);
+            }
         }
-
-        // Update last checked time
-        poller.store().update_last_checked(&doc.id)?;
     }
 
-    Ok(tasks_created)
+    let model_name = match config.employee_profile.model.clone() {
+        Some(model) => model,
+        None => {
+            if config.employee_profile.runner.eq_ignore_ascii_case("claude") {
+                String::new()
+            } else {
+                config.codex_model.clone()
+            }
+        }
+    };
+
+    let run_task = RunTaskTask {
+        workspace_dir: workspace.clone(),
+        input_email_dir: PathBuf::from("incoming_email"),
+        input_attachments_dir: PathBuf::from("incoming_attachments"),
+        memory_dir: PathBuf::from("memory"),
+        reference_dir: PathBuf::from("references"),
+        model_name,
+        runner: config.employee_profile.runner.clone(),
+        codex_disabled: config.codex_disabled,
+        reply_to: vec![message.sender.clone()],
+        reply_from: config.employee_profile.addresses.first().cloned(),
+        archive_root: None,
+        thread_id: Some(thread_key.clone()),
+        thread_epoch: Some(thread_state.epoch),
+        thread_state_path: Some(thread_state_path.clone()),
+        channel: Channel::GoogleDocs,
+        slack_team_id: None,
+        employee_id: Some(config.employee_profile.id.clone()),
+    };
+
+    let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+    let task_id = scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
+    index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
+
+    info!(
+        "scheduler tasks enqueued user_id={} task_id={} message_id={:?} workspace={} thread_epoch={}",
+        user.user_id,
+        task_id,
+        message.message_id,
+        workspace.display(),
+        thread_state.epoch
+    );
+
+    Ok(())
 }
 
 /// Save an incoming Google Docs comment or reply to the workspace.
@@ -2208,6 +2353,42 @@ async fn send_quick_slack_response(
         return Err(format!("Slack API error: {}", error).into());
     }
 
+    Ok(())
+}
+
+fn send_quick_discord_response_simple(
+    bot_token: &str,
+    channel_id: u64,
+    message_id: Option<&str>,
+    response_text: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use crate::adapters::discord::DiscordOutboundAdapter;
+    use crate::channel::{ChannelMetadata, OutboundAdapter, OutboundMessage};
+
+    let adapter = DiscordOutboundAdapter::new(bot_token.to_string());
+
+    let message = OutboundMessage {
+        channel: Channel::Discord,
+        from: None,
+        to: vec![channel_id.to_string()],
+        cc: vec![],
+        bcc: vec![],
+        subject: String::new(),
+        text_body: response_text.to_string(),
+        html_body: String::new(),
+        html_path: None,
+        attachments_dir: None,
+        thread_id: message_id.map(|value| value.to_string()),
+        metadata: ChannelMetadata {
+            discord_channel_id: Some(channel_id),
+            ..Default::default()
+        },
+    };
+
+    let result = adapter.send(&message)?;
+    if !result.success {
+        return Err(result.error.unwrap_or_else(|| "discord send failed".to_string()).into());
+    }
     Ok(())
 }
 
@@ -3673,30 +3854,6 @@ struct PostmarkAttachment {
     content_type: String,
 }
 
-fn extract_message_ids(payload: &PostmarkInbound, raw_payload: &[u8]) -> Vec<String> {
-    let mut ids = Vec::new();
-    let mut seen = HashSet::new();
-    if let Some(header_id) = payload.header_message_id().and_then(normalize_message_id) {
-        if seen.insert(header_id.clone()) {
-            ids.push(header_id);
-        }
-    }
-    if let Some(message_id) = payload
-        .message_id
-        .as_ref()
-        .and_then(|value| normalize_message_id(value))
-    {
-        if seen.insert(message_id.clone()) {
-            ids.push(message_id);
-        }
-    }
-    let fallback = format!("{:x}", md5::compute(raw_payload));
-    if seen.insert(fallback.clone()) {
-        ids.push(fallback);
-    }
-    ids
-}
-
 fn normalize_message_id(raw: &str) -> Option<String> {
     let trimmed = raw.trim().trim_matches(|ch| matches!(ch, '<' | '>'));
     if trimmed.is_empty() {
@@ -3760,6 +3917,7 @@ impl ProcessedMessageStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::channel::{ChannelMetadata, InboundMessage};
     use tempfile::TempDir;
 
     #[test]
@@ -3897,5 +4055,127 @@ mod tests {
     fn no_reply_detection_ignores_domain_markers() {
         assert!(!is_no_reply_address("notifications@github.com"));
         assert!(!is_no_reply_address("octocat@users.noreply.github.com"));
+    }
+
+    #[test]
+    fn process_sms_message_creates_run_task() -> Result<(), BoxError> {
+        let temp = TempDir::new()?;
+        let root = temp.path();
+        let users_root = root.join("users");
+        let state_root = root.join("state");
+        fs::create_dir_all(&users_root)?;
+        fs::create_dir_all(&state_root)?;
+
+        let addresses = vec!["service@example.com".to_string()];
+        let address_set: HashSet<String> = addresses
+            .iter()
+            .map(|value| value.to_ascii_lowercase())
+            .collect();
+        let employee = EmployeeProfile {
+            id: "test-employee".to_string(),
+            display_name: None,
+            runner: "codex".to_string(),
+            model: None,
+            addresses,
+            address_set: address_set.clone(),
+            runtime_root: None,
+            agents_path: None,
+            claude_path: None,
+            soul_path: None,
+            skills_dir: None,
+            discord_enabled: false,
+            slack_enabled: false,
+            bluebubbles_enabled: false,
+        };
+        let mut employee_by_id = HashMap::new();
+        employee_by_id.insert(employee.id.clone(), employee.clone());
+        let employee_directory = EmployeeDirectory {
+            employees: vec![employee.clone()],
+            employee_by_id,
+            default_employee_id: Some(employee.id.clone()),
+            service_addresses: address_set,
+        };
+
+        let config = ServiceConfig {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            employee_id: employee.id.clone(),
+            employee_config_path: root.join("employee.toml"),
+            employee_profile: employee,
+            employee_directory,
+            workspace_root: root.join("workspaces"),
+            scheduler_state_path: state_root.join("tasks.db"),
+            processed_ids_path: state_root.join("processed_ids.txt"),
+            ingestion_db_path: state_root.join("ingestion.db"),
+            ingestion_dedupe_path: state_root.join("ingestion_processed_ids.txt"),
+            ingestion_poll_interval: Duration::from_millis(50),
+            users_root: users_root.clone(),
+            users_db_path: state_root.join("users.db"),
+            task_index_path: state_root.join("task_index.db"),
+            codex_model: "gpt-5.2-codex".to_string(),
+            codex_disabled: true,
+            scheduler_poll_interval: Duration::from_millis(50),
+            scheduler_max_concurrency: 1,
+            scheduler_user_max_concurrency: 1,
+            inbound_body_max_bytes: DEFAULT_INBOUND_BODY_MAX_BYTES,
+            skills_source_dir: None,
+            slack_bot_token: None,
+            slack_bot_user_id: None,
+            slack_store_path: state_root.join("slack.db"),
+            slack_client_id: None,
+            slack_client_secret: None,
+            slack_redirect_uri: None,
+            discord_bot_token: None,
+            discord_bot_user_id: None,
+            google_docs_enabled: false,
+            bluebubbles_url: None,
+            bluebubbles_password: None,
+        };
+
+        let user_store = UserStore::new(&config.users_db_path)?;
+        let index_store = IndexStore::new(&config.task_index_path)?;
+
+        let sender = "+1 (555) 123-4567".to_string();
+        let recipient = "+1 555-999-0000".to_string();
+        let raw_payload = b"From=%2B15551234567&To=%2B15559990000&Body=Hello".to_vec();
+        let message = InboundMessage {
+            channel: Channel::Sms,
+            sender: sender.clone(),
+            sender_name: None,
+            recipient: recipient.clone(),
+            subject: None,
+            text_body: Some("Hello".to_string()),
+            html_body: None,
+            thread_id: "sms:test".to_string(),
+            message_id: Some("SM123".to_string()),
+            attachments: Vec::new(),
+            reply_to: vec![sender.clone()],
+            raw_payload: raw_payload.clone(),
+            metadata: ChannelMetadata {
+                sms_from: Some(sender.clone()),
+                sms_to: Some(recipient.clone()),
+                ..Default::default()
+            },
+        };
+
+        process_sms_message(&config, &user_store, &index_store, &message, &raw_payload)?;
+
+        let user = user_store.get_or_create_user("phone", &sender)?;
+        let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+        let scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+
+        let run_task = scheduler
+            .tasks()
+            .iter()
+            .find_map(|task| match &task.kind {
+                TaskKind::RunTask(run) => Some(run),
+                _ => None,
+            })
+            .expect("run task created");
+
+        assert_eq!(run_task.channel, Channel::Sms);
+        assert_eq!(run_task.reply_to, vec![sender]);
+        assert_eq!(run_task.reply_from.as_deref(), Some(recipient.as_str()));
+        Ok(())
     }
 }

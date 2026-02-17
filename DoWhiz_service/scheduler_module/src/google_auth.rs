@@ -3,7 +3,7 @@
 //! This module provides OAuth 2.0 token management for Google APIs,
 //! supporting both service account and user OAuth flows.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tracing::{debug, error, warn};
