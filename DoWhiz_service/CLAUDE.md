@@ -2,147 +2,123 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Code Style Guidelines
+## Project Overview
 
-**Modularity**: Keep the codebase modular and maintainable. If a file exceeds 500-1000 lines, split it into separate files with well-defined, single-purpose functionality.
+DoWhiz Service is a Rust microservice handling inbound webhooks (Postmark, Slack, Discord, Google Docs, BlueBubbles/iMessage), AI-powered task execution (Codex/Claude CLI), and outbound message delivery. It supports multiple "employee" profiles (Oliver, Maggie, Devin, Proto) with isolated workspaces and configurable AI runners.
 
 ## Build & Test Commands
 
 ```bash
 # Build
-cargo build                                    # Debug build
-cargo build --release                          # Release build
-cargo build -p scheduler_module --release      # Build specific module
+cargo build --release
 
-# Test
-cargo test                                     # All tests
-cargo test -p scheduler_module                 # Module-specific tests
-cargo test -p scheduler_module --test scheduler_basic  # Single test file
+# Run all tests
+cargo test
 
-# Lint & Format
-cargo fmt --check                              # Check formatting
-cargo fmt                                      # Auto-format
-cargo clippy --all-targets --all-features      # Run linter
+# Module-specific tests
+cargo test -p scheduler_module
+cargo test -p send_emails_module
+cargo test -p run_task_module
 
-# E2E Tests (requires environment setup)
+# Single test file
+cargo test -p scheduler_module --test scheduler_basic
+
+# Linting
+cargo clippy --all-targets --all-features
+cargo fmt --check
+
+# Run service locally (per-employee)
+./scripts/run_employee.sh little_bear 9001
+./scripts/run_employee.sh mini_mouse 9002 --skip-hook
+
+# Run inbound gateway
+./scripts/run_gateway_local.sh
+
+# Live E2E test (requires ngrok + Postmark setup)
 RUST_SERVICE_LIVE_TEST=1 cargo test -p scheduler_module --test service_real_email -- --nocapture
-RUN_CODEX_E2E=1 cargo test -p scheduler_module --test scheduler_agent_e2e -- --nocapture
 ```
+
+## Architecture
+
+### Message Flow
+```
+External Events (Postmark/Slack/Discord/GoogleDocs/BlueBubbles)
+    ↓
+Inbound Gateway (port 9100) - deduplicates, routes to single employee
+    ↓
+Worker Service (ports 9001-9004) - per-employee HTTP server
+    ↓
+Ingestion Queue + Scheduler - persists to SQLite, creates RunTask
+    ↓
+AI Agent Execution - codex CLI or claude CLI with workspace setup
+    ↓
+Reply Generation - parse schedule blocks, generate HTML, attach files
+    ↓
+Outbound Delivery - send via channel adapter, archive to user mail
+```
+
+### Key Modules
+
+- **scheduler_module/src/lib.rs**: Core types (`TaskKind`, `Schedule`, `Scheduler<E>`)
+- **scheduler_module/src/service.rs**: Axum HTTP server setup, webhook endpoints
+- **scheduler_module/src/channel.rs**: `Channel` enum abstracting Email/Slack/Discord/GoogleDocs/BlueBubbles
+- **scheduler_module/src/ingestion.rs**: `InboundMessage` envelope structure
+- **scheduler_module/src/adapters/**: Channel-specific implementations (postmark.rs, slack.rs, discord.rs, google_docs.rs, bluebubbles.rs)
+- **scheduler_module/src/bin/rust_service.rs**: Main entry point
+- **scheduler_module/src/bin/inbound_gateway.rs**: Message router/deduplicator
+
+### Configuration Files
+
+- **employee.toml**: Employee profiles (id, runner, addresses, personality files)
+- **gateway.toml**: Inbound gateway routing targets
+- **.env**: Secrets (POSTMARK_SERVER_TOKEN, AZURE_OPENAI_*, SLACK_*, DISCORD_*, GOOGLE_*)
+
+### Database Schema (SQLite)
+
+- `tasks.db`: Scheduler state with `tasks`, `send_email_tasks`, `run_task_tasks`, `task_executions` tables
+- `users.db`: User registry (normalized email, timestamps)
+- `task_index.db`: Global index for due task polling
+
+### Workspace Isolation
+
+Each task runs in isolated workspace at `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces/<message_id>/`:
+- `workspace/`: Agent working directory
+- `references/past_emails/`: Hydrated email history
+- `reply_email_draft.html`: Generated reply
+- `reply_email_attachments/`: Output files
+
+### Employee System
+
+| ID | Name | Runner | Primary Channel |
+|----|------|--------|-----------------|
+| `little_bear` | Oliver | codex | Email |
+| `mini_mouse` | Maggie | claude | Email |
+| `sticky_octopus` | Devin | codex | Email |
+| `boiled_egg` | Proto | codex | Email, Slack, Discord, BlueBubbles |
+
+### Skills System
+
+Skills in `skills/` directory provide agent capabilities (playwright-cli, pdf, docx, xlsx, google-docs, etc.). Each skill has `SKILL.md` metadata and optional `references/` guides.
 
 ## Testing Expectations
 
 After completing code changes, you must design targeted, detailed unit tests and end-to-end tests to ensure both new and existing functionality behave as expected. Debug and resolve any issues found during test runs. If certain issues require manual intervention, provide a detailed report and follow-up steps.
 
-## Running the Service
-
-```bash
-# Single employee with ngrok auto-exposure
-./scripts/run_employee.sh little_bear 9001
-
-# Manual start
-EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 \
-  cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
-
-# Docker (all employees)
-docker-compose -f docker-compose.fanout.yml up
-```
-
-## Architecture Overview
-
-This is a Rust microservice managing AI agent-driven email and chat workflows.
-
-```
-Inbound Webhooks (Postmark/Slack/Discord/Google Docs)
-                    ↓
-           Axum HTTP Server (service.rs)
-                    ↓
-    ┌───────────────┼───────────────┬──────────────┐
-    ↓               ↓               ↓              ↓
-Scheduler       Run Task        Send Emails    Adapters
-(lib.rs)        (Codex/Claude)  (Postmark)     (Slack/Discord)
-    ↓               ↓               ↓
- SQLite         Subprocess      HTTP Client
-(tasks.db)      Execution
-```
-
-### Workspace Structure
-
-| Module | Purpose |
-|--------|---------|
-| `scheduler_module/` | Core HTTP service, task scheduling, persistence, adapters |
-| `run_task_module/` | Codex/Claude CLI subprocess execution |
-| `send_emails_module/` | Postmark email API client |
-| `skills/` | 21 agent skill modules (pdf, playwright-cli, google-docs, etc.) |
-| `employees/` | Agent personas and configurations |
-| `scripts/` | Deployment and automation scripts |
-
-### Key Source Files
-
-- `scheduler_module/src/service.rs` - Axum HTTP server, webhook handlers
-- `scheduler_module/src/lib.rs` - Core scheduler, task types, SQLite persistence
-- `scheduler_module/src/employee_config.rs` - Employee profile loading from TOML
-- `scheduler_module/src/adapters/` - Channel-specific adapters (postmark, slack, discord, google_docs)
-- `scheduler_module/src/bin/rust_service.rs` - Main service entry point
-- `scheduler_module/src/bin/inbound_fanout.rs` - Multi-agent gateway
-- `employee.toml` - Employee/agent profiles (addresses, runners, models, skills)
-
 ## Key Patterns
 
-### Multi-Employee Architecture
-- Each `EMPLOYEE_ID` has isolated workspace, database, and configuration
-- `employee.toml` defines all profiles (little_bear/Oliver, mini_mouse/Maggie, etc.)
-- Fanout gateway routes inbound messages to all employees; each processes its own addresses
+- **Channel Abstraction**: Unified `InboundMessage` struct with `Channel` enum for platform independence
+- **Multi-Tenant Design**: Each employee isolated under `.workspace/<id>` with shared skills pool
+- **Deduplication**: Message IDs + hash lists prevent duplicate processing
+- **Cron Scheduling**: 6-field format `sec min hour day month weekday` (UTC)
+- **Per-Task Docker**: Optional isolated container execution via `RUN_TASK_DOCKER_IMAGE`
 
-### Task Types
-```rust
-enum TaskKind {
-    SendReply(SendReplyTask),   // Send email, Slack msg, etc.
-    RunTask(RunTaskTask),       // Invoke Codex/Claude to generate reply
-    Noop,                       // Testing placeholder
-}
-```
+## Important Environment Variables
 
-### Agent Runners
-- **Codex** (default): `@openai/codex` CLI, subprocess-based
-- **Claude**: `@anthropic-ai/claude-code` CLI, subprocess-based
-- Workspace passed via `--cd` argument; output files at known paths
-- Skills copied to `.agents/skills` in workspace before execution
+- `EMPLOYEE_ID`: Selects employee profile
+- `RUST_SERVICE_PORT`: HTTP server port (default 9001)
+- `CODEX_DISABLED=1`: Bypass Codex CLI for testing
+- `CODEX_BYPASS_SANDBOX=1`: Required inside Docker sometimes
+- `RUN_TASK_DOCKER_IMAGE`: Enable per-task container execution
+- `OLLAMA_ENABLED=false`: Disable local LLM routing
 
-### Cron Scheduling
-- 6-field format with seconds: `sec min hour day month weekday`
-- UTC-based scheduling
-- One-shot tasks converted to UTC timestamp
-
-### Channel Abstraction
-`Channel` enum (Email, Slack, Discord, Telegram) allows same task types across platforms.
-
-## Runtime State
-
-Default location: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/`
-
-```
-state/
-├── tasks.db              # Scheduler state
-├── users.db              # User registry
-└── task_index.db         # Due task index
-workspaces/<message_id>/
-├── workspace/            # Agent workspace
-├── references/           # Email history
-└── reply_email_draft.html
-users/<user_id>/
-├── state/tasks.db        # Per-user task queue
-├── memory/               # Agent context
-└── mail/                 # Email archive
-```
-
-## Environment Variables
-
-Critical variables in `.env`:
-- `EMPLOYEE_ID` - Which employee to run
-- `RUST_SERVICE_HOST`, `RUST_SERVICE_PORT` - Server binding
-- `POSTMARK_SERVER_TOKEN` - Email API
-- `AZURE_OPENAI_API_KEY_BACKUP`, `AZURE_OPENAI_ENDPOINT_BACKUP` - Codex
-- `ANTHROPIC_API_KEY` - Claude
-- `SLACK_BOT_TOKEN`, `DISCORD_BOT_TOKEN` - Chat integrations
-- `RUN_TASK_DOCKER_IMAGE` - Per-task Docker execution
-- `OLLAMA_URL`, `OLLAMA_MODEL`, `OLLAMA_ENABLED` - Local LLM routing
+**Contributor principle:** Keep the codebase modular and easy to maintain. If a file grows too large (roughly 500–1000 lines), consider splitting it into smaller, well-defined modules with clear responsibilities.
