@@ -70,8 +70,6 @@ struct GatewayRouteConfig {
 
 #[derive(Clone)]
 struct GatewayConfig {
-    host: String,
-    port: u16,
     db_path: PathBuf,
     defaults: GatewayDefaultsConfig,
     routes: HashMap<RouteKey, RouteTarget>,
@@ -147,8 +145,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let state = Arc::new(GatewayState {
         config: GatewayConfig {
-            host: host.clone(),
-            port,
             db_path,
             defaults: config_file.defaults,
             routes,

@@ -225,6 +225,13 @@ fn email_flow_injects_github_env() {
     fs::create_dir_all(&bin_root).expect("bin root");
     fs::create_dir_all(&home_root).expect("home root");
 
+    let _docker_guard = EnvUnsetGuard::remove(&[
+        "RUN_TASK_DOCKER_IMAGE",
+        "RUN_TASK_USE_DOCKER",
+        "RUN_TASK_DOCKERFILE",
+        "RUN_TASK_DOCKER_AUTO_BUILD",
+    ]);
+
     fs::write(
         root.join(".env"),
         "GITHUB_USERNAME=octo-user\nGITHUB_PERSONAL_ACCESS_TOKEN=pat-test-token\n",
@@ -340,6 +347,13 @@ fn email_flow_injects_employee_github_env() {
     fs::create_dir_all(&state_root).expect("state root");
     fs::create_dir_all(&bin_root).expect("bin root");
     fs::create_dir_all(&home_root).expect("home root");
+
+    let _docker_guard = EnvUnsetGuard::remove(&[
+        "RUN_TASK_DOCKER_IMAGE",
+        "RUN_TASK_USE_DOCKER",
+        "RUN_TASK_DOCKERFILE",
+        "RUN_TASK_DOCKER_AUTO_BUILD",
+    ]);
 
     fs::write(
         root.join(".env"),

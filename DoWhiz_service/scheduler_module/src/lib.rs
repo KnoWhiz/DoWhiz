@@ -557,8 +557,11 @@ fn execute_sms_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
         String::new()
     };
 
+    let api_base = std::env::var("TWILIO_API_BASE_URL")
+        .unwrap_or_else(|_| "https://api.twilio.com".to_string());
     let url = format!(
-        "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json",
+        "{}/2010-04-01/Accounts/{}/Messages.json",
+        api_base.trim_end_matches('/'),
         account_sid
     );
 
