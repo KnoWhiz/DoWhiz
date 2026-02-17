@@ -341,7 +341,18 @@ fn run_codex_task(
 ) -> Result<RunTaskOutput, RunTaskError> {
     load_env_sources(request.workspace_dir)?;
     let docker_image = read_env_trimmed("RUN_TASK_DOCKER_IMAGE");
-    let use_docker = docker_image.is_some() || env_enabled("RUN_TASK_USE_DOCKER");
+    let docker_requested = docker_image.is_some() || env_enabled("RUN_TASK_USE_DOCKER");
+    let docker_available = docker_requested && docker_cli_available();
+    let docker_required = env_enabled("RUN_TASK_DOCKER_REQUIRED");
+    let use_docker = docker_requested && docker_available;
+    if docker_requested && !docker_available {
+        if docker_required {
+            return Err(RunTaskError::DockerNotFound);
+        }
+        eprintln!(
+            "[run_task] Docker CLI not found; falling back to host execution. Set RUN_TASK_DOCKER_REQUIRED=1 to fail."
+        );
+    }
     let docker_image = if use_docker {
         docker_image.ok_or(RunTaskError::MissingEnv {
             key: "RUN_TASK_DOCKER_IMAGE",
@@ -1210,6 +1221,18 @@ fn resolve_docker_build_paths() -> Result<(PathBuf, PathBuf), RunTaskError> {
     };
 
     Ok((dockerfile, context))
+}
+
+fn docker_cli_available() -> bool {
+    match Command::new("docker")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+    {
+        Ok(status) => status.success(),
+        Err(_) => false,
+    }
 }
 
 fn resolve_rel_dir(
