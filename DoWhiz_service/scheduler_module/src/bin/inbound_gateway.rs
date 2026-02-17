@@ -16,7 +16,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use scheduler_module::adapters::bluebubbles::BlueBubblesInboundAdapter;
@@ -309,7 +309,7 @@ async fn ingest_bluebubbles(
     let message = match adapter.parse(&body) {
         Ok(message) => message,
         Err(err) => {
-            warn!("gateway failed to parse bluebubbles payload: {}", err);
+            debug!("gateway ignoring bluebubbles event: {}", err);
             return (StatusCode::OK, Json(json!({"status": "ignored"})));
         }
     };
