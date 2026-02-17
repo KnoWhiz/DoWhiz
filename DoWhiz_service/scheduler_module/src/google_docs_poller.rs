@@ -251,7 +251,8 @@ pub struct GoogleDocsPoller {
 impl GoogleDocsPoller {
     /// Create a new poller from configuration.
     pub fn new(config: GoogleDocsPollerConfig) -> Result<Self, SchedulerError> {
-        let auth_config = GoogleAuthConfig::from_env();
+        // Use employee-specific OAuth credentials (e.g., GOOGLE_REFRESH_TOKEN_BOILED_EGG for employee "boiled_egg")
+        let auth_config = GoogleAuthConfig::from_env_for_employee(Some(&config.employee_id));
         if !auth_config.is_valid() {
             return Err(SchedulerError::TaskFailed(
                 "Google OAuth credentials not configured".to_string(),
