@@ -19,6 +19,7 @@ use crate::channel::Channel;
 use crate::index_store::IndexStore;
 use crate::message_router::{MessageRouter, RouterDecision};
 use crate::service::ServiceConfig;
+use crate::user_store::UserStore;
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
 
 /// Paths for Discord guild-based organization.
@@ -63,6 +64,7 @@ impl DiscordGuildPaths {
 pub struct DiscordHandlerState {
     pub config: Arc<ServiceConfig>,
     pub index_store: Arc<IndexStore>,
+    pub user_store: Arc<UserStore>,
     /// Message router for handling simple queries locally
     pub message_router: Arc<MessageRouter>,
     /// Outbound adapter for sending quick responses
@@ -133,9 +135,43 @@ impl EventHandler for DiscordEventHandler {
 
         // Try local router first for simple queries
         if let Some(text) = &inbound.text_body {
-            match self.state.message_router.classify(text).await {
-                RouterDecision::Simple(response) => {
+            // Look up user and get memory
+            let (memory, user_paths) = match self.state.user_store.get_or_create_user("discord", &inbound.sender) {
+                Ok(user) => {
+                    let paths = self.state.user_store.user_paths(&self.state.config.users_root, &user.user_id);
+                    let memo = fs::read_to_string(paths.memory_dir.join("memo.md")).ok();
+                    (memo, Some((user.user_id, paths)))
+                }
+                Err(e) => {
+                    warn!("Failed to get user for memory: {}", e);
+                    (None, None)
+                }
+            };
+
+            match self.state.message_router.classify(text, memory.as_deref()).await {
+                RouterDecision::Simple { response, memory_update } => {
                     info!("Router handled message locally, sending quick response");
+
+                    // Write memory update if present
+                    if let (Some(update), Some((user_id, paths))) = (memory_update, &user_paths) {
+                        if let Err(e) = fs::create_dir_all(&paths.memory_dir) {
+                            warn!("Failed to create memory dir: {}", e);
+                        } else {
+                            let memo_path = paths.memory_dir.join("memo.md");
+                            let existing = fs::read_to_string(&memo_path).unwrap_or_default();
+                            let new_content = if existing.trim().is_empty() {
+                                format!("# Memo\n\n{}\n", update.trim())
+                            } else {
+                                format!("{}\n\n{}\n", existing.trim_end(), update.trim())
+                            };
+                            if let Err(e) = fs::write(&memo_path, new_content) {
+                                warn!("Failed to write memory update: {}", e);
+                            } else {
+                                info!("Updated memory for user {}", user_id);
+                            }
+                        }
+                    }
+
                     if let Err(e) = send_quick_discord_response(
                         &self.state.outbound_adapter.bot_token,
                         &inbound,
