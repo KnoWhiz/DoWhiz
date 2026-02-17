@@ -264,7 +264,7 @@ impl ServiceConfig {
             .filter(|s| !s.is_empty());
 
         // Telegram configuration
-        let telegram_bot_token = env::var("TELEGRAM_BOT_TOKEN").ok().filter(|s| !s.is_empty());
+        let telegram_bot_token = resolve_telegram_bot_token(&employee_profile);
 
         Ok(Self {
             host,
@@ -3953,6 +3953,72 @@ fn env_flag(key: &str, default: bool) -> bool {
     }
 }
 
+fn env_var_non_empty(key: &str) -> Option<String> {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn normalize_env_key_fragment(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut output = String::with_capacity(trimmed.len());
+    let mut last_was_underscore = false;
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() {
+            output.push(ch.to_ascii_uppercase());
+            last_was_underscore = false;
+        } else if !last_was_underscore {
+            output.push('_');
+            last_was_underscore = true;
+        }
+    }
+    let normalized = output.trim_matches('_').to_string();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+pub(crate) fn resolve_telegram_bot_token(employee: &EmployeeProfile) -> Option<String> {
+    let mut candidates: Vec<String> = Vec::new();
+
+    let mut push_candidate = |value: &str| {
+        if let Some(candidate) = normalize_env_key_fragment(value) {
+            if !candidates.contains(&candidate) {
+                candidates.push(candidate);
+            }
+        }
+    };
+
+    if let Some(display_name) = employee.display_name.as_deref() {
+        push_candidate(display_name);
+    }
+
+    for address in &employee.addresses {
+        if let Some((local, _domain)) = address.split_once('@') {
+            push_candidate(local);
+        } else {
+            push_candidate(address);
+        }
+    }
+
+    push_candidate(&employee.id);
+
+    for candidate in candidates {
+        let env_key = format!("DO_WHIZ_{candidate}_BOT");
+        if let Some(token) = env_var_non_empty(&env_key) {
+            return Some(token);
+        }
+    }
+
+    env_var_non_empty("TELEGRAM_BOT_TOKEN")
+}
+
 fn repo_skills_source_dir() -> PathBuf {
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     if cwd
@@ -3966,7 +4032,7 @@ fn repo_skills_source_dir() -> PathBuf {
     }
 }
 
-fn default_employee_config_path() -> PathBuf {
+pub(crate) fn default_employee_config_path() -> PathBuf {
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     if cwd
         .file_name()
@@ -4203,7 +4269,102 @@ impl ProcessedMessageStore {
 mod tests {
     use super::*;
     use crate::channel::{ChannelMetadata, InboundMessage};
+    use std::sync::Mutex;
     use tempfile::TempDir;
+
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    struct EnvGuard {
+        key: String,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &str, value: &str) -> Self {
+            let previous = env::var(key).ok();
+            env::set_var(key, value);
+            Self {
+                key: key.to_string(),
+                previous,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => env::set_var(&self.key, value),
+                None => env::remove_var(&self.key),
+            }
+        }
+    }
+
+    fn test_employee_profile(id: &str, display_name: Option<&str>, addresses: Vec<&str>) -> EmployeeProfile {
+        let addresses: Vec<String> = addresses.into_iter().map(|value| value.to_string()).collect();
+        let address_set: HashSet<String> = addresses
+            .iter()
+            .map(|value| value.to_ascii_lowercase())
+            .collect();
+        EmployeeProfile {
+            id: id.to_string(),
+            display_name: display_name.map(|value| value.to_string()),
+            runner: "codex".to_string(),
+            model: None,
+            addresses,
+            address_set,
+            runtime_root: None,
+            agents_path: None,
+            claude_path: None,
+            soul_path: None,
+            skills_dir: None,
+            discord_enabled: false,
+            slack_enabled: false,
+            bluebubbles_enabled: false,
+        }
+    }
+
+    #[test]
+    fn resolve_telegram_bot_token_prefers_employee_specific_env() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let _guard_employee = EnvGuard::set("DO_WHIZ_OLIVER_BOT", "employee-token");
+        let _guard_fallback = EnvGuard::set("TELEGRAM_BOT_TOKEN", "fallback-token");
+
+        let employee = test_employee_profile(
+            "little_bear",
+            Some("Oliver"),
+            vec!["oliver@dowhiz.com", "little-bear@dowhiz.com"],
+        );
+
+        let token = resolve_telegram_bot_token(&employee);
+        assert_eq!(token.as_deref(), Some("employee-token"));
+    }
+
+    #[test]
+    fn resolve_telegram_bot_token_falls_back_to_address_then_global() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let _guard_employee = EnvGuard::set("DO_WHIZ_DEVIN_BOT", "devin-token");
+        let _guard_fallback = EnvGuard::set("TELEGRAM_BOT_TOKEN", "fallback-token");
+
+        let employee = test_employee_profile(
+            "sticky_octopus",
+            Some("Sticky-Octopus"),
+            vec!["devin@dowhiz.com", "sticky-octopus@dowhiz.com"],
+        );
+
+        let token = resolve_telegram_bot_token(&employee);
+        assert_eq!(token.as_deref(), Some("devin-token"));
+    }
+
+    #[test]
+    fn resolve_telegram_bot_token_uses_global_when_employee_missing() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let _guard_fallback = EnvGuard::set("TELEGRAM_BOT_TOKEN", "fallback-token");
+
+        let employee = test_employee_profile("mini_mouse", Some("Maggie"), vec!["maggie@dowhiz.com"]);
+
+        let token = resolve_telegram_bot_token(&employee);
+        assert_eq!(token.as_deref(), Some("fallback-token"));
+    }
 
     #[test]
     fn create_workspace_hydrates_past_emails() {

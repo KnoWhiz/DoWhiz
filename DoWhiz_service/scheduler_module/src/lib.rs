@@ -531,14 +531,47 @@ fn execute_bluebubbles_send(task: &SendReplyTask) -> Result<(), SchedulerError> 
     Ok(())
 }
 
+fn env_var_non_empty(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn resolve_employee_profile_from_env() -> Option<employee_config::EmployeeProfile> {
+    let config_path = env_var_non_empty("EMPLOYEE_CONFIG_PATH")
+        .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                std::env::current_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .join(path)
+            }
+        })
+        .unwrap_or_else(crate::service::default_employee_config_path);
+    let employee_directory = employee_config::load_employee_directory(&config_path).ok()?;
+    let employee_id = env_var_non_empty("EMPLOYEE_ID")
+        .or_else(|| employee_directory.default_employee_id.clone())?;
+    employee_directory.employee(&employee_id).cloned()
+}
+
+fn resolve_telegram_bot_token_from_env() -> Option<String> {
+    resolve_employee_profile_from_env()
+        .and_then(|profile| crate::service::resolve_telegram_bot_token(&profile))
+        .or_else(|| env_var_non_empty("TELEGRAM_BOT_TOKEN"))
+}
+
 /// Execute a SendReplyTask via Telegram Bot API.
 fn execute_telegram_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
     use crate::adapters::telegram::TelegramOutboundAdapter;
     use crate::channel::{ChannelMetadata, OutboundAdapter, OutboundMessage};
 
     dotenvy::dotenv().ok();
-    let bot_token = std::env::var("TELEGRAM_BOT_TOKEN")
-        .map_err(|_| SchedulerError::TaskFailed("TELEGRAM_BOT_TOKEN not set".to_string()))?;
+    let bot_token = resolve_telegram_bot_token_from_env().ok_or_else(|| {
+        SchedulerError::TaskFailed("telegram bot token not configured".to_string())
+    })?;
 
     let adapter = TelegramOutboundAdapter::new(bot_token);
 

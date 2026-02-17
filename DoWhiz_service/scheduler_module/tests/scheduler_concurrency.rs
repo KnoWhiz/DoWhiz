@@ -154,6 +154,7 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
         google_docs_enabled: false,
         bluebubbles_url: None,
         bluebubbles_password: None,
+        telegram_bot_token: None,
     };
 
     let rt = Runtime::new()?;

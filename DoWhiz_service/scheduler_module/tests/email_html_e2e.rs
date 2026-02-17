@@ -121,6 +121,7 @@ fn inbound_email_html_is_sanitized() -> Result<(), Box<dyn std::error::Error + S
         google_docs_enabled: false,
         bluebubbles_url: None,
         bluebubbles_password: None,
+        telegram_bot_token: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path)?;
