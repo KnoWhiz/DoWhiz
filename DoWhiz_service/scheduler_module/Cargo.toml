@@ -7,6 +7,7 @@ edition = "2021"
 axum = "0.7"
 base64 = "0.21"
 chrono = { version = "0.4", features = ["serde"] }
+crossbeam-channel = "0.5"
 cron = "0.12"
 dirs = "5"
 dotenvy = "0.15"

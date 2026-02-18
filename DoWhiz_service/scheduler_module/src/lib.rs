@@ -13,6 +13,8 @@ pub mod slack_store;
 pub(crate) mod thread_state;
 
 pub mod index_store;
+pub mod memory_diff;
+pub mod memory_queue;
 pub mod memory_store;
 pub mod past_emails;
 pub mod secrets_store;
