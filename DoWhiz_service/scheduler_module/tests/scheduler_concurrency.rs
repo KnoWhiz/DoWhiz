@@ -68,6 +68,7 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
     env::set_var("GH_AUTH_DISABLED", "1");
     env::set_var("RUN_TASK_DOCKER_IMAGE", "");
     env::set_var("RUN_TASK_USE_DOCKER", "0");
+    env::set_var("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS", "1");
 
     let fake_bin_dir = temp.path().join("bin");
     fs::create_dir_all(&fake_bin_dir)?;
@@ -118,6 +119,9 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
         index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
     }
 
+    dotenvy::dotenv().ok();
+    let ingestion_db_url =
+        std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
     let port = pick_free_port()?;
     let (employee_profile, employee_directory) = test_employee_directory();
     let config = ServiceConfig {
@@ -130,8 +134,7 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
         workspace_root,
         scheduler_state_path: state_dir.join("tasks.db"),
         processed_ids_path: state_dir.join("postmark_processed_ids.txt"),
-        ingestion_db_path: state_dir.join("ingestion.db"),
-        ingestion_dedupe_path: state_dir.join("ingestion_processed_ids.txt"),
+        ingestion_db_url,
         ingestion_poll_interval: Duration::from_millis(50),
         users_root: users_root.clone(),
         users_db_path: state_dir.join("users.db"),

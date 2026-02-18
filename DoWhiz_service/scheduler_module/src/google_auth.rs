@@ -68,15 +68,13 @@ impl GoogleAuthConfig {
         let refresh_token = if let Some(emp_id) = employee_id {
             // Try employee-specific token first (convert to uppercase for env var)
             let env_var_name = format!("GOOGLE_REFRESH_TOKEN_{}", emp_id.to_uppercase());
-            std::env::var(&env_var_name)
-                .ok()
-                .or_else(|| {
-                    tracing::debug!(
-                        "No employee-specific token {} found, falling back to GOOGLE_REFRESH_TOKEN",
-                        env_var_name
-                    );
-                    std::env::var("GOOGLE_REFRESH_TOKEN").ok()
-                })
+            std::env::var(&env_var_name).ok().or_else(|| {
+                tracing::debug!(
+                    "No employee-specific token {} found, falling back to GOOGLE_REFRESH_TOKEN",
+                    env_var_name
+                );
+                std::env::var("GOOGLE_REFRESH_TOKEN").ok()
+            })
         } else {
             std::env::var("GOOGLE_REFRESH_TOKEN").ok()
         };
@@ -132,7 +130,10 @@ impl GoogleAuth {
         // (useful for sandbox environments without network access)
         let (access_token, token_expires_at) = if let Some(ref token) = config.access_token {
             // Pre-generated tokens are assumed valid for 1 hour
-            (Some(token.clone()), Some(Instant::now() + Duration::from_secs(3600)))
+            (
+                Some(token.clone()),
+                Some(Instant::now() + Duration::from_secs(3600)),
+            )
         } else {
             (None, None)
         };
@@ -160,8 +161,7 @@ impl GoogleAuth {
         // Check if we have a valid cached token
         {
             let inner = self.inner.read().unwrap();
-            if let (Some(token), Some(expires_at)) =
-                (&inner.access_token, &inner.token_expires_at)
+            if let (Some(token), Some(expires_at)) = (&inner.access_token, &inner.token_expires_at)
             {
                 // Add 60 second buffer before expiration
                 if *expires_at > Instant::now() + Duration::from_secs(60) {
@@ -186,11 +186,9 @@ impl GoogleAuth {
         }
 
         // Fall back to OAuth refresh token
-        if let (Some(ref client_id), Some(ref client_secret), Some(ref refresh_token)) = (
-            &inner.client_id,
-            &inner.client_secret,
-            &inner.refresh_token,
-        ) {
+        if let (Some(ref client_id), Some(ref client_secret), Some(ref refresh_token)) =
+            (&inner.client_id, &inner.client_secret, &inner.refresh_token)
+        {
             let client_id = client_id.clone();
             let client_secret = client_secret.clone();
             let refresh_token = refresh_token.clone();

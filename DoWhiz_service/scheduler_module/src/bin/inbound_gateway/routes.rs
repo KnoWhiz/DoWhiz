@@ -80,7 +80,13 @@ pub(super) fn build_dedupe_key(
 
 pub(super) fn normalize_routes(
     routes: &[GatewayRouteConfig],
-) -> Result<(HashMap<RouteKey, RouteTarget>, HashMap<Channel, RouteTarget>), String> {
+) -> Result<
+    (
+        HashMap<RouteKey, RouteTarget>,
+        HashMap<Channel, RouteTarget>,
+    ),
+    String,
+> {
     let mut map = HashMap::new();
     let mut defaults = HashMap::new();
 

@@ -56,6 +56,19 @@ fn build_object_url(base: &str, bucket: &str, path: &str) -> String {
     format!("{}/storage/v1/object/{}/{}", base, bucket, path)
 }
 
+fn is_duplicate_bucket_response(status: StatusCode, body: &str) -> bool {
+    if status == StatusCode::CONFLICT {
+        return true;
+    }
+    if status == StatusCode::BAD_REQUEST {
+        let lower = body.to_ascii_lowercase();
+        return lower.contains("duplicate")
+            || lower.contains("already exists")
+            || lower.contains("\"statuscode\":\"409\"");
+    }
+    false
+}
+
 fn to_supabase_ref(bucket: &str, path: &str) -> String {
     format!("supabase://{}/{}", bucket, path)
 }
@@ -83,7 +96,12 @@ fn parse_supabase_ref(reference: &str) -> Result<(String, String), RawPayloadSto
     ))
 }
 
-async fn ensure_bucket_ready(client: &Client, base: &str, bucket: &str, key: &str) -> Result<(), RawPayloadStoreError> {
+async fn ensure_bucket_ready(
+    client: &Client,
+    base: &str,
+    bucket: &str,
+    key: &str,
+) -> Result<(), RawPayloadStoreError> {
     if BUCKET_READY.get().is_some() {
         return Ok(());
     }
@@ -101,23 +119,50 @@ async fn ensure_bucket_ready(client: &Client, base: &str, bucket: &str, key: &st
         .send()
         .await?;
 
-    match response.status() {
-        status if status.is_success() => {
-            let _ = BUCKET_READY.set(());
-            Ok(())
-        }
-        StatusCode::CONFLICT => {
-            let _ = BUCKET_READY.set(());
-            Ok(())
-        }
-        status => {
-            let body = response.text().await.unwrap_or_default();
-            Err(RawPayloadStoreError::Storage(format!(
-                "bucket create failed (status {}): {}",
-                status, body
-            )))
-        }
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if status.is_success() || is_duplicate_bucket_response(status, &body) {
+        let _ = BUCKET_READY.set(());
+        return Ok(());
     }
+    Err(RawPayloadStoreError::Storage(format!(
+        "bucket create failed (status {}): {}",
+        status, body
+    )))
+}
+
+fn ensure_bucket_ready_blocking(
+    client: &reqwest::blocking::Client,
+    base: &str,
+    bucket: &str,
+    key: &str,
+) -> Result<(), RawPayloadStoreError> {
+    if BUCKET_READY.get().is_some() {
+        return Ok(());
+    }
+
+    let url = format!("{}/storage/v1/bucket", base);
+    let response = client
+        .post(url)
+        .header("Authorization", format!("Bearer {}", key))
+        .header("apikey", key)
+        .json(&json!({
+            "id": bucket,
+            "name": bucket,
+            "public": false
+        }))
+        .send()?;
+
+    let status = response.status();
+    let body = response.text().unwrap_or_default();
+    if status.is_success() || is_duplicate_bucket_response(status, &body) {
+        let _ = BUCKET_READY.set(());
+        return Ok(());
+    }
+    Err(RawPayloadStoreError::Storage(format!(
+        "bucket create failed (status {}): {}",
+        status, body
+    )))
 }
 
 pub async fn upload_raw_payload(
@@ -150,11 +195,51 @@ pub async fn upload_raw_payload(
         .await?;
 
     if !response.status().is_success() {
+        let status = response.status();
         let body = response.text().await.unwrap_or_default();
         return Err(RawPayloadStoreError::Storage(format!(
             "upload failed (status {}): {}",
-            response.status(),
-            body
+            status, body
+        )));
+    }
+
+    Ok(to_supabase_ref(&bucket, &path))
+}
+
+pub fn upload_raw_payload_blocking(
+    envelope_id: Uuid,
+    received_at: DateTime<Utc>,
+    raw_payload: &[u8],
+) -> Result<String, RawPayloadStoreError> {
+    if raw_payload.is_empty() {
+        return Err(RawPayloadStoreError::Storage(
+            "raw payload is empty".to_string(),
+        ));
+    }
+
+    let base = resolve_project_url()?;
+    let key = resolve_service_key()?;
+    let bucket = resolve_storage_bucket();
+    let path = build_object_path(envelope_id, received_at);
+    let url = build_object_url(&base, &bucket, &path);
+
+    let client = reqwest::blocking::Client::new();
+    ensure_bucket_ready_blocking(&client, &base, &bucket, &key)?;
+
+    let response = client
+        .post(url)
+        .header("Authorization", format!("Bearer {}", key))
+        .header("apikey", &key)
+        .header("x-upsert", "true")
+        .body(raw_payload.to_vec())
+        .send()?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(RawPayloadStoreError::Storage(format!(
+            "upload failed (status {}): {}",
+            status, body
         )));
     }
 

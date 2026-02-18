@@ -39,12 +39,18 @@ cp .env.example DoWhiz_service/.env
 
 ### 3. Start Service
 
-Set a shared ingestion queue path (add to `DoWhiz_service/.env` or export in each terminal before starting gateway/workers):
+Set a shared ingestion queue database URL (add to `DoWhiz_service/.env` or export in each terminal before starting gateway/workers):
 
 ```bash
-export INGESTION_DB_PATH="$HOME/.dowhiz/DoWhiz/ingestion/ingestion.db"
-export INGESTION_DEDUPE_PATH="$HOME/.dowhiz/DoWhiz/ingestion/ingestion_processed_ids.txt"
-mkdir -p "$(dirname "$INGESTION_DB_PATH")"
+export SUPABASE_DB_URL="postgresql://..."
+# or
+export INGESTION_DB_URL="postgresql://..."
+```
+Also set Supabase Storage credentials for raw payload blobs:
+```bash
+export SUPABASE_PROJECT_URL="https://<project>.supabase.co"
+export SUPABASE_SECRET_KEY="sb_secret_..."
+export SUPABASE_STORAGE_BUCKET="ingestion-raw"
 ```
 For VM/pm2 deployments, prefer writing these into `DoWhiz_service/.env` so they survive restarts.
 
@@ -57,7 +63,7 @@ Run a gateway + worker (local, single employee):
 # Terminal 2: gateway
 cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
 # Edit gateway.toml routes to map your service address to little_bear
-# Ensure INGESTION_DB_PATH/INGESTION_DEDUPE_PATH are set in this terminal
+# Ensure SUPABASE_DB_URL (or INGESTION_DB_URL) is set in this terminal
 ./DoWhiz_service/scripts/run_gateway_local.sh
 
 # Terminal 3: expose gateway + set Postmark hook

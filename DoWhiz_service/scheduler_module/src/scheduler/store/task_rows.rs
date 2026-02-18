@@ -517,12 +517,13 @@ impl SqliteSchedulerStore {
                 },
             )
             .optional()?;
-        let (phone_number, text_path, thread_epoch_raw, thread_state_path) = row.ok_or_else(|| {
-            SchedulerError::Storage(format!(
-                "missing send_whatsapp_tasks row for task {}",
-                task_id
-            ))
-        })?;
+        let (phone_number, text_path, thread_epoch_raw, thread_state_path) =
+            row.ok_or_else(|| {
+                SchedulerError::Storage(format!(
+                    "missing send_whatsapp_tasks row for task {}",
+                    task_id
+                ))
+            })?;
 
         Ok(SendReplyTask {
             channel: Channel::WhatsApp,

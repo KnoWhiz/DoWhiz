@@ -453,5 +453,4 @@ mod tests {
             .join("attachments_manifest.json")
             .exists());
     }
-
 }

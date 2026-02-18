@@ -11,7 +11,6 @@ use super::config::GatewayDefaultsConfig;
 
 #[derive(Clone)]
 pub(super) struct GatewayConfig {
-    pub(super) db_url: String,
     pub(super) defaults: GatewayDefaultsConfig,
     pub(super) routes: HashMap<RouteKey, RouteTarget>,
     pub(super) channel_defaults: HashMap<Channel, RouteTarget>,

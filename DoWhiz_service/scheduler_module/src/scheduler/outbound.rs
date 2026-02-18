@@ -318,9 +318,8 @@ pub(crate) fn execute_whatsapp_send(task: &SendReplyTask) -> Result<(), Schedule
     use crate::channel::{ChannelMetadata, OutboundAdapter, OutboundMessage};
 
     dotenvy::dotenv().ok();
-    let access_token = env_var_non_empty("WHATSAPP_ACCESS_TOKEN").ok_or_else(|| {
-        SchedulerError::TaskFailed("WHATSAPP_ACCESS_TOKEN not set".to_string())
-    })?;
+    let access_token = env_var_non_empty("WHATSAPP_ACCESS_TOKEN")
+        .ok_or_else(|| SchedulerError::TaskFailed("WHATSAPP_ACCESS_TOKEN not set".to_string()))?;
     let phone_number_id = env_var_non_empty("WHATSAPP_PHONE_NUMBER_ID").ok_or_else(|| {
         SchedulerError::TaskFailed("WHATSAPP_PHONE_NUMBER_ID not set".to_string())
     })?;

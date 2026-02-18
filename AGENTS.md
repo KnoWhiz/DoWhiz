@@ -2,6 +2,8 @@
 
 `external/` folder contains information about other projects that we can use as reference but we never need to touch the code in it.
 
+By default open RUN_CODEX_E2E=1 and POSTMARK_LIVE_TEST=1 to use real emails address (mini-mouse@dowhiz.com / deep-tutor@deep-tutor.com to send emails to proto@dowhiz.com / oliver@dowhiz.com / maggie@dowhiz.com). For ngrok domain you can use: `https://shayne-laminar-lillian.ngrok-free.dev`
+
 ## Project Structure & Module Organization
 - `DoWhiz_service/`: Rust backend (scheduler, task runner, email/webhook handling). Modules live under `*_module/`, with shared assets in `skills/` and employee configs in `employees/` plus `employee.toml`.
 - `website/`: React 19 + Vite marketing site (`src/`, `public/`, `eslint.config.js`).

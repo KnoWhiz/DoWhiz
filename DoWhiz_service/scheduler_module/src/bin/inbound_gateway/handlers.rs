@@ -6,15 +6,17 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
-use serde::Deserialize;
 use chrono::Utc;
+use serde::Deserialize;
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use scheduler_module::adapters::bluebubbles::BlueBubblesInboundAdapter;
 use scheduler_module::adapters::postmark::PostmarkInboundPayload;
-use scheduler_module::adapters::slack::{is_url_verification, SlackChallengeResponse, SlackInboundAdapter};
+use scheduler_module::adapters::slack::{
+    is_url_verification, SlackChallengeResponse, SlackInboundAdapter,
+};
 use scheduler_module::adapters::telegram::TelegramInboundAdapter;
 use scheduler_module::adapters::whatsapp::WhatsAppInboundAdapter;
 use scheduler_module::channel::{Channel, ChannelMetadata, InboundAdapter, InboundMessage};
@@ -24,7 +26,9 @@ use scheduler_module::raw_payload_store::{self, RawPayloadStoreError};
 
 use super::routes::{build_dedupe_key, normalize_email, normalize_phone_number, resolve_route};
 use super::state::{find_service_address, GatewayState, RouteDecision};
-use super::verify::{verify_bluebubbles, verify_postmark, verify_slack, verify_twilio, verify_whatsapp_subscription};
+use super::verify::{
+    verify_bluebubbles, verify_postmark, verify_slack, verify_twilio, verify_whatsapp_subscription,
+};
 
 pub(super) async fn health() -> impl IntoResponse {
     (StatusCode::OK, "ok")
@@ -41,9 +45,7 @@ pub(super) async fn ingest_postmark(
 
     let payload: PostmarkInboundPayload = match serde_json::from_slice(&body) {
         Ok(payload) => payload,
-        Err(_) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"})))
-        }
+        Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"}))),
     };
 
     let address = find_service_address(&payload, &state.employee_directory.service_addresses);
@@ -65,7 +67,10 @@ pub(super) async fn ingest_postmark(
         Ok(message) => message,
         Err(err) => {
             warn!("gateway failed to parse postmark payload: {}", err);
-            return (StatusCode::BAD_REQUEST, Json(json!({"status": "parse_error"})));
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"status": "parse_error"})),
+            );
         }
     };
 
@@ -75,15 +80,17 @@ pub(super) async fn ingest_postmark(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
 
-    let envelope = match build_envelope(route, Channel::Email, external_message_id, &message, &body)
-        .await
-    {
-        Ok(envelope) => envelope,
-        Err(err) => {
-            error!("gateway failed to store raw payload: {}", err);
-            return (StatusCode::BAD_GATEWAY, Json(json!({"status": "payload_store_failed"})));
-        }
-    };
+    let envelope =
+        match build_envelope(route, Channel::Email, external_message_id, &message, &body).await {
+            Ok(envelope) => envelope,
+            Err(err) => {
+                error!("gateway failed to store raw payload: {}", err);
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({"status": "payload_store_failed"})),
+                );
+            }
+        };
     enqueue_envelope(state.queue.clone(), envelope).await
 }
 
@@ -105,9 +112,7 @@ pub(super) async fn ingest_slack(
 
     let wrapper: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(value) => value,
-        Err(_) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"})))
-        }
+        Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"}))),
     };
 
     let team_id = wrapper
@@ -141,7 +146,10 @@ pub(super) async fn ingest_slack(
         Ok(envelope) => envelope,
         Err(err) => {
             error!("gateway failed to store raw payload: {}", err);
-            return (StatusCode::BAD_GATEWAY, Json(json!({"status": "payload_store_failed"})));
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"status": "payload_store_failed"})),
+            );
         }
     };
     enqueue_envelope(state.queue.clone(), envelope).await
@@ -177,11 +185,22 @@ pub(super) async fn ingest_bluebubbles(
     };
 
     let external_message_id = message.message_id.clone();
-    let envelope = match build_envelope(route, Channel::BlueBubbles, external_message_id, &message, &body).await {
+    let envelope = match build_envelope(
+        route,
+        Channel::BlueBubbles,
+        external_message_id,
+        &message,
+        &body,
+    )
+    .await
+    {
         Ok(envelope) => envelope,
         Err(err) => {
             error!("gateway failed to store raw payload: {}", err);
-            return (StatusCode::BAD_GATEWAY, Json(json!({"status": "payload_store_failed"})));
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"status": "payload_store_failed"})),
+            );
         }
     };
     enqueue_envelope(state.queue.clone(), envelope).await
@@ -198,9 +217,7 @@ pub(super) async fn ingest_sms(
 
     let params: HashMap<String, String> = match serde_urlencoded::from_bytes(&body) {
         Ok(values) => values,
-        Err(_) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_form"})))
-        }
+        Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_form"}))),
     };
 
     let from = params.get("From").cloned().unwrap_or_default();
@@ -209,7 +226,10 @@ pub(super) async fn ingest_sms(
     let message_sid = params.get("MessageSid").cloned();
 
     if from.is_empty() || to.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"status": "missing_fields"})));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"status": "missing_fields"})),
+        );
     }
 
     let route_key = normalize_phone_number(&to);
@@ -242,7 +262,10 @@ pub(super) async fn ingest_sms(
         Ok(envelope) => envelope,
         Err(err) => {
             error!("gateway failed to store raw payload: {}", err);
-            return (StatusCode::BAD_GATEWAY, Json(json!({"status": "payload_store_failed"})));
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"status": "payload_store_failed"})),
+            );
         }
     };
     enqueue_envelope(state.queue.clone(), envelope).await
@@ -273,11 +296,22 @@ pub(super) async fn ingest_telegram(
     };
 
     let external_message_id = message.message_id.clone();
-    let envelope = match build_envelope(route, Channel::Telegram, external_message_id, &message, &body).await {
+    let envelope = match build_envelope(
+        route,
+        Channel::Telegram,
+        external_message_id,
+        &message,
+        &body,
+    )
+    .await
+    {
         Ok(envelope) => envelope,
         Err(err) => {
             error!("gateway failed to store raw payload: {}", err);
-            return (StatusCode::BAD_GATEWAY, Json(json!({"status": "payload_store_failed"})));
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"status": "payload_store_failed"})),
+            );
         }
     };
     enqueue_envelope(state.queue.clone(), envelope).await
@@ -332,12 +366,32 @@ pub(super) async fn ingest_whatsapp(
         .unwrap_or_else(|| "unknown".to_string());
 
     let Some(route) = resolve_route(Channel::WhatsApp, &phone_number, &state) else {
-        info!("gateway no route for whatsapp phone_number={}", phone_number);
+        info!(
+            "gateway no route for whatsapp phone_number={}",
+            phone_number
+        );
         return (StatusCode::OK, Json(json!({"status": "no_route"})));
     };
 
     let external_message_id = message.message_id.clone();
-    let envelope = build_envelope(route, Channel::WhatsApp, external_message_id, &message, &body);
+    let envelope = match build_envelope(
+        route,
+        Channel::WhatsApp,
+        external_message_id,
+        &message,
+        &body,
+    )
+    .await
+    {
+        Ok(envelope) => envelope,
+        Err(err) => {
+            error!("gateway failed to store raw payload: {}", err);
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"status": "payload_store_failed"})),
+            );
+        }
+    };
     enqueue_envelope(state.queue.clone(), envelope).await
 }
 
@@ -345,17 +399,28 @@ pub(super) async fn enqueue_envelope(
     queue: Arc<dyn IngestionQueue>,
     envelope: IngestionEnvelope,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match queue.enqueue(&envelope) {
-        Ok(result) => {
+    let result = tokio::task::spawn_blocking(move || queue.enqueue(&envelope)).await;
+    match result {
+        Ok(Ok(result)) => {
             if result.inserted {
                 (StatusCode::OK, Json(json!({"status": "accepted"})))
             } else {
                 (StatusCode::OK, Json(json!({"status": "duplicate"})))
             }
         }
-        Err(err) => {
+        Ok(Err(err)) => {
             error!("gateway enqueue error: {}", err);
-            (StatusCode::BAD_GATEWAY, Json(json!({"status": "enqueue_failed"})))
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"status": "enqueue_failed"})),
+            )
+        }
+        Err(err) => {
+            error!("gateway enqueue join error: {}", err);
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"status": "enqueue_failed"})),
+            )
         }
     }
 }
@@ -380,6 +445,44 @@ pub(super) async fn build_envelope(
         None
     } else {
         Some(raw_payload_store::upload_raw_payload(envelope_id, received_at, raw_payload).await?)
+    };
+    Ok(IngestionEnvelope {
+        envelope_id,
+        received_at,
+        tenant_id: Some(route.tenant_id),
+        employee_id: route.employee_id,
+        channel,
+        external_message_id,
+        dedupe_key,
+        payload: IngestionPayload::from_inbound(message),
+        raw_payload_ref,
+    })
+}
+
+pub(super) fn build_envelope_blocking(
+    route: RouteDecision,
+    channel: Channel,
+    external_message_id: Option<String>,
+    message: &InboundMessage,
+    raw_payload: &[u8],
+) -> Result<IngestionEnvelope, RawPayloadStoreError> {
+    let envelope_id = Uuid::new_v4();
+    let received_at = Utc::now();
+    let dedupe_key = build_dedupe_key(
+        &route.tenant_id,
+        &route.employee_id,
+        channel,
+        external_message_id.as_deref(),
+        raw_payload,
+    );
+    let raw_payload_ref = if raw_payload.is_empty() {
+        None
+    } else {
+        Some(raw_payload_store::upload_raw_payload_blocking(
+            envelope_id,
+            received_at,
+            raw_payload,
+        )?)
     };
     Ok(IngestionEnvelope {
         envelope_id,

@@ -20,8 +20,8 @@ mod task_rows;
 use migrations::{
     ensure_run_task_task_columns, ensure_send_bluebubbles_tasks_table,
     ensure_send_discord_tasks_table, ensure_send_email_task_columns, ensure_send_slack_tasks_table,
-    ensure_send_sms_tasks_table, ensure_send_telegram_tasks_table, ensure_send_whatsapp_tasks_table,
-    ensure_tasks_columns,
+    ensure_send_sms_tasks_table, ensure_send_telegram_tasks_table,
+    ensure_send_whatsapp_tasks_table, ensure_tasks_columns,
 };
 use schema::SCHEDULER_SCHEMA;
 

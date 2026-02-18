@@ -106,8 +106,14 @@ impl InboundAdapter for TelegramInboundAdapter {
         let mut all_attachments = attachments;
         if let Some(ref doc) = message.document {
             all_attachments.push(Attachment {
-                name: doc.file_name.clone().unwrap_or_else(|| "document".to_string()),
-                content_type: doc.mime_type.clone().unwrap_or_else(|| "application/octet-stream".to_string()),
+                name: doc
+                    .file_name
+                    .clone()
+                    .unwrap_or_else(|| "document".to_string()),
+                content_type: doc
+                    .mime_type
+                    .clone()
+                    .unwrap_or_else(|| "application/octet-stream".to_string()),
                 content: doc.file_id.clone(),
             });
         }
@@ -209,7 +215,11 @@ impl OutboundAdapter for TelegramOutboundAdapter {
                 success: false,
                 message_id: String::new(),
                 submitted_at: String::new(),
-                error: Some(api_response.description.unwrap_or_else(|| "Unknown error".to_string())),
+                error: Some(
+                    api_response
+                        .description
+                        .unwrap_or_else(|| "Unknown error".to_string()),
+                ),
             })
         }
     }
@@ -380,7 +390,9 @@ pub async fn send_quick_telegram_response(
     if !api_response.ok {
         return Err(format!(
             "Telegram API error: {}",
-            api_response.description.unwrap_or_else(|| "Unknown error".to_string())
+            api_response
+                .description
+                .unwrap_or_else(|| "Unknown error".to_string())
         )
         .into());
     }

@@ -18,6 +18,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use std::env;
 use std::sync::Arc;
+use tokio::task;
 use tracing::info;
 
 use scheduler_module::employee_config::load_employee_directory;
@@ -66,11 +67,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let (routes, channel_defaults) = normalize_routes(&config_file.routes)?;
 
-    let queue: Arc<dyn IngestionQueue> = Arc::new(PostgresIngestionQueue::new_from_url(&db_url)?);
+    let queue: Arc<dyn IngestionQueue> = Arc::new(
+        task::spawn_blocking(move || PostgresIngestionQueue::new_from_url(&db_url))
+            .await
+            .map_err(|err| -> Box<dyn std::error::Error + Send + Sync> { err.into() })??,
+    );
 
     let state = Arc::new(GatewayState {
         config: GatewayConfig {
-            db_url,
             defaults: config_file.defaults,
             routes,
             channel_defaults,
@@ -84,8 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "ingestion gateway config path={}, host={}, port={}, db_url=***",
         config_path.display(),
         host,
-        port,
-        "supabase"
+        port
     );
 
     spawn_discord_gateway(state.clone()).await;

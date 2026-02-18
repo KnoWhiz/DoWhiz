@@ -1,4 +1,3 @@
-use chrono::Utc;
 use postgres_native_tls::MakeTlsConnector;
 use r2d2::{Pool, PooledConnection};
 use r2d2_postgres::PostgresConnectionManager;
@@ -43,9 +42,9 @@ pub trait IngestionQueue: Send + Sync {
     fn mark_failed(&self, id: &Uuid, error: &str) -> Result<(), IngestionQueueError>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PostgresIngestionQueue {
-    pool: Pool<PostgresConnectionManager<MakeTlsConnector>>,
+    pool: Option<Pool<PostgresConnectionManager<MakeTlsConnector>>>,
     table: String,
     lease_secs: i64,
     max_attempts: i32,
@@ -75,15 +74,21 @@ impl PostgresIngestionQueue {
     ) -> Result<Self, IngestionQueueError> {
         let table = sanitize_table_name(table)?;
 
-        let mut config: postgres::Config = db_url.parse().map_err(IngestionQueueError::Postgres)?;
-        let tls_connector = native_tls::TlsConnector::new()
+        let config: postgres::Config = db_url.parse().map_err(IngestionQueueError::Postgres)?;
+        let mut tls_builder = native_tls::TlsConnector::builder();
+        if resolve_bool_env("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS") {
+            tls_builder.danger_accept_invalid_certs(true);
+            tls_builder.danger_accept_invalid_hostnames(true);
+        }
+        let tls_connector = tls_builder
+            .build()
             .map_err(|err| IngestionQueueError::Config(err.to_string()))?;
         let tls = MakeTlsConnector::new(tls_connector);
 
         let manager = PostgresConnectionManager::new(config, tls);
         let pool = Pool::builder().max_size(8).build(manager)?;
         let queue = Self {
-            pool,
+            pool: Some(pool),
             table,
             lease_secs,
             max_attempts,
@@ -92,8 +97,15 @@ impl PostgresIngestionQueue {
         Ok(queue)
     }
 
-    fn connection(&self) -> Result<PooledConnection<PostgresConnectionManager<MakeTlsConnector>>, IngestionQueueError> {
-        Ok(self.pool.get()?)
+    fn connection(
+        &self,
+    ) -> Result<PooledConnection<PostgresConnectionManager<MakeTlsConnector>>, IngestionQueueError>
+    {
+        let pool = self
+            .pool
+            .as_ref()
+            .expect("ingestion queue pool unavailable");
+        Ok(pool.get()?)
     }
 
     fn ensure_schema(&self) -> Result<(), IngestionQueueError> {
@@ -126,8 +138,11 @@ impl PostgresIngestionQueue {
         Ok(())
     }
 
-    fn table(&self) -> &str {
-        &self.table
+    #[cfg(test)]
+    fn drop_table_for_tests(&self) {
+        if let Ok(mut conn) = self.connection() {
+            let _ = conn.execute(&format!("DROP TABLE IF EXISTS {}", self.table), &[]);
+        }
     }
 }
 
@@ -160,9 +175,9 @@ impl IngestionQueue for PostgresIngestionQueue {
     fn claim_next(&self, employee_id: &str) -> Result<Option<QueuedEnvelope>, IngestionQueueError> {
         let mut conn = self.connection()?;
         let instance_id = resolve_worker_instance_id(employee_id);
-        let lease_interval = format!("{} seconds", self.lease_secs);
+        let lease_secs = self.lease_secs;
 
-        let tx = conn.transaction()?;
+        let mut tx = conn.transaction()?;
         let row = tx.query_opt(
             &format!(
                 "SELECT id, payload_json
@@ -170,7 +185,7 @@ impl IngestionQueue for PostgresIngestionQueue {
                  WHERE employee_id = $1
                    AND (
                      status = 'pending'
-                     OR (status = 'processing' AND locked_at < now() - $2::interval)
+                     OR (status = 'processing' AND locked_at < now() - ($2::bigint * interval '1 second'))
                    )
                    AND (available_at IS NULL OR available_at <= now())
                    AND attempts < $3
@@ -179,7 +194,7 @@ impl IngestionQueue for PostgresIngestionQueue {
                  FOR UPDATE SKIP LOCKED",
                 table = self.table
             ),
-            &[&employee_id, &lease_interval, &self.max_attempts],
+            &[&employee_id, &lease_secs, &self.max_attempts],
         )?;
 
         let Some(row) = row else {
@@ -235,7 +250,10 @@ impl IngestionQueue for PostgresIngestionQueue {
         let mut conn = self.connection()?;
         let attempts: i32 = conn
             .query_one(
-                &format!("SELECT attempts FROM {table} WHERE id = $1", table = self.table),
+                &format!(
+                    "SELECT attempts FROM {table} WHERE id = $1",
+                    table = self.table
+                ),
                 &[id],
             )?
             .get(0);
@@ -255,12 +273,12 @@ impl IngestionQueue for PostgresIngestionQueue {
                          processed_at = now(),
                          locked_at = NULL,
                          locked_by = NULL,
-                         available_at = now() + ($3::text || ' seconds')::interval,
+                         available_at = now() + ($3::bigint * interval '1 second'),
                          last_error = $4
                      WHERE id = $1",
                     table = self.table
                 ),
-                &[id, &status, &backoff_secs.to_string(), &error],
+                &[id, &status, &backoff_secs, &error],
             )?;
         } else {
             conn.execute(
@@ -282,12 +300,28 @@ impl IngestionQueue for PostgresIngestionQueue {
     }
 }
 
+impl Drop for PostgresIngestionQueue {
+    fn drop(&mut self) {
+        if let Some(pool) = self.pool.take() {
+            std::thread::spawn(move || drop(pool));
+        }
+    }
+}
+
 fn resolve_db_url() -> Result<String, IngestionQueueError> {
     env::var("INGESTION_DB_URL")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .or_else(|| env::var("SUPABASE_DB_URL").ok().filter(|value| !value.trim().is_empty()))
-        .or_else(|| env::var("DATABASE_URL").ok().filter(|value| !value.trim().is_empty()))
+        .or_else(|| {
+            env::var("SUPABASE_DB_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .or_else(|| {
+            env::var("DATABASE_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
         .ok_or(IngestionQueueError::MissingDbUrl)
 }
 
@@ -333,6 +367,14 @@ fn resolve_i32_env(key: &str, default_value: i32) -> i32 {
         .unwrap_or(default_value)
 }
 
+fn resolve_bool_env(key: &str) -> bool {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .map(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
+}
+
 fn resolve_worker_instance_id(employee_id: &str) -> String {
     if let Ok(value) = env::var("WORKER_INSTANCE_ID") {
         let trimmed = value.trim();
@@ -363,6 +405,7 @@ mod tests {
     use super::*;
     use crate::channel::{Channel, ChannelMetadata, InboundMessage};
     use crate::ingestion::IngestionPayload;
+    use chrono::Utc;
 
     fn sample_envelope(employee_id: &str, dedupe_key: &str) -> IngestionEnvelope {
         let message = InboundMessage {
@@ -399,6 +442,7 @@ mod tests {
 
     fn test_queue() -> PostgresIngestionQueue {
         dotenvy::dotenv().ok();
+        env::set_var("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS", "true");
         let db_url = resolve_db_url().expect("SUPABASE_DB_URL required for ingestion queue tests");
         let table = format!("ingestion_queue_test_{}", Uuid::new_v4().simple());
         PostgresIngestionQueue::new(&db_url, &table, 10, 5).expect("queue")
@@ -417,6 +461,7 @@ mod tests {
         assert_eq!(claimed.envelope.dedupe_key, "dedupe-1");
 
         queue.mark_done(&claimed.id).expect("done");
+        queue.drop_table_for_tests();
     }
 
     #[test]
@@ -427,5 +472,6 @@ mod tests {
         let second = queue.enqueue(&envelope).expect("enqueue");
         assert!(first.inserted);
         assert!(!second.inserted);
+        queue.drop_table_for_tests();
     }
 }

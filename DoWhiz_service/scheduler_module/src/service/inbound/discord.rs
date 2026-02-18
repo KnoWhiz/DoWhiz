@@ -48,7 +48,12 @@ pub(crate) fn process_discord_inbound_message(
     let thread_state =
         bump_thread_state(&thread_state_path, &thread_key, message.message_id.clone())?;
 
-    append_discord_message_payload(&workspace, message, raw_payload, thread_state.last_email_seq)?;
+    append_discord_message_payload(
+        &workspace,
+        message,
+        raw_payload,
+        thread_state.last_email_seq,
+    )?;
 
     let model_name = match config.employee_profile.model.clone() {
         Some(model) => model,

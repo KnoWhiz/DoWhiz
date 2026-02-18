@@ -83,10 +83,7 @@ pub(crate) fn try_quick_response_slack(
                 let thread_ts = Some(message.thread_id.as_str());
                 if runtime
                     .block_on(send_quick_slack_response(
-                        &token,
-                        channel_id,
-                        thread_ts,
-                        &response,
+                        &token, channel_id, thread_ts, &response,
                     ))
                     .is_ok()
                 {
@@ -155,7 +152,9 @@ pub(crate) fn try_quick_response_bluebubbles(
             }
 
             if runtime
-                .block_on(send_quick_bluebubbles_response(url, password, chat_guid, &response))
+                .block_on(send_quick_bluebubbles_response(
+                    url, password, chat_guid, &response,
+                ))
                 .is_ok()
             {
                 return Ok(true);
@@ -272,8 +271,8 @@ async fn send_quick_slack_response(
     thread_ts: Option<&str>,
     response_text: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let api_base = std::env::var("SLACK_API_BASE_URL")
-        .unwrap_or_else(|_| "https://slack.com/api".to_string());
+    let api_base =
+        std::env::var("SLACK_API_BASE_URL").unwrap_or_else(|_| "https://slack.com/api".to_string());
     let url = format!("{}/chat.postMessage", api_base.trim_end_matches('/'));
 
     let mut request = serde_json::json!({
@@ -349,7 +348,10 @@ fn send_quick_discord_response_simple(
 
     let result = adapter.send(&message)?;
     if !result.success {
-        return Err(result.error.unwrap_or_else(|| "discord send failed".to_string()).into());
+        return Err(result
+            .error
+            .unwrap_or_else(|| "discord send failed".to_string())
+            .into());
     }
     Ok(())
 }

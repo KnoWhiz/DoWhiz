@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 
-use tracing::{error, warn};
+use tracing::warn;
 
 use crate::channel::Channel;
 use crate::index_store::IndexStore;
@@ -50,49 +50,45 @@ pub(super) fn spawn_ingestion_consumer(
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = stop.clone();
 
-    let handle = thread::spawn(move || {
-        loop {
-            if stop_thread.load(Ordering::Relaxed) {
-                break;
+    let handle = thread::spawn(move || loop {
+        if stop_thread.load(Ordering::Relaxed) {
+            break;
+        }
+        match queue.claim_next(&employee_id) {
+            Ok(Some(item)) => {
+                match process_ingestion_envelope(
+                    &config,
+                    &user_store,
+                    &index_store,
+                    &slack_store,
+                    &message_router,
+                    &runtime,
+                    &item.envelope,
+                ) {
+                    Ok(_) => {
+                        if let Err(err) = queue.mark_done(&item.id) {
+                            warn!("failed to mark envelope done: {}", err);
+                        }
+                    }
+                    Err(err) => {
+                        if let Err(mark_err) = queue.mark_failed(&item.id, &err.to_string()) {
+                            warn!("failed to mark envelope failed: {}", mark_err);
+                        }
+                    }
+                }
             }
-            match queue.claim_next(&employee_id) {
-                Ok(Some(item)) => {
-                    match process_ingestion_envelope(
-                        &config,
-                        &user_store,
-                        &index_store,
-                        &slack_store,
-                        &message_router,
-                        &runtime,
-                        &item.envelope,
-                    ) {
-                        Ok(_) => {
-                            if let Err(err) = queue.mark_done(&item.id) {
-                                warn!("failed to mark envelope done: {}", err);
-                            }
-                        }
-                        Err(err) => {
-                            if let Err(mark_err) =
-                                queue.mark_failed(&item.id, &err.to_string())
-                            {
-                                warn!("failed to mark envelope failed: {}", mark_err);
-                            }
-                        }
-                    }
+            Ok(None) => {
+                if stop_thread.load(Ordering::Relaxed) {
+                    break;
                 }
-                Ok(None) => {
-                    if stop_thread.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    thread::sleep(poll_interval);
+                thread::sleep(poll_interval);
+            }
+            Err(err) => {
+                if stop_thread.load(Ordering::Relaxed) {
+                    break;
                 }
-                Err(err) => {
-                    if stop_thread.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    warn!("ingestion queue claim error: {}", err);
-                    thread::sleep(poll_interval);
-                }
+                warn!("ingestion queue claim error: {}", err);
+                thread::sleep(poll_interval);
             }
         }
     });
@@ -155,13 +151,7 @@ fn process_ingestion_envelope(
         }
         Channel::Discord => {
             let message = envelope.to_inbound_message();
-            if try_quick_response_discord(
-                config,
-                user_store,
-                message_router,
-                runtime,
-                &message,
-            )? {
+            if try_quick_response_discord(config, user_store, message_router, runtime, &message)? {
                 return Ok(());
             }
             let raw_payload = envelope.raw_payload_bytes();
@@ -179,13 +169,7 @@ fn process_ingestion_envelope(
         }
         Channel::Telegram => {
             let message = envelope.to_inbound_message();
-            if try_quick_response_telegram(
-                config,
-                user_store,
-                message_router,
-                runtime,
-                &message,
-            )? {
+            if try_quick_response_telegram(config, user_store, message_router, runtime, &message)? {
                 return Ok(());
             }
             let raw_payload = envelope.raw_payload_bytes();
@@ -193,13 +177,7 @@ fn process_ingestion_envelope(
         }
         Channel::WhatsApp => {
             let message = envelope.to_inbound_message();
-            if try_quick_response_whatsapp(
-                config,
-                user_store,
-                message_router,
-                runtime,
-                &message,
-            )? {
+            if try_quick_response_whatsapp(config, user_store, message_router, runtime, &message)? {
                 return Ok(());
             }
             let raw_payload = envelope.raw_payload_bytes();
