@@ -52,6 +52,10 @@ export SUPABASE_PROJECT_URL="https://<project>.supabase.co"
 export SUPABASE_SECRET_KEY="sb_secret_..."
 export SUPABASE_STORAGE_BUCKET="ingestion-raw"
 ```
+If your Supabase DB hostname resolves to IPv6-only, ensure the VM has IPv6 outbound enabled (see VM deployment notes in `DoWhiz_service/README.md`). For Supabase DB TLS, you may also need:
+```bash
+export INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS=true
+```
 For VM/pm2 deployments, prefer writing these into `DoWhiz_service/.env` so they survive restarts.
 
 Run a gateway + worker (local, single employee):

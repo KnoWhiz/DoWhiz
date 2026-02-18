@@ -337,7 +337,31 @@ This is the current production flow (oliver on `dowhizprod1`): run a single work
 1. Provision an Ubuntu VM and open inbound TCP ports `22`, `80`, `443`.
 Outbound SMTP (`25`) is often blocked on cloud VMs; run E2E senders from your local machine if needed.
 
-2. Install dependencies + ngrok (VM):
+2. (Azure) If your Supabase DB hostname resolves to IPv6-only, enable IPv6 outbound on the VM's VNet/NIC:
+```bash
+# Example (dowhizprod1)
+RG=DoWhiz-prod1
+VNET=vnet-westus2
+SUBNET=snet-westus2-1
+NIC=dowhiz-vm-prod1694-2a8516e1
+ZONE=2
+
+az network vnet update -g "$RG" -n "$VNET" \
+  --add addressSpace.addressPrefixes "fd00:7c3a:9b5e::/56"
+az network vnet subnet update -g "$RG" --vnet-name "$VNET" -n "$SUBNET" \
+  --add addressPrefixes "fd00:7c3a:9b5e:0::/64"
+az network public-ip create -g "$RG" -n dowhiz-prod1-ipv6 \
+  --sku Standard --version IPv6 --zone "$ZONE" --allocation-method Static
+az network nic ip-config create -g "$RG" --nic-name "$NIC" -n ipv6config \
+  --private-ip-address-version IPv6 --subnet "$SUBNET" --vnet-name "$VNET" \
+  --public-ip-address dowhiz-prod1-ipv6
+
+# Verify on the VM
+ip -6 addr show dev eth0
+nc -6 -z -w5 db.<project>.supabase.co 5432
+```
+
+3. Install dependencies + ngrok (VM):
 ```bash
 sudo apt-get update
 sudo apt-get install -y ca-certificates libsqlite3-dev libssl-dev pkg-config curl git python3
@@ -347,7 +371,7 @@ curl https://sh.rustup.rs -sSf | sh -s -- -y
 sudo snap install ngrok
 ```
 
-3. Clone the repo and configure `.env` (VM):
+4. Clone the repo and configure `.env` (VM):
 ```bash
 git clone https://github.com/KnoWhiz/DoWhiz.git
 cd DoWhiz
@@ -358,6 +382,7 @@ SUPABASE_DB_URL=postgresql://...
 SUPABASE_PROJECT_URL=https://<project>.supabase.co
 SUPABASE_SECRET_KEY=sb_secret_...
 SUPABASE_STORAGE_BUCKET=ingestion-raw
+INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS=true  # Supabase DB uses a custom CA
 ```
 
 Optional: copy your local `.env` directly to the VM:
@@ -365,7 +390,7 @@ Optional: copy your local `.env` directly to the VM:
 scp /path/to/DoWhiz_service/.env azureuser@<vm>:/home/azureuser/DoWhiz/DoWhiz_service/.env
 ```
 
-4. Configure the gateway to route only Oliver:
+5. Configure the gateway to route only Oliver:
 ```bash
 cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
 cat > DoWhiz_service/gateway.toml <<'EOF'
@@ -381,7 +406,7 @@ tenant_id = "default"
 EOF
 ```
 
-5. Start services (tmux recommended):
+6. Start services (tmux recommended):
 ```bash
 tmux new-session -d -s oliver "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 RUN_TASK_DOCKER_IMAGE= cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001'"
 tmux new-session -d -s gateway "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && ./scripts/run_gateway_local.sh'"
@@ -390,21 +415,21 @@ tmux new-session -d -s ngrok "ngrok http 9100 --url https://oliver.dowhiz.prod.n
 ```
 Note: if you run services under pm2/systemd (non-interactive shells), ensure PATH includes `~/.cargo/bin` or use the full cargo path so `cargo run` works.
 
-6. Health checks (VM):
+7. Health checks (VM):
 ```bash
 curl -sS http://127.0.0.1:9001/health && echo
 curl -sS http://127.0.0.1:9100/health && echo
 curl -sS https://oliver.dowhiz.prod.ngrok.app/health && echo
 ```
 
-7. Point Postmark to the gateway (VM):
+8. Point Postmark to the gateway (VM):
 ```bash
 cd ~/DoWhiz/DoWhiz_service
 cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
   --hook-url https://oliver.dowhiz.prod.ngrok.app/postmark/inbound
 ```
 
-8. Run live E2E (from your local machine if VM blocks SMTP 25):
+9. Run live E2E (from your local machine if VM blocks SMTP 25):
 ```
 POSTMARK_INBOUND_HOOK_URL=https://oliver.dowhiz.prod.ngrok.app/postmark/inbound
 POSTMARK_TEST_FROM=mini-mouse@deep-tutor.com
