@@ -56,6 +56,19 @@ fn build_object_url(base: &str, bucket: &str, path: &str) -> String {
     format!("{}/storage/v1/object/{}/{}", base, bucket, path)
 }
 
+fn is_duplicate_bucket_response(status: StatusCode, body: &str) -> bool {
+    if status == StatusCode::CONFLICT {
+        return true;
+    }
+    if status == StatusCode::BAD_REQUEST {
+        let lower = body.to_ascii_lowercase();
+        return lower.contains("duplicate")
+            || lower.contains("already exists")
+            || lower.contains("\"statuscode\":\"409\"");
+    }
+    false
+}
+
 fn to_supabase_ref(bucket: &str, path: &str) -> String {
     format!("supabase://{}/{}", bucket, path)
 }
@@ -106,23 +119,16 @@ async fn ensure_bucket_ready(
         .send()
         .await?;
 
-    match response.status() {
-        status if status.is_success() => {
-            let _ = BUCKET_READY.set(());
-            Ok(())
-        }
-        StatusCode::CONFLICT => {
-            let _ = BUCKET_READY.set(());
-            Ok(())
-        }
-        status => {
-            let body = response.text().await.unwrap_or_default();
-            Err(RawPayloadStoreError::Storage(format!(
-                "bucket create failed (status {}): {}",
-                status, body
-            )))
-        }
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if status.is_success() || is_duplicate_bucket_response(status, &body) {
+        let _ = BUCKET_READY.set(());
+        return Ok(());
     }
+    Err(RawPayloadStoreError::Storage(format!(
+        "bucket create failed (status {}): {}",
+        status, body
+    )))
 }
 
 fn ensure_bucket_ready_blocking(
@@ -147,23 +153,16 @@ fn ensure_bucket_ready_blocking(
         }))
         .send()?;
 
-    match response.status() {
-        status if status.is_success() => {
-            let _ = BUCKET_READY.set(());
-            Ok(())
-        }
-        StatusCode::CONFLICT => {
-            let _ = BUCKET_READY.set(());
-            Ok(())
-        }
-        status => {
-            let body = response.text().unwrap_or_default();
-            Err(RawPayloadStoreError::Storage(format!(
-                "bucket create failed (status {}): {}",
-                status, body
-            )))
-        }
+    let status = response.status();
+    let body = response.text().unwrap_or_default();
+    if status.is_success() || is_duplicate_bucket_response(status, &body) {
+        let _ = BUCKET_READY.set(());
+        return Ok(());
     }
+    Err(RawPayloadStoreError::Storage(format!(
+        "bucket create failed (status {}): {}",
+        status, body
+    )))
 }
 
 pub async fn upload_raw_payload(
