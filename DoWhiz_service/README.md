@@ -1,6 +1,6 @@
 # DoWhiz Service
 
-Rust service for inbound webhooks (Postmark, Slack, Discord), task scheduling, AI agent execution (Codex/Claude), and outbound replies.
+Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, Telegram, Google Docs, BlueBubbles/iMessage), task scheduling, AI agent execution (Codex/Claude), and outbound replies.
 
 ## Table of Contents
 
@@ -19,7 +19,11 @@ Rust service for inbound webhooks (Postmark, Slack, Discord), task scheduling, A
   - [Unit Tests](#unit-tests)
   - [Live E2E Tests](#live-e2e-tests)
   - [Slack Local Testing](#slack-local-testing)
-- [Message Router (Ollama)](#message-router-ollama)
+  - [Discord Local Testing](#discord-local-testing)
+  - [Telegram Local Testing](#telegram-local-testing)
+  - [SMS (Twilio) Local Testing](#sms-twilio-local-testing)
+  - [iMessage Local Testing via BlueBubbles](#imessage-local-testing-via-bluebubbles)
+- [Message Router (OpenAI)](#message-router-openai)
 - [Environment Variables](#environment-variables)
 - [Runtime State](#runtime-state)
 - [Database Schema](#database-schema)
@@ -38,7 +42,7 @@ Rust service for inbound webhooks (Postmark, Slack, Discord), task scheduling, A
 - `playwright-cli` + Chromium (required for browser automation skills)
 - `ngrok` (for exposing local service to webhooks)
 - `python3` (for ngrok URL discovery)
-- Ollama (optional; required for local message routing via phi3:mini)
+- OpenAI API key (optional; enables message router quick replies)
 
 **Required in `.env`** (copy from repo-root `.env.example` to `DoWhiz_service/.env`):
 - `POSTMARK_SERVER_TOKEN`
@@ -50,6 +54,7 @@ Rust service for inbound webhooks (Postmark, Slack, Discord), task scheduling, A
 - `RUN_TASK_DOCKER_IMAGE` (run each task inside a disposable Docker container; use `dowhiz-service` for the repo image)
 - `RUN_TASK_DOCKER_AUTO_BUILD=1` to auto-build the image when missing (set `0` to disable)
 - `INGESTION_DB_PATH` + `INGESTION_DEDUPE_PATH` (shared queue for the inbound gateway + workers)
+- `OPENAI_API_KEY` (enables message router quick replies)
 
 ---
 
@@ -66,12 +71,6 @@ sudo npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest @playw
 sudo npx playwright install --with-deps chromium
 ```
 
-Optional: Install Ollama for local message routing:
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull phi3:mini
-```
-
 Optional (match Dockerfile's chrome-channel lookup used by E2E):
 ```bash
 export PLAYWRIGHT_BROWSERS_PATH="$PWD/.cache/ms-playwright"
@@ -83,10 +82,9 @@ sudo ln -sf "$chromium_path" /opt/google/chrome/chrome
 ### macOS (Homebrew)
 
 ```bash
-brew install node@20 openssl@3 sqlite pkg-config ollama
+brew install node@20 openssl@3 sqlite pkg-config
 npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest @playwright/cli@latest
 npx playwright install chromium
-ollama pull phi3:mini
 ```
 
 Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.
@@ -111,7 +109,7 @@ For forwarded mail, the service checks `To`/`Cc`/`Bcc` plus headers such as `X-O
 | `little_bear` | Oliver | Codex | oliver@dowhiz.com, little-bear@dowhiz.com, agent@dowhiz.com |
 | `mini_mouse` | Maggie | Claude | maggie@dowhiz.com, mini-mouse@dowhiz.com |
 | `sticky_octopus` | Devin | Codex | devin@dowhiz.com, sticky-octopus@dowhiz.com, coder@dowhiz.com |
-| `boiled_egg` | Proto | Codex | proto@dowhiz.com, boiled-egg@dowhiz.com |
+| `boiled_egg` | Boiled-Egg | Codex | proto@dowhiz.com, boiled-egg@dowhiz.com |
 
 `employee.toml` also supports `runtime_root` per employee to override the default runtime location (for repo-local runs, use `.workspace/<employee_id>` relative to `DoWhiz_service/employee.toml`).
 
@@ -231,7 +229,16 @@ Outputs appear under:
 
 ### Inbound Gateway (Recommended)
 
-The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio/Google Docs inbound traffic, deduplicates it, and enqueues messages into a shared ingestion queue. Workers poll that queue and send replies. Workers no longer expose `/postmark/inbound`.
+The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/Google Docs inbound traffic, deduplicates it, and enqueues messages into a shared ingestion queue. Workers poll that queue and send replies. Workers no longer expose `/postmark/inbound`.
+
+HTTP endpoints:
+- `/postmark/inbound` (email)
+- `/slack/events`
+- `/bluebubbles/webhook`
+- `/telegram/webhook`
+- `/sms/twilio`
+
+Discord is handled via the bot gateway (requires `DISCORD_BOT_TOKEN`), and Google Docs uses a poller when `GOOGLE_DOCS_ENABLED=true`.
 
 Optional webhook verification:
 - `POSTMARK_INBOUND_TOKEN` (validates `X-Postmark-Token`)
@@ -724,6 +731,23 @@ Set `SLACK_REDIRECT_URI` in `.env` to the OAuth Redirect URL.
 3. Add the bot to your server:
 `https://discord.com/oauth2/authorize?client_id=1472013251553525983&permissions=0&integration_type=0&scope=bot`
 
+### Telegram Local Testing
+
+1. Set `TELEGRAM_BOT_TOKEN` (or per-employee `DO_WHIZ_<EMPLOYEE>_BOT`) in `.env`.
+2. Start a worker and the inbound gateway with a shared ingestion queue.
+3. Expose the gateway and set the Telegram webhook to `https://<gateway-ngrok>.ngrok.app/telegram/webhook`.
+4. Ensure `gateway.toml` has a `telegram` route (use `key = "*"`, or a specific chat id).
+5. Message the bot.
+
+### SMS (Twilio) Local Testing
+
+1. Set `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` in `.env`.
+2. Start a worker and the inbound gateway with a shared ingestion queue.
+3. Expose the gateway and set the Twilio webhook to `https://<gateway-ngrok>.ngrok.app/sms/twilio`.
+4. If you want signature verification, set `TWILIO_WEBHOOK_URL` to the public webhook URL.
+5. Ensure `gateway.toml` has an `sms` route (use `key = "*"`, or the Twilio phone number).
+6. Send an SMS to the Twilio number.
+
 ### iMessage Local Testing via BlueBubbles
 1. Download BlueBubbles (e.g. `brew install --cask bluebubbles`).
 2. Start a worker and the inbound gateway with a shared ingestion queue.
@@ -831,7 +855,7 @@ Each employee needs their own Google account and refresh token:
 
 | Employee | Env Variable | Google Account |
 |----------|-------------|----------------|
-| Proto (boiled_egg) | `GOOGLE_REFRESH_TOKEN_BOILED_EGG` | proto@dowhiz.com |
+| Boiled-Egg (boiled_egg) | `GOOGLE_REFRESH_TOKEN_BOILED_EGG` | proto@dowhiz.com |
 | Oliver (little_bear) | `GOOGLE_REFRESH_TOKEN_LITTLE_BEAR` | oliver@dowhiz.com |
 
 Run `get_google_refresh_token.sh` once per employee, logging into the appropriate Google account each time.
@@ -846,32 +870,21 @@ Run `get_google_refresh_token.sh` once per employee, logging into the appropriat
 | `Permission denied` | Share the document with the employee's Google account |
 
 ---
-## Message Router (Ollama)
+## Message Router (OpenAI)
 
-The service includes a local LLM message router that classifies incoming Discord messages using Ollama. Simple queries (greetings, casual chat) are handled directly by a local model (phi3:mini), while complex queries are forwarded to the full Codex/Claude pipeline.
+The service includes a lightweight message router that can answer simple queries directly and forward complex ones to the full Codex/Claude pipeline. The router is enabled only when `OPENAI_API_KEY` is set.
 
 ### Configuration
 
 Environment variables:
-- `ROUTER_ENABLED`: Set to `"false"` to disable routing (default: enabled). `OLLAMA_ENABLED` is still honored as a legacy alias.
-- `ROUTER_MODEL`: Model name (default: `phi3:mini` for Ollama, `gpt-5` when `OPENAI_API_KEY` is set).
-- `OLLAMA_URL`: Ollama server URL (default: `http://localhost:11434`)
-- `OPENAI_API_KEY`: When set, the router uses OpenAI instead of Ollama.
+- `OPENAI_API_KEY`: Required to enable routing
 - `OPENAI_API_URL`: Override OpenAI base URL (default: `https://api.openai.com/v1`)
-
-### Docker Setup
-
-The `docker-compose.fanout.yml` includes an Ollama sidecar container. After starting the containers, pull the model:
-
-```bash
-docker exec dowhiz_service-ollama-1 ollama pull phi3:mini
-```
-
-The model is persisted in a Docker volume (`ollama-models`) so it only needs to be pulled once.
+- `ROUTER_MODEL`: Model name (default: `gpt-5`)
+- `ROUTER_ENABLED`: Set to `"false"` to disable routing (default: enabled)
 
 ### How it works
 
-1. Incoming Discord messages are classified by phi3:mini (~200-500ms)
+1. Short/simple messages are classified by the OpenAI model
 2. Simple queries get a quick local response
 3. Complex queries are forwarded to the full pipeline (Codex/Claude)
 
@@ -888,6 +901,7 @@ This reduces API costs and latency for simple interactions while preserving full
 | `RUST_SERVICE_PORT` | `9001` | Port to bind |
 | `EMPLOYEE_ID` | - | Selects employee profile from `employee.toml` |
 | `EMPLOYEE_CONFIG_PATH` | `DoWhiz_service/employee.toml` | Path to employee config |
+| `POSTMARK_INBOUND_MAX_BYTES` | `26214400` | Max inbound body size for worker endpoints |
 
 ### Paths
 | Variable | Default | Description |
@@ -933,6 +947,7 @@ This reduces API costs and latency for simple interactions while preserving full
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RUN_TASK_DOCKER_IMAGE` | - | Enable per-task containers |
+| `RUN_TASK_USE_DOCKER` | `0` | Force Docker execution (requires `RUN_TASK_DOCKER_IMAGE`) |
 | `RUN_TASK_DOCKER_REQUIRED` | `0` | Fail when Docker CLI is missing instead of falling back to host execution |
 | `RUN_TASK_DOCKER_AUTO_BUILD` | `1` | Auto-build missing images |
 | `RUN_TASK_DOCKERFILE` | - | Override Dockerfile path |
@@ -950,10 +965,46 @@ This reduces API costs and latency for simple interactions while preserving full
 | `GATEWAY_PORT` | `9100` | Gateway bind port |
 | `GATEWAY_MAX_BODY_BYTES` | `26214400` | Max inbound body size (25MB) |
 | `POSTMARK_INBOUND_TOKEN` | - | Verify Postmark webhook (`X-Postmark-Token`) |
-| `SLACK_SIGNING_SECRET` | - | Verify Slack signatures |
+
+### Slack
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SLACK_SIGNING_SECRET` | - | Verify Slack signatures (gateway) |
+| `SLACK_BOT_TOKEN` | - | Bot token for outbound messages (legacy single-workspace) |
+| `SLACK_BOT_USER_ID` | - | Bot user id (filter self messages) |
+| `SLACK_CLIENT_ID` | - | Slack OAuth client id |
+| `SLACK_CLIENT_SECRET` | - | Slack OAuth client secret |
+| `SLACK_REDIRECT_URI` | - | Slack OAuth redirect URI |
+| `SLACK_STORE_PATH` | `<runtime_root>/state/slack.db` | Slack installation store |
+| `SLACK_API_BASE_URL` | `https://slack.com/api` | Override Slack API base URL |
+
+### Discord
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISCORD_BOT_TOKEN` | - | Discord bot token |
+| `DISCORD_BOT_USER_ID` | - | Bot user id (filter self messages) |
+| `DISCORD_API_BASE_URL` | `https://discord.com/api/v10` | Override Discord API base URL |
+
+### BlueBubbles (iMessage)
+| Variable | Default | Description |
+|----------|---------|-------------|
 | `BLUEBUBBLES_WEBHOOK_TOKEN` | - | Verify BlueBubbles webhook token |
-| `TWILIO_AUTH_TOKEN` | - | Verify Twilio signatures |
+| `BLUEBUBBLES_URL` | - | BlueBubbles server URL |
+| `BLUEBUBBLES_PASSWORD` | - | BlueBubbles server password |
+
+### SMS (Twilio)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TWILIO_ACCOUNT_SID` | - | Twilio account SID |
+| `TWILIO_AUTH_TOKEN` | - | Twilio auth token (outbound + webhook verification) |
+| `TWILIO_API_BASE_URL` | `https://api.twilio.com` | Override Twilio API base URL |
 | `TWILIO_WEBHOOK_URL` | - | Public URL used to validate Twilio signatures |
+
+### Telegram
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TELEGRAM_BOT_TOKEN` | - | Global Telegram bot token |
+| `DO_WHIZ_<EMPLOYEE>_BOT` | - | Per-employee bot token override (e.g., `DO_WHIZ_OLIVER_BOT`) |
 
 ### Fanout Gateway (Legacy)
 | Variable | Default | Description |
@@ -966,10 +1017,9 @@ This reduces API costs and latency for simple interactions while preserving full
 ### Message Router
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ROUTER_ENABLED` | `true` | Set to `false` to disable (alias: `OLLAMA_ENABLED`) |
-| `ROUTER_MODEL` | `phi3:mini` | Model name (default is `gpt-5` when `OPENAI_API_KEY` is set) |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
-| `OPENAI_API_KEY` | - | When set, router uses OpenAI instead of Ollama |
+| `ROUTER_ENABLED` | `true` | Set to `false` to disable |
+| `ROUTER_MODEL` | `gpt-5` | Model name |
+| `OPENAI_API_KEY` | - | Required to enable routing |
 | `OPENAI_API_URL` | `https://api.openai.com/v1` | OpenAI base URL |
 
 ### Inbound Blacklist
