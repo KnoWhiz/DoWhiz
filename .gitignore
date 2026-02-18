@@ -30,3 +30,4 @@ mvp_python/email_pipeline/state/postmark_processed_ids.txt
 /.workspace_docker_test
 /.workspace_docker_e2e_little
 /.workspace_docker_e2e_mini
+DoWhiz_service/bin/google-docs
