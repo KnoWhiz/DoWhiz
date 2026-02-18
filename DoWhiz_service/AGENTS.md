@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 - `scheduler_module/`: inbound webhooks, scheduling, and service binaries.
 - `send_emails_module/`: Postmark integration and email sending.
-- `run_task_module/`: task execution and workspace orchestration (`run_task.rs`).
+- `run_task_module/`: task execution and workspace orchestration (`src/run_task/`).
 - `scripts/`: local run helpers (gateway, employees, E2E).
 - `employees/`: per-employee agent configs (`AGENTS.md`, `CLAUDE.md`, `SOUL.md`).
 - `skills/`: bundled agent skills.

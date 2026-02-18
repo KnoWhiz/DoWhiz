@@ -55,7 +55,7 @@ workspace/
 ```
 
 2) Ensure AZURE_OPENAI_API_KEY_BACKUP and AZURE_OPENAI_ENDPOINT_BACKUP are set.
-3) Run a small Rust harness that calls run_task from run_task.rs.
+3) Run a small Rust harness that calls run_task from run_task_module (see `src/run_task/`).
 4) Verify the outputs:
    - reply_email_draft.html exists in the workspace root.
    - reply_email_attachments/ exists (and contains any generated attachments).
