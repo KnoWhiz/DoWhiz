@@ -6,14 +6,15 @@ flowchart TD
   B -->|BlueBubbles| C3[HTTP /bluebubbles/webhook]
   B -->|SMS/Twilio| C4[HTTP /sms/twilio]
   B -->|Discord WS| C5[Discord Gateway]
-  B -->|Google Docs| C6[Docs Poller]
+  B -->|Telegram| C6[HTTP /telegram/webhook]
+  B -->|Google Docs| C7[Docs Poller]
 
   C1 --> D1{Verify token?}
   C2 --> D2{URL verification?}
   C3 --> D3{Verify token?}
   C4 --> D4{Verify Twilio signature?}
   C5 --> D5{Mention or reply to bot?}
-  C6 --> D6[Fetch comments -> filter actionable items]
+  C7 --> D7[Fetch comments -> filter actionable items]
 
   D1 -->|fail| X1[401/400]
   D2 -->|yes| X2[return challenge]
@@ -22,14 +23,13 @@ flowchart TD
   D4 -->|fail| X1
   D5 -->|no| X3[ignore]
   D5 -->|yes| E5
-  D6 --> E6
-
   E1[Parse Postmark payload] --> F1[Extract service address]
   E2[Parse Slack payload] --> F2[Extract team_id]
   E3[Parse BlueBubbles payload] --> F3[Extract chat_guid]
   E4[Parse SMS form] --> F4[Extract To/From]
   E5[Parse Discord message] --> F5[Extract guild_id/channel_id]
-  E6[Build GoogleDocs InboundMessage] --> F6[doc_id]
+  E6[Parse Telegram payload] --> F6[Extract chat_id]
+  E7[Build GoogleDocs InboundMessage] --> F7[doc_id]
 
   C1 --> E1
   C2 --> E2
@@ -37,6 +37,7 @@ flowchart TD
   C4 --> E4
   C5 --> E5
   C6 --> E6
+  C7 --> E7
 
   F1 --> G{Route match}
   F2 --> G
@@ -44,6 +45,7 @@ flowchart TD
   F4 --> G
   F5 --> G
   F6 --> G
+  F7 --> G
 
   G -->|hit| H[RouteDecision tenant_id + employee_id]
   G -->|miss| X4[no_route / ignore]
@@ -61,6 +63,7 @@ flowchart TD
   P -->|Slack| Q1[Quick response router?]
   P -->|BlueBubbles| Q2[Quick response router?]
   P -->|Discord| Q3[Quick response router?]
+  P -->|Telegram| Q4[Quick response router?]
   P -->|Email| R1[process_inbound_payload]
   P -->|SMS| R2[process_sms_message]
   P -->|GoogleDocs| R3[process_google_docs_message]
@@ -70,7 +73,9 @@ flowchart TD
   Q2 -->|Simple| S2[Send quick BlueBubbles reply]
   Q2 -->|Complex/Pass| R2S[process_bluebubbles_event]
   Q3 -->|Simple| S3[Send quick Discord reply]
-  Q3 -->|Complex/Pass| R3S[process_discord_message]
+  Q3 -->|Complex/Pass| R3S[process_discord_inbound_message]
+  Q4 -->|Simple| S4[Send quick Telegram reply]
+  Q4 -->|Complex/Pass| R4S[process_telegram_event]
 
   R1 --> T[Create or get user + workspace]
   R2 --> T
@@ -78,6 +83,7 @@ flowchart TD
   R1S --> T
   R2S --> T
   R3S --> T
+  R4S --> T
 
   T --> U[Bump thread_state epoch]
   U --> V[Write incoming_email/attachments]

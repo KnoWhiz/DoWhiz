@@ -1,6 +1,6 @@
 # DoWhiz_service Test Checklist
 
-Scope: DoWhiz_service only. Excludes website/ and function_app/.
+Scope: DoWhiz_service only. Excludes website/.
 
 Status legend:
 AUTO = implemented and can run locally without external creds.
@@ -14,12 +14,12 @@ After any code change, consult this checklist, run all relevant AUTO tests, and 
 ## Unit Tests: run_task_module
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
 |---|---|---|---|---|---|---|---|
-| UT-RUN-01 | load_memory_context_sorts_and_includes_markdown | run_task_module/run_task.rs::load_memory_context | DoWhiz_service/run_task_module/run_task.rs | Markdown read + sorted ordering | Large files, encoding errors, IO failures | AUTO | cargo test -p run_task_module |
-| UT-RUN-02 | build_prompt_includes_memory_policy_and_section | run_task_module/run_task.rs::build_prompt | DoWhiz_service/run_task_module/run_task.rs | Prompt includes memory policy and section | Prompt quality/LLM correctness | AUTO | cargo test -p run_task_module |
-| UT-RUN-03 | build_prompt_skips_reply_instruction_for_non_replyable | run_task_module/run_task.rs::build_prompt | DoWhiz_service/run_task_module/run_task.rs | Non-replyable branch | Channel-specific variants | AUTO | cargo test -p run_task_module |
-| UT-RUN-04 | extract_scheduler_actions_returns_empty_when_missing | run_task_module/run_task.rs::extract_scheduler_actions | DoWhiz_service/run_task_module/run_task.rs | Safe empty return | Multiple blocks handling | AUTO | cargo test -p run_task_module |
-| UT-RUN-05 | extract_scheduler_actions_parses_list | run_task_module/run_task.rs::extract_scheduler_actions | DoWhiz_service/run_task_module/run_task.rs | Parse cancel action list | All action types | AUTO | cargo test -p run_task_module |
-| UT-RUN-06 | extract_scheduler_actions_reports_invalid_json | run_task_module/run_task.rs::extract_scheduler_actions | DoWhiz_service/run_task_module/run_task.rs | Error path on invalid JSON | Error message detail | AUTO | cargo test -p run_task_module |
+| UT-RUN-01 | load_memory_context_sorts_and_includes_markdown | run_task_module/src/run_task/prompt.rs::load_memory_context | DoWhiz_service/run_task_module/src/run_task/prompt.rs | Markdown read + sorted ordering | Large files, encoding errors, IO failures | AUTO | cargo test -p run_task_module |
+| UT-RUN-02 | build_prompt_includes_memory_policy_and_section | run_task_module/src/run_task/prompt.rs::build_prompt | DoWhiz_service/run_task_module/src/run_task/prompt.rs | Prompt includes memory policy and section | Prompt quality/LLM correctness | AUTO | cargo test -p run_task_module |
+| UT-RUN-03 | build_prompt_skips_reply_instruction_for_non_replyable | run_task_module/src/run_task/prompt.rs::build_prompt | DoWhiz_service/run_task_module/src/run_task/prompt.rs | Non-replyable branch | Channel-specific variants | AUTO | cargo test -p run_task_module |
+| UT-RUN-04 | extract_scheduler_actions_returns_empty_when_missing | run_task_module/src/run_task/scheduled.rs::extract_scheduler_actions | DoWhiz_service/run_task_module/src/run_task/scheduled.rs | Safe empty return | Multiple blocks handling | AUTO | cargo test -p run_task_module |
+| UT-RUN-05 | extract_scheduler_actions_parses_list | run_task_module/src/run_task/scheduled.rs::extract_scheduler_actions | DoWhiz_service/run_task_module/src/run_task/scheduled.rs | Parse cancel action list | All action types | AUTO | cargo test -p run_task_module |
+| UT-RUN-06 | extract_scheduler_actions_reports_invalid_json | run_task_module/src/run_task/scheduled.rs::extract_scheduler_actions | DoWhiz_service/run_task_module/src/run_task/scheduled.rs | Error path on invalid JSON | Error message detail | AUTO | cargo test -p run_task_module |
 
 ## Unit Tests: scheduler_module (core/data/stores)
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
@@ -185,7 +185,7 @@ After any code change, consult this checklist, run all relevant AUTO tests, and 
 | GAP-05 | P0 | Ingestion queue concurrency claim | ingestion_queue::claim_next | No multi-worker race test | PLANNED | Parallel claims with threads |
 | GAP-06 | P1 | HTML sanitizer complex cases | service/email.rs::render_email_html | Only simple HTML cases | MANUAL | Feed complex HTML samples |
 | GAP-07 | P1 | Large attachment and size cap behavior | past_emails::hydrate_past_emails | No max size behavior test | MANUAL | Create large attachment samples |
-| GAP-08 | P1 | Router HTTP failure handling | message_router::classify | No network failure test | MANUAL | Simulate OpenAI/Ollama down |
+| GAP-08 | P1 | Router HTTP failure handling | message_router::classify | No network failure test | MANUAL | Simulate OpenAI down |
 | GAP-09 | P1 | SlackStore env fallback | slack_store::get_installation_or_env | Not tested | PLANNED | Set env + call fallback path |
 | GAP-10 | P2 | Cron timezone/DST edge behavior | scheduler cron parsing | No DST tests | MANUAL | Run around DST boundary |
 | GAP-11 | P2 | Postmark inbound payload edge cases | service/email.rs::process_inbound_payload | Limited payload variations | MANUAL | Create malformed/partial payloads |
