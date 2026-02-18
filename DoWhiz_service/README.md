@@ -1,6 +1,6 @@
 # DoWhiz Service
 
-Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, Telegram, Google Docs, BlueBubbles/iMessage), task scheduling, AI agent execution (Codex/Claude), and outbound replies.
+Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, Telegram, WhatsApp, Google Docs, BlueBubbles/iMessage), task scheduling, AI agent execution (Codex/Claude), and outbound replies.
 
 ## Table of Contents
 
@@ -230,7 +230,7 @@ Outputs appear under:
 
 ### Inbound Gateway (Recommended)
 
-The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/Google Docs inbound traffic, deduplicates it, and enqueues messages into a shared ingestion queue. Workers poll that queue and send replies. Workers no longer expose `/postmark/inbound`.
+The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/WhatsApp/Google Docs inbound traffic, deduplicates it, and enqueues messages into a shared ingestion queue. Workers poll that queue and send replies. Workers no longer expose `/postmark/inbound`.
 
 HTTP endpoints:
 - `/postmark/inbound` (email)
@@ -238,6 +238,7 @@ HTTP endpoints:
 - `/bluebubbles/webhook`
 - `/telegram/webhook`
 - `/sms/twilio`
+- `/whatsapp/webhook`
 
 Discord is handled via the bot gateway (requires `DISCORD_BOT_TOKEN`), and Google Docs uses a poller when `GOOGLE_DOCS_ENABLED=true`.
 
@@ -246,6 +247,7 @@ Optional webhook verification:
 - `SLACK_SIGNING_SECRET`
 - `BLUEBUBBLES_WEBHOOK_TOKEN`
 - `TWILIO_AUTH_TOKEN` + `TWILIO_WEBHOOK_URL`
+- `WHATSAPP_VERIFY_TOKEN` (validates WhatsApp webhook verification handshake)
 - `GATEWAY_MAX_BODY_BYTES` to override the default 25MB request limit
 
 **Local gateway + Docker workers (shared ingestion queue)**
@@ -964,6 +966,7 @@ This reduces API costs and latency for simple interactions while preserving full
 |----------|---------|-------------|
 | `SUPABASE_DB_URL` | - | Postgres connection string for the shared ingestion queue |
 | `INGESTION_DB_URL` | - | Optional alias for `SUPABASE_DB_URL` |
+| `DATABASE_URL` | - | Fallback Postgres connection string for the ingestion queue |
 | `SUPABASE_PROJECT_URL` | - | Supabase project URL for raw payload storage |
 | `SUPABASE_SECRET_KEY` | - | Supabase service role key for storage access |
 | `SUPABASE_STORAGE_BUCKET` | `ingestion-raw` | Bucket for raw payload blobs |
@@ -1051,6 +1054,13 @@ This reduces API costs and latency for simple interactions while preserving full
 |----------|---------|-------------|
 | `TELEGRAM_BOT_TOKEN` | - | Global Telegram bot token |
 | `DO_WHIZ_<EMPLOYEE>_BOT` | - | Per-employee bot token override (e.g., `DO_WHIZ_OLIVER_BOT`) |
+
+### WhatsApp (Meta Cloud API)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WHATSAPP_ACCESS_TOKEN` | - | Cloud API access token for outbound sends |
+| `WHATSAPP_PHONE_NUMBER_ID` | - | Phone number ID for the bot |
+| `WHATSAPP_VERIFY_TOKEN` | - | Verify token for webhook subscription |
 
 ### Fanout Gateway (Legacy)
 | Variable | Default | Description |
