@@ -46,6 +46,7 @@ export INGESTION_DB_PATH="$HOME/.dowhiz/DoWhiz/ingestion/ingestion.db"
 export INGESTION_DEDUPE_PATH="$HOME/.dowhiz/DoWhiz/ingestion/ingestion_processed_ids.txt"
 mkdir -p "$(dirname "$INGESTION_DB_PATH")"
 ```
+For VM/pm2 deployments, prefer writing these into `DoWhiz_service/.env` so they survive restarts.
 
 Run a gateway + worker (local, single employee):
 

@@ -347,8 +347,8 @@ cd DoWhiz
 cp .env.example DoWhiz_service/.env
 # Edit DoWhiz_service/.env with production secrets
 # Add shared ingestion paths (used by gateway + worker):
-# INGESTION_DB_PATH=/home/azureuser/.dowhiz/DoWhiz/ingestion/ingestion.db
-# INGESTION_DEDUPE_PATH=/home/azureuser/.dowhiz/DoWhiz/ingestion/ingestion_processed_ids.txt
+INGESTION_DB_PATH=/home/azureuser/.dowhiz/DoWhiz/ingestion/ingestion.db
+INGESTION_DEDUPE_PATH=/home/azureuser/.dowhiz/DoWhiz/ingestion/ingestion_processed_ids.txt
 mkdir -p /home/azureuser/.dowhiz/DoWhiz/ingestion
 ```
 
@@ -380,6 +380,7 @@ tmux new-session -d -s gateway "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a &
 ngrok config add-authtoken "$NGROK_AUTHTOKEN"
 tmux new-session -d -s ngrok "ngrok http 9100 --url https://oliver.dowhiz.prod.ngrok.app"
 ```
+Note: if you run services under pm2/systemd (non-interactive shells), ensure PATH includes `~/.cargo/bin` or use the full cargo path so `cargo run` works.
 
 6. Health checks (VM):
 ```bash
@@ -1056,7 +1057,9 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 ## Database Schema
 
 ### users.db
-Table `users(id, email, created_at, last_seen_at)` stores normalized email, creation time, and last activity time (RFC3339 UTC). `last_seen_at` updates on inbound email.
+Table `users(id, identifier_type, identifier, created_at, last_seen_at)` stores normalized identifiers (email/phone/slack/etc), creation time, and last activity time (RFC3339 UTC). `last_seen_at` updates on inbound activity.
+
+Upgrade note: if you have an older `users.db` with only the `email` column, delete it to rebuild or migrate by adding `identifier_type` + `identifier` and backfilling from `email`.
 
 ### task_index.db
 Global task index for due work. Table `task_index(task_id, user_id, next_run, enabled)` plus indexes on `next_run` and `user_id`. This is a derived index synced from each user's `tasks.db` and used by the scheduler thread to query due tasks efficiently.
