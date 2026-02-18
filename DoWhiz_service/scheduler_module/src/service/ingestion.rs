@@ -18,8 +18,9 @@ use super::config::ServiceConfig;
 use super::email::{process_inbound_payload, PostmarkInbound};
 use super::inbound::{
     process_bluebubbles_event, process_discord_inbound_message, process_google_docs_message,
-    process_slack_event, process_sms_message, process_telegram_event, try_quick_response_bluebubbles,
-    try_quick_response_discord, try_quick_response_slack, try_quick_response_telegram,
+    process_slack_event, process_sms_message, process_telegram_event, process_whatsapp_event,
+    try_quick_response_bluebubbles, try_quick_response_discord, try_quick_response_slack,
+    try_quick_response_telegram, try_quick_response_whatsapp,
 };
 use super::BoxError;
 
@@ -216,6 +217,20 @@ fn process_ingestion_envelope(
             }
             let raw_payload = envelope.raw_payload_bytes();
             process_telegram_event(config, user_store, index_store, &message, &raw_payload)
+        }
+        Channel::WhatsApp => {
+            let message = envelope.to_inbound_message();
+            if try_quick_response_whatsapp(
+                config,
+                user_store,
+                message_router,
+                runtime,
+                &message,
+            )? {
+                return Ok(());
+            }
+            let raw_payload = envelope.raw_payload_bytes();
+            process_whatsapp_event(config, user_store, index_store, &message, &raw_payload)
         }
     }
 }

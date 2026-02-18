@@ -5,6 +5,7 @@ use tracing::{info, warn};
 
 use crate::adapters::bluebubbles::send_quick_bluebubbles_response;
 use crate::adapters::telegram::send_quick_telegram_response;
+use crate::adapters::whatsapp::send_quick_whatsapp_response;
 use crate::message_router::{MessageRouter, RouterDecision};
 use crate::slack_store::SlackStore;
 use crate::user_store::UserStore;
@@ -351,4 +352,61 @@ fn send_quick_discord_response_simple(
         return Err(result.error.unwrap_or_else(|| "discord send failed".to_string()).into());
     }
     Ok(())
+}
+
+pub(crate) fn try_quick_response_whatsapp(
+    config: &ServiceConfig,
+    user_store: &UserStore,
+    message_router: &MessageRouter,
+    runtime: &tokio::runtime::Handle,
+    message: &crate::channel::InboundMessage,
+) -> Result<bool, BoxError> {
+    let Some(text) = message.text_body.as_deref() else {
+        return Ok(false);
+    };
+    let Some(phone_number) = message.metadata.whatsapp_phone_number.as_deref() else {
+        return Ok(false);
+    };
+    let Some(access_token) = config.whatsapp_access_token.as_deref() else {
+        return Ok(false);
+    };
+    let Some(phone_number_id) = config.whatsapp_phone_number_id.as_deref() else {
+        return Ok(false);
+    };
+
+    // Look up user and get memory
+    let user = user_store.get_or_create_user("whatsapp", &message.sender)?;
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+    let memory = read_user_memo(&user_paths.memory_dir);
+
+    let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
+    match decision {
+        RouterDecision::Simple {
+            response,
+            memory_update,
+        } => {
+            // Write memory update if present
+            if let Some(update) = memory_update {
+                if let Err(e) = append_user_memo(&user_paths.memory_dir, &update) {
+                    warn!("Failed to write memory update: {}", e);
+                } else {
+                    info!("Updated memory for user {}", user.user_id);
+                }
+            }
+
+            if runtime
+                .block_on(send_quick_whatsapp_response(
+                    access_token,
+                    phone_number_id,
+                    phone_number,
+                    &response,
+                ))
+                .is_ok()
+            {
+                return Ok(true);
+            }
+            Ok(false)
+        }
+        RouterDecision::Complex | RouterDecision::Passthrough => Ok(false),
+    }
 }

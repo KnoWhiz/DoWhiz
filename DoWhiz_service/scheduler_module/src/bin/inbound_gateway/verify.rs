@@ -106,3 +106,27 @@ pub(super) fn verify_twilio(headers: &HeaderMap, body: &[u8]) -> Result<(), &'st
     }
     Ok(())
 }
+
+/// Verify WhatsApp webhook subscription request.
+/// Returns the challenge token if verification succeeds.
+pub(super) fn verify_whatsapp_subscription(
+    mode: Option<&str>,
+    token: Option<&str>,
+    challenge: Option<&str>,
+) -> Result<String, &'static str> {
+    let expected_token = env::var("WHATSAPP_VERIFY_TOKEN").ok();
+    let Some(expected) = expected_token.filter(|value| !value.trim().is_empty()) else {
+        return Err("verify_token_not_configured");
+    };
+
+    if mode != Some("subscribe") {
+        return Err("invalid_mode");
+    }
+
+    let provided_token = token.ok_or("missing_token")?;
+    if provided_token != expected {
+        return Err("token_mismatch");
+    }
+
+    challenge.map(|c| c.to_string()).ok_or("missing_challenge")
+}

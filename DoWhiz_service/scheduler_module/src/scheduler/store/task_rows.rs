@@ -472,6 +472,75 @@ impl SqliteSchedulerStore {
         })
     }
 
+    pub(super) fn insert_send_whatsapp_task(
+        &self,
+        tx: &Transaction,
+        task_id: &str,
+        send: &SendReplyTask,
+    ) -> Result<(), SchedulerError> {
+        // For WhatsApp, we use to[0] as phone_number and html_path as text_path
+        let phone_number = send.to.first().cloned().unwrap_or_default();
+        tx.execute(
+            "INSERT INTO send_whatsapp_tasks (task_id, phone_number, text_path, thread_epoch, thread_state_path)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                task_id,
+                phone_number,
+                send.html_path.to_string_lossy().into_owned(),
+                send.thread_epoch.map(|value| value as i64),
+                send.thread_state_path
+                    .as_ref()
+                    .map(|value| value.to_string_lossy().into_owned()),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(super) fn load_send_whatsapp_task(
+        &self,
+        conn: &Connection,
+        task_id: &str,
+    ) -> Result<SendReplyTask, SchedulerError> {
+        let row = conn
+            .query_row(
+                "SELECT phone_number, text_path, thread_epoch, thread_state_path
+                 FROM send_whatsapp_tasks
+                 WHERE task_id = ?1",
+                params![task_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let (phone_number, text_path, thread_epoch_raw, thread_state_path) = row.ok_or_else(|| {
+            SchedulerError::Storage(format!(
+                "missing send_whatsapp_tasks row for task {}",
+                task_id
+            ))
+        })?;
+
+        Ok(SendReplyTask {
+            channel: Channel::WhatsApp,
+            subject: String::new(), // WhatsApp doesn't use subject
+            html_path: PathBuf::from(text_path),
+            attachments_dir: PathBuf::new(), // WhatsApp attachments handled differently
+            from: None,
+            to: vec![phone_number], // phone_number stored in to[0]
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            in_reply_to: None,
+            references: None,
+            archive_root: None,
+            thread_epoch: thread_epoch_raw.map(|value| value as u64),
+            thread_state_path: normalize_optional_path(thread_state_path),
+        })
+    }
+
     pub(super) fn load_run_task_task(
         &self,
         conn: &Connection,

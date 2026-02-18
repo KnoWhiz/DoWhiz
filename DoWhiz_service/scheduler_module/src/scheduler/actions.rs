@@ -91,6 +91,7 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         | Channel::Discord
         | Channel::BlueBubbles
         | Channel::Telegram
+        | Channel::WhatsApp
         | Channel::Sms => ("reply_message.txt", "reply_attachments"),
         Channel::Email | Channel::GoogleDocs => {
             ("reply_email_draft.html", "reply_email_attachments")

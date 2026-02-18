@@ -146,6 +146,20 @@ pub(super) fn ensure_send_telegram_tasks_table(conn: &Connection) -> Result<(), 
     Ok(())
 }
 
+pub(super) fn ensure_send_whatsapp_tasks_table(conn: &Connection) -> Result<(), SchedulerError> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS send_whatsapp_tasks (
+            task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+            phone_number TEXT NOT NULL,
+            text_path TEXT NOT NULL,
+            thread_epoch INTEGER,
+            thread_state_path TEXT
+        )",
+        [],
+    )?;
+    Ok(())
+}
+
 pub(super) fn ensure_run_task_task_columns(conn: &Connection) -> Result<(), SchedulerError> {
     let mut stmt = conn.prepare("PRAGMA table_info(run_task_tasks)")?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
