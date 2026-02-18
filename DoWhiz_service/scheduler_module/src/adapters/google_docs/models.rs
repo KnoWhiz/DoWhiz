@@ -112,6 +112,7 @@ impl ActionableComment {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CommentsListResponse {
     pub comments: Option<Vec<GoogleDocsComment>>,
+    #[allow(dead_code)]
     #[serde(rename = "nextPageToken")]
     pub next_page_token: Option<String>,
 }
@@ -138,6 +139,7 @@ pub struct DriveFileOwner {
 #[derive(Debug, Clone, Deserialize)]
 pub struct FilesListResponse {
     pub files: Option<Vec<DriveFile>>,
+    #[allow(dead_code)]
     #[serde(rename = "nextPageToken")]
     pub next_page_token: Option<String>,
 }
