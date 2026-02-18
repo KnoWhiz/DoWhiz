@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DoWhiz Service is a Rust microservice handling inbound webhooks (Postmark, Slack, Discord, Google Docs, BlueBubbles/iMessage), AI-powered task execution (Codex/Claude CLI), and outbound message delivery. It supports multiple "employee" profiles (Oliver, Maggie, Devin, Proto) with isolated workspaces and configurable AI runners.
+DoWhiz Service is a Rust microservice handling inbound channels (Postmark email, Slack, Discord, Google Docs, BlueBubbles/iMessage, Twilio SMS, Telegram), AI-powered task execution (Codex/Claude CLI), and outbound message delivery. It supports multiple "employee" profiles (Oliver, Maggie, Devin, Boiled-Egg) with isolated workspaces and configurable AI runners.
 
 ## Build & Test Commands
 
@@ -42,7 +42,7 @@ RUST_SERVICE_LIVE_TEST=1 cargo test -p scheduler_module --test service_real_emai
 
 ### Message Flow
 ```
-External Events (Postmark/Slack/Discord/GoogleDocs/BlueBubbles)
+External Events (Postmark/Slack/Discord/GoogleDocs/BlueBubbles/Twilio SMS/Telegram)
     ↓
 Inbound Gateway (port 9100) - deduplicates, routes to single employee
     ↓
@@ -60,9 +60,10 @@ Outbound Delivery - send via channel adapter, archive to user mail
 ### Key Modules
 
 - **scheduler_module/src/lib.rs**: Core types (`TaskKind`, `Schedule`, `Scheduler<E>`)
-- **scheduler_module/src/service.rs**: Axum HTTP server setup, webhook endpoints
-- **scheduler_module/src/channel.rs**: `Channel` enum abstracting Email/Slack/Discord/GoogleDocs/BlueBubbles
+- **scheduler_module/src/service/server.rs**: Axum HTTP server setup (worker)
+- **scheduler_module/src/channel.rs**: `Channel` enum abstracting Email/Slack/Discord/SMS/Telegram/GoogleDocs/BlueBubbles
 - **scheduler_module/src/ingestion.rs**: `InboundMessage` envelope structure
+- **scheduler_module/src/message_router.rs**: quick-response classifier (OpenAI)
 - **scheduler_module/src/adapters/**: Channel-specific implementations (postmark.rs, slack.rs, discord.rs, google_docs.rs, bluebubbles.rs)
 - **scheduler_module/src/bin/rust_service.rs**: Main entry point
 - **scheduler_module/src/bin/inbound_gateway.rs**: Message router/deduplicator
@@ -94,7 +95,7 @@ Each task runs in isolated workspace at `$HOME/.dowhiz/DoWhiz/run_task/<employee
 | `little_bear` | Oliver | codex | Email |
 | `mini_mouse` | Maggie | claude | Email |
 | `sticky_octopus` | Devin | codex | Email |
-| `boiled_egg` | Proto | codex | Email, Slack, Discord, BlueBubbles |
+| `boiled_egg` | Boiled-Egg | codex | Email, Slack, Discord, BlueBubbles |
 
 ### Skills System
 
@@ -119,6 +120,17 @@ After completing code changes, you must design targeted, detailed unit tests and
 - `CODEX_DISABLED=1`: Bypass Codex CLI for testing
 - `CODEX_BYPASS_SANDBOX=1`: Required inside Docker sometimes
 - `RUN_TASK_DOCKER_IMAGE`: Enable per-task container execution
-- `OLLAMA_ENABLED=false`: Disable local LLM routing
+- `OPENAI_API_KEY`: Enable message router quick replies
+- `TELEGRAM_BOT_TOKEN`: Telegram bot token (or per-employee `DO_WHIZ_<EMPLOYEE>_BOT`)
+- `TWILIO_ACCOUNT_SID`: Twilio account SID (SMS outbound)
+- `TWILIO_AUTH_TOKEN`: Twilio auth token (SMS outbound + webhook verification)
+- `TWILIO_WEBHOOK_URL`: Public URL used to validate Twilio signatures
+- `BLUEBUBBLES_URL`: BlueBubbles server URL (iMessage outbound)
+- `BLUEBUBBLES_PASSWORD`: BlueBubbles server password
+- `SLACK_CLIENT_ID`: Slack OAuth client id
+- `SLACK_CLIENT_SECRET`: Slack OAuth client secret
+- `SLACK_REDIRECT_URI`: Slack OAuth redirect URI
+- `DISCORD_BOT_TOKEN`: Discord bot token
+- `DISCORD_BOT_USER_ID`: Discord bot user id (filter bot messages)
 
 **Contributor principle:** Keep the codebase modular and easy to maintain. If a file grows too large (roughly 500–1000 lines), consider splitting it into smaller, well-defined modules with clear responsibilities.

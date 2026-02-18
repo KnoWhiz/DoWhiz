@@ -1,12 +1,12 @@
 # CLAUDE.md
 
-`external/` folder contains information about other projects that we can use as reference bu we never need to touch the code in it.
+`external/` folder contains information about other projects that we can use as reference but we never need to touch the code in it.
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-DoWhiz is a multi-tenant, email-first digital employee platform. Users send tasks to digital employees via email (and other channels like Discord, Slack, iMessage), and AI agents (Codex CLI or Claude Code) process and respond. The system emphasizes per-user isolation, role-based agents, and tool-backed execution.
+DoWhiz is a multi-tenant, email-first digital employee platform. Users send tasks to digital employees via email (and other channels like Slack, Discord, SMS via Twilio, Telegram, Google Docs comments, iMessage via BlueBubbles), and AI agents (Codex CLI or Claude Code) process and respond. The system emphasizes per-user isolation, role-based agents, and tool-backed execution.
 
 ## Build and Development Commands
 
@@ -63,14 +63,15 @@ docker run --rm -p 9001:9001 \
 
 ### Data Flow
 ```
-Inbound (Email/Discord/Slack/iMessage) → Gateway → Deduplication → Routing
+Inbound (Email/Slack/Discord/SMS/Telegram/Google Docs/iMessage) → Gateway → Deduplication → Routing
     → Scheduler (SQLite) → Task Execution (Codex/Claude) → Outbound Reply
 ```
 
 ### Key Files
 | File | Purpose |
 |------|---------|
-| `scheduler_module/src/service.rs` | Webhook handlers, scheduler loop |
+| `scheduler_module/src/service/server.rs` | Worker HTTP server, scheduler loop |
+| `scheduler_module/src/bin/inbound_gateway.rs` | Inbound gateway entrypoint (webhooks + dedupe) |
 | `scheduler_module/src/lib.rs` | Core Scheduler, TaskKind, Schedule definitions |
 | `scheduler_module/src/user_store/mod.rs` | Per-user data management |
 | `send_emails_module/src/lib.rs` | Postmark API wrapper |
@@ -98,7 +99,7 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 | `little_bear` | Oliver | Codex | oliver@dowhiz.com |
 | `mini_mouse` | Maggie | Claude | maggie@dowhiz.com |
 | `sticky_octopus` | Devin | Codex | devin@dowhiz.com |
-| `boiled_egg` | Proto | Codex | proto@dowhiz.com |
+| `boiled_egg` | Boiled-Egg | Codex | proto@dowhiz.com |
 
 ## Key Concepts
 
@@ -126,13 +127,14 @@ SCHEDULED_TASKS_JSON_END
 
 Copy `.env.example` to `DoWhiz_service/.env` and configure:
 - `POSTMARK_SERVER_TOKEN` - Postmark API key (required)
-- `AZURE_OPENAI_API_KEY_BACKUP`, `AZURE_OPENAI_ENDPOINT_BACKUP` - For Codex employees
-- `ANTHROPIC_API_KEY` - For Claude employees (mini_mouse)
+- `AZURE_OPENAI_API_KEY_BACKUP` - Required for Codex and Claude runners (Foundry config)
+- `AZURE_OPENAI_ENDPOINT_BACKUP` - Required for Codex runner
 
 Optional:
 - `CODEX_DISABLED=1` - Bypass Codex CLI (uses placeholder replies)
 - `RUN_TASK_DOCKER_IMAGE` - Enable per-task Docker isolation
 - `GITHUB_USERNAME`, `GITHUB_PERSONAL_ACCESS_TOKEN` - GitHub access for agents
+- `OPENAI_API_KEY` - Enable message router quick replies
 
 ## Testing Expectations
 

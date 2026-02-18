@@ -17,6 +17,7 @@
 - `cargo clippy --all-targets --all-features`: lint.
 - `cargo fmt --check`: formatting check.
 - `./scripts/run_employee.sh little_bear 9001`: run a local worker with ngrok + Postmark hook update.
+- When using the inbound gateway, run workers with `--skip-hook --skip-ngrok`.
 - `cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001`: run the service directly.
 - `./scripts/run_gateway_local.sh`: start the inbound gateway locally.
 - `docker build -t dowhiz-service .`: build the container image.

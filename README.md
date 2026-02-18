@@ -16,7 +16,7 @@
   </a>
 </p>
 
-A lightweight Rust replica of OpenClaw🦞 with **better security, accessibility, and token usage**. Serve as your digital employee team, message us any task over email, Discord, Slack, Telegram, WhatsApp, iMessage, or any other channel. 🧸🐭🐙🐘👾🦞🐦🐉
+A lightweight Rust replica of OpenClaw🦞 with **better security, accessibility, and token usage**. Serve as your digital employee team, message us any task over email, Slack, Discord, SMS (Twilio), Telegram, Google Docs comments, iMessage (BlueBubbles), or any other channel. 🧸🐭🐙🐘👾🦞🐦🐉
 
 ## Quick Start
 
@@ -83,7 +83,7 @@ Inbound message -> Ingestion Gateway -> Ingestion Queue -> Scheduler -> Task run
 ```
 
 **Core capabilities:**
-- Any-channel task intake and replies (email, Discord, Slack, Telegram, WhatsApp, iMessage)
+- Any-channel task intake and replies (email, Slack, Discord, SMS/Twilio, Telegram, Google Docs comments, iMessage/BlueBubbles)
 - Role-based agents with isolated, user-specific memory and data
 - Scheduling and orchestration for long-running or recurring work
 - Tool-backed execution for reliable outputs
