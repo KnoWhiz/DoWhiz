@@ -79,6 +79,10 @@ fn test_employee_directory() -> (EmployeeProfile, EmployeeDirectory) {
 
 #[test]
 fn inbound_email_html_is_sanitized() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    dotenvy::dotenv().ok();
+    let ingestion_db_url =
+        std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
+
     let temp = TempDir::new()?;
     let root = temp.path();
     let users_root = root.join("users");
@@ -97,8 +101,7 @@ fn inbound_email_html_is_sanitized() -> Result<(), Box<dyn std::error::Error + S
         workspace_root: root.join("workspaces"),
         scheduler_state_path: state_root.join("tasks.db"),
         processed_ids_path: state_root.join("processed_ids.txt"),
-        ingestion_db_path: state_root.join("ingestion.db"),
-        ingestion_dedupe_path: state_root.join("ingestion_processed_ids.txt"),
+        ingestion_db_url,
         ingestion_poll_interval: Duration::from_millis(50),
         users_root: users_root.clone(),
         users_db_path: state_root.join("users.db"),

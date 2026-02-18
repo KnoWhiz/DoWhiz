@@ -175,7 +175,10 @@ pub(super) fn run_codex_task(
             // Also write to file as backup since Codex sandbox may strip env vars
             let token_file = host_workspace_dir.join(".google_access_token");
             if let Err(e) = std::fs::write(&token_file, token) {
-                eprintln!("[run_task] Warning: Failed to write Google access token file: {}", e);
+                eprintln!(
+                    "[run_task] Warning: Failed to write Google access token file: {}",
+                    e
+                );
             }
         }
         for (key, value) in &github_auth.env_overrides {
@@ -266,7 +269,10 @@ pub(super) fn run_codex_task(
             // Also write to file as backup since Codex sandbox may strip env vars
             let token_file = request.workspace_dir.join(".google_access_token");
             if let Err(e) = fs::write(&token_file, token) {
-                eprintln!("[run_task] Warning: Failed to write Google access token file: {}", e);
+                eprintln!(
+                    "[run_task] Warning: Failed to write Google access token file: {}",
+                    e
+                );
             }
         }
         for (key, value) in github_auth.env_overrides {

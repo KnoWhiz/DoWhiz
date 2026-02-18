@@ -6,9 +6,9 @@ use scheduler_module::adapters::discord::DiscordInboundAdapter;
 use scheduler_module::channel::Channel;
 use tracing::{error, info, warn};
 
+use super::handlers::build_envelope;
 use super::routes::resolve_route;
 use super::state::GatewayState;
-use super::handlers::build_envelope;
 
 pub(super) async fn spawn_discord_gateway(state: Arc<GatewayState>) {
     let token = match env::var("DISCORD_BOT_TOKEN") {
@@ -92,24 +92,38 @@ impl serenity::all::EventHandler for DiscordIngressHandler {
         };
 
         let external_message_id = inbound.message_id.clone();
-        let envelope = build_envelope(
+        let envelope = match build_envelope(
             route,
             Channel::Discord,
             external_message_id,
             &inbound,
             &inbound.raw_payload,
-        );
+        )
+        .await
+        {
+            Ok(envelope) => envelope,
+            Err(err) => {
+                error!("gateway failed to store raw payload: {}", err);
+                return;
+            }
+        };
 
-        match self.inner.state.queue.enqueue(&envelope) {
-            Ok(result) => {
+        let envelope_id = envelope.envelope_id;
+        let dedupe_key = envelope.dedupe_key.clone();
+        let queue = self.inner.state.queue.clone();
+        match tokio::task::spawn_blocking(move || queue.enqueue(&envelope)).await {
+            Ok(Ok(result)) => {
                 if result.inserted {
-                    info!("gateway enqueued discord message {}", envelope.envelope_id);
+                    info!("gateway enqueued discord message {}", envelope_id);
                 } else {
-                    info!("gateway duplicate discord message {}", envelope.dedupe_key);
+                    info!("gateway duplicate discord message {}", dedupe_key);
                 }
             }
-            Err(err) => {
+            Ok(Err(err)) => {
                 error!("gateway discord enqueue error: {}", err);
+            }
+            Err(err) => {
+                error!("gateway discord enqueue join error: {}", err);
             }
         }
     }

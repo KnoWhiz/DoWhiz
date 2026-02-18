@@ -7,8 +7,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::channel::{
-    AdapterError, Channel, ChannelMetadata, InboundAdapter, InboundMessage,
-    OutboundAdapter, OutboundMessage, SendResult,
+    AdapterError, Channel, ChannelMetadata, InboundAdapter, InboundMessage, OutboundAdapter,
+    OutboundMessage, SendResult,
 };
 
 /// Adapter for parsing WhatsApp webhook payloads.
@@ -61,10 +61,14 @@ impl InboundAdapter for WhatsAppInboundAdapter {
             .as_ref()
             .map(|t| t.body.clone())
             .or_else(|| message.button.as_ref().map(|b| b.text.clone()))
-            .or_else(|| message.interactive.as_ref().and_then(|i| {
-                i.button_reply.as_ref().map(|b| b.title.clone())
-                    .or_else(|| i.list_reply.as_ref().map(|l| l.title.clone()))
-            }));
+            .or_else(|| {
+                message.interactive.as_ref().and_then(|i| {
+                    i.button_reply
+                        .as_ref()
+                        .map(|b| b.title.clone())
+                        .or_else(|| i.list_reply.as_ref().map(|l| l.title.clone()))
+                })
+            });
 
         // Use phone number as thread identifier
         let thread_id = format!("whatsapp:{}", sender);
@@ -73,7 +77,12 @@ impl InboundAdapter for WhatsAppInboundAdapter {
             channel: Channel::WhatsApp,
             sender: sender.clone(),
             sender_name,
-            recipient: change.value.metadata.display_phone_number.clone().unwrap_or_default(),
+            recipient: change
+                .value
+                .metadata
+                .display_phone_number
+                .clone()
+                .unwrap_or_default(),
             subject: None,
             text_body,
             html_body: None,
@@ -160,10 +169,7 @@ impl OutboundAdapter for WhatsAppOutboundAdapter {
             .map_err(|e| AdapterError::SendError(e.to_string()))?;
 
         if status.is_success() {
-            let message_id = body["messages"][0]["id"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
+            let message_id = body["messages"][0]["id"].as_str().unwrap_or("").to_string();
             Ok(SendResult {
                 success: true,
                 message_id,
@@ -420,7 +426,10 @@ mod tests {
         assert_eq!(message.sender, "14155551234");
         assert_eq!(message.sender_name, Some("Dylan Tang".to_string()));
         assert_eq!(message.text_body, Some("Hello from WhatsApp!".to_string()));
-        assert_eq!(message.metadata.whatsapp_phone_number, Some("14155551234".to_string()));
+        assert_eq!(
+            message.metadata.whatsapp_phone_number,
+            Some("14155551234".to_string())
+        );
     }
 
     #[test]

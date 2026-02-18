@@ -180,7 +180,11 @@ impl OutboundAdapter for BlueBubblesOutboundAdapter {
                 success: false,
                 message_id: String::new(),
                 submitted_at: String::new(),
-                error: Some(api_response.message.unwrap_or_else(|| "Unknown error".to_string())),
+                error: Some(
+                    api_response
+                        .message
+                        .unwrap_or_else(|| "Unknown error".to_string()),
+                ),
             })
         }
     }
@@ -335,7 +339,9 @@ pub async fn send_quick_bluebubbles_response(
     if api_response.status != 200 {
         return Err(format!(
             "BlueBubbles API error: {}",
-            api_response.message.unwrap_or_else(|| "Unknown error".to_string())
+            api_response
+                .message
+                .unwrap_or_else(|| "Unknown error".to_string())
         )
         .into());
     }

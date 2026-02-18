@@ -62,7 +62,9 @@ fn resolve_employee_github_env() -> Option<EmployeeGithubEnv> {
     Some(EmployeeGithubEnv { username, token })
 }
 
-pub(super) fn resolve_github_auth(askpass_dir: Option<&Path>) -> Result<GitHubAuthConfig, RunTaskError> {
+pub(super) fn resolve_github_auth(
+    askpass_dir: Option<&Path>,
+) -> Result<GitHubAuthConfig, RunTaskError> {
     let gh_token = read_env_trimmed("GH_TOKEN");
     let github_token = read_env_trimmed("GITHUB_TOKEN");
     let pat_token = read_env_trimmed("GITHUB_PERSONAL_ACCESS_TOKEN");

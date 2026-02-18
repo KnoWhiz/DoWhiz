@@ -11,12 +11,12 @@ use crate::slack_store::SlackStore;
 use crate::user_store::UserStore;
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
 
+use super::super::bump_thread_state;
 use super::super::config::ServiceConfig;
+use super::super::default_thread_state_path;
 use super::super::scheduler::cancel_pending_thread_tasks;
 use super::super::workspace::ensure_thread_workspace;
 use super::super::BoxError;
-use super::super::default_thread_state_path;
-use super::super::bump_thread_state;
 
 pub(crate) fn process_slack_event(
     config: &ServiceConfig,

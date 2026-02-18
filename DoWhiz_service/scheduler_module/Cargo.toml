@@ -15,7 +15,7 @@ hex = "0.4"
 kuchiki = "0.8"
 md5 = "0.7"
 native-tls = "0.2"
-postgres = "0.19"
+postgres = { version = "0.19", features = ["with-uuid-1"] }
 postgres-native-tls = "0.5"
 r2d2 = "0.8"
 r2d2_postgres = "0.18"

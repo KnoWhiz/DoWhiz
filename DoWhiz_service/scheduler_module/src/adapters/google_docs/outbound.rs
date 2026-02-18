@@ -56,7 +56,10 @@ impl GoogleDocsOutboundAdapter {
                 "Failed to reply to comment {} on {}: {} - {}",
                 comment_id, document_id, status, body
             );
-            return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+            return Err(AdapterError::SendError(format!(
+                "HTTP {}: {}",
+                status, body
+            )));
         }
 
         let reply: CommentReply = response
@@ -95,8 +98,14 @@ impl GoogleDocsOutboundAdapter {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().unwrap_or_default();
-            error!("Failed to read document {}: {} - {}", document_id, status, body);
-            return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+            error!(
+                "Failed to read document {}: {} - {}",
+                document_id, status, body
+            );
+            return Err(AdapterError::SendError(format!(
+                "HTTP {}: {}",
+                status, body
+            )));
         }
 
         response
@@ -138,8 +147,14 @@ impl GoogleDocsOutboundAdapter {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().unwrap_or_default();
-            error!("Failed to apply edit to {}: {} - {}", document_id, status, body);
-            return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+            error!(
+                "Failed to apply edit to {}: {} - {}",
+                document_id, status, body
+            );
+            return Err(AdapterError::SendError(format!(
+                "HTTP {}: {}",
+                status, body
+            )));
         }
 
         info!("Applied edit to document {}", document_id);
@@ -158,10 +173,7 @@ impl GoogleDocsOutboundAdapter {
             .map_err(|e| AdapterError::ConfigError(e.to_string()))?;
 
         let client = reqwest::blocking::Client::new();
-        let url = format!(
-            "https://docs.googleapis.com/v1/documents/{}",
-            document_id
-        );
+        let url = format!("https://docs.googleapis.com/v1/documents/{}", document_id);
 
         let response = client
             .get(&url)
@@ -172,8 +184,14 @@ impl GoogleDocsOutboundAdapter {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().unwrap_or_default();
-            error!("Failed to get document structure {}: {} - {}", document_id, status, body);
-            return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+            error!(
+                "Failed to get document structure {}: {} - {}",
+                document_id, status, body
+            );
+            return Err(AdapterError::SendError(format!(
+                "HTTP {}: {}",
+                status, body
+            )));
         }
 
         response
@@ -196,9 +214,10 @@ impl GoogleDocsOutboundAdapter {
             return Ok(None);
         }
 
-        let content = body.unwrap().as_array().ok_or_else(|| {
-            AdapterError::ParseError("Invalid document structure".to_string())
-        })?;
+        let content = body
+            .unwrap()
+            .as_array()
+            .ok_or_else(|| AdapterError::ParseError("Invalid document structure".to_string()))?;
 
         // Build full text and track positions
         let mut full_text = String::new();
@@ -209,8 +228,11 @@ impl GoogleDocsOutboundAdapter {
                 if let Some(elements) = paragraph.get("elements").and_then(|e| e.as_array()) {
                     for elem in elements {
                         if let Some(text_run) = elem.get("textRun") {
-                            if let Some(content_text) = text_run.get("content").and_then(|c| c.as_str()) {
-                                let start_idx = elem.get("startIndex").and_then(|i| i.as_i64()).unwrap_or(0);
+                            if let Some(content_text) =
+                                text_run.get("content").and_then(|c| c.as_str())
+                            {
+                                let start_idx =
+                                    elem.get("startIndex").and_then(|i| i.as_i64()).unwrap_or(0);
                                 text_positions.push((full_text.len(), start_idx));
                                 full_text.push_str(content_text);
                             }
@@ -238,11 +260,7 @@ impl GoogleDocsOutboundAdapter {
 
     /// Mark text for deletion with red color and strikethrough.
     /// Used in suggesting mode to show text that will be removed.
-    pub fn mark_deletion(
-        &self,
-        document_id: &str,
-        text_to_mark: &str,
-    ) -> Result<(), AdapterError> {
+    pub fn mark_deletion(&self, document_id: &str, text_to_mark: &str) -> Result<(), AdapterError> {
         let position = self.find_text_position(document_id, text_to_mark)?;
 
         let (start_idx, end_idx) = position.ok_or_else(|| {
@@ -250,32 +268,33 @@ impl GoogleDocsOutboundAdapter {
         })?;
 
         // Apply red color and strikethrough
-        let requests = vec![
-            serde_json::json!({
-                "updateTextStyle": {
-                    "range": {
-                        "startIndex": start_idx,
-                        "endIndex": end_idx
-                    },
-                    "textStyle": {
-                        "foregroundColor": {
-                            "color": {
-                                "rgbColor": {
-                                    "red": 1.0,
-                                    "green": 0.0,
-                                    "blue": 0.0
-                                }
+        let requests = vec![serde_json::json!({
+            "updateTextStyle": {
+                "range": {
+                    "startIndex": start_idx,
+                    "endIndex": end_idx
+                },
+                "textStyle": {
+                    "foregroundColor": {
+                        "color": {
+                            "rgbColor": {
+                                "red": 1.0,
+                                "green": 0.0,
+                                "blue": 0.0
                             }
-                        },
-                        "strikethrough": true
+                        }
                     },
-                    "fields": "foregroundColor,strikethrough"
-                }
-            })
-        ];
+                    "strikethrough": true
+                },
+                "fields": "foregroundColor,strikethrough"
+            }
+        })];
 
         self.apply_document_edit(document_id, requests)?;
-        info!("Marked deletion '{}' at indices {}-{}", text_to_mark, start_idx, end_idx);
+        info!(
+            "Marked deletion '{}' at indices {}-{}",
+            text_to_mark, start_idx, end_idx
+        );
         Ok(())
     }
 
@@ -323,7 +342,7 @@ impl GoogleDocsOutboundAdapter {
                     },
                     "fields": "foregroundColor,strikethrough"
                 }
-            })
+            }),
         ];
 
         self.apply_document_edit(document_id, requests)?;
@@ -400,7 +419,7 @@ impl GoogleDocsOutboundAdapter {
                     },
                     "fields": "foregroundColor,strikethrough"
                 }
-            })
+            }),
         ];
 
         self.apply_document_edit(document_id, requests)?;
@@ -418,9 +437,10 @@ impl GoogleDocsOutboundAdapter {
             return Ok(());
         }
 
-        let content = body.unwrap().as_array().ok_or_else(|| {
-            AdapterError::ParseError("Invalid document structure".to_string())
-        })?;
+        let content = body
+            .unwrap()
+            .as_array()
+            .ok_or_else(|| AdapterError::ParseError("Invalid document structure".to_string()))?;
 
         // Collect ranges to delete (red strikethrough) and ranges to normalize (blue)
         let mut ranges_to_delete: Vec<(i64, i64)> = Vec::new();
@@ -431,21 +451,30 @@ impl GoogleDocsOutboundAdapter {
                 if let Some(elements) = paragraph.get("elements").and_then(|e| e.as_array()) {
                     for elem in elements {
                         if let Some(text_run) = elem.get("textRun") {
-                            let start_idx = elem.get("startIndex").and_then(|i| i.as_i64()).unwrap_or(0);
-                            let end_idx = elem.get("endIndex").and_then(|i| i.as_i64()).unwrap_or(0);
+                            let start_idx =
+                                elem.get("startIndex").and_then(|i| i.as_i64()).unwrap_or(0);
+                            let end_idx =
+                                elem.get("endIndex").and_then(|i| i.as_i64()).unwrap_or(0);
 
                             if let Some(text_style) = text_run.get("textStyle") {
                                 // Check for red strikethrough (deletion markers)
-                                let is_strikethrough = text_style.get("strikethrough")
+                                let is_strikethrough = text_style
+                                    .get("strikethrough")
                                     .and_then(|s| s.as_bool())
                                     .unwrap_or(false);
-                                let is_red = text_style.get("foregroundColor")
+                                let is_red = text_style
+                                    .get("foregroundColor")
                                     .and_then(|fc| fc.get("color"))
                                     .and_then(|c| c.get("rgbColor"))
                                     .map(|rgb| {
-                                        let r = rgb.get("red").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                        let g = rgb.get("green").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                        let b = rgb.get("blue").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                        let r =
+                                            rgb.get("red").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                        let g = rgb
+                                            .get("green")
+                                            .and_then(|v| v.as_f64())
+                                            .unwrap_or(0.0);
+                                        let b =
+                                            rgb.get("blue").and_then(|v| v.as_f64()).unwrap_or(0.0);
                                         r > 0.8 && g < 0.2 && b < 0.2 // Check if red
                                     })
                                     .unwrap_or(false);
@@ -456,13 +485,19 @@ impl GoogleDocsOutboundAdapter {
                                 }
 
                                 // Check for blue text (addition markers)
-                                let is_blue = text_style.get("foregroundColor")
+                                let is_blue = text_style
+                                    .get("foregroundColor")
                                     .and_then(|fc| fc.get("color"))
                                     .and_then(|c| c.get("rgbColor"))
                                     .map(|rgb| {
-                                        let r = rgb.get("red").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                        let g = rgb.get("green").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                        let b = rgb.get("blue").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                        let r =
+                                            rgb.get("red").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                        let g = rgb
+                                            .get("green")
+                                            .and_then(|v| v.as_f64())
+                                            .unwrap_or(0.0);
+                                        let b =
+                                            rgb.get("blue").and_then(|v| v.as_f64()).unwrap_or(0.0);
                                         r < 0.2 && g < 0.2 && b > 0.8 // Check if blue
                                     })
                                     .unwrap_or(false);
@@ -525,8 +560,11 @@ impl GoogleDocsOutboundAdapter {
 
         if !requests.is_empty() {
             self.apply_document_edit(document_id, requests)?;
-            info!("Applied suggestions: deleted {} ranges, normalized {} ranges",
-                  ranges_to_delete.len(), ranges_to_normalize_len);
+            info!(
+                "Applied suggestions: deleted {} ranges, normalized {} ranges",
+                ranges_to_delete.len(),
+                ranges_to_normalize_len
+            );
         }
 
         Ok(())
@@ -542,9 +580,10 @@ impl GoogleDocsOutboundAdapter {
             return Ok(());
         }
 
-        let content = body.unwrap().as_array().ok_or_else(|| {
-            AdapterError::ParseError("Invalid document structure".to_string())
-        })?;
+        let content = body
+            .unwrap()
+            .as_array()
+            .ok_or_else(|| AdapterError::ParseError("Invalid document structure".to_string()))?;
 
         // Collect ranges to delete (blue text) and ranges to restore (red strikethrough)
         let mut ranges_to_delete: Vec<(i64, i64)> = Vec::new();
@@ -555,18 +594,26 @@ impl GoogleDocsOutboundAdapter {
                 if let Some(elements) = paragraph.get("elements").and_then(|e| e.as_array()) {
                     for elem in elements {
                         if let Some(text_run) = elem.get("textRun") {
-                            let start_idx = elem.get("startIndex").and_then(|i| i.as_i64()).unwrap_or(0);
-                            let end_idx = elem.get("endIndex").and_then(|i| i.as_i64()).unwrap_or(0);
+                            let start_idx =
+                                elem.get("startIndex").and_then(|i| i.as_i64()).unwrap_or(0);
+                            let end_idx =
+                                elem.get("endIndex").and_then(|i| i.as_i64()).unwrap_or(0);
 
                             if let Some(text_style) = text_run.get("textStyle") {
                                 // Check for blue text (to be deleted)
-                                let is_blue = text_style.get("foregroundColor")
+                                let is_blue = text_style
+                                    .get("foregroundColor")
                                     .and_then(|fc| fc.get("color"))
                                     .and_then(|c| c.get("rgbColor"))
                                     .map(|rgb| {
-                                        let r = rgb.get("red").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                        let g = rgb.get("green").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                        let b = rgb.get("blue").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                        let r =
+                                            rgb.get("red").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                        let g = rgb
+                                            .get("green")
+                                            .and_then(|v| v.as_f64())
+                                            .unwrap_or(0.0);
+                                        let b =
+                                            rgb.get("blue").and_then(|v| v.as_f64()).unwrap_or(0.0);
                                         r < 0.2 && g < 0.2 && b > 0.8
                                     })
                                     .unwrap_or(false);
@@ -577,16 +624,23 @@ impl GoogleDocsOutboundAdapter {
                                 }
 
                                 // Check for red strikethrough (to be restored)
-                                let is_strikethrough = text_style.get("strikethrough")
+                                let is_strikethrough = text_style
+                                    .get("strikethrough")
                                     .and_then(|s| s.as_bool())
                                     .unwrap_or(false);
-                                let is_red = text_style.get("foregroundColor")
+                                let is_red = text_style
+                                    .get("foregroundColor")
                                     .and_then(|fc| fc.get("color"))
                                     .and_then(|c| c.get("rgbColor"))
                                     .map(|rgb| {
-                                        let r = rgb.get("red").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                        let g = rgb.get("green").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                        let b = rgb.get("blue").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                        let r =
+                                            rgb.get("red").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                        let g = rgb
+                                            .get("green")
+                                            .and_then(|v| v.as_f64())
+                                            .unwrap_or(0.0);
+                                        let b =
+                                            rgb.get("blue").and_then(|v| v.as_f64()).unwrap_or(0.0);
                                         r > 0.8 && g < 0.2 && b < 0.2
                                     })
                                     .unwrap_or(false);
@@ -650,8 +704,11 @@ impl GoogleDocsOutboundAdapter {
 
         if !requests.is_empty() {
             self.apply_document_edit(document_id, requests)?;
-            info!("Discarded suggestions: deleted {} ranges, restored {} ranges",
-                  ranges_to_delete.len(), ranges_to_restore_len);
+            info!(
+                "Discarded suggestions: deleted {} ranges, restored {} ranges",
+                ranges_to_delete.len(),
+                ranges_to_restore_len
+            );
         }
 
         Ok(())
@@ -684,7 +741,9 @@ impl OutboundAdapter for GoogleDocsOutboundAdapter {
         Ok(SendResult {
             success: true,
             message_id: reply.id,
-            submitted_at: reply.created_time.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+            submitted_at: reply
+                .created_time
+                .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
             error: None,
         })
     }
@@ -693,4 +752,3 @@ impl OutboundAdapter for GoogleDocsOutboundAdapter {
         Channel::GoogleDocs
     }
 }
-

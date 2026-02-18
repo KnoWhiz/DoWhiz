@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use rusqlite::Connection;
+use std::collections::HashSet;
 
 use super::super::types::SchedulerError;
 

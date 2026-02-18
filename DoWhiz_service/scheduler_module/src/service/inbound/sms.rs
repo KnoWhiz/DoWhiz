@@ -45,7 +45,12 @@ pub(crate) fn process_sms_message(
     let thread_state =
         bump_thread_state(&thread_state_path, &thread_key, message.message_id.clone())?;
 
-    append_sms_message(&workspace, message, raw_payload, thread_state.last_email_seq)?;
+    append_sms_message(
+        &workspace,
+        message,
+        raw_payload,
+        thread_state.last_email_seq,
+    )?;
 
     let model_name = match config.employee_profile.model.clone() {
         Some(model) => model,
@@ -167,6 +172,10 @@ mod tests {
 
     #[test]
     fn process_sms_message_creates_run_task() -> Result<(), BoxError> {
+        dotenvy::dotenv().ok();
+        let ingestion_db_url =
+            std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
+
         let temp = TempDir::new()?;
         let root = temp.path();
         let users_root = root.join("users");
@@ -214,8 +223,7 @@ mod tests {
             workspace_root: root.join("workspaces"),
             scheduler_state_path: state_root.join("tasks.db"),
             processed_ids_path: state_root.join("processed_ids.txt"),
-            ingestion_db_path: state_root.join("ingestion.db"),
-            ingestion_dedupe_path: state_root.join("ingestion_processed_ids.txt"),
+            ingestion_db_url,
             ingestion_poll_interval: Duration::from_millis(50),
             users_root: users_root.clone(),
             users_db_path: state_root.join("users.db"),

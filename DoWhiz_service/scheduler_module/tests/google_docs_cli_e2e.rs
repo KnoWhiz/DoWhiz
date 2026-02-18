@@ -152,11 +152,8 @@ fn google_docs_cli_e2e_mark_deletion() {
     // Take first 10 chars to mark
     let mark_text = &test_text[..test_text.len().min(20)];
 
-    let (success, stdout, stderr) = run_cli(&[
-        "mark-deletion",
-        &doc_id,
-        &format!("--find={}", mark_text),
-    ]);
+    let (success, stdout, stderr) =
+        run_cli(&["mark-deletion", &doc_id, &format!("--find={}", mark_text)]);
 
     assert!(
         success,
@@ -169,7 +166,10 @@ fn google_docs_cli_e2e_mark_deletion() {
         stdout
     );
 
-    println!("✓ mark-deletion test passed: marked '{}' for deletion", mark_text);
+    println!(
+        "✓ mark-deletion test passed: marked '{}' for deletion",
+        mark_text
+    );
 }
 
 /// Test insert-suggestion: Insert blue text after anchor.
@@ -226,7 +226,10 @@ fn google_docs_cli_e2e_insert_suggestion() {
         stdout
     );
 
-    println!("✓ insert-suggestion test passed: inserted '{}' after '{}'", suggestion_text, anchor);
+    println!(
+        "✓ insert-suggestion test passed: inserted '{}' after '{}'",
+        suggestion_text, anchor
+    );
 }
 
 /// Test suggest-replace: Replace text with revision marks.
@@ -281,7 +284,10 @@ fn google_docs_cli_e2e_suggest_replace() {
         stdout
     );
 
-    println!("✓ suggest-replace test passed: suggested replacing '{}' with '{}'", old_text, new_text);
+    println!(
+        "✓ suggest-replace test passed: suggested replacing '{}' with '{}'",
+        old_text, new_text
+    );
 }
 
 /// Test apply-suggestions: Apply all pending suggestions.
@@ -363,7 +369,10 @@ fn google_docs_cli_e2e_full_suggestion_workflow() {
     // Step 1: Read initial content
     let (success, initial_content, _) = run_cli(&["read-document", &doc_id]);
     assert!(success, "Should read initial document");
-    println!("1. Read initial document content ({} chars)", initial_content.len());
+    println!(
+        "1. Read initial document content ({} chars)",
+        initial_content.len()
+    );
 
     // Step 2: Find anchor and insert suggestion
     let anchor = initial_content
@@ -381,7 +390,10 @@ fn google_docs_cli_e2e_full_suggestion_workflow() {
         &format!("--text={}", test_text),
     ]);
     assert!(success, "insert-suggestion should succeed: {}", stderr);
-    println!("2. Inserted suggestion '{}' after '{}'", test_text, anchor_short);
+    println!(
+        "2. Inserted suggestion '{}' after '{}'",
+        test_text, anchor_short
+    );
 
     // Step 3: Read document - should now contain blue text
     let (success, content_with_suggestion, _) = run_cli(&["read-document", &doc_id]);
@@ -467,8 +479,12 @@ fn google_docs_cli_e2e_apply_edit() {
     assert!(
         final_content.contains(&new_text),
         "Document should contain the replaced text '{}'\nContent: {}",
-        new_text, final_content
+        new_text,
+        final_content
     );
 
-    println!("✓ apply-edit test passed: replaced '{}' with '{}'", old_text, new_text);
+    println!(
+        "✓ apply-edit test passed: replaced '{}' with '{}'",
+        old_text, new_text
+    );
 }

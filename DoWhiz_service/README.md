@@ -53,7 +53,8 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
 - GitHub auth: `GH_TOKEN`/`GITHUB_TOKEN`/`GITHUB_PERSONAL_ACCESS_TOKEN` + `GITHUB_USERNAME`. Per-employee prefixes are supported (`OLIVER_`, `MAGGIE_`, `DEVIN_`, `PROTO_`) and can be overridden with `EMPLOYEE_GITHUB_ENV_PREFIX` or `GITHUB_ENV_PREFIX`.
 - `RUN_TASK_DOCKER_IMAGE` (run each task inside a disposable Docker container; use `dowhiz-service` for the repo image)
 - `RUN_TASK_DOCKER_AUTO_BUILD=1` to auto-build the image when missing (set `0` to disable)
-- `INGESTION_DB_PATH` + `INGESTION_DEDUPE_PATH` (shared queue for the inbound gateway + workers)
+- `SUPABASE_DB_URL` (shared Postgres queue for the inbound gateway + workers)
+- `SUPABASE_PROJECT_URL` + `SUPABASE_SECRET_KEY` + `SUPABASE_STORAGE_BUCKET` (raw payload storage references)
 - `OPENAI_API_KEY` (enables message router quick replies)
 
 ---
@@ -153,9 +154,9 @@ scripts/run_employee.sh --employee <id> --port <port> [--public-url <url>] [--sk
 **Step 0: Choose a shared ingestion queue (same for gateway + all workers)**
 Add these to `DoWhiz_service/.env` (recommended) or export in each terminal before starting gateway/workers.
 ```bash
-export INGESTION_DB_PATH="$HOME/.dowhiz/DoWhiz/ingestion/ingestion.db"
-export INGESTION_DEDUPE_PATH="$HOME/.dowhiz/DoWhiz/ingestion/ingestion_processed_ids.txt"
-mkdir -p "$(dirname "$INGESTION_DB_PATH")"
+export SUPABASE_DB_URL="postgresql://..."
+# or
+export INGESTION_DB_URL="postgresql://..."
 ```
 
 **Step 1: Start workers (one per employee)**
@@ -199,7 +200,7 @@ EOF
 
 **Step 3: Start the inbound gateway (Terminal 2)**
 ```bash
-# Ensure INGESTION_DB_PATH/INGESTION_DEDUPE_PATH are set in this terminal
+# Ensure SUPABASE_DB_URL (or INGESTION_DB_URL) is set in this terminal
 ./DoWhiz_service/scripts/run_gateway_local.sh
 ```
 
@@ -254,10 +255,12 @@ Optional webhook verification:
 docker build -t dowhiz-service .
 ```
 
-**Step 2: Prepare a shared ingestion directory**
+**Step 2: Configure a shared Postgres ingestion queue**
 ```bash
-export INGESTION_DIR="$HOME/.dowhiz/DoWhiz/ingestion"
-mkdir -p "$INGESTION_DIR"
+export SUPABASE_DB_URL="postgresql://..."
+export SUPABASE_PROJECT_URL="https://<project>.supabase.co"
+export SUPABASE_SECRET_KEY="sb_secret_..."
+export SUPABASE_STORAGE_BUCKET="ingestion-raw"
 ```
 
 **Step 3: Start workers in Docker (mount shared ingestion dir)**
@@ -266,10 +269,11 @@ docker run --rm -p 9001:9001 \
   -e EMPLOYEE_ID=little_bear \
   -e RUST_SERVICE_PORT=9001 \
   -e RUN_TASK_DOCKER_IMAGE= \
-  -e INGESTION_DB_PATH=/ingestion/ingestion.db \
-  -e INGESTION_DEDUPE_PATH=/ingestion/ingestion_processed_ids.txt \
+  -e SUPABASE_DB_URL="$SUPABASE_DB_URL" \
+  -e SUPABASE_PROJECT_URL="$SUPABASE_PROJECT_URL" \
+  -e SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
+  -e SUPABASE_STORAGE_BUCKET="$SUPABASE_STORAGE_BUCKET" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
-  -v "$INGESTION_DIR:/ingestion" \
   -v dowhiz-workspace-oliver:/app/.workspace \
   dowhiz-service
 
@@ -277,10 +281,11 @@ docker run --rm -p 9002:9001 \
   -e EMPLOYEE_ID=mini_mouse \
   -e RUST_SERVICE_PORT=9001 \
   -e RUN_TASK_DOCKER_IMAGE= \
-  -e INGESTION_DB_PATH=/ingestion/ingestion.db \
-  -e INGESTION_DEDUPE_PATH=/ingestion/ingestion_processed_ids.txt \
+  -e SUPABASE_DB_URL="$SUPABASE_DB_URL" \
+  -e SUPABASE_PROJECT_URL="$SUPABASE_PROJECT_URL" \
+  -e SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
+  -e SUPABASE_STORAGE_BUCKET="$SUPABASE_STORAGE_BUCKET" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
-  -v "$INGESTION_DIR:/ingestion" \
   -v dowhiz-workspace-maggie:/app/.workspace \
   dowhiz-service
 ```
@@ -295,8 +300,10 @@ cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
 
 **Step 5: Start the gateway (host)**
 ```bash
-INGESTION_DB_PATH="$INGESTION_DIR/ingestion.db" \
-INGESTION_DEDUPE_PATH="$INGESTION_DIR/ingestion_processed_ids.txt" \
+SUPABASE_DB_URL="$SUPABASE_DB_URL" \
+SUPABASE_PROJECT_URL="$SUPABASE_PROJECT_URL" \
+SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
+SUPABASE_STORAGE_BUCKET="$SUPABASE_STORAGE_BUCKET" \
   ./DoWhiz_service/scripts/run_gateway_local.sh
 ```
 
@@ -346,10 +353,11 @@ git clone https://github.com/KnoWhiz/DoWhiz.git
 cd DoWhiz
 cp .env.example DoWhiz_service/.env
 # Edit DoWhiz_service/.env with production secrets
-# Add shared ingestion paths (used by gateway + worker):
-INGESTION_DB_PATH=/home/azureuser/.dowhiz/DoWhiz/ingestion/ingestion.db
-INGESTION_DEDUPE_PATH=/home/azureuser/.dowhiz/DoWhiz/ingestion/ingestion_processed_ids.txt
-mkdir -p /home/azureuser/.dowhiz/DoWhiz/ingestion
+# Add shared Postgres queue + storage settings (used by gateway + worker):
+SUPABASE_DB_URL=postgresql://...
+SUPABASE_PROJECT_URL=https://<project>.supabase.co
+SUPABASE_SECRET_KEY=sb_secret_...
+SUPABASE_STORAGE_BUCKET=ingestion-raw
 ```
 
 Optional: copy your local `.env` directly to the VM:
@@ -471,13 +479,12 @@ Build the image from the repo root and run it with the same `.env` file mounted:
 
 ```bash
 docker build -t dowhiz-service .
-export INGESTION_DIR="$HOME/.dowhiz/DoWhiz/ingestion"
-mkdir -p "$INGESTION_DIR"
 docker run --rm -p 9001:9001 \
-  -e INGESTION_DB_PATH=/ingestion/ingestion.db \
-  -e INGESTION_DEDUPE_PATH=/ingestion/ingestion_processed_ids.txt \
+  -e SUPABASE_DB_URL="$SUPABASE_DB_URL" \
+  -e SUPABASE_PROJECT_URL="$SUPABASE_PROJECT_URL" \
+  -e SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
+  -e SUPABASE_STORAGE_BUCKET="$SUPABASE_STORAGE_BUCKET" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
-  -v "$INGESTION_DIR:/ingestion" \
   -v dowhiz-workspace:/app/.workspace \
   dowhiz-service
 ```
@@ -487,11 +494,12 @@ This runs a worker only. For inbound webhooks, run the inbound gateway separatel
 docker run --rm -p 9100:9100 \
   --entrypoint /app/inbound_gateway \
   -e GATEWAY_PORT=9100 \
-  -e INGESTION_DB_PATH=/ingestion/ingestion.db \
-  -e INGESTION_DEDUPE_PATH=/ingestion/ingestion_processed_ids.txt \
+  -e SUPABASE_DB_URL="$SUPABASE_DB_URL" \
+  -e SUPABASE_PROJECT_URL="$SUPABASE_PROJECT_URL" \
+  -e SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
+  -e SUPABASE_STORAGE_BUCKET="$SUPABASE_STORAGE_BUCKET" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
   -v "$PWD/DoWhiz_service/gateway.toml:/app/DoWhiz_service/gateway.toml:ro" \
-  -v "$INGESTION_DIR:/ingestion" \
   dowhiz-service
 ```
 
@@ -564,10 +572,12 @@ cargo fmt --check
 
 **Docker flow (worker in Docker, gateway on host):**
 
-1. Prepare a shared ingestion directory:
+1. Configure the shared Postgres queue + storage:
 ```bash
-export INGESTION_DIR="$HOME/.dowhiz/DoWhiz/ingestion"
-mkdir -p "$INGESTION_DIR"
+export SUPABASE_DB_URL="postgresql://..."
+export SUPABASE_PROJECT_URL="https://<project>.supabase.co"
+export SUPABASE_SECRET_KEY="sb_secret_..."
+export SUPABASE_STORAGE_BUCKET="ingestion-raw"
 ```
 
 2. Start the worker container:
@@ -576,10 +586,11 @@ docker run --rm -p 9002:9002 \
   -e EMPLOYEE_ID=mini_mouse \
   -e RUST_SERVICE_PORT=9002 \
   -e RUN_TASK_SKIP_WORKSPACE_REMAP=1 \
-  -e INGESTION_DB_PATH=/ingestion/ingestion.db \
-  -e INGESTION_DEDUPE_PATH=/ingestion/ingestion_processed_ids.txt \
+  -e SUPABASE_DB_URL="$SUPABASE_DB_URL" \
+  -e SUPABASE_PROJECT_URL="$SUPABASE_PROJECT_URL" \
+  -e SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
+  -e SUPABASE_STORAGE_BUCKET="$SUPABASE_STORAGE_BUCKET" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
-  -v "$INGESTION_DIR:/ingestion" \
   -v dowhiz-workspace:/app/.workspace \
   dowhiz-service
 ```
@@ -588,8 +599,10 @@ For `little_bear` (Codex), add `-e CODEX_BYPASS_SANDBOX=1` if Codex fails with L
 
 3. Ensure `DoWhiz_service/gateway.toml` routes the test address to your worker, then start the inbound gateway on the host:
 ```bash
-INGESTION_DB_PATH="$INGESTION_DIR/ingestion.db" \
-INGESTION_DEDUPE_PATH="$INGESTION_DIR/ingestion_processed_ids.txt" \
+SUPABASE_DB_URL="$SUPABASE_DB_URL" \
+SUPABASE_PROJECT_URL="$SUPABASE_PROJECT_URL" \
+SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
+SUPABASE_STORAGE_BUCKET="$SUPABASE_STORAGE_BUCKET" \
   ./DoWhiz_service/scripts/run_gateway_local.sh
 ```
 
@@ -924,8 +937,15 @@ This reduces API costs and latency for simple interactions while preserving full
 ### Ingestion Queue
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INGESTION_DB_PATH` | `<runtime_root>/state/ingestion.db` (workers) | Shared ingestion queue DB. Gateway default is `$HOME/.dowhiz/DoWhiz/gateway/state/ingestion.db`; set explicitly so gateway and workers share. |
-| `INGESTION_DEDUPE_PATH` | `<runtime_root>/state/ingestion_processed_ids.txt` | Dedupe store for ingestion consumer |
+| `SUPABASE_DB_URL` | - | Postgres connection string for the shared ingestion queue |
+| `INGESTION_DB_URL` | - | Optional alias for `SUPABASE_DB_URL` |
+| `SUPABASE_PROJECT_URL` | - | Supabase project URL for raw payload storage |
+| `SUPABASE_SECRET_KEY` | - | Supabase service role key for storage access |
+| `SUPABASE_STORAGE_BUCKET` | `ingestion-raw` | Bucket for raw payload blobs |
+| `INGESTION_QUEUE_TABLE` | `ingestion_queue` | Postgres table name for the queue |
+| `INGESTION_QUEUE_LEASE_SECS` | `60` | Lease timeout before reclaiming stuck jobs |
+| `INGESTION_QUEUE_MAX_ATTEMPTS` | `5` | Max retry attempts before marking failed |
+| `INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS` | `0` | Set to `1` to allow self-signed Postgres certificates (local/dev only) |
 | `INGESTION_POLL_INTERVAL_SECS` | `1` | Poll interval for ingestion consumer |
 
 ### Codex (OpenAI)

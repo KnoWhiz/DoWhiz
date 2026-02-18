@@ -150,10 +150,7 @@ pub(super) fn append_telegram_message(
     // Save text content as .txt file (similar to other messaging platforms)
     if let Some(ref text) = message.text_body {
         let txt_filename = format!("{:04}_telegram.txt", seq);
-        let sender_name = message
-            .sender_name
-            .as_deref()
-            .unwrap_or(&message.sender);
+        let sender_name = message.sender_name.as_deref().unwrap_or(&message.sender);
         let content = format!(
             "From: {} ({})\nDate: {}\n\n{}",
             sender_name,

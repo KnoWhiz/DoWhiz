@@ -19,7 +19,9 @@ pub fn format_edit_proposal(
         reply.push_str(exp);
     }
 
-    reply.push_str("\n\nReply \"apply\" to confirm this edit, or let me know if you'd like any changes.");
+    reply.push_str(
+        "\n\nReply \"apply\" to confirm this edit, or let me know if you'd like any changes.",
+    );
 
     reply
 }

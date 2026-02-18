@@ -20,8 +20,7 @@ pub struct ServiceConfig {
     pub workspace_root: PathBuf,
     pub scheduler_state_path: PathBuf,
     pub processed_ids_path: PathBuf,
-    pub ingestion_db_path: PathBuf,
-    pub ingestion_dedupe_path: PathBuf,
+    pub ingestion_db_url: String,
     pub ingestion_poll_interval: Duration,
     pub users_root: PathBuf,
     pub users_db_path: PathBuf,
@@ -132,22 +131,23 @@ impl ServiceConfig {
                     .to_string_lossy()
                     .into_owned()
             }))?;
-        let ingestion_db_path =
-            resolve_path(env::var("INGESTION_DB_PATH").unwrap_or_else(|_| {
-                employee_runtime_root
-                    .join("state")
-                    .join("ingestion.db")
-                    .to_string_lossy()
-                    .into_owned()
-            }))?;
-        let ingestion_dedupe_path =
-            resolve_path(env::var("INGESTION_DEDUPE_PATH").unwrap_or_else(|_| {
-                employee_runtime_root
-                    .join("state")
-                    .join("ingestion_processed_ids.txt")
-                    .to_string_lossy()
-                    .into_owned()
-            }))?;
+        let ingestion_db_url = env::var("INGESTION_DB_URL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                env::var("SUPABASE_DB_URL")
+                    .ok()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            })
+            .or_else(|| {
+                env::var("DATABASE_URL")
+                    .ok()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            })
+            .ok_or_else(|| "missing INGESTION_DB_URL or SUPABASE_DB_URL".to_string())?;
         let users_root = resolve_path(env::var("USERS_ROOT").unwrap_or_else(|_| {
             employee_runtime_root
                 .join("users")
@@ -258,8 +258,7 @@ impl ServiceConfig {
             workspace_root,
             scheduler_state_path,
             processed_ids_path,
-            ingestion_db_path,
-            ingestion_dedupe_path,
+            ingestion_db_url,
             ingestion_poll_interval,
             users_root,
             users_db_path,
@@ -434,6 +433,15 @@ mod tests {
                 previous,
             }
         }
+
+        fn unset(key: &str) -> Self {
+            let previous = env::var(key).ok();
+            env::remove_var(key);
+            Self {
+                key: key.to_string(),
+                previous,
+            }
+        }
     }
 
     impl Drop for EnvGuard {
@@ -445,8 +453,15 @@ mod tests {
         }
     }
 
-    fn test_employee_profile(id: &str, display_name: Option<&str>, addresses: Vec<&str>) -> EmployeeProfile {
-        let addresses: Vec<String> = addresses.into_iter().map(|value| value.to_string()).collect();
+    fn test_employee_profile(
+        id: &str,
+        display_name: Option<&str>,
+        addresses: Vec<&str>,
+    ) -> EmployeeProfile {
+        let addresses: Vec<String> = addresses
+            .into_iter()
+            .map(|value| value.to_string())
+            .collect();
         let address_set: HashSet<String> = addresses
             .iter()
             .map(|value| value.to_ascii_lowercase())
@@ -504,9 +519,12 @@ mod tests {
     #[test]
     fn resolve_telegram_bot_token_uses_global_when_employee_missing() {
         let _lock = ENV_MUTEX.lock().unwrap();
+        let _guard_maggie = EnvGuard::unset("DO_WHIZ_MAGGIE_BOT");
+        let _guard_mini_mouse = EnvGuard::unset("DO_WHIZ_MINI_MOUSE_BOT");
         let _guard_fallback = EnvGuard::set("TELEGRAM_BOT_TOKEN", "fallback-token");
 
-        let employee = test_employee_profile("mini_mouse", Some("Maggie"), vec!["maggie@dowhiz.com"]);
+        let employee =
+            test_employee_profile("mini_mouse", Some("Maggie"), vec!["maggie@dowhiz.com"]);
 
         let token = resolve_telegram_bot_token(&employee);
         assert_eq!(token.as_deref(), Some("fallback-token"));

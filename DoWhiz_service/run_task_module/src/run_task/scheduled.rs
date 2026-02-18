@@ -1,6 +1,8 @@
 use serde::Deserialize;
 
-use super::constants::{SCHEDULED_TASKS_BEGIN, SCHEDULED_TASKS_END, SCHEDULER_ACTIONS_BEGIN, SCHEDULER_ACTIONS_END};
+use super::constants::{
+    SCHEDULED_TASKS_BEGIN, SCHEDULED_TASKS_END, SCHEDULER_ACTIONS_BEGIN, SCHEDULER_ACTIONS_END,
+};
 use super::types::{ScheduledTaskRequest, SchedulerActionRequest};
 
 #[derive(Debug, Deserialize)]
@@ -14,7 +16,9 @@ enum ScheduledTasksBlock {
 #[serde(untagged)]
 enum SchedulerActionsBlock {
     List(Vec<SchedulerActionRequest>),
-    Wrapper { actions: Vec<SchedulerActionRequest> },
+    Wrapper {
+        actions: Vec<SchedulerActionRequest>,
+    },
 }
 
 pub(super) fn extract_scheduled_tasks(output: &str) -> (Vec<ScheduledTaskRequest>, Option<String>) {
@@ -26,9 +30,7 @@ pub(super) fn extract_scheduled_tasks(output: &str) -> (Vec<ScheduledTaskRequest
         .find(SCHEDULED_TASKS_BEGIN)
         .map(|idx| idx + SCHEDULED_TASKS_BEGIN.len())
         .unwrap_or(output.len());
-    let end = output
-        .rfind(SCHEDULED_TASKS_END)
-        .unwrap_or(output.len());
+    let end = output.rfind(SCHEDULED_TASKS_END).unwrap_or(output.len());
 
     let raw_json = output[start..end].trim();
     if raw_json.is_empty() {
@@ -61,9 +63,7 @@ pub(super) fn extract_scheduler_actions(
         .find(SCHEDULER_ACTIONS_BEGIN)
         .map(|idx| idx + SCHEDULER_ACTIONS_BEGIN.len())
         .unwrap_or(output.len());
-    let end = output
-        .rfind(SCHEDULER_ACTIONS_END)
-        .unwrap_or(output.len());
+    let end = output.rfind(SCHEDULER_ACTIONS_END).unwrap_or(output.len());
 
     let raw_json = output[start..end].trim();
     if raw_json.is_empty() {

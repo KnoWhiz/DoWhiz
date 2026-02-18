@@ -367,10 +367,7 @@ fn notify_task_failure(
     // Log the failure for monitoring
     error!(
         "TASK_FAILURE_ALERT: task_id={} user_id={} thread_id={:?} retries={}",
-        stale_claim.task_id,
-        stale_claim.user_id,
-        stale_claim.thread_id,
-        stale_claim.retry_count
+        stale_claim.task_id, stale_claim.user_id, stale_claim.thread_id, stale_claim.retry_count
     );
 
     Ok(())
@@ -698,6 +695,10 @@ mod tests {
             service_addresses: address_set,
         };
 
+        dotenvy::dotenv().ok();
+        let ingestion_db_url =
+            std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
+
         ServiceConfig {
             host: "127.0.0.1".to_string(),
             port: 0,
@@ -708,8 +709,7 @@ mod tests {
             workspace_root: workspace_root.clone(),
             scheduler_state_path: state_dir.join("tasks.db"),
             processed_ids_path: state_dir.join("postmark_processed_ids.txt"),
-            ingestion_db_path: state_dir.join("ingestion.db"),
-            ingestion_dedupe_path: state_dir.join("ingestion_processed_ids.txt"),
+            ingestion_db_url,
             ingestion_poll_interval: Duration::from_millis(50),
             users_root: users_root.clone(),
             users_db_path: state_dir.join("users.db"),
