@@ -138,6 +138,13 @@ Optional:
 
 After completing code changes, you must design targeted, detailed unit tests and end-to-end tests to ensure both new and existing functionality behave as expected. Debug and resolve any issues found during test runs. If certain issues require manual intervention, provide a detailed report and follow-up steps.
 
+## Test Checklist and Report (DoWhiz_service)
+- Canonical checklist: `test_plans/DoWhiz_service_tests.md`
+- After any DoWhiz_service change, run all relevant AUTO tests from the checklist.
+- For LIVE/MANUAL/PLANNED entries, mark SKIP with a reason unless explicitly run.
+- Always include the Test Report table from the checklist in your final response (PASS/FAIL/SKIP per Test ID).
+- For real end-to-end tests requiring a public ngrok URL, use `https://shayne-laminar-lillian.ngrok-free.dev` and set up the environment accordingly.
+
 ## Coding Guidelines
 
 **Contributor principle:** Keep the codebase modular and easy to maintain. If a file grows too large (roughly 500–1000 lines), consider splitting it into smaller, well-defined modules with clear responsibilities.
