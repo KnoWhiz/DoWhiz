@@ -1,4 +1,5 @@
 use mockito::{Matcher, Server};
+use scheduler_module::collaboration_store::CollaborationStore;
 use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
 use scheduler_module::service::{
@@ -342,6 +343,7 @@ fn secrets_persist_across_workspaces_and_load(
 
     let user_store = UserStore::new(&config.users_db_path)?;
     let index_store = IndexStore::new(&config.task_index_path)?;
+    let collaboration_store = CollaborationStore::new(state_root.join("collaboration.db"))?;
 
     let inbound_raw = format!(
         r#"{{
@@ -357,6 +359,7 @@ fn secrets_persist_across_workspaces_and_load(
         &config,
         &user_store,
         &index_store,
+        &collaboration_store,
         &payload,
         inbound_raw.as_bytes(),
     )?;
@@ -388,6 +391,7 @@ fn secrets_persist_across_workspaces_and_load(
         &config,
         &user_store,
         &index_store,
+        &collaboration_store,
         &follow_up,
         follow_up_raw.as_bytes(),
     )?;

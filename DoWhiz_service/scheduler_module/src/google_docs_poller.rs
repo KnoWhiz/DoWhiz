@@ -6,6 +6,7 @@
 use chrono::Utc;
 use rusqlite::{params, Connection};
 use std::collections::HashSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -14,6 +15,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::adapters::google_docs::{ActionableComment, GoogleDocsInboundAdapter};
 use crate::channel::Channel;
+use crate::collaboration_store::CollaborationStore;
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
 use crate::{RunTaskTask, Scheduler, SchedulerError, TaskExecutor, TaskKind};
 
@@ -410,6 +412,257 @@ impl GoogleDocsPoller {
         }
 
         Ok(tasks_created)
+    }
+
+    /// Run one polling cycle with collaboration session support.
+    ///
+    /// This method looks up existing collaboration sessions for each document
+    /// and writes collaboration context to the workspace if a session exists.
+    pub fn poll_once_with_collaboration<E: TaskExecutor>(
+        &self,
+        scheduler: &mut Scheduler<E>,
+        collaboration_store: &CollaborationStore,
+    ) -> Result<usize, SchedulerError> {
+        let adapter = GoogleDocsInboundAdapter::new(
+            self.auth.clone(),
+            self.config.employee_emails.clone(),
+        );
+
+        // List all shared documents
+        let documents = adapter.list_shared_documents().map_err(|e| {
+            SchedulerError::TaskFailed(format!("Failed to list documents: {}", e))
+        })?;
+
+        debug!("Found {} shared documents (with collaboration support)", documents.len());
+
+        let mut tasks_created = 0;
+
+        for doc in documents {
+            // Register document for tracking
+            let owner_email = doc
+                .owners
+                .as_ref()
+                .and_then(|owners| owners.first())
+                .and_then(|o| o.email_address.as_deref());
+
+            self.store.register_document(
+                &doc.id,
+                doc.name.as_deref(),
+                owner_email,
+            )?;
+
+            // Look up existing collaboration session for this document (any user)
+            let existing_session = collaboration_store
+                .find_session_by_artifact("google_docs", &doc.id, None)
+                .ok()
+                .flatten();
+
+            if existing_session.is_some() {
+                debug!(
+                    "Found existing collaboration session for document {}",
+                    doc.id
+                );
+            }
+
+            // Get comments for this document
+            let comments = match adapter.list_comments(&doc.id) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("Failed to list comments for {}: {}", doc.id, e);
+                    continue;
+                }
+            };
+
+            // Get already processed comments/replies (using tracking IDs)
+            let processed = self.store.get_processed_ids(&doc.id)?;
+
+            // Filter for actionable comments (returns ActionableComment items)
+            let actionable_items = adapter.filter_actionable_comments(&comments, &processed);
+
+            for actionable in actionable_items {
+                // Convert to inbound message using the new method
+                let doc_name = doc.name.as_deref().unwrap_or("Untitled");
+                let message = adapter.actionable_to_inbound_message(&doc.id, doc_name, &actionable);
+
+                // Determine workspace directory
+                let workspace_dir = if let Some(ref session) = existing_session {
+                    // Use session's workspace if available, otherwise create new
+                    if let Some(ref ws_path) = session.workspace_path {
+                        let ws = PathBuf::from(ws_path);
+                        if ws.exists() {
+                            info!(
+                                "Reusing collaboration session workspace: {}",
+                                ws.display()
+                            );
+                            ws
+                        } else {
+                            self.create_workspace(&doc.id, &actionable.tracking_id)?
+                        }
+                    } else {
+                        self.create_workspace(&doc.id, &actionable.tracking_id)?
+                    }
+                } else {
+                    self.create_workspace(&doc.id, &actionable.tracking_id)?
+                };
+
+                // Write incoming comment to workspace
+                self.write_incoming_actionable(&workspace_dir, &message, &actionable)?;
+
+                // Add message to collaboration session if exists
+                if let Some(ref session) = existing_session {
+                    let comment_content: &str = actionable.triggering_reply
+                        .as_ref()
+                        .map(|r| r.content.as_str())
+                        .unwrap_or(&actionable.comment.content);
+                    let preview_len = comment_content.len().min(500);
+
+                    if let Err(err) = collaboration_store.add_message(
+                        &session.id,
+                        "google_docs",
+                        Some(&actionable.tracking_id),
+                        &session.user_id,
+                        Some(&comment_content[..preview_len]),
+                        false,
+                        None,
+                    ) {
+                        warn!("Failed to add message to collaboration session: {}", err);
+                    }
+
+                    // Write collaboration context to workspace
+                    self.write_collaboration_context(
+                        &workspace_dir,
+                        session,
+                        &doc.id,
+                        comment_content,
+                        collaboration_store,
+                    );
+                }
+
+                // Fetch and save document content for agent context
+                match adapter.read_document_content(&doc.id) {
+                    Ok(doc_content) => {
+                        let doc_content_path = workspace_dir.join("incoming_email").join("document_content.txt");
+                        if let Err(e) = fs::write(&doc_content_path, &doc_content) {
+                            warn!(
+                                "Failed to save document content for {}: {}",
+                                doc.id, e
+                            );
+                        } else {
+                            info!(
+                                "Saved document content ({} chars) to {}",
+                                doc_content.len(),
+                                doc_content_path.display()
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to fetch document content for {}: {}",
+                            doc.id, e
+                        );
+                    }
+                }
+
+                // Create RunTask
+                let run_task = RunTaskTask {
+                    workspace_dir: workspace_dir.clone(),
+                    input_email_dir: PathBuf::from("incoming_email"),
+                    input_attachments_dir: PathBuf::from("incoming_attachments"),
+                    memory_dir: PathBuf::from("memory"),
+                    reference_dir: PathBuf::from("references"),
+                    model_name: self.config.model_name.clone(),
+                    runner: self.config.runner.clone(),
+                    codex_disabled: false,
+                    reply_to: vec![message.sender.clone()],
+                    reply_from: Some("oliver@dowhiz.com".to_string()),
+                    archive_root: None,
+                    thread_id: Some(message.thread_id.clone()),
+                    thread_epoch: None,
+                    thread_state_path: None,
+                    channel: Channel::GoogleDocs,
+                    slack_team_id: None,
+                    employee_id: Some(self.config.employee_id.clone()),
+                };
+
+                // Schedule the task
+                scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
+
+                // Mark as processed using the tracking_id
+                self.store.mark_processed_id(&doc.id, &actionable.tracking_id)?;
+
+                tasks_created += 1;
+                let item_type = if actionable.triggering_reply.is_some() { "reply" } else { "comment" };
+                let session_info = if existing_session.is_some() { " (with collaboration session)" } else { "" };
+                info!(
+                    "Created task for Google Docs {} {} on {} ({}){}",
+                    item_type, actionable.tracking_id, doc_name, doc.id, session_info
+                );
+            }
+
+            // Update last checked time
+            self.store.update_last_checked(&doc.id)?;
+        }
+
+        Ok(tasks_created)
+    }
+
+    /// Write collaboration context to workspace.
+    fn write_collaboration_context(
+        &self,
+        workspace_dir: &Path,
+        session: &crate::collaboration_store::CollaborationSession,
+        document_id: &str,
+        current_comment: &str,
+        collaboration_store: &CollaborationStore,
+    ) {
+        let collab_dir = workspace_dir.join("collaboration");
+        if let Err(err) = fs::create_dir_all(&collab_dir) {
+            warn!("Failed to create collaboration dir: {}", err);
+            return;
+        }
+
+        // Write session info
+        if let Ok(session_json) = serde_json::to_string_pretty(session) {
+            let _ = fs::write(collab_dir.join("session_info.json"), &session_json);
+        }
+
+        // Get message history
+        if let Ok(messages) = collaboration_store.get_messages(&session.id) {
+            if let Ok(messages_json) = serde_json::to_string_pretty(&messages) {
+                let _ = fs::write(collab_dir.join("message_history.json"), &messages_json);
+            }
+        }
+
+        // Write context summary for the agent
+        let summary = format!(
+            "# Collaboration Context\n\n\
+            ## Session\n\
+            - Session ID: {}\n\
+            - Primary Channel: {}\n\
+            - Primary Artifact: google_docs:{}\n\
+            - Status: active\n\
+            - This is a CONTINUATION of an earlier conversation\n\n\
+            ## Original Request\n\
+            {}\n\n\
+            ## Current Comment\n\
+            {}\n\n\
+            ## Instructions\n\
+            This Google Docs comment continues an earlier collaboration session. \
+            Review the original request and message history in this directory. \
+            The user's attachments from earlier interactions may be in incoming_attachments/.\n",
+            session.id,
+            session.primary_channel,
+            document_id,
+            session.original_request.as_deref().unwrap_or("(not recorded)"),
+            current_comment,
+        );
+        let _ = fs::write(collab_dir.join("context_summary.md"), &summary);
+
+        debug!(
+            "Wrote collaboration context for session {} to {}",
+            session.id,
+            collab_dir.display()
+        );
     }
 
     fn create_workspace(&self, document_id: &str, tracking_id: &str) -> Result<PathBuf, SchedulerError> {

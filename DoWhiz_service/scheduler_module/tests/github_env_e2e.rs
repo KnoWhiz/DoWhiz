@@ -1,4 +1,5 @@
 use run_task_module::RunTaskParams;
+use scheduler_module::collaboration_store::CollaborationStore;
 use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
 use scheduler_module::service::{
@@ -293,6 +294,8 @@ fn email_flow_injects_github_env() {
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
+    let collaboration_store =
+        CollaborationStore::new(state_root.join("collaboration.db")).expect("collaboration store");
 
     let inbound_raw = r#"{
   "From": "Alice <alice@example.com>",
@@ -306,6 +309,7 @@ fn email_flow_injects_github_env() {
         &config,
         &user_store,
         &index_store,
+        &collaboration_store,
         &payload,
         inbound_raw.as_bytes(),
     )
@@ -417,6 +421,8 @@ fn email_flow_injects_employee_github_env() {
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
+    let collaboration_store =
+        CollaborationStore::new(state_root.join("collaboration.db")).expect("collaboration store");
 
     let inbound_raw = r#"{
   "From": "Alice <alice@example.com>",
@@ -430,6 +436,7 @@ fn email_flow_injects_employee_github_env() {
         &config,
         &user_store,
         &index_store,
+        &collaboration_store,
         &payload,
         inbound_raw.as_bytes(),
     )

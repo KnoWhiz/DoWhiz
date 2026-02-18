@@ -24,6 +24,9 @@ use uuid::Uuid;
 
 use crate::adapters::bluebubbles::send_quick_bluebubbles_response;
 use crate::adapters::slack::SlackEventWrapper;
+use crate::artifact_extractor::extract_artifacts_from_email;
+use crate::channel::ExtractedArtifactRef;
+use crate::collaboration_store::CollaborationStore;
 use crate::employee_config::{load_employee_directory, EmployeeDirectory, EmployeeProfile};
 use crate::ingestion::IngestionEnvelope;
 use crate::ingestion_queue::IngestionQueue;
@@ -446,6 +449,14 @@ pub async fn run_server(
     let slack_store = Arc::new(SlackStore::new(&config.slack_store_path)?);
     let ingestion_queue = Arc::new(IngestionQueue::new(&config.ingestion_db_path)?);
     let message_router = Arc::new(MessageRouter::new());
+
+    // Initialize collaboration store (same directory as other state databases)
+    let collaboration_store_path = config
+        .scheduler_state_path
+        .parent()
+        .map(|p| p.join("collaboration.db"))
+        .unwrap_or_else(|| PathBuf::from("collaboration.db"));
+    let collaboration_store = Arc::new(CollaborationStore::new(&collaboration_store_path)?);
     if let Ok(user_ids) = user_store.list_user_ids() {
         for user_id in user_ids {
             let paths = user_store.user_paths(&config.users_root, &user_id);
@@ -718,6 +729,7 @@ pub async fn run_server(
         user_store.clone(),
         index_store.clone(),
         slack_store.clone(),
+        collaboration_store.clone(),
         message_router.clone(),
     )?;
 
@@ -934,6 +946,7 @@ fn spawn_ingestion_consumer(
     user_store: Arc<UserStore>,
     index_store: Arc<IndexStore>,
     slack_store: Arc<SlackStore>,
+    collaboration_store: Arc<CollaborationStore>,
     message_router: Arc<MessageRouter>,
 ) -> Result<(), BoxError> {
     let poll_interval = config.ingestion_poll_interval;
@@ -974,6 +987,7 @@ fn spawn_ingestion_consumer(
                         &user_store,
                         &index_store,
                         &slack_store,
+                        &collaboration_store,
                         &message_router,
                         &runtime,
                         &item.envelope,
@@ -1011,6 +1025,7 @@ fn process_ingestion_envelope(
     user_store: &UserStore,
     index_store: &IndexStore,
     slack_store: &SlackStore,
+    collaboration_store: &CollaborationStore,
     message_router: &MessageRouter,
     runtime: &tokio::runtime::Handle,
     envelope: &IngestionEnvelope,
@@ -1019,7 +1034,7 @@ fn process_ingestion_envelope(
         Channel::Email => {
             let raw_payload = envelope.raw_payload_bytes();
             let payload: PostmarkInbound = serde_json::from_slice(&raw_payload)?;
-            process_inbound_payload(config, user_store, index_store, &payload, &raw_payload)
+            process_inbound_payload(config, user_store, index_store, collaboration_store, &payload, &raw_payload)
         }
         Channel::Slack => {
             let message = envelope.to_inbound_message();
@@ -1075,7 +1090,7 @@ fn process_ingestion_envelope(
         Channel::GoogleDocs => {
             let message = envelope.to_inbound_message();
             let raw_payload = envelope.raw_payload_bytes();
-            process_google_docs_message(config, user_store, index_store, &message, &raw_payload)
+            process_google_docs_message(config, user_store, index_store, collaboration_store, &message, &raw_payload)
         }
         Channel::Telegram => Ok(()),
     }
@@ -2047,6 +2062,7 @@ fn process_google_docs_message(
     config: &ServiceConfig,
     user_store: &UserStore,
     index_store: &IndexStore,
+    collaboration_store: &CollaborationStore,
     message: &crate::channel::InboundMessage,
     raw_payload: &[u8],
 ) -> Result<(), BoxError> {
@@ -2069,13 +2085,54 @@ fn process_google_docs_message(
 
     let thread_key = format!("gdocs:{}:{}", document_id, actionable.comment.id);
 
-    let workspace = ensure_thread_workspace(
-        &user_paths,
-        &user.user_id,
-        &thread_key,
-        &config.employee_profile,
-        config.skills_source_dir.as_deref(),
+    // Check for existing collaboration session for this document
+    let existing_session = collaboration_store.find_session_by_artifact(
+        "google_docs",
+        document_id,
+        None, // Any user - comments can continue sessions started by others
     )?;
+
+    // Determine workspace - use existing session's workspace if available
+    let (workspace, is_continuation) = if let Some(ref session) = existing_session {
+        if let Some(ref ws_path) = session.workspace_path {
+            let ws = PathBuf::from(ws_path);
+            if ws.exists() {
+                info!(
+                    "continuing collaboration session {} for document {}",
+                    session.id, document_id
+                );
+                (ws, true)
+            } else {
+                // Session workspace doesn't exist, create new one
+                let ws = ensure_thread_workspace(
+                    &user_paths,
+                    &user.user_id,
+                    &thread_key,
+                    &config.employee_profile,
+                    config.skills_source_dir.as_deref(),
+                )?;
+                (ws, false)
+            }
+        } else {
+            let ws = ensure_thread_workspace(
+                &user_paths,
+                &user.user_id,
+                &thread_key,
+                &config.employee_profile,
+                config.skills_source_dir.as_deref(),
+            )?;
+            (ws, false)
+        }
+    } else {
+        let ws = ensure_thread_workspace(
+            &user_paths,
+            &user.user_id,
+            &thread_key,
+            &config.employee_profile,
+            config.skills_source_dir.as_deref(),
+        )?;
+        (ws, false)
+    };
 
     let thread_state_path = default_thread_state_path(&workspace);
     let thread_state = bump_thread_state(
@@ -2083,6 +2140,75 @@ fn process_google_docs_message(
         &thread_key,
         Some(actionable.tracking_id.clone()),
     )?;
+
+    // Add message to collaboration session if exists
+    if let Some(ref session) = existing_session {
+        let comment_content: &str = actionable.triggering_reply
+            .as_ref()
+            .map(|r| r.content.as_str())
+            .unwrap_or(&actionable.comment.content);
+        let preview_len = comment_content.len().min(500);
+
+        if let Err(err) = collaboration_store.add_message(
+            &session.id,
+            "google_docs",
+            Some(&actionable.tracking_id),
+            &user.user_id,
+            Some(&comment_content[..preview_len]),
+            false,
+            None,
+        ) {
+            warn!("failed to add message to collaboration session: {}", err);
+        }
+
+        // Write collaboration context to workspace
+        let collab_dir = workspace.join("collaboration");
+        if let Err(err) = fs::create_dir_all(&collab_dir) {
+            warn!("failed to create collaboration dir: {}", err);
+        } else {
+            // Write session info
+            if let Ok(session_json) = serde_json::to_string_pretty(session) {
+                let _ = fs::write(collab_dir.join("session_info.json"), &session_json);
+            }
+
+            // Get message history
+            if let Ok(messages) = collaboration_store.get_messages(&session.id) {
+                if let Ok(messages_json) = serde_json::to_string_pretty(&messages) {
+                    let _ = fs::write(collab_dir.join("message_history.json"), &messages_json);
+                }
+            }
+
+            // Write context summary
+            let summary = format!(
+                "# Collaboration Context\n\n\
+                ## Session\n\
+                - Session ID: {}\n\
+                - Primary Channel: {}\n\
+                - Primary Artifact: google_docs:{}\n\
+                - Status: active\n\
+                - This is a CONTINUATION of an earlier conversation\n\n\
+                ## Original Request\n\
+                {}\n\n\
+                ## Current Comment\n\
+                {}\n\n\
+                ## Instructions\n\
+                This Google Docs comment continues an earlier collaboration session. \
+                Review the original request and message history in this directory. \
+                The user's attachments from earlier interactions may be in incoming_attachments/.\n",
+                session.id,
+                session.primary_channel,
+                document_id,
+                session.original_request.as_deref().unwrap_or("(not recorded)"),
+                comment_content,
+            );
+            let _ = fs::write(collab_dir.join("context_summary.md"), &summary);
+        }
+
+        info!(
+            "google docs comment continues collaboration session {} (is_continuation={})",
+            session.id, is_continuation
+        );
+    }
 
     append_google_docs_comment(&workspace, message, &actionable, thread_state.last_email_seq)?;
 
@@ -2396,6 +2522,7 @@ pub fn process_inbound_payload(
     config: &ServiceConfig,
     user_store: &UserStore,
     index_store: &IndexStore,
+    collaboration_store: &CollaborationStore,
     payload: &PostmarkInbound,
     raw_payload: &[u8],
 ) -> Result<(), BoxError> {
@@ -2470,6 +2597,142 @@ pub fn process_inbound_payload(
         .or(payload.message_id.as_deref())
         .map(|value| value.trim().to_string());
     let thread_state = bump_thread_state(&thread_state_path, &thread_key, message_id.clone())?;
+
+    // Extract artifacts from email for collaboration tracking
+    let extracted_artifacts = extract_artifacts_from_email(
+        payload.html_body.as_deref(),
+        payload.text_body.as_deref(),
+        payload.subject.as_deref(),
+    );
+
+    // Find or create collaboration session if artifacts are present
+    let collaboration_session = if !extracted_artifacts.is_empty() {
+        // Try to find existing session by primary artifact
+        let primary_artifact = &extracted_artifacts[0];
+        let existing = collaboration_store.find_session_by_artifact(
+            &primary_artifact.artifact_type,
+            &primary_artifact.artifact_id,
+            Some(&user.user_id),
+        )?;
+
+        let session = match existing {
+            Some(mut session) => {
+                // Update existing session
+                collaboration_store.touch_session(&session.id)?;
+                collaboration_store.add_message(
+                    &session.id,
+                    "email",
+                    message_id.as_deref(),
+                    &user.user_id,
+                    payload.text_body.as_deref().map(|t| &t[..t.len().min(500)]),
+                    !payload.attachments.as_ref().map(|a| a.is_empty()).unwrap_or(true),
+                    None,
+                )?;
+                // Update workspace path if not set
+                if session.workspace_path.is_none() {
+                    collaboration_store.update_session_workspace(&session.id, &workspace.to_string_lossy())?;
+                    session.workspace_path = Some(workspace.to_string_lossy().into_owned());
+                }
+                info!(
+                    "continuing collaboration session {} for artifact {}:{}",
+                    session.id, primary_artifact.artifact_type, primary_artifact.artifact_id
+                );
+                session
+            }
+            None => {
+                // Create new session
+                let session = collaboration_store.create_session(
+                    &user.user_id,
+                    &thread_key,
+                    "email",
+                    Some(&primary_artifact.artifact_type),
+                    Some(&primary_artifact.artifact_id),
+                    None, // artifact_title - could fetch later
+                    payload.text_body.as_deref().map(|t| &t[..t.len().min(1000)]),
+                    Some(&workspace.to_string_lossy()),
+                )?;
+                // Add initial message
+                collaboration_store.add_message(
+                    &session.id,
+                    "email",
+                    message_id.as_deref(),
+                    &user.user_id,
+                    payload.text_body.as_deref().map(|t| &t[..t.len().min(500)]),
+                    !payload.attachments.as_ref().map(|a| a.is_empty()).unwrap_or(true),
+                    None,
+                )?;
+                // Add all extracted artifacts
+                for artifact in &extracted_artifacts[1..] {
+                    let _ = collaboration_store.add_artifact(
+                        &session.id,
+                        &artifact.artifact_type,
+                        &artifact.artifact_id,
+                        Some(&artifact.url),
+                        None,
+                        crate::collaboration_store::ArtifactRole::Reference,
+                    );
+                }
+                info!(
+                    "created collaboration session {} for artifact {}:{}",
+                    session.id, primary_artifact.artifact_type, primary_artifact.artifact_id
+                );
+                session
+            }
+        };
+        Some(session)
+    } else {
+        None
+    };
+
+    // Write collaboration context to workspace if session exists
+    if let Some(ref session) = collaboration_session {
+        let collab_dir = workspace.join("collaboration");
+        if let Err(err) = fs::create_dir_all(&collab_dir) {
+            warn!("failed to create collaboration dir: {}", err);
+        } else {
+            // Write session info
+            let session_json = serde_json::to_string_pretty(session)?;
+            if let Err(err) = fs::write(collab_dir.join("session_info.json"), &session_json) {
+                warn!("failed to write session info: {}", err);
+            }
+            // Write artifacts list
+            let artifacts_refs: Vec<ExtractedArtifactRef> = extracted_artifacts
+                .iter()
+                .map(|a| ExtractedArtifactRef {
+                    artifact_type: a.artifact_type.clone(),
+                    artifact_id: a.artifact_id.clone(),
+                    url: a.url.clone(),
+                })
+                .collect();
+            let artifacts_json = serde_json::to_string_pretty(&artifacts_refs)?;
+            if let Err(err) = fs::write(collab_dir.join("artifacts.json"), &artifacts_json) {
+                warn!("failed to write artifacts: {}", err);
+            }
+            // Write context summary for agent
+            let summary = format!(
+                "# Collaboration Context\n\n\
+                ## Session\n\
+                - Session ID: {}\n\
+                - Primary Channel: email\n\
+                - Status: active\n\n\
+                ## Artifacts\n\
+                {}\n\n\
+                ## Instructions\n\
+                This email contains references to external artifacts. \
+                You may need to access and modify these artifacts as part of your task.\n",
+                session.id,
+                extracted_artifacts
+                    .iter()
+                    .map(|a| format!("- [{}] {} ({})", a.artifact_type, a.artifact_id, a.url))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+            if let Err(err) = fs::write(collab_dir.join("context_summary.md"), &summary) {
+                warn!("failed to write context summary: {}", err);
+            }
+        }
+    }
+
     append_inbound_payload(
         &workspace,
         payload,

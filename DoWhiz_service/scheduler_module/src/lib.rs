@@ -12,7 +12,9 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 pub mod adapters;
+pub mod artifact_extractor;
 pub mod channel;
+pub mod collaboration_store;
 pub mod discord_gateway;
 pub mod employee_config;
 pub mod google_auth;
