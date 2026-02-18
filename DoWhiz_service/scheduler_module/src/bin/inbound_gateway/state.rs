@@ -11,7 +11,7 @@ use super::config::GatewayDefaultsConfig;
 
 #[derive(Clone)]
 pub(super) struct GatewayConfig {
-    pub(super) db_path: std::path::PathBuf,
+    pub(super) db_url: String,
     pub(super) defaults: GatewayDefaultsConfig,
     pub(super) routes: HashMap<RouteKey, RouteTarget>,
     pub(super) channel_defaults: HashMap<Channel, RouteTarget>,
@@ -22,7 +22,7 @@ pub(super) struct GatewayState {
     pub(super) config: GatewayConfig,
     pub(super) employee_directory: EmployeeDirectory,
     pub(super) address_to_employee: HashMap<String, String>,
-    pub(super) queue: Arc<IngestionQueue>,
+    pub(super) queue: Arc<dyn IngestionQueue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
