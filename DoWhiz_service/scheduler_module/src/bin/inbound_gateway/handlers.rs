@@ -2,10 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
+use serde::Deserialize;
 use chrono::Utc;
 use serde_json::json;
 use tracing::{debug, error, info, warn};
@@ -15,13 +16,14 @@ use scheduler_module::adapters::bluebubbles::BlueBubblesInboundAdapter;
 use scheduler_module::adapters::postmark::PostmarkInboundPayload;
 use scheduler_module::adapters::slack::{is_url_verification, SlackChallengeResponse, SlackInboundAdapter};
 use scheduler_module::adapters::telegram::TelegramInboundAdapter;
+use scheduler_module::adapters::whatsapp::WhatsAppInboundAdapter;
 use scheduler_module::channel::{Channel, ChannelMetadata, InboundAdapter, InboundMessage};
 use scheduler_module::ingestion::{encode_raw_payload, IngestionEnvelope, IngestionPayload};
 use scheduler_module::ingestion_queue::IngestionQueue;
 
 use super::routes::{build_dedupe_key, normalize_email, normalize_phone_number, resolve_route};
 use super::state::{find_service_address, GatewayState, RouteDecision};
-use super::verify::{verify_bluebubbles, verify_postmark, verify_slack, verify_twilio};
+use super::verify::{verify_bluebubbles, verify_postmark, verify_slack, verify_twilio, verify_whatsapp_subscription};
 
 pub(super) async fn health() -> impl IntoResponse {
     (StatusCode::OK, "ok")
@@ -245,6 +247,64 @@ pub(super) async fn ingest_telegram(
 
     let external_message_id = message.message_id.clone();
     let envelope = build_envelope(route, Channel::Telegram, external_message_id, &message, &body);
+    enqueue_envelope(state.queue.clone(), envelope).await
+}
+
+/// Query parameters for WhatsApp webhook verification
+#[derive(Debug, Deserialize)]
+pub(super) struct WhatsAppVerifyParams {
+    #[serde(rename = "hub.mode")]
+    pub hub_mode: Option<String>,
+    #[serde(rename = "hub.verify_token")]
+    pub hub_verify_token: Option<String>,
+    #[serde(rename = "hub.challenge")]
+    pub hub_challenge: Option<String>,
+}
+
+/// Handle WhatsApp webhook verification (GET request)
+pub(super) async fn verify_whatsapp_webhook(
+    Query(params): Query<WhatsAppVerifyParams>,
+) -> impl IntoResponse {
+    match verify_whatsapp_subscription(
+        params.hub_mode.as_deref(),
+        params.hub_verify_token.as_deref(),
+        params.hub_challenge.as_deref(),
+    ) {
+        Ok(challenge) => (StatusCode::OK, challenge),
+        Err(reason) => {
+            info!("whatsapp webhook verification failed: {}", reason);
+            (StatusCode::FORBIDDEN, reason.to_string())
+        }
+    }
+}
+
+/// Handle WhatsApp inbound messages (POST request)
+pub(super) async fn ingest_whatsapp(
+    State(state): State<Arc<GatewayState>>,
+    body: Bytes,
+) -> impl IntoResponse {
+    let adapter = WhatsAppInboundAdapter::new();
+    let message = match adapter.parse(&body) {
+        Ok(message) => message,
+        Err(err) => {
+            debug!("gateway ignoring whatsapp event: {}", err);
+            return (StatusCode::OK, Json(json!({"status": "ignored"})));
+        }
+    };
+
+    let phone_number = message
+        .metadata
+        .whatsapp_phone_number
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let Some(route) = resolve_route(Channel::WhatsApp, &phone_number, &state) else {
+        info!("gateway no route for whatsapp phone_number={}", phone_number);
+        return (StatusCode::OK, Json(json!({"status": "no_route"})));
+    };
+
+    let external_message_id = message.message_id.clone();
+    let envelope = build_envelope(route, Channel::WhatsApp, external_message_id, &message, &body);
     enqueue_envelope(state.queue.clone(), envelope).await
 }
 

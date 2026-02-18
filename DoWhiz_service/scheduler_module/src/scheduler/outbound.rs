@@ -312,6 +312,67 @@ pub(crate) fn execute_telegram_send(task: &SendReplyTask) -> Result<(), Schedule
     Ok(())
 }
 
+/// Execute a SendReplyTask via WhatsApp Cloud API.
+pub(crate) fn execute_whatsapp_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
+    use crate::adapters::whatsapp::WhatsAppOutboundAdapter;
+    use crate::channel::{ChannelMetadata, OutboundAdapter, OutboundMessage};
+
+    dotenvy::dotenv().ok();
+    let access_token = env_var_non_empty("WHATSAPP_ACCESS_TOKEN").ok_or_else(|| {
+        SchedulerError::TaskFailed("WHATSAPP_ACCESS_TOKEN not set".to_string())
+    })?;
+    let phone_number_id = env_var_non_empty("WHATSAPP_PHONE_NUMBER_ID").ok_or_else(|| {
+        SchedulerError::TaskFailed("WHATSAPP_PHONE_NUMBER_ID not set".to_string())
+    })?;
+
+    let adapter = WhatsAppOutboundAdapter::new(access_token, phone_number_id);
+
+    // Read plain text content from reply_message.txt (html_path field reused for simplicity)
+    let text_body = if task.html_path.exists() {
+        fs::read_to_string(&task.html_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    // For WhatsApp, to[0] contains the phone number
+    let phone_number = task.to.first().cloned();
+
+    let message = OutboundMessage {
+        channel: Channel::WhatsApp,
+        from: task.from.clone(),
+        to: task.to.clone(),
+        cc: vec![],
+        bcc: vec![],
+        subject: task.subject.clone(),
+        text_body,
+        html_body: String::new(),
+        html_path: Some(task.html_path.clone()),
+        attachments_dir: Some(task.attachments_dir.clone()),
+        thread_id: task.in_reply_to.clone(),
+        metadata: ChannelMetadata {
+            whatsapp_phone_number: phone_number,
+            ..Default::default()
+        },
+    };
+
+    let result = adapter
+        .send(&message)
+        .map_err(|err| SchedulerError::TaskFailed(format!("WhatsApp send failed: {}", err)))?;
+
+    if !result.success {
+        return Err(SchedulerError::TaskFailed(format!(
+            "WhatsApp API error: {}",
+            result.error.unwrap_or_default()
+        )));
+    }
+
+    info!(
+        "sent WhatsApp message to {:?}, message_id={}",
+        task.to, result.message_id
+    );
+    Ok(())
+}
+
 /// Execute a SendReplyTask via SMS (Twilio).
 pub(crate) fn execute_sms_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
     dotenvy::dotenv().ok();

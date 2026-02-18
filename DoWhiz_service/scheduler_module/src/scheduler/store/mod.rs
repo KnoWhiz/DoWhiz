@@ -20,7 +20,8 @@ mod task_rows;
 use migrations::{
     ensure_run_task_task_columns, ensure_send_bluebubbles_tasks_table,
     ensure_send_discord_tasks_table, ensure_send_email_task_columns, ensure_send_slack_tasks_table,
-    ensure_send_sms_tasks_table, ensure_send_telegram_tasks_table, ensure_tasks_columns,
+    ensure_send_sms_tasks_table, ensure_send_telegram_tasks_table, ensure_send_whatsapp_tasks_table,
+    ensure_tasks_columns,
 };
 use schema::SCHEDULER_SCHEMA;
 
@@ -131,6 +132,7 @@ impl SqliteSchedulerStore {
                         }
                         Channel::Telegram => self.load_send_telegram_task(&conn, &id_raw)?,
                         Channel::BlueBubbles => self.load_send_bluebubbles_task(&conn, &id_raw)?,
+                        Channel::WhatsApp => self.load_send_whatsapp_task(&conn, &id_raw)?,
                     };
                     TaskKind::SendReply(send_task)
                 }
@@ -202,6 +204,9 @@ impl SqliteSchedulerStore {
                     }
                     Channel::BlueBubbles => {
                         self.insert_send_bluebubbles_task(&tx, &task.id.to_string(), send)?;
+                    }
+                    Channel::WhatsApp => {
+                        self.insert_send_whatsapp_task(&tx, &task.id.to_string(), send)?;
                     }
                 }
             }
@@ -318,6 +323,7 @@ impl SqliteSchedulerStore {
         ensure_send_sms_tasks_table(&conn)?;
         ensure_send_bluebubbles_tasks_table(&conn)?;
         ensure_send_telegram_tasks_table(&conn)?;
+        ensure_send_whatsapp_tasks_table(&conn)?;
         ensure_run_task_task_columns(&conn)?;
         Ok(conn)
     }

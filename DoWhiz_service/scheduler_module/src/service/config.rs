@@ -57,6 +57,12 @@ pub struct ServiceConfig {
     pub bluebubbles_password: Option<String>,
     /// Telegram bot token
     pub telegram_bot_token: Option<String>,
+    /// WhatsApp access token (from Meta Developer Console)
+    pub whatsapp_access_token: Option<String>,
+    /// WhatsApp phone number ID (the bot's phone)
+    pub whatsapp_phone_number_id: Option<String>,
+    /// WhatsApp webhook verify token
+    pub whatsapp_verify_token: Option<String>,
 }
 
 impl ServiceConfig {
@@ -231,6 +237,17 @@ impl ServiceConfig {
         // Telegram configuration
         let telegram_bot_token = resolve_telegram_bot_token(&employee_profile);
 
+        // WhatsApp configuration
+        let whatsapp_access_token = env::var("WHATSAPP_ACCESS_TOKEN")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let whatsapp_phone_number_id = env::var("WHATSAPP_PHONE_NUMBER_ID")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let whatsapp_verify_token = env::var("WHATSAPP_VERIFY_TOKEN")
+            .ok()
+            .filter(|s| !s.is_empty());
+
         Ok(Self {
             host,
             port,
@@ -266,6 +283,9 @@ impl ServiceConfig {
             bluebubbles_url,
             bluebubbles_password,
             telegram_bot_token,
+            whatsapp_access_token,
+            whatsapp_phone_number_id,
+            whatsapp_verify_token,
         })
     }
 }

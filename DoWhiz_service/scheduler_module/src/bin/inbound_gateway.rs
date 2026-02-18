@@ -32,6 +32,7 @@ use discord::spawn_discord_gateway;
 use google_docs::spawn_google_docs_poller;
 use handlers::{
     health, ingest_bluebubbles, ingest_postmark, ingest_slack, ingest_sms, ingest_telegram,
+    ingest_whatsapp, verify_whatsapp_webhook,
 };
 use routes::normalize_routes;
 use state::{build_address_map, GatewayConfig, GatewayState};
@@ -113,6 +114,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/bluebubbles/webhook", post(ingest_bluebubbles))
         .route("/telegram/webhook", post(ingest_telegram))
         .route("/sms/twilio", post(ingest_sms))
+        .route("/whatsapp/webhook", get(verify_whatsapp_webhook))
+        .route("/whatsapp/webhook", post(ingest_whatsapp))
         .with_state(state)
         .layer(DefaultBodyLimit::max(max_body_bytes));
 

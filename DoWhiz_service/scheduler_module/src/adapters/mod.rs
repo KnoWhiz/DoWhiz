@@ -9,6 +9,7 @@ pub mod google_docs;
 pub mod postmark;
 pub mod slack;
 pub mod telegram;
+pub mod whatsapp;
 
 pub use bluebubbles::{
     send_quick_bluebubbles_response, BlueBubblesInboundAdapter, BlueBubblesOutboundAdapter,
@@ -26,4 +27,7 @@ pub use slack::{
 };
 pub use telegram::{
     send_quick_telegram_response, TelegramInboundAdapter, TelegramOutboundAdapter, TelegramUpdate,
+};
+pub use whatsapp::{
+    send_quick_whatsapp_response, WhatsAppInboundAdapter, WhatsAppOutboundAdapter, WhatsAppWebhook,
 };
