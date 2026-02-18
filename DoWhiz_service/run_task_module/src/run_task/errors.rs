@@ -50,7 +50,11 @@ impl fmt::Display for RunTaskError {
         match self {
             RunTaskError::Io(err) => write!(f, "I/O error: {}", err),
             RunTaskError::MissingEnv { key } => write!(f, "Missing environment variable: {}", key),
-            RunTaskError::InvalidPath { label, path, reason } => write!(
+            RunTaskError::InvalidPath {
+                label,
+                path,
+                reason,
+            } => write!(
                 f,
                 "Invalid path for {}: {} ({})",
                 label,

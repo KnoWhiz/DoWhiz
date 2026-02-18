@@ -1,10 +1,8 @@
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 
-use tracing::{error, warn};
+use tracing::warn;
 
 use crate::channel::Channel;
 use crate::index_store::IndexStore;
@@ -40,7 +38,7 @@ impl IngestionControl {
 
 pub(super) fn spawn_ingestion_consumer(
     config: std::sync::Arc<ServiceConfig>,
-    queue: std::sync::Arc<IngestionQueue>,
+    queue: std::sync::Arc<dyn IngestionQueue>,
     user_store: std::sync::Arc<UserStore>,
     index_store: std::sync::Arc<IndexStore>,
     slack_store: std::sync::Arc<SlackStore>,
@@ -48,78 +46,49 @@ pub(super) fn spawn_ingestion_consumer(
 ) -> Result<IngestionControl, BoxError> {
     let poll_interval = config.ingestion_poll_interval;
     let employee_id = config.employee_id.clone();
-    let dedupe_path = config.ingestion_dedupe_path.clone();
     let runtime = tokio::runtime::Handle::current();
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = stop.clone();
 
-    let handle = thread::spawn(move || {
-        let mut dedupe_store = match ProcessedMessageStore::load(&dedupe_path) {
-            Ok(store) => store,
-            Err(err) => {
-                error!("ingestion dedupe store load failed: {}", err);
-                return;
-            }
-        };
-
-        loop {
-            if stop_thread.load(Ordering::Relaxed) {
-                break;
-            }
-            match queue.claim_next(&employee_id) {
-                Ok(Some(item)) => {
-                    let is_new = match dedupe_store.mark_if_new(&[item.envelope.dedupe_key.clone()])
-                    {
-                        Ok(value) => value,
-                        Err(err) => {
-                            error!("ingestion dedupe store error: {}", err);
-                            true
-                        }
-                    };
-
-                    if !is_new {
+    let handle = thread::spawn(move || loop {
+        if stop_thread.load(Ordering::Relaxed) {
+            break;
+        }
+        match queue.claim_next(&employee_id) {
+            Ok(Some(item)) => {
+                match process_ingestion_envelope(
+                    &config,
+                    &user_store,
+                    &index_store,
+                    &slack_store,
+                    &message_router,
+                    &runtime,
+                    &item.envelope,
+                ) {
+                    Ok(_) => {
                         if let Err(err) = queue.mark_done(&item.id) {
-                            warn!("failed to mark duplicate envelope done: {}", err);
+                            warn!("failed to mark envelope done: {}", err);
                         }
-                        continue;
                     }
-
-                    match process_ingestion_envelope(
-                        &config,
-                        &user_store,
-                        &index_store,
-                        &slack_store,
-                        &message_router,
-                        &runtime,
-                        &item.envelope,
-                    ) {
-                        Ok(_) => {
-                            if let Err(err) = queue.mark_done(&item.id) {
-                                warn!("failed to mark envelope done: {}", err);
-                            }
-                        }
-                        Err(err) => {
-                            if let Err(mark_err) =
-                                queue.mark_failed(&item.id, &err.to_string())
-                            {
-                                warn!("failed to mark envelope failed: {}", mark_err);
-                            }
+                    Err(err) => {
+                        if let Err(mark_err) = queue.mark_failed(&item.id, &err.to_string()) {
+                            warn!("failed to mark envelope failed: {}", mark_err);
                         }
                     }
                 }
-                Ok(None) => {
-                    if stop_thread.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    thread::sleep(poll_interval);
+            }
+            Ok(None) => {
+                if stop_thread.load(Ordering::Relaxed) {
+                    break;
                 }
-                Err(err) => {
-                    if stop_thread.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    warn!("ingestion queue claim error: {}", err);
-                    thread::sleep(poll_interval);
+                thread::sleep(poll_interval);
+            }
+            Err(err) => {
+                if stop_thread.load(Ordering::Relaxed) {
+                    break;
                 }
+                warn!("ingestion queue claim error: {}", err);
+                thread::sleep(poll_interval);
             }
         }
     });
@@ -182,13 +151,7 @@ fn process_ingestion_envelope(
         }
         Channel::Discord => {
             let message = envelope.to_inbound_message();
-            if try_quick_response_discord(
-                config,
-                user_store,
-                message_router,
-                runtime,
-                &message,
-            )? {
+            if try_quick_response_discord(config, user_store, message_router, runtime, &message)? {
                 return Ok(());
             }
             let raw_payload = envelope.raw_payload_bytes();
@@ -206,13 +169,7 @@ fn process_ingestion_envelope(
         }
         Channel::Telegram => {
             let message = envelope.to_inbound_message();
-            if try_quick_response_telegram(
-                config,
-                user_store,
-                message_router,
-                runtime,
-                &message,
-            )? {
+            if try_quick_response_telegram(config, user_store, message_router, runtime, &message)? {
                 return Ok(());
             }
             let raw_payload = envelope.raw_payload_bytes();
@@ -220,69 +177,11 @@ fn process_ingestion_envelope(
         }
         Channel::WhatsApp => {
             let message = envelope.to_inbound_message();
-            if try_quick_response_whatsapp(
-                config,
-                user_store,
-                message_router,
-                runtime,
-                &message,
-            )? {
+            if try_quick_response_whatsapp(config, user_store, message_router, runtime, &message)? {
                 return Ok(());
             }
             let raw_payload = envelope.raw_payload_bytes();
             process_whatsapp_event(config, user_store, index_store, &message, &raw_payload)
         }
-    }
-}
-
-struct ProcessedMessageStore {
-    path: PathBuf,
-    seen: HashSet<String>,
-}
-
-impl ProcessedMessageStore {
-    fn load(path: &Path) -> Result<Self, std::io::Error> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let mut seen = HashSet::new();
-        if path.exists() {
-            for raw in std::fs::read_to_string(path)?.lines() {
-                let line = raw.trim();
-                if !line.is_empty() {
-                    seen.insert(line.to_string());
-                }
-            }
-        }
-        Ok(Self {
-            path: path.to_path_buf(),
-            seen,
-        })
-    }
-
-    fn mark_if_new(&mut self, ids: &[String]) -> Result<bool, std::io::Error> {
-        let candidates: Vec<_> = ids
-            .iter()
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-            .collect();
-        if candidates.is_empty() {
-            return Ok(true);
-        }
-
-        if candidates.iter().any(|value| self.seen.contains(*value)) {
-            return Ok(false);
-        }
-
-        let mut handle = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)?;
-        for value in candidates {
-            self.seen.insert(value.to_string());
-            use std::io::Write;
-            writeln!(handle, "{}", value)?;
-        }
-        Ok(true)
     }
 }

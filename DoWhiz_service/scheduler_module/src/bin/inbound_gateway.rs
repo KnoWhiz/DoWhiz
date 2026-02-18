@@ -17,16 +17,16 @@ use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use axum::Router;
 use std::env;
-use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::task;
 use tracing::info;
 
 use scheduler_module::employee_config::load_employee_directory;
-use scheduler_module::ingestion_queue::IngestionQueue;
+use scheduler_module::ingestion_queue::{IngestionQueue, PostgresIngestionQueue};
 
 use config::{
-    default_ingestion_db_path, load_gateway_config, resolve_employee_config_path,
-    resolve_gateway_config_path, GatewayConfigFile,
+    load_gateway_config, resolve_employee_config_path, resolve_gateway_config_path,
+    resolve_ingestion_db_url, GatewayConfigFile,
 };
 use discord::spawn_discord_gateway;
 use google_docs::spawn_google_docs_poller;
@@ -63,24 +63,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or_else(|| config_file.server.port.unwrap_or(9100));
 
-    let db_path = env::var("INGESTION_DB_PATH")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            config_file
-                .storage
-                .db_path
-                .unwrap_or_else(default_ingestion_db_path)
-        });
+    let db_url = resolve_ingestion_db_url(&config_file.storage)?;
 
     let (routes, channel_defaults) = normalize_routes(&config_file.routes)?;
 
-    let queue = Arc::new(IngestionQueue::new(&db_path)?);
+    let queue: Arc<dyn IngestionQueue> = Arc::new(
+        task::spawn_blocking(move || PostgresIngestionQueue::new_from_url(&db_url))
+            .await
+            .map_err(|err| -> Box<dyn std::error::Error + Send + Sync> { err.into() })??,
+    );
 
     let state = Arc::new(GatewayState {
         config: GatewayConfig {
-            db_path,
             defaults: config_file.defaults,
             routes,
             channel_defaults,
@@ -91,11 +85,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
 
     info!(
-        "ingestion gateway config path={}, host={}, port={}, db_path={}",
+        "ingestion gateway config path={}, host={}, port={}, db_url=***",
         config_path.display(),
         host,
-        port,
-        state.config.db_path.display()
+        port
     );
 
     spawn_discord_gateway(state.clone()).await;

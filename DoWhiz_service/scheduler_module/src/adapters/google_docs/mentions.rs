@@ -27,7 +27,9 @@ static EMPLOYEE_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 
 /// Check if text contains an employee mention.
 pub fn contains_employee_mention(text: &str) -> bool {
-    EMPLOYEE_PATTERNS.iter().any(|pattern| pattern.is_match(text))
+    EMPLOYEE_PATTERNS
+        .iter()
+        .any(|pattern| pattern.is_match(text))
 }
 
 /// Extract the employee name from a mention.

@@ -7,7 +7,7 @@ use scheduler_module::google_auth::GoogleAuthConfig;
 use scheduler_module::google_docs_poller::GoogleDocsPollerConfig;
 use tracing::{error, info, warn};
 
-use super::handlers::build_envelope;
+use super::handlers::build_envelope_blocking;
 use super::routes::resolve_route;
 use super::state::GatewayState;
 
@@ -98,13 +98,19 @@ fn poll_google_docs_comments(
 
             let external_message_id = Some(actionable.tracking_id.clone());
             let raw_payload = serde_json::to_vec(&actionable).unwrap_or_default();
-            let envelope = build_envelope(
+            let envelope = match build_envelope_blocking(
                 route,
                 Channel::GoogleDocs,
                 external_message_id,
                 &message,
                 &raw_payload,
-            );
+            ) {
+                Ok(envelope) => envelope,
+                Err(err) => {
+                    error!("gateway failed to store raw payload: {}", err);
+                    continue;
+                }
+            };
 
             match state.queue.enqueue(&envelope) {
                 Ok(result) => {

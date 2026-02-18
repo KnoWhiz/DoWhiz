@@ -31,7 +31,11 @@ impl Drop for EnvGuard {
     }
 }
 
-fn write_text_file(temp: &TempDir, name: &str, contents: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn write_text_file(
+    temp: &TempDir,
+    name: &str,
+    contents: &str,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let path = temp.path().join(name);
     fs::write(&path, contents)?;
     Ok(path)

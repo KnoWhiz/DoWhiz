@@ -264,10 +264,7 @@ impl MessageRouter {
             max_completion_tokens: 1024,
         };
 
-        debug!(
-            "Calling OpenAI: {} with model {}",
-            url, self.config.model
-        );
+        debug!("Calling OpenAI: {} with model {}", url, self.config.model);
 
         let response = self
             .client

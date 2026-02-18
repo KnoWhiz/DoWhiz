@@ -136,9 +136,16 @@ impl EventHandler for DiscordEventHandler {
         // Try local router first for simple queries
         if let Some(text) = &inbound.text_body {
             // Look up user and get memory
-            let (memory, user_paths) = match self.state.user_store.get_or_create_user("discord", &inbound.sender) {
+            let (memory, user_paths) = match self
+                .state
+                .user_store
+                .get_or_create_user("discord", &inbound.sender)
+            {
                 Ok(user) => {
-                    let paths = self.state.user_store.user_paths(&self.state.config.users_root, &user.user_id);
+                    let paths = self
+                        .state
+                        .user_store
+                        .user_paths(&self.state.config.users_root, &user.user_id);
                     let memo = fs::read_to_string(paths.memory_dir.join("memo.md")).ok();
                     (memo, Some((user.user_id, paths)))
                 }
@@ -148,8 +155,16 @@ impl EventHandler for DiscordEventHandler {
                 }
             };
 
-            match self.state.message_router.classify(text, memory.as_deref()).await {
-                RouterDecision::Simple { response, memory_update } => {
+            match self
+                .state
+                .message_router
+                .classify(text, memory.as_deref())
+                .await
+            {
+                RouterDecision::Simple {
+                    response,
+                    memory_update,
+                } => {
                     info!("Router handled message locally, sending quick response");
 
                     // Write memory update if present

@@ -2,9 +2,7 @@ use std::collections::HashSet;
 
 use tracing::{error, info};
 
-use crate::channel::{
-    AdapterError, Channel, ChannelMetadata, InboundAdapter, InboundMessage,
-};
+use crate::channel::{AdapterError, Channel, ChannelMetadata, InboundAdapter, InboundMessage};
 use crate::google_auth::GoogleAuth;
 
 use super::mentions::contains_employee_mention;
@@ -57,7 +55,10 @@ impl GoogleDocsInboundAdapter {
             let status = response.status();
             let body = response.text().unwrap_or_default();
             error!("Failed to list documents: {} - {}", status, body);
-            return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+            return Err(AdapterError::SendError(format!(
+                "HTTP {}: {}",
+                status, body
+            )));
         }
 
         let files_response: FilesListResponse = response
@@ -90,8 +91,14 @@ impl GoogleDocsInboundAdapter {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().unwrap_or_default();
-            error!("Failed to list comments for {}: {} - {}", document_id, status, body);
-            return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+            error!(
+                "Failed to list comments for {}: {} - {}",
+                document_id, status, body
+            );
+            return Err(AdapterError::SendError(format!(
+                "HTTP {}: {}",
+                status, body
+            )));
         }
 
         let comments_response: CommentsListResponse = response
@@ -161,7 +168,10 @@ impl GoogleDocsInboundAdapter {
                     if contains_employee_mention(&reply.content) {
                         let reply_preview = reply.content.chars().take(50).collect::<String>();
                         info!("Found actionable reply: '{}'", reply_preview);
-                        actionable.push(ActionableComment::from_reply(comment.clone(), reply.clone()));
+                        actionable.push(ActionableComment::from_reply(
+                            comment.clone(),
+                            reply.clone(),
+                        ));
                     }
                 }
             }
@@ -290,8 +300,14 @@ impl GoogleDocsInboundAdapter {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().unwrap_or_default();
-            error!("Failed to read document {}: {} - {}", document_id, status, body);
-            return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+            error!(
+                "Failed to read document {}: {} - {}",
+                document_id, status, body
+            );
+            return Err(AdapterError::SendError(format!(
+                "HTTP {}: {}",
+                status, body
+            )));
         }
 
         response
@@ -303,13 +319,14 @@ impl GoogleDocsInboundAdapter {
 impl InboundAdapter for GoogleDocsInboundAdapter {
     fn parse(&self, raw_payload: &[u8]) -> Result<InboundMessage, AdapterError> {
         // This adapter is poll-based, so parse is used to convert a comment to InboundMessage
-        let _comment: GoogleDocsComment =
-            serde_json::from_slice(raw_payload).map_err(|e| AdapterError::ParseError(e.to_string()))?;
+        let _comment: GoogleDocsComment = serde_json::from_slice(raw_payload)
+            .map_err(|e| AdapterError::ParseError(e.to_string()))?;
 
         // We need document info which isn't in the raw payload
         // This method is less useful for poll-based adapters
         Err(AdapterError::ParseError(
-            "GoogleDocsInboundAdapter is poll-based; use comment_to_inbound_message instead".to_string(),
+            "GoogleDocsInboundAdapter is poll-based; use comment_to_inbound_message instead"
+                .to_string(),
         ))
     }
 

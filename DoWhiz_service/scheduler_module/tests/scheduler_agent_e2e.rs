@@ -53,7 +53,8 @@ impl TaskExecutor for RecordingExecutor {
                     runner: run.runner.clone(),
                     codex_disabled: run.codex_disabled,
                     channel: run.channel.to_string(),
-                    google_access_token: scheduler_module::load_google_access_token_from_service_env(),
+                    google_access_token:
+                        scheduler_module::load_google_access_token_from_service_env(),
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;

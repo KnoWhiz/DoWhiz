@@ -57,22 +57,29 @@ pub(crate) fn process_google_docs_message(
         Some(actionable.tracking_id.clone()),
     )?;
 
-    append_google_docs_comment(&workspace, message, &actionable, thread_state.last_email_seq)?;
+    append_google_docs_comment(
+        &workspace,
+        message,
+        &actionable,
+        thread_state.last_email_seq,
+    )?;
 
     if let Ok(auth) = GoogleAuth::from_env() {
         let adapter = GoogleDocsInboundAdapter::new(auth, HashSet::new());
         match adapter.read_document_content(document_id) {
             Ok(doc_content) => {
-                let doc_content_path = workspace.join("incoming_email").join("document_content.txt");
+                let doc_content_path = workspace
+                    .join("incoming_email")
+                    .join("document_content.txt");
                 if let Err(e) = std::fs::write(&doc_content_path, &doc_content) {
-                    warn!(
-                        "Failed to save document content for {}: {}",
-                        document_id, e
-                    );
+                    warn!("Failed to save document content for {}: {}", document_id, e);
                 }
             }
             Err(e) => {
-                warn!("Failed to fetch document content for {}: {}", document_id, e);
+                warn!(
+                    "Failed to fetch document content for {}: {}",
+                    document_id, e
+                );
             }
         }
     }
@@ -80,7 +87,11 @@ pub(crate) fn process_google_docs_message(
     let model_name = match config.employee_profile.model.clone() {
         Some(model) => model,
         None => {
-            if config.employee_profile.runner.eq_ignore_ascii_case("claude") {
+            if config
+                .employee_profile
+                .runner
+                .eq_ignore_ascii_case("claude")
+            {
                 String::new()
             } else {
                 config.codex_model.clone()
@@ -140,8 +151,16 @@ pub(super) fn append_google_docs_comment(
     std::fs::write(&raw_path, &raw_json)?;
 
     // Create HTML representation for the agent
-    let doc_name = message.metadata.google_docs_document_name.as_deref().unwrap_or("Document");
-    let doc_id = message.metadata.google_docs_document_id.as_deref().unwrap_or("");
+    let doc_name = message
+        .metadata
+        .google_docs_document_name
+        .as_deref()
+        .unwrap_or("Document");
+    let doc_id = message
+        .metadata
+        .google_docs_document_id
+        .as_deref()
+        .unwrap_or("");
     let sender_name = message.sender_name.as_deref().unwrap_or(&message.sender);
     let quoted_text = actionable
         .comment
@@ -216,7 +235,10 @@ pub(super) fn append_google_docs_comment(
         if quoted_text.is_empty() {
             String::new()
         } else {
-            format!("<h3>Quoted text:</h3><blockquote>{}</blockquote>", quoted_text)
+            format!(
+                "<h3>Quoted text:</h3><blockquote>{}</blockquote>",
+                quoted_text
+            )
         },
         thread_html
     );
