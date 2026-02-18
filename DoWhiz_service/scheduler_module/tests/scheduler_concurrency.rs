@@ -155,6 +155,9 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
         bluebubbles_url: None,
         bluebubbles_password: None,
         telegram_bot_token: None,
+        whatsapp_access_token: None,
+        whatsapp_phone_number_id: None,
+        whatsapp_verify_token: None,
     };
 
     let rt = Runtime::new()?;
