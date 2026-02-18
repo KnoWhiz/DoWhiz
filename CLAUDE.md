@@ -2,6 +2,8 @@
 
 `external/` folder contains information about other projects that we can use as reference but we never need to touch the code in it.
 
+By default open RUN_CODEX_E2E=1 and POSTMARK_LIVE_TEST=1 to use real emails address (mini-mouse@dowhiz.com / deep-tutor@deep-tutor.com to send emails to proto@dowhiz.com / oliver@dowhiz.com / maggie@dowhiz.com). For ngrok domain you can use: `https://shayne-laminar-lillian.ngrok-free.dev`
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
