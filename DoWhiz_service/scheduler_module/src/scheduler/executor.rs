@@ -1,8 +1,10 @@
 use tracing::{info, warn};
 
 use crate::channel::Channel;
+use crate::memory_diff::compute_memory_diff;
+use crate::memory_queue::{global_memory_queue, MemoryWriteRequest};
 use crate::memory_store::{
-    resolve_user_memory_dir, sync_user_memory_to_workspace, sync_workspace_memory_to_user,
+    read_memo_content, resolve_user_memory_dir, snapshot_memo_content, sync_user_memory_to_workspace,
 };
 use crate::secrets_store::{
     resolve_user_secrets_path, sync_user_secrets_to_workspace, sync_workspace_secrets_to_user,
@@ -80,6 +82,12 @@ impl TaskExecutor for ModuleExecutor {
                 let workspace_memory_dir = task.workspace_dir.join(&task.memory_dir);
                 let user_memory_dir = resolve_user_memory_dir(task);
                 let user_secrets_path = resolve_user_secrets_path(task);
+
+                // Snapshot original memo content before syncing to workspace
+                let original_memo_snapshot = user_memory_dir
+                    .as_ref()
+                    .and_then(|dir| snapshot_memo_content(dir));
+
                 if let Some(user_memory_dir) = user_memory_dir.as_ref() {
                     sync_user_memory_to_workspace(user_memory_dir, &workspace_memory_dir).map_err(
                         |err| SchedulerError::TaskFailed(format!("memory sync failed: {}", err)),
@@ -116,11 +124,57 @@ impl TaskExecutor for ModuleExecutor {
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
+
+                // After task completes, compute diff and submit to queue instead of direct sync
                 if let Some(user_memory_dir) = user_memory_dir.as_ref() {
-                    sync_workspace_memory_to_user(&workspace_memory_dir, user_memory_dir).map_err(
-                        |err| SchedulerError::TaskFailed(format!("memory sync failed: {}", err)),
-                    )?;
+                    if let Some(original_content) = original_memo_snapshot {
+                        // Read modified workspace memo
+                        if let Some(modified_content) = read_memo_content(&workspace_memory_dir) {
+                            let diff = compute_memory_diff(&original_content, &modified_content);
+                            if !diff.is_empty() {
+                                // Extract user_id from path: users/{user_id}/memory
+                                let user_id = user_memory_dir
+                                    .parent()
+                                    .and_then(|p| p.file_name())
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("unknown")
+                                    .to_string();
+
+                                let request = MemoryWriteRequest {
+                                    user_id: user_id.clone(),
+                                    user_memory_dir: user_memory_dir.clone(),
+                                    diff,
+                                };
+
+                                // Submit to queue - blocks until worker applies the diff
+                                if let Err(e) = global_memory_queue().submit(request) {
+                                    warn!(
+                                        "Failed to submit memory diff to queue for user {}: {}",
+                                        user_id, e
+                                    );
+                                    // Fall back to direct sync on queue failure
+                                    if let Err(e) = crate::memory_store::sync_workspace_memory_to_user(
+                                        &workspace_memory_dir,
+                                        user_memory_dir,
+                                    ) {
+                                        warn!("Fallback memory sync also failed: {}", e);
+                                    }
+                                }
+                            }
+                            // If diff is empty, no changes to sync
+                        }
+                    } else {
+                        // No snapshot available, fall back to direct sync
+                        warn!("No original memo snapshot, falling back to direct sync");
+                        if let Err(e) = crate::memory_store::sync_workspace_memory_to_user(
+                            &workspace_memory_dir,
+                            user_memory_dir,
+                        ) {
+                            warn!("Memory sync failed: {}", e);
+                        }
+                    }
                 }
+
                 if let Some(user_secrets_path) = user_secrets_path.as_ref() {
                     sync_workspace_secrets_to_user(&task.workspace_dir, user_secrets_path)
                         .map_err(|err| {
