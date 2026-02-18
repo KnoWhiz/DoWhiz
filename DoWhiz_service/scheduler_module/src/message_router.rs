@@ -1,13 +1,12 @@
 //! LLM message router for classifying and handling simple queries.
 //!
-//! This module provides a message router that uses an LLM (OpenAI or Ollama) to classify
+//! This module provides a message router that uses OpenAI GPT to classify
 //! incoming messages. Simple queries (greetings, basic questions) are handled directly
 //! by the model, while complex queries are forwarded to the full Codex/Claude pipeline.
 //!
 //! Configuration:
-//! - `OPENAI_API_KEY`: OpenAI API key (preferred if set)
-//! - `ROUTER_MODEL`: Model to use (default: `gpt-4o-mini` for OpenAI, `phi3:mini` for Ollama)
-//! - `OLLAMA_URL`: Ollama server URL (default: `http://localhost:11434`)
+//! - `OPENAI_API_KEY`: OpenAI API key (required)
+//! - `ROUTER_MODEL`: Model to use (default: `gpt-5`)
 //! - `ROUTER_ENABLED`: Set to "false" to disable routing (default: enabled)
 
 use std::env;
@@ -20,14 +19,8 @@ use tracing::{debug, info, warn};
 /// Default OpenAI API URL
 const DEFAULT_OPENAI_URL: &str = "https://api.openai.com/v1";
 
-/// Default Ollama server URL
-const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
-
 /// Default model for OpenAI
-const DEFAULT_OPENAI_MODEL: &str = "gpt-5";
-
-/// Default model for Ollama
-const DEFAULT_OLLAMA_MODEL: &str = "phi3:mini";
+const DEFAULT_MODEL: &str = "gpt-5";
 
 /// Timeout for LLM requests
 const LLM_TIMEOUT: Duration = Duration::from_secs(15);
@@ -82,24 +75,13 @@ pub enum RouterDecision {
     Passthrough,
 }
 
-/// LLM provider to use for routing
-#[derive(Debug, Clone, PartialEq)]
-pub enum RouterProvider {
-    OpenAI,
-    Ollama,
-}
-
 /// Configuration for the message router
 #[derive(Debug, Clone)]
 pub struct RouterConfig {
-    /// Which LLM provider to use
-    pub provider: RouterProvider,
-    /// OpenAI API key (required for OpenAI provider)
+    /// OpenAI API key (required)
     pub openai_api_key: Option<String>,
     /// OpenAI API URL
     pub openai_url: String,
-    /// Ollama server URL
-    pub ollama_url: String,
     /// Model to use
     pub model: String,
     /// Whether routing is enabled
@@ -109,26 +91,13 @@ pub struct RouterConfig {
 impl Default for RouterConfig {
     fn default() -> Self {
         let openai_api_key = env::var("OPENAI_API_KEY").ok();
-        let provider = if openai_api_key.is_some() {
-            RouterProvider::OpenAI
-        } else {
-            RouterProvider::Ollama
-        };
-
-        let default_model = match provider {
-            RouterProvider::OpenAI => DEFAULT_OPENAI_MODEL,
-            RouterProvider::Ollama => DEFAULT_OLLAMA_MODEL,
-        };
 
         Self {
-            provider,
             openai_api_key,
             openai_url: env::var("OPENAI_API_URL")
                 .unwrap_or_else(|_| DEFAULT_OPENAI_URL.to_string()),
-            ollama_url: env::var("OLLAMA_URL").unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string()),
-            model: env::var("ROUTER_MODEL").unwrap_or_else(|_| default_model.to_string()),
+            model: env::var("ROUTER_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string()),
             enabled: env::var("ROUTER_ENABLED")
-                .or_else(|_| env::var("OLLAMA_ENABLED"))
                 .map(|v| v.to_lowercase() != "false")
                 .unwrap_or(true),
         }
@@ -155,14 +124,9 @@ impl MessageRouter {
             .build()
             .unwrap_or_else(|_| Client::new());
 
-        let provider_info = match config.provider {
-            RouterProvider::OpenAI => format!("OpenAI ({})", config.openai_url),
-            RouterProvider::Ollama => format!("Ollama ({})", config.ollama_url),
-        };
-
         info!(
-            "MessageRouter initialized: provider={}, model={}, enabled={}",
-            provider_info, config.model, config.enabled
+            "MessageRouter initialized: url={}, model={}, enabled={}",
+            config.openai_url, config.model, config.enabled
         );
 
         Self { config, client }
@@ -189,6 +153,11 @@ impl MessageRouter {
             return RouterDecision::Passthrough;
         }
 
+        if self.config.openai_api_key.is_none() {
+            warn!("OPENAI_API_KEY not set, router disabled");
+            return RouterDecision::Passthrough;
+        }
+
         if message.trim().is_empty() {
             return RouterDecision::Passthrough;
         }
@@ -203,10 +172,7 @@ impl MessageRouter {
             return RouterDecision::Complex;
         }
 
-        let result = match self.config.provider {
-            RouterProvider::OpenAI => self.call_openai(message, memory).await,
-            RouterProvider::Ollama => self.call_ollama(message, memory).await,
-        };
+        let result = self.call_openai(message, memory).await;
 
         match result {
             Ok(response) => {
@@ -217,11 +183,17 @@ impl MessageRouter {
                     RouterDecision::Complex
                 } else {
                     let (reply, memory_update) = Self::parse_response(trimmed);
-                    info!("Router decision: Simple (local response, memory_update={})", memory_update.is_some());
+                    info!(
+                        "Router decision: Simple (local response, memory_update={})",
+                        memory_update.is_some()
+                    );
                     if let Some(ref update) = memory_update {
                         debug!("Memory update content: {}", update);
                     }
-                    RouterDecision::Simple { response: reply, memory_update }
+                    RouterDecision::Simple {
+                        response: reply,
+                        memory_update,
+                    }
                 }
             }
             Err(e) => {
@@ -267,7 +239,11 @@ impl MessageRouter {
             if mem.trim().is_empty() {
                 message.to_string()
             } else {
-                format!("User memory:\n```\n{}\n```\n\nMessage: {}", mem.trim(), message)
+                format!(
+                    "User memory:\n```\n{}\n```\n\nMessage: {}",
+                    mem.trim(),
+                    message
+                )
             }
         } else {
             message.to_string()
@@ -324,58 +300,6 @@ impl MessageRouter {
 
         Ok(content)
     }
-
-    /// Make a request to the Ollama API (async)
-    async fn call_ollama(&self, message: &str, memory: Option<&str>) -> Result<String, String> {
-        let url = format!("{}/api/generate", self.config.ollama_url);
-
-        // Build prompt with optional memory context
-        let prompt = if let Some(mem) = memory {
-            if mem.trim().is_empty() {
-                message.to_string()
-            } else {
-                format!("User memory:\n```\n{}\n```\n\nMessage: {}", mem.trim(), message)
-            }
-        } else {
-            message.to_string()
-        };
-
-        let request = OllamaGenerateRequest {
-            model: self.config.model.clone(),
-            prompt,
-            system: Some(SYSTEM_PROMPT.to_string()),
-            stream: false,
-            temperature: 0.3, // Low temp for consistent classification, some variety in responses
-        };
-
-        debug!("Calling Ollama: {} with model {}", url, self.config.model);
-
-        let response = self
-            .client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(format!("Ollama returned {}: {}", status, body));
-        }
-
-        let ollama_response: OllamaGenerateResponse = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-
-        debug!(
-            "Ollama response received in {:?}",
-            Duration::from_nanos(ollama_response.total_duration.unwrap_or(0))
-        );
-
-        Ok(ollama_response.response)
-    }
 }
 
 impl Default for MessageRouter {
@@ -415,30 +339,6 @@ struct OpenAIChatChoice {
     message: OpenAIChatMessage,
 }
 
-// ============================================================================
-// Ollama API types
-// ============================================================================
-
-/// Request body for Ollama generate endpoint
-#[derive(Debug, Clone, Serialize)]
-struct OllamaGenerateRequest {
-    model: String,
-    prompt: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
-    stream: bool,
-    /// Temperature for sampling (0.0 = deterministic, 1.0 = max randomness)
-    temperature: f32,
-}
-
-/// Response from Ollama generate endpoint
-#[derive(Debug, Clone, Deserialize)]
-struct OllamaGenerateResponse {
-    response: String,
-    #[serde(default)]
-    total_duration: Option<u64>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -448,16 +348,12 @@ mod tests {
         // Clear env vars for test
         env::remove_var("OPENAI_API_KEY");
         env::remove_var("OPENAI_API_URL");
-        env::remove_var("OLLAMA_URL");
         env::remove_var("ROUTER_MODEL");
         env::remove_var("ROUTER_ENABLED");
-        env::remove_var("OLLAMA_ENABLED");
 
         let config = RouterConfig::default();
-        // Without OPENAI_API_KEY, should fall back to Ollama
-        assert_eq!(config.provider, RouterProvider::Ollama);
-        assert_eq!(config.ollama_url, DEFAULT_OLLAMA_URL);
-        assert_eq!(config.model, DEFAULT_OLLAMA_MODEL);
+        assert_eq!(config.openai_url, DEFAULT_OPENAI_URL);
+        assert_eq!(config.model, DEFAULT_MODEL);
         assert!(config.enabled);
     }
 
@@ -469,5 +365,22 @@ mod tests {
 
         let response_with_extra = "I think this needs FORWARD_TO_AGENT handling";
         assert!(response_with_extra.contains(FORWARD_MARKER));
+    }
+
+    #[test]
+    fn parse_response_with_memory() {
+        let response = "Great! I'll remember that.\n\n<MEMORY_UPDATE>\n## Profile\n- Goes to Stanford\n</MEMORY_UPDATE>";
+        let (reply, memory) = MessageRouter::parse_response(response);
+        assert_eq!(reply, "Great! I'll remember that.");
+        assert!(memory.is_some());
+        assert!(memory.unwrap().contains("Stanford"));
+    }
+
+    #[test]
+    fn parse_response_without_memory() {
+        let response = "Hello! How can I help you today?";
+        let (reply, memory) = MessageRouter::parse_response(response);
+        assert_eq!(reply, response);
+        assert!(memory.is_none());
     }
 }
