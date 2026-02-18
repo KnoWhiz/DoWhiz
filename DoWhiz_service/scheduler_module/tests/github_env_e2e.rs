@@ -290,6 +290,9 @@ fn email_flow_injects_github_env() {
         bluebubbles_url: None,
         bluebubbles_password: None,
         telegram_bot_token: None,
+        whatsapp_access_token: None,
+        whatsapp_phone_number_id: None,
+        whatsapp_verify_token: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
@@ -415,6 +418,9 @@ fn email_flow_injects_employee_github_env() {
         bluebubbles_url: None,
         bluebubbles_password: None,
         telegram_bot_token: None,
+        whatsapp_access_token: None,
+        whatsapp_phone_number_id: None,
+        whatsapp_verify_token: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");

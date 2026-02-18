@@ -579,6 +579,9 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         bluebubbles_url: None,
         bluebubbles_password: None,
         telegram_bot_token: None,
+        whatsapp_access_token: None,
+        whatsapp_phone_number_id: None,
+        whatsapp_verify_token: None,
     };
 
     let gateway_config_path = state_dir.join("gateway.toml");

@@ -339,6 +339,9 @@ fn secrets_persist_across_workspaces_and_load(
         bluebubbles_url: None,
         bluebubbles_password: None,
         telegram_bot_token: None,
+        whatsapp_access_token: None,
+        whatsapp_phone_number_id: None,
+        whatsapp_verify_token: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path)?;
