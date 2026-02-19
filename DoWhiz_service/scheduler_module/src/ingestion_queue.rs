@@ -98,7 +98,8 @@ impl PostgresIngestionQueue {
 
         let manager = PostgresConnectionManager::new(config, tls);
         let pool = Pool::builder()
-            .max_size(8)
+            .max_size(4)
+            .idle_timeout(Some(std::time::Duration::from_secs(300))) // Close idle connections after 5 min
             .error_handler(Box::new(LoggingErrorHandler))
             .build(manager)?;
         let queue = Self {
