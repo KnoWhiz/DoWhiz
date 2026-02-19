@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DoWhiz Service is a Rust microservice handling inbound channels (Postmark email, Slack, Discord, Google Docs, BlueBubbles/iMessage, Twilio SMS, Telegram), AI-powered task execution (Codex/Claude CLI), and outbound message delivery. It supports multiple "employee" profiles (Oliver, Maggie, Devin, Boiled-Egg) with isolated workspaces and configurable AI runners.
+DoWhiz Service is a Rust microservice handling inbound channels (Postmark email, Slack, Discord, Google Docs, BlueBubbles/iMessage, Twilio SMS, Telegram, WhatsApp), AI-powered task execution (Codex/Claude CLI), and outbound message delivery. It supports multiple "employee" profiles (Oliver, Maggie, Devin, Boiled-Egg) with isolated workspaces and configurable AI runners.
 
 ## Build & Test Commands
 
@@ -42,13 +42,15 @@ RUST_SERVICE_LIVE_TEST=1 cargo test -p scheduler_module --test service_real_emai
 
 ### Message Flow
 ```
-External Events (Postmark/Slack/Discord/GoogleDocs/BlueBubbles/Twilio SMS/Telegram)
+External Events (Postmark/Slack/Discord/GoogleDocs/BlueBubbles/Twilio SMS/Telegram/WhatsApp)
     ↓
-Inbound Gateway (port 9100) - deduplicates, routes to single employee
+Inbound Gateway (port 9100) - deduplicates, stores raw payloads, routes to single employee
     ↓
-Worker Service (ports 9001-9004) - per-employee HTTP server
+Postgres Ingestion Queue
     ↓
-Ingestion Queue + Scheduler - persists to SQLite, creates RunTask
+Worker Service (ports 9001-9004) - per-employee consumer + HTTP server
+    ↓
+Scheduler (SQLite) - persists tasks, creates RunTask
     ↓
 AI Agent Execution - codex CLI or claude CLI with workspace setup
     ↓
@@ -61,10 +63,11 @@ Outbound Delivery - send via channel adapter, archive to user mail
 
 - **scheduler_module/src/lib.rs**: Core types (`TaskKind`, `Schedule`, `Scheduler<E>`)
 - **scheduler_module/src/service/server.rs**: Axum HTTP server setup (worker)
-- **scheduler_module/src/channel.rs**: `Channel` enum abstracting Email/Slack/Discord/SMS/Telegram/GoogleDocs/BlueBubbles
+- **scheduler_module/src/channel.rs**: `Channel` enum abstracting Email/Slack/Discord/SMS/Telegram/WhatsApp/GoogleDocs/BlueBubbles
 - **scheduler_module/src/ingestion.rs**: `InboundMessage` envelope structure
 - **scheduler_module/src/message_router.rs**: quick-response classifier (OpenAI)
 - **scheduler_module/src/adapters/**: Channel-specific implementations (postmark.rs, slack.rs, discord.rs, google_docs.rs, bluebubbles.rs)
+- **scheduler_module/src/adapters/whatsapp.rs**: WhatsApp inbound/outbound adapter
 - **scheduler_module/src/bin/rust_service.rs**: Main entry point
 - **scheduler_module/src/bin/inbound_gateway.rs**: Message router/deduplicator
 
@@ -72,7 +75,7 @@ Outbound Delivery - send via channel adapter, archive to user mail
 
 - **employee.toml**: Employee profiles (id, runner, addresses, personality files)
 - **gateway.toml**: Inbound gateway routing targets
-- **.env**: Secrets (POSTMARK_SERVER_TOKEN, AZURE_OPENAI_*, SLACK_*, DISCORD_*, GOOGLE_*)
+- **.env**: Secrets (POSTMARK_SERVER_TOKEN, AZURE_OPENAI_*, SLACK_*, DISCORD_*, GOOGLE_*, WHATSAPP_*)
 
 ### Database Schema (SQLite)
 
@@ -125,6 +128,9 @@ After completing code changes, you must design targeted, detailed unit tests and
 - `TWILIO_ACCOUNT_SID`: Twilio account SID (SMS outbound)
 - `TWILIO_AUTH_TOKEN`: Twilio auth token (SMS outbound + webhook verification)
 - `TWILIO_WEBHOOK_URL`: Public URL used to validate Twilio signatures
+- `WHATSAPP_ACCESS_TOKEN`: WhatsApp Cloud API access token
+- `WHATSAPP_PHONE_NUMBER_ID`: WhatsApp phone number ID for outbound sends
+- `WHATSAPP_VERIFY_TOKEN`: WhatsApp webhook verification token
 - `BLUEBUBBLES_URL`: BlueBubbles server URL (iMessage outbound)
 - `BLUEBUBBLES_PASSWORD`: BlueBubbles server password
 - `SLACK_CLIENT_ID`: Slack OAuth client id

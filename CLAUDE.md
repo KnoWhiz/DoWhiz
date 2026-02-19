@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DoWhiz is a multi-tenant, email-first digital employee platform. Users send tasks to digital employees via email (and other channels like Slack, Discord, SMS via Twilio, Telegram, Google Docs comments, iMessage via BlueBubbles), and AI agents (Codex CLI or Claude Code) process and respond. The system emphasizes per-user isolation, role-based agents, and tool-backed execution.
+DoWhiz is a multi-tenant, email-first digital employee platform. Users send tasks to digital employees via email (and other channels like Slack, Discord, SMS via Twilio, Telegram, WhatsApp, Google Docs comments, iMessage via BlueBubbles), and AI agents (Codex CLI or Claude Code) process and respond. The system emphasizes per-user isolation, role-based agents, and tool-backed execution.
 
 ## Build and Development Commands
 
@@ -65,7 +65,10 @@ docker run --rm -p 9001:9001 \
 
 ### Data Flow
 ```
-Inbound (Email/Slack/Discord/SMS/Telegram/Google Docs/iMessage) → Gateway → Deduplication → Routing
+Inbound (Email/Slack/Discord/SMS/Telegram/WhatsApp/Google Docs/iMessage)
+    → Ingestion Gateway (dedupe + raw payload storage)
+    → Postgres Ingestion Queue
+    → Worker Service (per-employee)
     → Scheduler (SQLite) → Task Execution (Codex/Claude) → Outbound Reply
 ```
 
@@ -78,6 +81,7 @@ Inbound (Email/Slack/Discord/SMS/Telegram/Google Docs/iMessage) → Gateway → 
 | `scheduler_module/src/user_store/mod.rs` | Per-user data management |
 | `send_emails_module/src/lib.rs` | Postmark API wrapper |
 | `run_task_module/src/lib.rs` | Codex/Claude CLI invocation |
+| `scheduler_module/src/adapters/whatsapp.rs` | WhatsApp inbound/outbound adapter |
 | `DoWhiz_service/employee.toml` | Employee registry (addresses, runners, models) |
 
 ### Runtime State

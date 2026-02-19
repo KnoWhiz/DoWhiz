@@ -2,9 +2,20 @@ use postgres_native_tls::MakeTlsConnector;
 use r2d2::{Pool, PooledConnection};
 use r2d2_postgres::PostgresConnectionManager;
 use std::env;
+use tracing::error;
 use uuid::Uuid;
 
 use crate::ingestion::IngestionEnvelope;
+
+/// Custom error handler that logs the actual connection error
+#[derive(Debug)]
+struct LoggingErrorHandler;
+
+impl r2d2::HandleError<postgres::Error> for LoggingErrorHandler {
+    fn handle_error(&self, err: postgres::Error) {
+        error!("postgres connection pool error: {:?}", err);
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum IngestionQueueError {
@@ -86,7 +97,11 @@ impl PostgresIngestionQueue {
         let tls = MakeTlsConnector::new(tls_connector);
 
         let manager = PostgresConnectionManager::new(config, tls);
-        let pool = Pool::builder().max_size(8).build(manager)?;
+        let pool = Pool::builder()
+            .max_size(4)
+            .idle_timeout(Some(std::time::Duration::from_secs(300))) // Close idle connections after 5 min
+            .error_handler(Box::new(LoggingErrorHandler))
+            .build(manager)?;
         let queue = Self {
             pool: Some(pool),
             table,

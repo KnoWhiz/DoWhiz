@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `scheduler_module/`: inbound webhooks, scheduling, and service binaries.
+- `scheduler_module/`: inbound gateway (Postgres ingestion queue + raw payload storage), scheduling, and service binaries.
 - `send_emails_module/`: Postmark integration and email sending.
 - `run_task_module/`: task execution and workspace orchestration (`src/run_task/`).
 - `scripts/`: local run helpers (gateway, employees, E2E).
@@ -17,7 +17,7 @@
 - `cargo clippy --all-targets --all-features`: lint.
 - `cargo fmt --check`: formatting check.
 - `./scripts/run_employee.sh little_bear 9001`: run a local worker with ngrok + Postmark hook update.
-- When using the inbound gateway, run workers with `--skip-hook --skip-ngrok`.
+- When using the inbound gateway, run workers with `--skip-hook --skip-ngrok` (workers only consume the ingestion queue; webhooks hit the gateway).
 - `cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001`: run the service directly.
 - `./scripts/run_gateway_local.sh`: start the inbound gateway locally.
 - `docker build -t dowhiz-service .`: build the container image.

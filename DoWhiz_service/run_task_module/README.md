@@ -1,11 +1,12 @@
 # run_task_module
 
-Run Codex CLI to generate `reply_email_draft.html` and optional `reply_email_attachments/` based on workspace inputs.
+Run Codex or Claude CLI to generate `reply_email_draft.html` and optional `reply_email_attachments/` based on workspace inputs.
 
 ## Usage
 
 Requirements:
-- Codex CLI installed and available on PATH.
+- Codex CLI installed and available on PATH (for `runner = "codex"`).
+- Claude CLI installed and available on PATH (for `runner = "claude"`).
 - Node.js 20 + npm.
 - `playwright-cli` + Chromium (required when Codex calls browser automation skills).
 - Environment variables:

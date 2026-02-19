@@ -22,6 +22,7 @@ After any code change, consult this checklist, run all relevant AUTO tests, and 
 | UT-RUN-06 | extract_scheduler_actions_reports_invalid_json | run_task_module/src/run_task/scheduled.rs::extract_scheduler_actions | DoWhiz_service/run_task_module/src/run_task/scheduled.rs | Error path on invalid JSON | Error message detail | AUTO | cargo test -p run_task_module |
 
 ## Unit Tests: scheduler_module (core/data/stores)
+Note: scheduler_module tests expect a Postgres ingestion queue; set `SUPABASE_DB_URL` (or `INGESTION_DB_URL` / `DATABASE_URL`) before running `cargo test -p scheduler_module`.
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
 |---|---|---|---|---|---|---|---|
 | UT-SCH-01 | build_scheduler_snapshot_limits_to_window | scheduler_module/src/scheduler/snapshot | DoWhiz_service/scheduler_module/src/scheduler/tests.rs | Snapshot window trimming | Performance with large task sets | AUTO | cargo test -p scheduler_module |
@@ -189,6 +190,9 @@ After any code change, consult this checklist, run all relevant AUTO tests, and 
 | GAP-09 | P1 | SlackStore env fallback | slack_store::get_installation_or_env | Not tested | PLANNED | Set env + call fallback path |
 | GAP-10 | P2 | Cron timezone/DST edge behavior | scheduler cron parsing | No DST tests | MANUAL | Run around DST boundary |
 | GAP-11 | P2 | Postmark inbound payload edge cases | service/email.rs::process_inbound_payload | Limited payload variations | MANUAL | Create malformed/partial payloads |
+| GAP-12 | P1 | WhatsApp inbound adapter parsing | adapters/whatsapp.rs::WhatsAppInboundAdapter::parse | No webhook parsing tests | PLANNED | Add unit tests with sample webhook payloads |
+| GAP-13 | P1 | WhatsApp outbound adapter send/error mapping | adapters/whatsapp.rs::WhatsAppOutboundAdapter::send | No outbound/mock coverage | PLANNED | Mock Graph API or inject base URL |
+| GAP-14 | P1 | Raw payload storage upload/download | raw_payload_store::{upload_raw_payload, download_raw_payload} | No Supabase storage tests | PLANNED | Run against a test bucket or mock HTTP |
 
 ## Test Report Template
 | Test ID | Status (PASS/FAIL/SKIP) | Evidence (log/summary) | Notes/Reason |
