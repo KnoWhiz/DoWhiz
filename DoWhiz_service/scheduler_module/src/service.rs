@@ -2075,22 +2075,47 @@ fn process_google_docs_message(
         .google_docs_document_id
         .as_deref()
         .ok_or("missing google_docs_document_id")?;
-    let user_email = extract_emails(&message.sender)
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| format!("gdocs_{}@local", message.sender.replace(' ', "_")));
-    let user = user_store.get_or_create_user("google_docs", &user_email)?;
-    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
-    user_store.ensure_user_dirs(&user_paths)?;
-
     let thread_key = format!("gdocs:{}:{}", document_id, actionable.comment.id);
 
-    // Check for existing collaboration session for this document
+    // Check for existing collaboration session for this document FIRST
+    // This allows us to use the session's user_id for cross-channel collaboration
     let existing_session = collaboration_store.find_session_by_artifact(
         "google_docs",
         document_id,
         None, // Any user - comments can continue sessions started by others
     )?;
+
+    // Determine user_id: prefer session's user_id for collaboration continuity
+    let (user, user_paths) = if let Some(ref session) = existing_session {
+        // Use the session's user_id to maintain collaboration context
+        // This ensures Email + Google Docs comments share the same user identity
+        let session_user_id = &session.user_id;
+        let paths = user_store.user_paths(&config.users_root, session_user_id);
+        user_store.ensure_user_dirs(&paths)?;
+        info!(
+            "using collaboration session user_id {} for Google Docs comment (original channel: {})",
+            session_user_id, session.primary_channel
+        );
+        // Create a minimal UserRecord for consistency (we don't need to store it again)
+        let user_record = crate::user_store::UserRecord {
+            user_id: session_user_id.clone(),
+            identifier_type: "session".to_string(),
+            identifier: session.id.clone(),
+            created_at: chrono::Utc::now(),
+            last_seen_at: chrono::Utc::now(),
+        };
+        (user_record, paths)
+    } else {
+        // No existing session - create/find user based on Google Docs identity
+        let user_email = extract_emails(&message.sender)
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| format!("gdocs_{}@local", message.sender.replace(' ', "_")));
+        let user = user_store.get_or_create_user("google_docs", &user_email)?;
+        let paths = user_store.user_paths(&config.users_root, &user.user_id);
+        user_store.ensure_user_dirs(&paths)?;
+        (user, paths)
+    };
 
     // Determine workspace - use existing session's workspace if available
     let (workspace, is_continuation) = if let Some(ref session) = existing_session {
@@ -2576,7 +2601,13 @@ pub fn process_inbound_payload(
         &config.employee_profile,
         config.skills_source_dir.as_deref(),
     )?;
-    let reply_from = Some(inbound_service_mailbox.formatted());
+    // Use employee's first address if inbound is a Postmark test address, otherwise use inbound
+    let inbound_formatted = inbound_service_mailbox.formatted();
+    let reply_from = if inbound_formatted.contains("@inbound.postmarkapp.com") {
+        config.employee_profile.addresses.first().cloned()
+    } else {
+        Some(inbound_formatted)
+    };
     let model_name = match config.employee_profile.model.clone() {
         Some(model) => model,
         None => {
@@ -2718,8 +2749,7 @@ pub fn process_inbound_payload(
                 ## Artifacts\n\
                 {}\n\n\
                 ## Instructions\n\
-                This email contains references to external artifacts. \
-                You may need to access and modify these artifacts as part of your task.\n",
+                This email contains references to external artifacts. You may need to access and modify these artifacts as part of your task.\n",
                 session.id,
                 extracted_artifacts
                     .iter()
@@ -2730,6 +2760,129 @@ pub fn process_inbound_payload(
             if let Err(err) = fs::write(collab_dir.join("context_summary.md"), &summary) {
                 warn!("failed to write context summary: {}", err);
             }
+        }
+    }
+
+    // Pre-fetch Google Docs content for artifacts (outside sandbox, before Codex runs)
+    // This allows Codex to access document content without needing network access
+    if !extracted_artifacts.is_empty() {
+        use crate::adapters::google_docs::GoogleDocsInboundAdapter;
+        use crate::google_auth::GoogleAuthConfig;
+        use std::collections::HashSet;
+
+        // Try to create Google Docs adapter with employee-specific credentials
+        let auth_config = GoogleAuthConfig::from_env_for_employee(
+            Some(&config.employee_profile.id)
+        );
+        if let Ok(auth) = crate::google_auth::GoogleAuth::new(auth_config) {
+            // Write access token to workspace for agent to use
+            // (google-docs CLI will read this file since it can't access network in sandbox)
+            match auth.get_access_token() {
+                Ok(token) => {
+                    let token_path = workspace.join(".google_access_token");
+                    if let Err(e) = fs::write(&token_path, &token) {
+                        warn!("failed to write .google_access_token: {}", e);
+                    } else {
+                        info!("wrote .google_access_token to workspace for agent");
+                    }
+                }
+                Err(e) => {
+                    warn!("failed to get Google access token: {}", e);
+                }
+            }
+
+            let adapter = GoogleDocsInboundAdapter::new(auth, HashSet::new());
+
+            for artifact in &extracted_artifacts {
+                // Only fetch google_docs and google_sheets for now
+                if artifact.artifact_type == "google_docs" || artifact.artifact_type == "google_sheets" {
+                    let artifacts_dir = workspace.join("artifacts").join(&artifact.artifact_type);
+                    if let Err(e) = fs::create_dir_all(&artifacts_dir) {
+                        warn!("failed to create artifacts dir for {}: {}", artifact.artifact_type, e);
+                        continue;
+                    }
+
+                    let doc_dir = artifacts_dir.join(&artifact.artifact_id);
+                    if let Err(e) = fs::create_dir_all(&doc_dir) {
+                        warn!("failed to create doc dir for {}: {}", artifact.artifact_id, e);
+                        continue;
+                    }
+
+                    // Fetch document content
+                    match adapter.read_document_content(&artifact.artifact_id) {
+                        Ok(content) => {
+                            // Save to artifacts directory
+                            let content_path = doc_dir.join("content.txt");
+                            if let Err(e) = fs::write(&content_path, &content) {
+                                warn!(
+                                    "failed to write document content for {}: {}",
+                                    artifact.artifact_id, e
+                                );
+                            }
+                            // Also save to incoming_email/document_content.txt for agent compatibility
+                            // (this is where the agent looks for document content, matching google_docs_poller behavior)
+                            let incoming_email_dir = workspace.join("incoming_email");
+                            let _ = fs::create_dir_all(&incoming_email_dir);
+                            let doc_content_path = incoming_email_dir.join("document_content.txt");
+                            if let Err(e) = fs::write(&doc_content_path, &content) {
+                                warn!(
+                                    "failed to write document_content.txt for {}: {}",
+                                    artifact.artifact_id, e
+                                );
+                            } else {
+                                info!(
+                                    "pre-fetched Google Docs content for {} ({} bytes) -> incoming_email/document_content.txt",
+                                    artifact.artifact_id,
+                                    content.len()
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                "failed to fetch document content for {}: {}",
+                                artifact.artifact_id, e
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Update context_summary.md with correct instructions for document editing
+            // Now that we've pre-fetched content and written the access token
+            if let Some(ref session) = collaboration_session {
+                let collab_dir = workspace.join("collaboration");
+                let _ = fs::create_dir_all(&collab_dir);
+                let summary = format!(
+                    "# Collaboration Context\n\n\
+                    ## Session\n\
+                    - Session ID: {}\n\
+                    - Primary Channel: email\n\
+                    - Status: active\n\n\
+                    ## Artifacts\n\
+                    {}\n\n\
+                    ## Pre-fetched Content\n\
+                    Document content has been pre-fetched and saved to: `incoming_email/document_content.txt`\n\n\
+                    ## How to Work with This Document\n\
+                    1. **Read**: Read document content from `incoming_email/document_content.txt`\n\
+                    2. **Edit**: Use the `google-docs` CLI tool to modify the document:\n\
+                       - `google-docs update <document_id> <text>` - Overwrite document content\n\
+                       - `google-docs append <document_id> <text>` - Append text to document\n\
+                       - `google-docs insert <document_id> <index> <text>` - Insert text at position\n\
+                    3. **Reply**: Write your response to `reply_email_draft.html`\n\n\
+                    **Note**: The google-docs CLI is available and configured. Use it to make changes to the document.\n",
+                    session.id,
+                    extracted_artifacts
+                        .iter()
+                        .map(|a| format!("- [{}] {} ({})", a.artifact_type, a.artifact_id, a.url))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                if let Err(err) = fs::write(collab_dir.join("context_summary.md"), &summary) {
+                    warn!("failed to update context summary after pre-fetch: {}", err);
+                }
+            }
+        } else {
+            warn!("Google Auth not configured, skipping artifact content pre-fetch");
         }
     }
 

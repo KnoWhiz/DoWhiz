@@ -79,6 +79,10 @@ pub struct SendReplyTask {
     pub thread_epoch: Option<u64>,
     #[serde(default)]
     pub thread_state_path: Option<PathBuf>,
+    /// Reply-To header address - where replies should be sent
+    /// If set, this overrides the default reply behavior
+    #[serde(default)]
+    pub reply_to_header: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -330,6 +334,7 @@ fn execute_email_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
         bcc: task.bcc.clone(),
         in_reply_to: task.in_reply_to.clone(),
         references: task.references.clone(),
+        reply_to: task.reply_to_header.clone(),
     };
     let response = send_emails_module::send_email(&params)
         .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -611,9 +616,11 @@ fn execute_google_docs_send(task: &SendReplyTask) -> Result<(), SchedulerError> 
 
     let adapter = GoogleDocsOutboundAdapter::new(auth);
 
-    // Read text content from html_path if it exists
+    // Read text content from html_path if it exists, and strip HTML tags
+    // Google Docs comments API only supports plain text, not HTML
     let text_body = if task.html_path.exists() {
-        fs::read_to_string(&task.html_path).unwrap_or_default()
+        let html_content = fs::read_to_string(&task.html_path).unwrap_or_default();
+        strip_html_tags_for_google_docs(&html_content)
     } else {
         String::new()
     };
@@ -632,9 +639,12 @@ fn execute_google_docs_send(task: &SendReplyTask) -> Result<(), SchedulerError> 
             }
         })
         .ok_or_else(|| {
-            SchedulerError::TaskFailed(
-                "Missing document_id:comment_id in in_reply_to for Google Docs".to_string(),
-            )
+            SchedulerError::TaskFailed(format!(
+                "Missing document_id:comment_id in in_reply_to for Google Docs (got: {:?}). \
+                This may happen for tasks created before the google_docs_metadata.json feature was added. \
+                Check workspace incoming_email/google_docs_metadata.json file.",
+                task.in_reply_to
+            ))
         })?;
 
     let message = OutboundMessage {
@@ -672,6 +682,53 @@ fn execute_google_docs_send(task: &SendReplyTask) -> Result<(), SchedulerError> 
         task.to, result.message_id
     );
     Ok(())
+}
+
+/// Strip HTML tags from content for Google Docs comments (which only support plain text).
+/// This also converts common HTML entities and normalizes whitespace.
+fn strip_html_tags_for_google_docs(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_tag = false;
+    let mut last_was_whitespace = false;
+
+    for ch in input.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                // Add a space after closing tags to preserve word boundaries
+                if !last_was_whitespace {
+                    out.push(' ');
+                    last_was_whitespace = true;
+                }
+            }
+            _ if !in_tag => {
+                if ch.is_whitespace() {
+                    if !last_was_whitespace {
+                        out.push(' ');
+                        last_was_whitespace = true;
+                    }
+                } else {
+                    out.push(ch);
+                    last_was_whitespace = false;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Decode common HTML entities
+    let result = out
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'");
+
+    // Trim and normalize multiple spaces
+    result.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn notify_run_task_failure(
@@ -715,6 +772,7 @@ fn notify_run_task_failure(
                 archive_root: None,
                 thread_epoch: None,
                 thread_state_path: None,
+                reply_to_header: None,
             };
             execute_slack_send(&send_task)?;
         } else {
@@ -737,6 +795,7 @@ fn notify_run_task_failure(
                 bcc: vec![],
                 in_reply_to: None,
                 references: None,
+                reply_to: None,
             };
             send_emails_module::send_email(&params)
                 .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -771,6 +830,7 @@ fn notify_run_task_failure(
             bcc: vec![],
             in_reply_to: None,
             references: None,
+            reply_to: None,
         };
         send_emails_module::send_email(&params)
             .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -1844,6 +1904,7 @@ impl SqliteSchedulerStore {
             archive_root: normalize_optional_path(archive_root),
             thread_epoch: thread_epoch_raw.map(|value| value as u64),
             thread_state_path: normalize_optional_path(thread_state_path),
+            reply_to_header: None, // Loaded from database, default to None
         })
     }
 
@@ -1887,6 +1948,7 @@ impl SqliteSchedulerStore {
             archive_root: workspace_dir.map(PathBuf::from),
             thread_epoch: None,
             thread_state_path: None,
+            reply_to_header: None,
         })
     }
 
@@ -1929,6 +1991,7 @@ impl SqliteSchedulerStore {
             archive_root: workspace_dir.map(PathBuf::from),
             thread_epoch: None,
             thread_state_path: None,
+            reply_to_header: None,
         })
     }
     fn load_send_sms_task(
@@ -1973,6 +2036,7 @@ impl SqliteSchedulerStore {
             archive_root: None,
             thread_epoch: thread_epoch_raw.map(|value| value as u64),
             thread_state_path: normalize_optional_path(thread_state_path),
+            reply_to_header: None,
         })
     }
 
@@ -2018,6 +2082,7 @@ impl SqliteSchedulerStore {
             archive_root: None,
             thread_epoch: thread_epoch_raw.map(|value| value as u64),
             thread_state_path: normalize_optional_path(thread_state_path),
+            reply_to_header: None,
         })
     }
 
@@ -2542,8 +2607,51 @@ fn schedule_auto_reply<E: TaskExecutor>(
         return Ok(false);
     }
     let attachments_dir = task.workspace_dir.join(attachments_dirname);
-    let reply_context = load_reply_context(&task.workspace_dir);
+
+    // For Google Docs, extract document_id:comment_id from task.thread_id to avoid
+    // stale metadata when multiple comments share the same collaboration workspace.
+    // thread_id format: "gdocs:document_id:comment_id"
+    let reply_context = if matches!(task.channel, Channel::GoogleDocs) {
+        if let Some(thread_id) = task.thread_id.as_ref() {
+            if let Some(rest) = thread_id.strip_prefix("gdocs:") {
+                let parts: Vec<&str> = rest.splitn(2, ':').collect();
+                if parts.len() == 2 {
+                    let document_id = parts[0];
+                    let comment_id = parts[1];
+                    info!(
+                        "Using thread_id for Google Docs reply context: document_id={}, comment_id={}",
+                        document_id, comment_id
+                    );
+                    ReplyContext {
+                        subject: "Re: Google Docs Comment".to_string(),
+                        in_reply_to: Some(format!("{}:{}", document_id, comment_id)),
+                        references: None,
+                        from: None,
+                    }
+                } else {
+                    warn!("Invalid Google Docs thread_id format: {}", thread_id);
+                    load_reply_context(&task.workspace_dir, &task.channel)
+                }
+            } else {
+                warn!("Google Docs thread_id missing 'gdocs:' prefix: {:?}", thread_id);
+                load_reply_context(&task.workspace_dir, &task.channel)
+            }
+        } else {
+            warn!("Google Docs task missing thread_id, falling back to metadata file");
+            load_reply_context(&task.workspace_dir, &task.channel)
+        }
+    } else {
+        load_reply_context(&task.workspace_dir, &task.channel)
+    };
+
     let reply_from = task.reply_from.clone().or(reply_context.from.clone());
+
+    // Set Reply-To header to Postmark inbound address so replies come back to the service
+    let reply_to_header = if matches!(task.channel, Channel::Email) {
+        std::env::var("POSTMARK_INBOUND_ADDRESS").ok()
+    } else {
+        None
+    };
 
     let send_task = SendReplyTask {
         channel: task.channel.clone(),
@@ -2559,6 +2667,7 @@ fn schedule_auto_reply<E: TaskExecutor>(
         archive_root: task.archive_root.clone(),
         thread_epoch: task.thread_epoch,
         thread_state_path: task.thread_state_path.clone(),
+        reply_to_header,
     };
 
     let task_id =
@@ -2633,7 +2742,7 @@ fn schedule_send_email<E: TaskExecutor>(
         return Ok(false);
     }
 
-    let reply_context = load_reply_context(&task.workspace_dir);
+    let reply_context = load_reply_context(&task.workspace_dir, &task.channel);
     let from = request
         .from
         .as_deref()
@@ -2642,6 +2751,13 @@ fn schedule_send_email<E: TaskExecutor>(
         .map(|value: &str| value.to_string())
         .or_else(|| task.reply_from.clone())
         .or_else(|| reply_context.from.clone());
+
+    // Set Reply-To header to Postmark inbound address so replies come back to the service
+    let reply_to_header = if matches!(task.channel, Channel::Email) {
+        std::env::var("POSTMARK_INBOUND_ADDRESS").ok()
+    } else {
+        None
+    };
 
     let send_task = SendReplyTask {
         channel: task.channel.clone(),
@@ -2657,6 +2773,7 @@ fn schedule_send_email<E: TaskExecutor>(
         archive_root: task.archive_root.clone(),
         thread_epoch: task.thread_epoch,
         thread_state_path: task.thread_state_path.clone(),
+        reply_to_header,
     };
 
     if let Some(run_at_raw) = request.run_at.as_deref() {
@@ -2935,7 +3052,69 @@ impl PostmarkInboundLite {
     }
 }
 
-fn load_reply_context(workspace_dir: &Path) -> ReplyContext {
+fn load_reply_context(workspace_dir: &Path, channel: &Channel) -> ReplyContext {
+    // For Google Docs, load from google_docs_metadata.json
+    if matches!(channel, Channel::GoogleDocs) {
+        let metadata_path = workspace_dir
+            .join("incoming_email")
+            .join("google_docs_metadata.json");
+
+        if let Ok(content) = fs::read_to_string(&metadata_path) {
+            if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&content) {
+                let document_id = metadata
+                    .get("document_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let comment_id = metadata
+                    .get("comment_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let document_name = metadata
+                    .get("document_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Google Doc");
+
+                if !document_id.is_empty() && !comment_id.is_empty() {
+                    info!(
+                        "Loaded Google Docs reply context: document_id={}, comment_id={}",
+                        document_id, comment_id
+                    );
+                    return ReplyContext {
+                        subject: format!("Re: Comment on {}", document_name),
+                        in_reply_to: Some(format!("{}:{}", document_id, comment_id)),
+                        references: None,
+                        from: None,
+                    };
+                } else {
+                    warn!(
+                        "Google Docs metadata file has empty document_id or comment_id: {}",
+                        metadata_path.display()
+                    );
+                }
+            } else {
+                warn!(
+                    "Failed to parse Google Docs metadata file: {}",
+                    metadata_path.display()
+                );
+            }
+        } else {
+            warn!(
+                "Google Docs metadata file not found: {}. This task may have been created before \
+                the google_docs_metadata.json feature was added.",
+                metadata_path.display()
+            );
+        }
+
+        // Fallback if metadata file doesn't exist or is invalid
+        return ReplyContext {
+            subject: "Re: Google Docs Comment".to_string(),
+            in_reply_to: None,
+            references: None,
+            from: None,
+        };
+    }
+
+    // For email and other channels, load from postmark_payload.json
     let payload_path = workspace_dir
         .join("incoming_email")
         .join("postmark_payload.json");

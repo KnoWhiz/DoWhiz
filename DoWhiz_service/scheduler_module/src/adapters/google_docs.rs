@@ -1154,6 +1154,258 @@ impl GoogleDocsOutboundAdapter {
 
         Ok(())
     }
+
+    /// Get existing styles from the document, useful for maintaining consistent formatting.
+    /// Returns a summary of styles found for different heading levels and body text.
+    pub fn get_document_styles(&self, document_id: &str) -> Result<DocumentStyles, AdapterError> {
+        let doc = self.get_document_structure(document_id)?;
+        let mut styles = DocumentStyles::default();
+
+        // Get named styles (heading styles defined in the document)
+        if let Some(named_styles) = doc.get("namedStyles").and_then(|ns| ns.get("styles")).and_then(|s| s.as_array()) {
+            for style in named_styles {
+                if let Some(name) = style.get("namedStyleType").and_then(|n| n.as_str()) {
+                    let text_style = style.get("textStyle");
+                    let paragraph_style = style.get("paragraphStyle");
+
+                    let style_info = TextStyleInfo {
+                        foreground_color: text_style
+                            .and_then(|ts| ts.get("foregroundColor"))
+                            .and_then(|fc| fc.get("color"))
+                            .and_then(|c| c.get("rgbColor"))
+                            .map(|rgb| {
+                                let r = (rgb.get("red").and_then(|v| v.as_f64()).unwrap_or(0.0) * 255.0) as u8;
+                                let g = (rgb.get("green").and_then(|v| v.as_f64()).unwrap_or(0.0) * 255.0) as u8;
+                                let b = (rgb.get("blue").and_then(|v| v.as_f64()).unwrap_or(0.0) * 255.0) as u8;
+                                format!("#{:02X}{:02X}{:02X}", r, g, b)
+                            }),
+                        font_family: text_style
+                            .and_then(|ts| ts.get("weightedFontFamily"))
+                            .and_then(|wf| wf.get("fontFamily"))
+                            .and_then(|f| f.as_str())
+                            .map(|s| s.to_string()),
+                        font_size: text_style
+                            .and_then(|ts| ts.get("fontSize"))
+                            .and_then(|fs| fs.get("magnitude"))
+                            .and_then(|m| m.as_f64()),
+                        bold: text_style
+                            .and_then(|ts| ts.get("bold"))
+                            .and_then(|b| b.as_bool()),
+                        italic: text_style
+                            .and_then(|ts| ts.get("italic"))
+                            .and_then(|i| i.as_bool()),
+                        alignment: paragraph_style
+                            .and_then(|ps| ps.get("alignment"))
+                            .and_then(|a| a.as_str())
+                            .map(|s| s.to_string()),
+                    };
+
+                    match name {
+                        "HEADING_1" => styles.heading_1 = Some(style_info),
+                        "HEADING_2" => styles.heading_2 = Some(style_info),
+                        "HEADING_3" => styles.heading_3 = Some(style_info),
+                        "HEADING_4" => styles.heading_4 = Some(style_info),
+                        "HEADING_5" => styles.heading_5 = Some(style_info),
+                        "HEADING_6" => styles.heading_6 = Some(style_info),
+                        "NORMAL_TEXT" => styles.normal_text = Some(style_info),
+                        "TITLE" => styles.title = Some(style_info),
+                        "SUBTITLE" => styles.subtitle = Some(style_info),
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Also scan document body for actual styles used (in case they differ from named styles)
+        if let Some(body) = doc.get("body").and_then(|b| b.get("content")).and_then(|c| c.as_array()) {
+            for element in body {
+                if let Some(paragraph) = element.get("paragraph") {
+                    let para_style = paragraph.get("paragraphStyle");
+                    let named_style = para_style
+                        .and_then(|ps| ps.get("namedStyleType"))
+                        .and_then(|n| n.as_str());
+
+                    // Get sample text and its style
+                    if let Some(elements) = paragraph.get("elements").and_then(|e| e.as_array()) {
+                        for elem in elements {
+                            if let Some(text_run) = elem.get("textRun") {
+                                if let Some(content) = text_run.get("content").and_then(|c| c.as_str()) {
+                                    let content_trimmed = content.trim();
+                                    if !content_trimmed.is_empty() && content_trimmed.len() > 1 {
+                                        if let Some(text_style) = text_run.get("textStyle") {
+                                            let style_info = TextStyleInfo {
+                                                foreground_color: text_style
+                                                    .get("foregroundColor")
+                                                    .and_then(|fc| fc.get("color"))
+                                                    .and_then(|c| c.get("rgbColor"))
+                                                    .map(|rgb| {
+                                                        let r = (rgb.get("red").and_then(|v| v.as_f64()).unwrap_or(0.0) * 255.0) as u8;
+                                                        let g = (rgb.get("green").and_then(|v| v.as_f64()).unwrap_or(0.0) * 255.0) as u8;
+                                                        let b = (rgb.get("blue").and_then(|v| v.as_f64()).unwrap_or(0.0) * 255.0) as u8;
+                                                        format!("#{:02X}{:02X}{:02X}", r, g, b)
+                                                    }),
+                                                font_family: text_style
+                                                    .get("weightedFontFamily")
+                                                    .and_then(|wf| wf.get("fontFamily"))
+                                                    .and_then(|f| f.as_str())
+                                                    .map(|s| s.to_string()),
+                                                font_size: text_style
+                                                    .get("fontSize")
+                                                    .and_then(|fs| fs.get("magnitude"))
+                                                    .and_then(|m| m.as_f64()),
+                                                bold: text_style.get("bold").and_then(|b| b.as_bool()),
+                                                italic: text_style.get("italic").and_then(|i| i.as_bool()),
+                                                alignment: None,
+                                            };
+
+                                            // Store sample for each heading type
+                                            match named_style {
+                                                Some("HEADING_1") if styles.heading_1_sample.is_none() => {
+                                                    styles.heading_1_sample = Some((content_trimmed.to_string(), style_info));
+                                                }
+                                                Some("HEADING_2") if styles.heading_2_sample.is_none() => {
+                                                    styles.heading_2_sample = Some((content_trimmed.to_string(), style_info));
+                                                }
+                                                Some("HEADING_3") if styles.heading_3_sample.is_none() => {
+                                                    styles.heading_3_sample = Some((content_trimmed.to_string(), style_info));
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                        break; // Only need first text run per paragraph
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(styles)
+    }
+
+    /// Set text style for specified text in the document.
+    /// Supports color (hex like "#FF0000"), font family, font size, bold, italic.
+    pub fn set_text_style(
+        &self,
+        document_id: &str,
+        text_to_style: &str,
+        color: Option<&str>,
+        font_family: Option<&str>,
+        font_size: Option<f64>,
+        bold: Option<bool>,
+        italic: Option<bool>,
+    ) -> Result<(), AdapterError> {
+        let position = self.find_text_position(document_id, text_to_style)?;
+
+        let (start_idx, end_idx) = position.ok_or_else(|| {
+            AdapterError::SendError(format!("Text not found in document: '{}'", text_to_style))
+        })?;
+
+        let mut text_style = serde_json::Map::new();
+        let mut fields = Vec::new();
+
+        // Parse hex color like "#FF0000" or "FF0000"
+        if let Some(color_str) = color {
+            let hex = color_str.trim_start_matches('#');
+            if hex.len() == 6 {
+                if let (Ok(r), Ok(g), Ok(b)) = (
+                    u8::from_str_radix(&hex[0..2], 16),
+                    u8::from_str_radix(&hex[2..4], 16),
+                    u8::from_str_radix(&hex[4..6], 16),
+                ) {
+                    text_style.insert("foregroundColor".to_string(), serde_json::json!({
+                        "color": {
+                            "rgbColor": {
+                                "red": r as f64 / 255.0,
+                                "green": g as f64 / 255.0,
+                                "blue": b as f64 / 255.0
+                            }
+                        }
+                    }));
+                    fields.push("foregroundColor");
+                }
+            }
+        }
+
+        if let Some(font) = font_family {
+            text_style.insert("weightedFontFamily".to_string(), serde_json::json!({
+                "fontFamily": font,
+                "weight": 400
+            }));
+            fields.push("weightedFontFamily");
+        }
+
+        if let Some(size) = font_size {
+            text_style.insert("fontSize".to_string(), serde_json::json!({
+                "magnitude": size,
+                "unit": "PT"
+            }));
+            fields.push("fontSize");
+        }
+
+        if let Some(b) = bold {
+            text_style.insert("bold".to_string(), serde_json::json!(b));
+            fields.push("bold");
+        }
+
+        if let Some(i) = italic {
+            text_style.insert("italic".to_string(), serde_json::json!(i));
+            fields.push("italic");
+        }
+
+        if fields.is_empty() {
+            return Err(AdapterError::ConfigError("No style properties specified".to_string()));
+        }
+
+        let requests = vec![
+            serde_json::json!({
+                "updateTextStyle": {
+                    "range": {
+                        "startIndex": start_idx,
+                        "endIndex": end_idx
+                    },
+                    "textStyle": text_style,
+                    "fields": fields.join(",")
+                }
+            })
+        ];
+
+        self.apply_document_edit(document_id, requests)?;
+        info!("Applied style to '{}' at indices {}-{}: fields={:?}",
+              text_to_style, start_idx, end_idx, fields);
+        Ok(())
+    }
+}
+
+/// Style information for a text element
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct TextStyleInfo {
+    pub foreground_color: Option<String>,
+    pub font_family: Option<String>,
+    pub font_size: Option<f64>,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub alignment: Option<String>,
+}
+
+/// Document styles summary
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct DocumentStyles {
+    pub title: Option<TextStyleInfo>,
+    pub subtitle: Option<TextStyleInfo>,
+    pub heading_1: Option<TextStyleInfo>,
+    pub heading_2: Option<TextStyleInfo>,
+    pub heading_3: Option<TextStyleInfo>,
+    pub heading_4: Option<TextStyleInfo>,
+    pub heading_5: Option<TextStyleInfo>,
+    pub heading_6: Option<TextStyleInfo>,
+    pub normal_text: Option<TextStyleInfo>,
+    // Samples of actual styled text found in the document
+    pub heading_1_sample: Option<(String, TextStyleInfo)>,
+    pub heading_2_sample: Option<(String, TextStyleInfo)>,
+    pub heading_3_sample: Option<(String, TextStyleInfo)>,
 }
 
 impl OutboundAdapter for GoogleDocsOutboundAdapter {

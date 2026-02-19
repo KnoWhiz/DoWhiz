@@ -403,7 +403,9 @@ fn run_codex_task(
     // Bypass sandbox for GoogleDocs tasks to allow network access for Google APIs
     let channel_lower = request.channel.to_lowercase();
     let is_google_docs = channel_lower == "google_docs" || channel_lower == "googledocs";
-    let bypass_sandbox = codex_bypass_sandbox() || use_docker || is_google_docs;
+    // Also bypass sandbox if workspace has .google_access_token (indicates Google Docs artifacts)
+    let has_google_token = request.workspace_dir.join(".google_access_token").exists();
+    let bypass_sandbox = codex_bypass_sandbox() || use_docker || is_google_docs || has_google_token;
     if use_docker {
         let codex_home = host_workspace_dir
             .as_ref()

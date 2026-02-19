@@ -699,6 +699,29 @@ impl GoogleDocsPoller {
             .map_err(|e| SchedulerError::TaskFailed(format!("JSON error: {}", e)))?;
         std::fs::write(&raw_path, raw_json)?;
 
+        // Write Google Docs metadata for reply context (used by load_reply_context)
+        let document_id = message
+            .metadata
+            .google_docs_document_id
+            .as_deref()
+            .unwrap_or("");
+        let comment_id = &actionable.comment.id;
+        let reply_id = actionable
+            .triggering_reply
+            .as_ref()
+            .map(|r| r.id.as_str());
+
+        let metadata = serde_json::json!({
+            "document_id": document_id,
+            "comment_id": comment_id,
+            "reply_id": reply_id,
+            "document_name": message.metadata.google_docs_document_name,
+        });
+        let metadata_path = incoming_dir.join("google_docs_metadata.json");
+        let metadata_json = serde_json::to_string_pretty(&metadata)
+            .map_err(|e| SchedulerError::TaskFailed(format!("JSON error: {}", e)))?;
+        std::fs::write(&metadata_path, metadata_json)?;
+
         // Write HTML representation for the agent
         let html_content = self.format_actionable_as_html(message, actionable);
         let html_path = incoming_dir.join("email.html");

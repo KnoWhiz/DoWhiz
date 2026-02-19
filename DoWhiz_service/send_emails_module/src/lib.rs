@@ -17,6 +17,9 @@ pub struct SendEmailParams {
     pub bcc: Vec<String>,
     pub in_reply_to: Option<String>,
     pub references: Option<String>,
+    /// Reply-To address - where replies should be sent
+    /// If set, this overrides the default reply behavior
+    pub reply_to: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,6 +60,8 @@ struct PostmarkSendRequest {
     cc: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bcc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply_to: Option<String>,
     subject: String,
     text_body: String,
     html_body: String,
@@ -130,11 +135,14 @@ pub fn send_email(params: &SendEmailParams) -> Result<PostmarkSendResponse, Send
         });
     }
 
+    let reply_to = clean_header_value(&params.reply_to);
+
     let payload = PostmarkSendRequest {
         from,
         to,
         cc,
         bcc,
+        reply_to,
         subject: params.subject.clone(),
         text_body,
         html_body,

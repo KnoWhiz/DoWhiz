@@ -115,6 +115,8 @@ pub struct ChannelMetadata {
     pub in_reply_to: Option<String>,
     /// Email-specific: References header
     pub references: Option<String>,
+    /// Email-specific: Reply-To header (where replies should be sent)
+    pub reply_to_header: Option<String>,
     /// Slack-specific: Channel ID
     pub slack_channel_id: Option<String>,
     /// Slack-specific: Team ID
