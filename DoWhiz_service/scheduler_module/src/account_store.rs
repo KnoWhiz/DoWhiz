@@ -277,3 +277,79 @@ impl AccountStore {
     }
 }
 
+// ============================================================================
+// Global AccountStore accessor
+// ============================================================================
+
+use std::sync::Arc;
+
+/// Lazy-initialized global AccountStore
+static ACCOUNT_STORE: std::sync::OnceLock<Option<Arc<AccountStore>>> = std::sync::OnceLock::new();
+
+/// Get or initialize the global AccountStore (returns None if not configured)
+pub fn get_global_account_store() -> Option<Arc<AccountStore>> {
+    ACCOUNT_STORE
+        .get_or_init(|| {
+            match AccountStore::from_env() {
+                Ok(store) => {
+                    tracing::info!("AccountStore initialized for account lookups");
+                    Some(Arc::new(store))
+                }
+                Err(e) => {
+                    tracing::info!("AccountStore not available ({}), account lookups disabled", e);
+                    None
+                }
+            }
+        })
+        .clone()
+}
+
+/// Map a channel type to the identifier_type used in account_identifiers table
+pub fn channel_to_identifier_type(channel: &crate::channel::Channel) -> &'static str {
+    use crate::channel::Channel;
+    match channel {
+        Channel::Email => "email",
+        Channel::Sms => "phone",
+        Channel::WhatsApp => "phone",
+        Channel::Telegram => "telegram",
+        Channel::Slack => "slack",
+        Channel::Discord => "discord",
+        Channel::BlueBubbles => "phone",
+        Channel::GoogleDocs => "email",
+    }
+}
+
+/// Look up account by channel and identifier
+/// Returns the account_id if found and verified, None otherwise
+pub fn lookup_account_by_channel(
+    channel: &crate::channel::Channel,
+    identifier: &str,
+) -> Option<Uuid> {
+    let store = get_global_account_store()?;
+    let identifier_type = channel_to_identifier_type(channel);
+
+    match store.get_account_by_identifier(identifier_type, identifier) {
+        Ok(Some(account)) => {
+            tracing::debug!(
+                "Found account {} for {}:{}",
+                account.id, identifier_type, identifier
+            );
+            Some(account.id)
+        }
+        Ok(None) => {
+            tracing::debug!(
+                "No account found for {}:{}, using local storage",
+                identifier_type, identifier
+            );
+            None
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Error looking up account for {}:{}: {}, using local storage",
+                identifier_type, identifier, e
+            );
+            None
+        }
+    }
+}
+
