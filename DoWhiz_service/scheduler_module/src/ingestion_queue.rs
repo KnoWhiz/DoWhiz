@@ -73,8 +73,13 @@ impl PostgresIngestionQueue {
         max_attempts: i32,
     ) -> Result<Self, IngestionQueueError> {
         let table = sanitize_table_name(table)?;
+        let pool_size = resolve_pool_size();
+        let pool_db_url = resolve_pooler_db_url().unwrap_or_else(|| db_url.to_string());
 
-        let config: postgres::Config = db_url.parse().map_err(IngestionQueueError::Postgres)?;
+        let pool_config: postgres::Config =
+            pool_db_url.parse().map_err(IngestionQueueError::Postgres)?;
+        let direct_config: postgres::Config =
+            db_url.parse().map_err(IngestionQueueError::Postgres)?;
         let mut tls_builder = native_tls::TlsConnector::builder();
         if resolve_bool_env("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS") {
             tls_builder.danger_accept_invalid_certs(true);
@@ -83,17 +88,18 @@ impl PostgresIngestionQueue {
         let tls_connector = tls_builder
             .build()
             .map_err(|err| IngestionQueueError::Config(err.to_string()))?;
-        let tls = MakeTlsConnector::new(tls_connector);
+        let tls_for_pool = MakeTlsConnector::new(tls_connector.clone());
+        let tls_for_direct = MakeTlsConnector::new(tls_connector);
 
-        let manager = PostgresConnectionManager::new(config, tls);
-        let pool = Pool::builder().max_size(8).build(manager)?;
+        let manager = PostgresConnectionManager::new(pool_config, tls_for_pool);
+        let pool = Pool::builder().max_size(pool_size).build(manager)?;
         let queue = Self {
             pool: Some(pool),
             table,
             lease_secs,
             max_attempts,
         };
-        queue.ensure_schema()?;
+        queue.ensure_schema_with_config(&direct_config, tls_for_direct)?;
         Ok(queue)
     }
 
@@ -108,8 +114,43 @@ impl PostgresIngestionQueue {
         Ok(pool.get()?)
     }
 
+    #[allow(dead_code)]
     fn ensure_schema(&self) -> Result<(), IngestionQueueError> {
         let mut conn = self.connection()?;
+        let statement = format!(
+            "CREATE TABLE IF NOT EXISTS {table} (
+                id UUID PRIMARY KEY,
+                tenant_id TEXT,
+                employee_id TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                external_message_id TEXT,
+                dedupe_key TEXT NOT NULL UNIQUE,
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                locked_at TIMESTAMPTZ,
+                locked_by TEXT,
+                processed_at TIMESTAMPTZ,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                available_at TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS {table}_pending_idx
+                ON {table}(employee_id, status, created_at);
+            CREATE INDEX IF NOT EXISTS {table}_available_idx
+                ON {table}(status, available_at);",
+            table = self.table
+        );
+        conn.batch_execute(&statement)?;
+        Ok(())
+    }
+
+    fn ensure_schema_with_config(
+        &self,
+        config: &postgres::Config,
+        tls: MakeTlsConnector,
+    ) -> Result<(), IngestionQueueError> {
+        let mut conn = config.connect(tls)?;
         let statement = format!(
             "CREATE TABLE IF NOT EXISTS {table} (
                 id UUID PRIMARY KEY,
@@ -367,12 +408,31 @@ fn resolve_i32_env(key: &str, default_value: i32) -> i32 {
         .unwrap_or(default_value)
 }
 
+fn resolve_pool_size() -> u32 {
+    env::var("INGESTION_QUEUE_POOL_SIZE")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(8)
+}
+
 fn resolve_bool_env(key: &str) -> bool {
     env::var(key)
         .ok()
         .map(|value| value.trim().to_ascii_lowercase())
         .map(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
         .unwrap_or(false)
+}
+
+fn resolve_pooler_db_url() -> Option<String> {
+    env::var("INGESTION_QUEUE_POOLER_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            env::var("SUPABASE_POOLER_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
 }
 
 fn resolve_worker_instance_id(employee_id: &str) -> String {
