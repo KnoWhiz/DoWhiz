@@ -1,10 +1,10 @@
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::channel::{Attachment, Channel, ChannelMetadata, InboundMessage};
+use crate::raw_payload_store;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IngestionEnvelope {
@@ -17,12 +17,22 @@ pub struct IngestionEnvelope {
     pub dedupe_key: String,
     pub payload: IngestionPayload,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub raw_payload_b64: Option<String>,
+    pub raw_payload_ref: Option<String>,
 }
 
 impl IngestionEnvelope {
     pub fn raw_payload_bytes(&self) -> Vec<u8> {
-        decode_raw_payload(self.raw_payload_b64.as_deref())
+        if let Some(ref payload_ref) = self.raw_payload_ref {
+            match raw_payload_store::download_raw_payload(payload_ref) {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    warn!("failed to download raw payload {}: {}", payload_ref, err);
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        }
     }
 
     pub fn to_inbound_message(&self) -> InboundMessage {
@@ -87,22 +97,5 @@ impl IngestionPayload {
             raw_payload,
             metadata: self.metadata.clone(),
         }
-    }
-}
-
-pub fn encode_raw_payload(payload: &[u8]) -> Option<String> {
-    if payload.is_empty() {
-        None
-    } else {
-        Some(BASE64_STANDARD.encode(payload))
-    }
-}
-
-pub fn decode_raw_payload(encoded: Option<&str>) -> Vec<u8> {
-    match encoded {
-        Some(value) if !value.trim().is_empty() => BASE64_STANDARD
-            .decode(value.as_bytes())
-            .unwrap_or_default(),
-        _ => Vec::new(),
     }
 }

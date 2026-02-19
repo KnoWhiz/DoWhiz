@@ -1,20 +1,42 @@
-use chrono::Utc;
-use rusqlite::{params, Connection, OptionalExtension};
-use std::path::{Path, PathBuf};
+use postgres_native_tls::MakeTlsConnector;
+use postgres::types::Type;
+use r2d2::{Pool, PooledConnection};
+use r2d2_postgres::PostgresConnectionManager;
+use std::env;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 use crate::ingestion::IngestionEnvelope;
+use crate::service_bus_queue::ServiceBusIngestionQueue;
+
+/// Custom error handler that logs the actual connection error
+#[derive(Debug)]
+struct LoggingErrorHandler;
+
+impl r2d2::HandleError<postgres::Error> for LoggingErrorHandler {
+    fn handle_error(&self, err: postgres::Error) {
+        error!("postgres connection pool error: {:?}", err);
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum IngestionQueueError {
-    #[error("sqlite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
+    #[error("postgres error: {0}")]
+    Postgres(#[from] postgres::Error),
+    #[error("pool error: {0}")]
+    Pool(#[from] r2d2::Error),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("invalid envelope id {0}")]
-    InvalidEnvelopeId(String),
+    #[error("uuid error: {0}")]
+    Uuid(#[from] uuid::Error),
+    #[error("missing SUPABASE_DB_URL/INGESTION_DB_URL/DATABASE_URL")]
+    MissingDbUrl,
+    #[error("invalid ingestion queue table name: {0}")]
+    InvalidTableName(String),
+    #[error("ingestion queue config error: {0}")]
+    Config(String),
+    #[error("service bus error: {0}")]
+    ServiceBus(String),
 }
 
 #[derive(Debug, Clone)]
@@ -28,133 +50,544 @@ pub struct QueuedEnvelope {
     pub envelope: IngestionEnvelope,
 }
 
-#[derive(Debug, Clone)]
-pub struct IngestionQueue {
-    path: PathBuf,
+pub trait IngestionQueue: Send + Sync {
+    fn enqueue(&self, envelope: &IngestionEnvelope) -> Result<EnqueueResult, IngestionQueueError>;
+    fn claim_next(&self, employee_id: &str) -> Result<Option<QueuedEnvelope>, IngestionQueueError>;
+    fn mark_done(&self, id: &Uuid) -> Result<(), IngestionQueueError>;
+    fn mark_failed(&self, id: &Uuid, error: &str) -> Result<(), IngestionQueueError>;
 }
 
-impl IngestionQueue {
-    pub fn new(path: impl Into<PathBuf>) -> Result<Self, IngestionQueueError> {
-        let queue = Self { path: path.into() };
-        queue.ensure_schema()?;
+#[derive(Clone)]
+pub struct PostgresIngestionQueue {
+    pool: Option<Pool<PostgresConnectionManager<MakeTlsConnector>>>,
+    table: String,
+    lease_secs: i64,
+    max_attempts: i32,
+    use_typed_queries: bool,
+}
+
+pub fn resolve_ingestion_queue_backend() -> String {
+    env::var("INGESTION_QUEUE_BACKEND")
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "postgres".to_string())
+}
+
+pub fn build_queue_from_env(
+    db_url_override: Option<String>,
+) -> Result<std::sync::Arc<dyn IngestionQueue>, IngestionQueueError> {
+    let backend = resolve_ingestion_queue_backend();
+    if backend == "servicebus" || backend == "service_bus" {
+        let queue = ServiceBusIngestionQueue::from_env()?;
+        return Ok(std::sync::Arc::new(queue));
+    }
+
+    if let Some(db_url) = db_url_override {
+        if !db_url.trim().is_empty() {
+            return Ok(std::sync::Arc::new(PostgresIngestionQueue::new_from_url(
+                &db_url,
+            )?));
+        }
+    }
+    Ok(std::sync::Arc::new(PostgresIngestionQueue::from_env()?))
+}
+
+impl PostgresIngestionQueue {
+    pub fn from_env() -> Result<Self, IngestionQueueError> {
+        let db_url = resolve_db_url()?;
+        let table = resolve_table_name()?;
+        let lease_secs = resolve_i64_env("INGESTION_QUEUE_LEASE_SECS", 60);
+        let max_attempts = resolve_i32_env("INGESTION_QUEUE_MAX_ATTEMPTS", 5);
+        Self::new(&db_url, &table, lease_secs, max_attempts)
+    }
+
+    pub fn new_from_url(db_url: &str) -> Result<Self, IngestionQueueError> {
+        let table = resolve_table_name()?;
+        let lease_secs = resolve_i64_env("INGESTION_QUEUE_LEASE_SECS", 60);
+        let max_attempts = resolve_i32_env("INGESTION_QUEUE_MAX_ATTEMPTS", 5);
+        Self::new(db_url, &table, lease_secs, max_attempts)
+    }
+
+    pub fn new(
+        db_url: &str,
+        table: &str,
+        lease_secs: i64,
+        max_attempts: i32,
+    ) -> Result<Self, IngestionQueueError> {
+        let table = sanitize_table_name(table)?;
+        let pool_size = resolve_pool_size();
+        let pool_db_url = resolve_pooler_db_url().unwrap_or_else(|| db_url.to_string());
+
+        let pool_config: postgres::Config =
+            pool_db_url.parse().map_err(IngestionQueueError::Postgres)?;
+        let direct_config: postgres::Config =
+            db_url.parse().map_err(IngestionQueueError::Postgres)?;
+        let mut tls_builder = native_tls::TlsConnector::builder();
+        if resolve_bool_env("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS") {
+            tls_builder.danger_accept_invalid_certs(true);
+            tls_builder.danger_accept_invalid_hostnames(true);
+        }
+        let tls_connector = tls_builder
+            .build()
+            .map_err(|err| IngestionQueueError::Config(err.to_string()))?;
+        let tls_for_pool = MakeTlsConnector::new(tls_connector.clone());
+        let tls_for_direct = MakeTlsConnector::new(tls_connector.clone());
+        let tls_for_fallback = MakeTlsConnector::new(tls_connector);
+
+        let manager = PostgresConnectionManager::new(pool_config, tls_for_pool);
+        let pool = Pool::builder()
+            .max_size(pool_size)
+            .idle_timeout(Some(std::time::Duration::from_secs(300))) // Close idle connections after 5 min
+            .error_handler(Box::new(LoggingErrorHandler))
+            .build(manager)?;
+        let use_typed_queries = pool_db_url != db_url;
+        let queue = Self {
+            pool: Some(pool),
+            table,
+            lease_secs,
+            max_attempts,
+            use_typed_queries,
+        };
+        if let Err(err) = queue.ensure_schema_with_config(&direct_config, tls_for_direct) {
+            if pool_db_url != db_url {
+                warn!(
+                    "direct ingestion schema init failed; falling back to pooler: {}",
+                    err
+                );
+                let fallback_config: postgres::Config =
+                    pool_db_url.parse().map_err(IngestionQueueError::Postgres)?;
+                queue.ensure_schema_with_config(&fallback_config, tls_for_fallback)?;
+            } else {
+                return Err(err);
+            }
+        }
         Ok(queue)
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub fn enqueue(&self, envelope: &IngestionEnvelope) -> Result<EnqueueResult, IngestionQueueError> {
-        let conn = self.open()?;
-        let payload_json = serde_json::to_string(envelope)?;
-        let now = Utc::now().to_rfc3339();
-        let inserted = conn.execute(
-            "INSERT OR IGNORE INTO ingestion_queue\n                (id, tenant_id, employee_id, channel, external_message_id, dedupe_key, payload_json, status, created_at, attempts)\n             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, 0)",
-            params![
-                envelope.envelope_id.to_string(),
-                envelope.tenant_id.as_deref(),
-                envelope.employee_id.as_str(),
-                envelope.channel.to_string(),
-                envelope.external_message_id.as_deref(),
-                envelope.dedupe_key.as_str(),
-                payload_json,
-                now,
-            ],
-        )?;
-
-        Ok(EnqueueResult {
-            inserted: inserted > 0,
-        })
-    }
-
-    pub fn claim_next(
+    fn connection(
         &self,
-        employee_id: &str,
-    ) -> Result<Option<QueuedEnvelope>, IngestionQueueError> {
-        let mut conn = self.open()?;
-        let tx = conn.transaction()?;
-        let row = tx
-            .query_row(
-                "SELECT id, payload_json\n                 FROM ingestion_queue\n                 WHERE status = 'pending' AND employee_id = ?1\n                 ORDER BY created_at\n                 LIMIT 1",
-                params![employee_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()?;
+    ) -> Result<PooledConnection<PostgresConnectionManager<MakeTlsConnector>>, IngestionQueueError>
+    {
+        let pool = self
+            .pool
+            .as_ref()
+            .expect("ingestion queue pool unavailable");
+        Ok(pool.get()?)
+    }
 
-        let Some((id_raw, payload_json)) = row else {
+    #[allow(dead_code)]
+    fn ensure_schema(&self) -> Result<(), IngestionQueueError> {
+        let mut conn = self.connection()?;
+        let statement = format!(
+            "CREATE TABLE IF NOT EXISTS {table} (
+                id UUID PRIMARY KEY,
+                tenant_id TEXT,
+                employee_id TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                external_message_id TEXT,
+                dedupe_key TEXT NOT NULL UNIQUE,
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                locked_at TIMESTAMPTZ,
+                locked_by TEXT,
+                processed_at TIMESTAMPTZ,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                available_at TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS {table}_pending_idx
+                ON {table}(employee_id, status, created_at);
+            CREATE INDEX IF NOT EXISTS {table}_available_idx
+                ON {table}(status, available_at);",
+            table = self.table
+        );
+        conn.batch_execute(&statement)?;
+        Ok(())
+    }
+
+    fn ensure_schema_with_config(
+        &self,
+        config: &postgres::Config,
+        tls: MakeTlsConnector,
+    ) -> Result<(), IngestionQueueError> {
+        let mut conn = config.connect(tls)?;
+        let statement = format!(
+            "CREATE TABLE IF NOT EXISTS {table} (
+                id UUID PRIMARY KEY,
+                tenant_id TEXT,
+                employee_id TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                external_message_id TEXT,
+                dedupe_key TEXT NOT NULL UNIQUE,
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                locked_at TIMESTAMPTZ,
+                locked_by TEXT,
+                processed_at TIMESTAMPTZ,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                available_at TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS {table}_pending_idx
+                ON {table}(employee_id, status, created_at);
+            CREATE INDEX IF NOT EXISTS {table}_available_idx
+                ON {table}(status, available_at);",
+            table = self.table
+        );
+        conn.batch_execute(&statement)?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn drop_table_for_tests(&self) {
+        if let Ok(mut conn) = self.connection() {
+            let _ = conn.execute(&format!("DROP TABLE IF EXISTS {}", self.table), &[]);
+        }
+    }
+}
+
+impl IngestionQueue for PostgresIngestionQueue {
+    fn enqueue(&self, envelope: &IngestionEnvelope) -> Result<EnqueueResult, IngestionQueueError> {
+        let mut conn = self.connection()?;
+        let payload_json = serde_json::to_string(envelope)?;
+        let statement = format!(
+            "INSERT INTO {table}
+                (id, tenant_id, employee_id, channel, external_message_id, dedupe_key, payload_json, status, created_at, attempts)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', now(), 0)
+             ON CONFLICT (dedupe_key) DO NOTHING
+             RETURNING 1",
+            table = self.table
+        );
+        if self.use_typed_queries {
+            let channel = envelope.channel.to_string();
+            let rows = conn.query_typed(
+                &statement,
+                &[
+                    (&envelope.envelope_id, Type::UUID),
+                    (&envelope.tenant_id, Type::TEXT),
+                    (&envelope.employee_id, Type::TEXT),
+                    (&channel, Type::TEXT),
+                    (&envelope.external_message_id, Type::TEXT),
+                    (&envelope.dedupe_key, Type::TEXT),
+                    (&payload_json, Type::TEXT),
+                ],
+            )?;
+            Ok(EnqueueResult {
+                inserted: !rows.is_empty(),
+            })
+        } else {
+            let row = conn.execute(
+                &statement,
+                &[
+                    &envelope.envelope_id,
+                    &envelope.tenant_id,
+                    &envelope.employee_id,
+                    &envelope.channel.to_string(),
+                    &envelope.external_message_id,
+                    &envelope.dedupe_key,
+                    &payload_json,
+                ],
+            )?;
+            Ok(EnqueueResult { inserted: row > 0 })
+        }
+    }
+
+    fn claim_next(&self, employee_id: &str) -> Result<Option<QueuedEnvelope>, IngestionQueueError> {
+        let mut conn = self.connection()?;
+        let instance_id = resolve_worker_instance_id(employee_id);
+        let lease_secs = self.lease_secs;
+
+        let mut tx = conn.transaction()?;
+        let select_statement = format!(
+            "SELECT id, payload_json
+             FROM {table}
+             WHERE employee_id = $1
+               AND (
+                 status = 'pending'
+                 OR (status = 'processing' AND locked_at < now() - ($2::bigint * interval '1 second'))
+               )
+               AND (available_at IS NULL OR available_at <= now())
+               AND attempts < $3
+             ORDER BY created_at
+             LIMIT 1
+             FOR UPDATE SKIP LOCKED",
+            table = self.table
+        );
+        let row = if self.use_typed_queries {
+            let mut rows = tx.query_typed(
+                &select_statement,
+                &[
+                    (&employee_id, Type::TEXT),
+                    (&lease_secs, Type::INT8),
+                    (&self.max_attempts, Type::INT4),
+                ],
+            )?;
+            rows.pop()
+        } else {
+            tx.query_opt(
+                &select_statement,
+                &[&employee_id, &lease_secs, &self.max_attempts],
+            )?
+        };
+
+        let Some(row) = row else {
+            tx.commit()?;
             return Ok(None);
         };
 
-        let now = Utc::now().to_rfc3339();
-        let updated = tx.execute(
-            "UPDATE ingestion_queue\n             SET status = 'processing', locked_at = ?1, attempts = attempts + 1\n             WHERE id = ?2 AND status = 'pending'",
-            params![now, id_raw.as_str()],
-        )?;
+        let id: Uuid = row.get(0);
+        let payload_json: String = row.get(1);
+
+        let update_statement = format!(
+            "UPDATE {table}
+             SET status = 'processing',
+                 locked_at = now(),
+                 locked_by = $2,
+                 attempts = attempts + 1
+             WHERE id = $1
+             RETURNING 1",
+            table = self.table
+        );
+        let updated = if self.use_typed_queries {
+            let rows = tx.query_typed(
+                &update_statement,
+                &[(&id, Type::UUID), (&instance_id, Type::TEXT)],
+            )?;
+            rows.len() as u64
+        } else {
+            tx.execute(&update_statement, &[&id, &instance_id])?
+        };
 
         if updated == 0 {
             tx.commit()?;
             return Ok(None);
         }
 
-        let envelope: IngestionEnvelope = serde_json::from_str(&payload_json)?;
         tx.commit()?;
-        let id =
-            Uuid::parse_str(&id_raw).map_err(|_| IngestionQueueError::InvalidEnvelopeId(id_raw))?;
+
+        let envelope: IngestionEnvelope = serde_json::from_str(&payload_json)?;
         Ok(Some(QueuedEnvelope { id, envelope }))
     }
 
-    pub fn mark_done(&self, id: &Uuid) -> Result<(), IngestionQueueError> {
-        let conn = self.open()?;
-        let now = Utc::now().to_rfc3339();
-        conn.execute(
-            "UPDATE ingestion_queue\n             SET status = 'done', processed_at = ?1\n             WHERE id = ?2",
-            params![now, id.to_string()],
-        )?;
-        Ok(())
-    }
-
-    pub fn mark_failed(&self, id: &Uuid, error: &str) -> Result<(), IngestionQueueError> {
-        let conn = self.open()?;
-        let now = Utc::now().to_rfc3339();
-        conn.execute(
-            "UPDATE ingestion_queue\n             SET status = 'failed', processed_at = ?1, last_error = ?2\n             WHERE id = ?3",
-            params![now, error, id.to_string()],
-        )?;
-        Ok(())
-    }
-
-    fn open(&self) -> Result<Connection, IngestionQueueError> {
-        let conn = Connection::open(&self.path)?;
-        Ok(conn)
-    }
-
-    fn ensure_schema(&self) -> Result<(), IngestionQueueError> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
+    fn mark_done(&self, id: &Uuid) -> Result<(), IngestionQueueError> {
+        let mut conn = self.connection()?;
+        let statement = format!(
+            "UPDATE {table}
+             SET status = 'done',
+                 processed_at = now(),
+                 locked_at = NULL,
+                 locked_by = NULL
+             WHERE id = $1",
+            table = self.table
+        );
+        if self.use_typed_queries {
+            let _ = conn.query_typed(&statement, &[(&id, Type::UUID)])?;
+        } else {
+            conn.execute(&statement, &[id])?;
         }
-        let conn = self.open()?;
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS ingestion_queue (\n                id TEXT PRIMARY KEY,\n                tenant_id TEXT,\n                employee_id TEXT NOT NULL,\n                channel TEXT NOT NULL,\n                external_message_id TEXT,\n                dedupe_key TEXT NOT NULL UNIQUE,\n                payload_json TEXT NOT NULL,\n                status TEXT NOT NULL,\n                created_at TEXT NOT NULL,\n                locked_at TEXT,\n                processed_at TEXT,\n                attempts INTEGER NOT NULL DEFAULT 0,\n                last_error TEXT\n            )",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ingestion_queue_pending\n             ON ingestion_queue(employee_id, status, created_at)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ingestion_queue_dedupe\n             ON ingestion_queue(dedupe_key)",
-            [],
-        )?;
         Ok(())
     }
+
+    fn mark_failed(&self, id: &Uuid, error: &str) -> Result<(), IngestionQueueError> {
+        let mut conn = self.connection()?;
+        let attempts_statement = format!("SELECT attempts FROM {table} WHERE id = $1", table = self.table);
+        let attempts: i32 = if self.use_typed_queries {
+            let rows = conn.query_typed(&attempts_statement, &[(&id, Type::UUID)])?;
+            rows.first()
+                .map(|row| row.get(0))
+                .unwrap_or(0)
+        } else {
+            conn.query_one(&attempts_statement, &[id])?.get(0)
+        };
+
+        let (status, available_at) = if attempts >= self.max_attempts {
+            ("failed", None)
+        } else {
+            let backoff_secs = i64::from(attempts.max(1)).saturating_mul(5);
+            ("pending", Some(backoff_secs))
+        };
+
+        if let Some(backoff_secs) = available_at {
+            let statement = format!(
+                "UPDATE {table}
+                 SET status = $2,
+                     processed_at = now(),
+                     locked_at = NULL,
+                     locked_by = NULL,
+                     available_at = now() + ($3::bigint * interval '1 second'),
+                     last_error = $4
+                 WHERE id = $1",
+                table = self.table
+            );
+            if self.use_typed_queries {
+                let _ = conn.query_typed(
+                    &statement,
+                    &[
+                        (&id, Type::UUID),
+                        (&status, Type::TEXT),
+                        (&backoff_secs, Type::INT8),
+                        (&error, Type::TEXT),
+                    ],
+                )?;
+            } else {
+                conn.execute(&statement, &[id, &status, &backoff_secs, &error])?;
+            }
+        } else {
+            let statement = format!(
+                "UPDATE {table}
+                 SET status = $2,
+                     processed_at = now(),
+                     locked_at = NULL,
+                     locked_by = NULL,
+                     available_at = NULL,
+                     last_error = $3
+                 WHERE id = $1",
+                table = self.table
+            );
+            if self.use_typed_queries {
+                let _ = conn.query_typed(
+                    &statement,
+                    &[(&id, Type::UUID), (&status, Type::TEXT), (&error, Type::TEXT)],
+                )?;
+            } else {
+                conn.execute(&statement, &[id, &status, &error])?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PostgresIngestionQueue {
+    fn drop(&mut self) {
+        if let Some(pool) = self.pool.take() {
+            std::thread::spawn(move || drop(pool));
+        }
+    }
+}
+
+fn resolve_db_url() -> Result<String, IngestionQueueError> {
+    env::var("INGESTION_DB_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            env::var("SUPABASE_DB_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .or_else(|| {
+            env::var("DATABASE_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .ok_or(IngestionQueueError::MissingDbUrl)
+}
+
+fn resolve_table_name() -> Result<String, IngestionQueueError> {
+    let raw = env::var("INGESTION_QUEUE_TABLE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "ingestion_queue".to_string());
+    sanitize_table_name(&raw)
+}
+
+fn sanitize_table_name(raw: &str) -> Result<String, IngestionQueueError> {
+    let parts: Vec<&str> = raw.split('.').collect();
+    if parts.is_empty() || parts.len() > 2 {
+        return Err(IngestionQueueError::InvalidTableName(raw.to_string()));
+    }
+    for part in &parts {
+        if part.is_empty()
+            || !part
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            return Err(IngestionQueueError::InvalidTableName(raw.to_string()));
+        }
+    }
+    Ok(raw.to_string())
+}
+
+fn resolve_i64_env(key: &str, default_value: i64) -> i64 {
+    env::var(key)
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default_value)
+}
+
+fn resolve_i32_env(key: &str, default_value: i32) -> i32 {
+    env::var(key)
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default_value)
+}
+
+fn resolve_pool_size() -> u32 {
+    env::var("INGESTION_QUEUE_POOL_SIZE")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(8)
+}
+
+fn resolve_bool_env(key: &str) -> bool {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .map(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
+}
+
+fn resolve_pooler_db_url() -> Option<String> {
+    env::var("INGESTION_QUEUE_POOLER_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            env::var("SUPABASE_POOLER_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+}
+
+fn resolve_worker_instance_id(employee_id: &str) -> String {
+    if let Ok(value) = env::var("WORKER_INSTANCE_ID") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    let key = format!(
+        "WORKER_INSTANCE_ID_{}",
+        employee_id.trim().to_ascii_uppercase()
+    );
+    if let Ok(value) = env::var(key) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    env::var("HOSTNAME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| format!("pid-{}", std::process::id()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::channel::{Channel, ChannelMetadata, InboundMessage};
-    use crate::ingestion::{encode_raw_payload, IngestionPayload};
-    use tempfile::TempDir;
+    use crate::ingestion::IngestionPayload;
+    use crate::service_bus_queue::ServiceBusIngestionQueue;
+    use chrono::Utc;
+    use std::thread;
+    use std::time::Duration;
 
     fn sample_envelope(employee_id: &str, dedupe_key: &str) -> IngestionEnvelope {
         let message = InboundMessage {
@@ -185,38 +618,77 @@ mod tests {
             external_message_id: Some("evt_1".to_string()),
             dedupe_key: dedupe_key.to_string(),
             payload: IngestionPayload::from_inbound(&message),
-            raw_payload_b64: encode_raw_payload(&message.raw_payload),
+            raw_payload_ref: None,
         }
+    }
+
+    fn is_service_bus_backend() -> bool {
+        matches!(resolve_ingestion_queue_backend().as_str(), "servicebus" | "service_bus")
+    }
+
+    fn postgres_queue() -> PostgresIngestionQueue {
+        dotenvy::dotenv().ok();
+        env::set_var("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS", "true");
+        let db_url = resolve_db_url().expect("SUPABASE_DB_URL required for ingestion queue tests");
+        let table = format!("ingestion_queue_test_{}", Uuid::new_v4().simple());
+        PostgresIngestionQueue::new(&db_url, &table, 10, 5).expect("queue")
     }
 
     #[test]
     fn enqueue_and_claim_roundtrip() {
-        let temp = TempDir::new().expect("tempdir");
-        let db_path = temp.path().join("ingest.db");
-        let queue = IngestionQueue::new(db_path).expect("queue");
+        if is_service_bus_backend() {
+            dotenvy::dotenv().ok();
+            env::set_var("SERVICE_BUS_QUEUE_PER_EMPLOYEE", "0");
+            let test_queue =
+                env::var("SERVICE_BUS_TEST_QUEUE_NAME").unwrap_or_else(|_| "ingestion-test".to_string());
+            env::set_var("SERVICE_BUS_QUEUE_NAME", &test_queue);
+            let queue = ServiceBusIngestionQueue::from_env().expect("service bus queue");
+            let dedupe_key = format!("dedupe-{}", Uuid::new_v4());
+            let envelope = sample_envelope("emp", &dedupe_key);
+            let result = queue.enqueue(&envelope).expect("enqueue");
+            assert!(result.inserted);
 
-        let envelope = sample_envelope("emp", "dedupe-1");
-        let result = queue.enqueue(&envelope).expect("enqueue");
-        assert!(result.inserted);
+            let mut claimed = None;
+            for _ in 0..5 {
+                claimed = queue.claim_next("emp").expect("claim");
+                if claimed.is_some() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(200));
+            }
+            assert!(claimed.is_some());
+            let claimed = claimed.unwrap();
+            assert_eq!(claimed.envelope.dedupe_key, dedupe_key);
 
-        let claimed = queue.claim_next("emp").expect("claim");
-        assert!(claimed.is_some());
-        let claimed = claimed.unwrap();
-        assert_eq!(claimed.envelope.dedupe_key, "dedupe-1");
+            queue.mark_done(&claimed.id).expect("done");
+        } else {
+            let queue = postgres_queue();
+            let envelope = sample_envelope("emp", "dedupe-1");
+            let result = queue.enqueue(&envelope).expect("enqueue");
+            assert!(result.inserted);
 
-        queue.mark_done(&claimed.id).expect("done");
+            let claimed = queue.claim_next("emp").expect("claim");
+            assert!(claimed.is_some());
+            let claimed = claimed.unwrap();
+            assert_eq!(claimed.envelope.dedupe_key, "dedupe-1");
+
+            queue.mark_done(&claimed.id).expect("done");
+            queue.drop_table_for_tests();
+        }
     }
 
     #[test]
     fn enqueue_dedupe_prevents_duplicates() {
-        let temp = TempDir::new().expect("tempdir");
-        let db_path = temp.path().join("ingest.db");
-        let queue = IngestionQueue::new(db_path).expect("queue");
-
+        if is_service_bus_backend() {
+            eprintln!("Service Bus backend does not report dedupe insert results; skipping.");
+            return;
+        }
+        let queue = postgres_queue();
         let envelope = sample_envelope("emp", "dedupe-2");
         let first = queue.enqueue(&envelope).expect("enqueue");
         let second = queue.enqueue(&envelope).expect("enqueue");
         assert!(first.inserted);
         assert!(!second.inserted);
+        queue.drop_table_for_tests();
     }
 }

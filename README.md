@@ -16,79 +16,66 @@
   </a>
 </p>
 
-A lightweight Rust replica of OpenClaw🦞 with **better security, accessibility, and token usage**. Serve as your digital employee team, message us any task over email, Discord, Slack, Telegram, WhatsApp, iMessage, or any other channel. 🧸🐭🐙🐘👾🦞🐦🐉
+A lightweight Rust replica of OpenClaw🦞 with **better security, accessibility, and token usage**. Serve as your digital employee team, message us any task over email, Slack, Discord, SMS (Twilio), Telegram, WhatsApp, Google Docs comments, iMessage (BlueBubbles), or any other channel. 🧸🐭🐙🐘👾🦞🐦🐉
 
 ## Quick Start
 
 ### 1. Prerequisites
+- Rust toolchain (via `rustup`)
+- Node.js 20 + npm
+- `ngrok`
+- Docker (optional; for containerized workers)
+- `python3` (used by scripts to discover ngrok URLs)
 
-**macOS:**
-```bash
-brew install node@20 openssl@3 sqlite pkg-config
-npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest
-```
-
-**Linux (Debian/Ubuntu):**
-```bash
-sudo apt-get update && sudo apt-get install -y ca-certificates libsqlite3-dev libssl-dev pkg-config curl
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-sudo npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest
-```
+For full dependency install steps, see `DoWhiz_service/README.md`.
 
 ### 2. Configure Environment
 
 ```bash
 cp .env.example DoWhiz_service/.env
 # Edit DoWhiz_service/.env and add your POSTMARK_SERVER_TOKEN
+# For Codex/Claude runners, also set AZURE_OPENAI_API_KEY_BACKUP (+ AZURE_OPENAI_ENDPOINT_BACKUP for Codex)
 ```
 
 ### 3. Start Service
 
-**Option A: Start Inbound Gateway + Workers (recommended)**
+Set a shared ingestion queue database URL (add to `DoWhiz_service/.env` or export in each terminal before starting gateway/workers):
+
 ```bash
-# Terminal 1: Build image (once)
-docker build -t dowhiz-service .
+export SUPABASE_DB_URL="postgresql://..."
+# or
+export INGESTION_DB_URL="postgresql://..."
+```
+Also set Supabase Storage credentials for raw payload blobs:
+```bash
+export SUPABASE_PROJECT_URL="https://<project>.supabase.co"
+export SUPABASE_SECRET_KEY="sb_secret_..."
+export SUPABASE_STORAGE_BUCKET="ingestion-raw"
+```
+If your Supabase DB hostname resolves to IPv6-only, ensure the VM has IPv6 outbound enabled (see VM deployment notes in `DoWhiz_service/README.md`). For Supabase DB TLS, you may also need:
+```bash
+export INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS=true
+```
+For VM/pm2 deployments, prefer writing these into `DoWhiz_service/.env` so they survive restarts.
 
-# Terminal 2: Oliver worker (Docker)
-docker run --rm -p 9001:9001 \
-  -e EMPLOYEE_ID=little_bear \
-  -e RUST_SERVICE_PORT=9001 \
-  -e RUN_TASK_DOCKER_IMAGE= \
-  -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
-  -v dowhiz-workspace-oliver:/app/.workspace \
-  dowhiz-service
+Run a gateway + worker (local, single employee):
 
-# Terminal 3: Maggie worker (Docker)
-docker run --rm -p 9002:9001 \
-  -e EMPLOYEE_ID=mini_mouse \
-  -e RUST_SERVICE_PORT=9001 \
-  -e RUN_TASK_DOCKER_IMAGE= \
-  -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
-  -v dowhiz-workspace-maggie:/app/.workspace \
-  dowhiz-service
+```bash
+# Terminal 1: worker
+./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
 
-# Terminal 4: Gateway (host)
+# Terminal 2: gateway
 cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
-# Edit gateway.toml targets to match the workers you started.
+# Edit gateway.toml routes to map your service address to little_bear
+# Ensure SUPABASE_DB_URL (or INGESTION_DB_URL) is set in this terminal
 ./DoWhiz_service/scripts/run_gateway_local.sh
 
-# Terminal 5: Expose the gateway
-ngrok http 9100 --url https://YOUR-DOMAIN.ngrok.app
-
-# Terminal 6: Point Postmark at the gateway
+# Terminal 3: expose gateway + set Postmark hook
+ngrok http 9100
+cd DoWhiz_service
 cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
   --hook-url https://YOUR-DOMAIN.ngrok.app/postmark/inbound
 ```
-
-Note: when running workers inside Docker, clear `RUN_TASK_DOCKER_IMAGE` to avoid nested Docker usage.
-
-**Option B: Start Single Employee (auto ngrok + hook)**
-```bash
-./DoWhiz_service/scripts/run_employee.sh little_bear 9001
-```
-
-This single command starts ngrok, updates the Postmark hook, and runs the service.
 
 **Available employees:**
 | Employee | Port | Runner | Email |
@@ -100,71 +87,14 @@ This single command starts ngrok, updates the Postmark hook, and runs the servic
 
 Now send an email to `oliver@dowhiz.com` (or any employee) and watch the magic happen!
 
-## VM Deployment (Gateway + ngrok)
-
-This is the production flow we used for `oliver` on `dowhizprod1`: run a single worker behind the inbound gateway and expose the gateway with ngrok.
-
-1. Provision an Ubuntu VM and open inbound TCP ports `22`, `80`, `443`.
-Outbound SMTP (`25`) is often blocked on cloud VMs; run E2E senders from your local machine if needed.
-
-2. Install dependencies and ngrok:
-```bash
-sudo apt-get update
-sudo apt-get install -y ca-certificates libsqlite3-dev libssl-dev pkg-config curl git python3
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-curl https://sh.rustup.rs -sSf | sh -s -- -y
-sudo snap install ngrok
-```
-
-3. Clone repo and place `.env`:
-```bash
-git clone https://github.com/KnoWhiz/DoWhiz.git
-cd DoWhiz
-cp .env.example DoWhiz_service/.env
-# Fill in secrets inside DoWhiz_service/.env
-```
-
-4. Configure gateway targets:
-```bash
-cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
-cat > DoWhiz_service/gateway.toml <<'EOF'
-[targets]
-little_bear = "http://127.0.0.1:9001"
-EOF
-```
-
-5. Start services (tmux):
-```bash
-tmux new-session -d -s oliver "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 RUN_TASK_DOCKER_IMAGE= cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001'"
-tmux new-session -d -s gateway "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && ./scripts/run_gateway_local.sh'"
-ngrok config add-authtoken "$NGROK_AUTHTOKEN"
-tmux new-session -d -s ngrok "ngrok http 9100 --url https://oliver.dowhiz.prod.ngrok.app"
-```
-
-6. Point Postmark to the gateway:
-```bash
-cd ~/DoWhiz/DoWhiz_service
-cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
-  --hook-url https://oliver.dowhiz.prod.ngrok.app/postmark/inbound
-```
-
-7. Run E2E from your local machine (recommended if VM blocks SMTP 25):
-```
-POSTMARK_INBOUND_HOOK_URL=https://oliver.dowhiz.prod.ngrok.app/postmark/inbound
-POSTMARK_TEST_FROM=mini-mouse@deep-tutor.com
-POSTMARK_TEST_SERVICE_ADDRESS=oliver@dowhiz.com
-```
-See `DoWhiz_service/README.md` for the full E2E driver script.
-
 ## Architecture
 
 ```
-Inbound message -> Scheduler -> Task runner -> Tools -> Outbound message
+Inbound message -> Ingestion Gateway -> Ingestion Queue -> Scheduler -> Task runner -> Tools -> Outbound message
 ```
 
 **Core capabilities:**
-- Any-channel task intake and replies (email, Discord, Slack, Telegram, WhatsApp, iMessage)
+- Any-channel task intake and replies (email, Slack, Discord, SMS/Twilio, Telegram, WhatsApp, Google Docs comments, iMessage/BlueBubbles)
 - Role-based agents with isolated, user-specific memory and data
 - Scheduling and orchestration for long-running or recurring work
 - Tool-backed execution for reliable outputs

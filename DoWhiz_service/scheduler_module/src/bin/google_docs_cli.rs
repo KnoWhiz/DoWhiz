@@ -126,7 +126,10 @@ fn get_auth() -> Result<GoogleAuth, String> {
     let has_client_id = config.client_id.is_some();
     eprintln!(
         "[google-docs] Auth config: access_token={}, refresh_token={}, client_id={}, valid={}",
-        has_access_token, has_refresh_token, has_client_id, config.is_valid()
+        has_access_token,
+        has_refresh_token,
+        has_client_id,
+        config.is_valid()
     );
 
     if !config.is_valid() {
@@ -323,13 +326,18 @@ fn cmd_list_documents() -> Result<String, String> {
         std::collections::HashSet::new(),
     );
 
-    let docs = adapter.list_shared_documents()
+    let docs = adapter
+        .list_shared_documents()
         .map_err(|e| format!("Failed to list documents: {}", e))?;
 
     let mut output = String::new();
     output.push_str(&format!("Found {} documents:\n\n", docs.len()));
     for doc in docs {
-        output.push_str(&format!("- {} ({})\n", doc.name.as_deref().unwrap_or("Untitled"), doc.id));
+        output.push_str(&format!(
+            "- {} ({})\n",
+            doc.name.as_deref().unwrap_or("Untitled"),
+            doc.id
+        ));
     }
     Ok(output)
 }
@@ -341,7 +349,8 @@ fn cmd_read_document(doc_id: &str) -> Result<String, String> {
         std::collections::HashSet::new(),
     );
 
-    adapter.read_document_content(doc_id)
+    adapter
+        .read_document_content(doc_id)
         .map_err(|e| format!("Failed to read document: {}", e))
 }
 
@@ -352,25 +361,34 @@ fn cmd_list_comments(doc_id: &str) -> Result<String, String> {
         std::collections::HashSet::new(),
     );
 
-    let comments = adapter.list_comments(doc_id)
+    let comments = adapter
+        .list_comments(doc_id)
         .map_err(|e| format!("Failed to list comments: {}", e))?;
 
     let mut output = String::new();
     output.push_str(&format!("Found {} comments:\n\n", comments.len()));
     for comment in comments {
-        let author = comment.author
+        let author = comment
+            .author
             .as_ref()
             .and_then(|a| a.display_name.as_deref())
             .unwrap_or("Unknown");
-        output.push_str(&format!("- [{}] {}: {}\n", comment.id, author, comment.content));
+        output.push_str(&format!(
+            "- [{}] {}: {}\n",
+            comment.id, author, comment.content
+        ));
 
         if let Some(replies) = comment.replies {
             for reply in replies {
-                let reply_author = reply.author
+                let reply_author = reply
+                    .author
                     .as_ref()
                     .and_then(|a| a.display_name.as_deref())
                     .unwrap_or("Unknown");
-                output.push_str(&format!("    └─ [{}] {}: {}\n", reply.id, reply_author, reply.content));
+                output.push_str(&format!(
+                    "    └─ [{}] {}: {}\n",
+                    reply.id, reply_author, reply.content
+                ));
             }
         }
     }
@@ -382,13 +400,18 @@ fn cmd_apply_edit(doc_id: &str, find: &str, replace: &str) -> Result<String, Str
     let adapter = GoogleDocsOutboundAdapter::new(auth);
 
     // For direct edit, we use suggest_replace then apply_suggestions
-    adapter.suggest_replace(doc_id, find, replace)
+    adapter
+        .suggest_replace(doc_id, find, replace)
         .map_err(|e| format!("Failed to mark edit: {}", e))?;
 
-    adapter.apply_suggestions(doc_id)
+    adapter
+        .apply_suggestions(doc_id)
         .map_err(|e| format!("Failed to apply edit: {}", e))?;
 
-    Ok(format!("Successfully replaced \"{}\" with \"{}\"", find, replace))
+    Ok(format!(
+        "Successfully replaced \"{}\" with \"{}\"",
+        find, replace
+    ))
 }
 
 fn cmd_insert_text(doc_id: &str, after: &str, text: &str) -> Result<String, String> {
@@ -396,13 +419,18 @@ fn cmd_insert_text(doc_id: &str, after: &str, text: &str) -> Result<String, Stri
     let adapter = GoogleDocsOutboundAdapter::new(auth);
 
     // For direct insert, add as suggestion then apply
-    adapter.insert_suggestion(doc_id, after, text)
+    adapter
+        .insert_suggestion(doc_id, after, text)
         .map_err(|e| format!("Failed to mark insertion: {}", e))?;
 
-    adapter.apply_suggestions(doc_id)
+    adapter
+        .apply_suggestions(doc_id)
         .map_err(|e| format!("Failed to apply insertion: {}", e))?;
 
-    Ok(format!("Successfully inserted \"{}\" after \"{}\"", text, after))
+    Ok(format!(
+        "Successfully inserted \"{}\" after \"{}\"",
+        text, after
+    ))
 }
 
 fn cmd_delete_text(doc_id: &str, find: &str) -> Result<String, String> {
@@ -410,10 +438,12 @@ fn cmd_delete_text(doc_id: &str, find: &str) -> Result<String, String> {
     let adapter = GoogleDocsOutboundAdapter::new(auth);
 
     // For direct delete, mark for deletion then apply
-    adapter.mark_deletion(doc_id, find)
+    adapter
+        .mark_deletion(doc_id, find)
         .map_err(|e| format!("Failed to mark deletion: {}", e))?;
 
-    adapter.apply_suggestions(doc_id)
+    adapter
+        .apply_suggestions(doc_id)
         .map_err(|e| format!("Failed to apply deletion: {}", e))?;
 
     Ok(format!("Successfully deleted \"{}\"", find))
@@ -423,47 +453,64 @@ fn cmd_mark_deletion(doc_id: &str, find: &str) -> Result<String, String> {
     let auth = get_auth()?;
     let adapter = GoogleDocsOutboundAdapter::new(auth);
 
-    adapter.mark_deletion(doc_id, find)
+    adapter
+        .mark_deletion(doc_id, find)
         .map_err(|e| format!("Failed to mark deletion: {}", e))?;
 
-    Ok(format!("Successfully marked \"{}\" for deletion (red strikethrough)", find))
+    Ok(format!(
+        "Successfully marked \"{}\" for deletion (red strikethrough)",
+        find
+    ))
 }
 
 fn cmd_insert_suggestion(doc_id: &str, after: &str, text: &str) -> Result<String, String> {
     let auth = get_auth()?;
     let adapter = GoogleDocsOutboundAdapter::new(auth);
 
-    adapter.insert_suggestion(doc_id, after, text)
+    adapter
+        .insert_suggestion(doc_id, after, text)
         .map_err(|e| format!("Failed to insert suggestion: {}", e))?;
 
-    Ok(format!("Successfully inserted suggestion \"{}\" (blue) after \"{}\"", text, after))
+    Ok(format!(
+        "Successfully inserted suggestion \"{}\" (blue) after \"{}\"",
+        text, after
+    ))
 }
 
 fn cmd_suggest_replace(doc_id: &str, find: &str, replace: &str) -> Result<String, String> {
     let auth = get_auth()?;
     let adapter = GoogleDocsOutboundAdapter::new(auth);
 
-    adapter.suggest_replace(doc_id, find, replace)
+    adapter
+        .suggest_replace(doc_id, find, replace)
         .map_err(|e| format!("Failed to suggest replacement: {}", e))?;
 
-    Ok(format!("Successfully suggested replacing \"{}\" (red strikethrough) with \"{}\" (blue)", find, replace))
+    Ok(format!(
+        "Successfully suggested replacing \"{}\" (red strikethrough) with \"{}\" (blue)",
+        find, replace
+    ))
 }
 
 fn cmd_apply_suggestions(doc_id: &str) -> Result<String, String> {
     let auth = get_auth()?;
     let adapter = GoogleDocsOutboundAdapter::new(auth);
 
-    adapter.apply_suggestions(doc_id)
+    adapter
+        .apply_suggestions(doc_id)
         .map_err(|e| format!("Failed to apply suggestions: {}", e))?;
 
-    Ok("Successfully applied all suggestions (deleted red text, normalized blue text to black)".to_string())
+    Ok(
+        "Successfully applied all suggestions (deleted red text, normalized blue text to black)"
+            .to_string(),
+    )
 }
 
 fn cmd_discard_suggestions(doc_id: &str) -> Result<String, String> {
     let auth = get_auth()?;
     let adapter = GoogleDocsOutboundAdapter::new(auth);
 
-    adapter.discard_suggestions(doc_id)
+    adapter
+        .discard_suggestions(doc_id)
         .map_err(|e| format!("Failed to discard suggestions: {}", e))?;
 
     Ok("Successfully discarded all suggestions (deleted blue text, restored red text)".to_string())

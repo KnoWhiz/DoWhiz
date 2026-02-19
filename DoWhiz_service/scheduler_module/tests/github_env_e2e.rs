@@ -119,7 +119,8 @@ impl TaskExecutor for RecordingExecutor {
                     runner: run.runner.clone(),
                     codex_disabled: run.codex_disabled,
                     channel: run.channel.to_string(),
-                    google_access_token: scheduler_module::load_google_access_token_from_service_env(),
+                    google_access_token:
+                        scheduler_module::load_google_access_token_from_service_env(),
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -226,13 +227,6 @@ fn email_flow_injects_github_env() {
     fs::create_dir_all(&bin_root).expect("bin root");
     fs::create_dir_all(&home_root).expect("home root");
 
-    let _docker_guard = EnvUnsetGuard::remove(&[
-        "RUN_TASK_DOCKER_IMAGE",
-        "RUN_TASK_USE_DOCKER",
-        "RUN_TASK_DOCKERFILE",
-        "RUN_TASK_DOCKER_AUTO_BUILD",
-    ]);
-
     fs::write(
         root.join(".env"),
         "GITHUB_USERNAME=octo-user\nGITHUB_PERSONAL_ACCESS_TOKEN=pat-test-token\n",
@@ -255,6 +249,20 @@ fn email_flow_injects_github_env() {
     let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");
     let _home_guard = EnvGuard::set("HOME", &home_root);
 
+    dotenvy::dotenv().ok();
+    let _docker_guard = EnvUnsetGuard::remove(&[
+        "RUN_TASK_DOCKER_IMAGE",
+        "RUN_TASK_USE_DOCKER",
+        "RUN_TASK_DOCKERFILE",
+        "RUN_TASK_DOCKER_AUTO_BUILD",
+        "RUN_TASK_DOCKER_REQUIRED",
+        "RUN_TASK_DOCKER_BUILD_CONTEXT",
+        "RUN_TASK_DOCKER_NETWORK",
+        "RUN_TASK_DOCKER_DNS",
+        "RUN_TASK_DOCKER_DNS_SEARCH",
+    ]);
+    let ingestion_db_url =
+        std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
     let (employee_profile, employee_directory) = test_employee_directory();
     let config = ServiceConfig {
         host: "127.0.0.1".to_string(),
@@ -266,8 +274,7 @@ fn email_flow_injects_github_env() {
         workspace_root: root.join("workspaces"),
         scheduler_state_path: state_root.join("tasks.db"),
         processed_ids_path: state_root.join("processed_ids.txt"),
-        ingestion_db_path: state_root.join("ingestion.db"),
-        ingestion_dedupe_path: state_root.join("ingestion_processed_ids.txt"),
+        ingestion_db_url: ingestion_db_url.clone(),
         ingestion_poll_interval: Duration::from_millis(50),
         users_root: users_root.clone(),
         users_db_path: state_root.join("users.db"),
@@ -290,6 +297,10 @@ fn email_flow_injects_github_env() {
         google_docs_enabled: false,
         bluebubbles_url: None,
         bluebubbles_password: None,
+        telegram_bot_token: None,
+        whatsapp_access_token: None,
+        whatsapp_phone_number_id: None,
+        whatsapp_verify_token: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
@@ -352,13 +363,6 @@ fn email_flow_injects_employee_github_env() {
     fs::create_dir_all(&bin_root).expect("bin root");
     fs::create_dir_all(&home_root).expect("home root");
 
-    let _docker_guard = EnvUnsetGuard::remove(&[
-        "RUN_TASK_DOCKER_IMAGE",
-        "RUN_TASK_USE_DOCKER",
-        "RUN_TASK_DOCKERFILE",
-        "RUN_TASK_DOCKER_AUTO_BUILD",
-    ]);
-
     fs::write(
         root.join(".env"),
         "MAGGIE_GITHUB_USERNAME=octo-user\nMAGGIE_GITHUB_PERSONAL_ACCESS_TOKEN=pat-test-token\n",
@@ -382,6 +386,20 @@ fn email_flow_injects_employee_github_env() {
     let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");
     let _home_guard = EnvGuard::set("HOME", &home_root);
 
+    dotenvy::dotenv().ok();
+    let _docker_guard = EnvUnsetGuard::remove(&[
+        "RUN_TASK_DOCKER_IMAGE",
+        "RUN_TASK_USE_DOCKER",
+        "RUN_TASK_DOCKERFILE",
+        "RUN_TASK_DOCKER_AUTO_BUILD",
+        "RUN_TASK_DOCKER_REQUIRED",
+        "RUN_TASK_DOCKER_BUILD_CONTEXT",
+        "RUN_TASK_DOCKER_NETWORK",
+        "RUN_TASK_DOCKER_DNS",
+        "RUN_TASK_DOCKER_DNS_SEARCH",
+    ]);
+    let ingestion_db_url =
+        std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
     let (employee_profile, employee_directory) = test_employee_directory();
     let config = ServiceConfig {
         host: "127.0.0.1".to_string(),
@@ -393,8 +411,7 @@ fn email_flow_injects_employee_github_env() {
         workspace_root: root.join("workspaces"),
         scheduler_state_path: state_root.join("tasks.db"),
         processed_ids_path: state_root.join("processed_ids.txt"),
-        ingestion_db_path: state_root.join("ingestion.db"),
-        ingestion_dedupe_path: state_root.join("ingestion_processed_ids.txt"),
+        ingestion_db_url,
         ingestion_poll_interval: Duration::from_millis(50),
         users_root: users_root.clone(),
         users_db_path: state_root.join("users.db"),
@@ -417,6 +434,10 @@ fn email_flow_injects_employee_github_env() {
         google_docs_enabled: false,
         bluebubbles_url: None,
         bluebubbles_password: None,
+        telegram_bot_token: None,
+        whatsapp_access_token: None,
+        whatsapp_phone_number_id: None,
+        whatsapp_verify_token: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");

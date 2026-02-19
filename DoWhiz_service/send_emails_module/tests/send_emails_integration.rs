@@ -216,7 +216,13 @@ fn send_payload_includes_recipients_and_attachments() -> Result<(), Box<dyn std:
 #[test]
 fn live_postmark_delivery_with_attachments() -> Result<(), Box<dyn std::error::Error>> {
     let _lock = ENV_MUTEX.lock().unwrap_or_else(|err| err.into_inner());
-    load_env_file(&repo_root().join(".env"));
+    let root_env = repo_root().join(".env");
+    let service_env = repo_root().join("DoWhiz_service").join(".env");
+    if root_env.exists() {
+        load_env_file(&root_env);
+    } else {
+        load_env_file(&service_env);
+    }
 
     if env::var("POSTMARK_LIVE_TEST").unwrap_or_default() != "1" {
         eprintln!("Skipping live Postmark test. Set POSTMARK_LIVE_TEST=1 to run it.");

@@ -88,9 +88,11 @@ impl GoogleDocsPollerConfig {
 
         let processed_db_path = workspace_root.join("google_docs_processed.db");
 
-        let employee_id = std::env::var("EMPLOYEE_ID").unwrap_or_else(|_| "little_bear".to_string());
+        let employee_id =
+            std::env::var("EMPLOYEE_ID").unwrap_or_else(|_| "little_bear".to_string());
 
-        let model_name = std::env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string());
+        let model_name =
+            std::env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string());
 
         let runner = if std::env::var("CLAUDE_MODEL").is_ok() {
             "claude".to_string()
@@ -163,7 +165,11 @@ impl GoogleDocsProcessedStore {
     }
 
     /// Check if a comment has been processed.
-    pub fn is_processed(&self, document_id: &str, comment_id: &str) -> Result<bool, SchedulerError> {
+    pub fn is_processed(
+        &self,
+        document_id: &str,
+        comment_id: &str,
+    ) -> Result<bool, SchedulerError> {
         let conn = self.open()?;
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM google_docs_processed_comments WHERE document_id = ?1 AND comment_id = ?2",
@@ -174,7 +180,11 @@ impl GoogleDocsProcessedStore {
     }
 
     /// Mark a comment as processed.
-    pub fn mark_processed(&self, document_id: &str, comment_id: &str) -> Result<(), SchedulerError> {
+    pub fn mark_processed(
+        &self,
+        document_id: &str,
+        comment_id: &str,
+    ) -> Result<(), SchedulerError> {
         let conn = self.open()?;
         conn.execute(
             "INSERT OR IGNORE INTO google_docs_processed_comments (document_id, comment_id, processed_at) VALUES (?1, ?2, ?3)",
@@ -185,7 +195,10 @@ impl GoogleDocsProcessedStore {
 
     /// Get all processed comment IDs for a document.
     /// @deprecated Use get_processed_ids instead for new tracking_id format.
-    pub fn get_processed_comments(&self, document_id: &str) -> Result<HashSet<String>, SchedulerError> {
+    pub fn get_processed_comments(
+        &self,
+        document_id: &str,
+    ) -> Result<HashSet<String>, SchedulerError> {
         let conn = self.open()?;
         let mut stmt = conn.prepare(
             "SELECT comment_id FROM google_docs_processed_comments WHERE document_id = ?1",
@@ -207,7 +220,11 @@ impl GoogleDocsProcessedStore {
 
     /// Mark a tracking ID as processed.
     /// Tracking IDs can be "comment:{id}" or "comment:{id}:reply:{reply_id}".
-    pub fn mark_processed_id(&self, document_id: &str, tracking_id: &str) -> Result<(), SchedulerError> {
+    pub fn mark_processed_id(
+        &self,
+        document_id: &str,
+        tracking_id: &str,
+    ) -> Result<(), SchedulerError> {
         let conn = self.open()?;
         conn.execute(
             "INSERT OR IGNORE INTO google_docs_processed_comments (document_id, comment_id, processed_at) VALUES (?1, ?2, ?3)",
@@ -293,15 +310,13 @@ impl GoogleDocsPoller {
         &self,
         scheduler: &mut Scheduler<E>,
     ) -> Result<usize, SchedulerError> {
-        let adapter = GoogleDocsInboundAdapter::new(
-            self.auth.clone(),
-            self.config.employee_emails.clone(),
-        );
+        let adapter =
+            GoogleDocsInboundAdapter::new(self.auth.clone(), self.config.employee_emails.clone());
 
         // List all shared documents
-        let documents = adapter.list_shared_documents().map_err(|e| {
-            SchedulerError::TaskFailed(format!("Failed to list documents: {}", e))
-        })?;
+        let documents = adapter
+            .list_shared_documents()
+            .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list documents: {}", e)))?;
 
         debug!("Found {} shared documents", documents.len());
 
@@ -315,11 +330,8 @@ impl GoogleDocsPoller {
                 .and_then(|owners| owners.first())
                 .and_then(|o| o.email_address.as_deref());
 
-            self.store.register_document(
-                &doc.id,
-                doc.name.as_deref(),
-                owner_email,
-            )?;
+            self.store
+                .register_document(&doc.id, doc.name.as_deref(), owner_email)?;
 
             // Get comments for this document
             let comments = match adapter.list_comments(&doc.id) {
@@ -350,12 +362,11 @@ impl GoogleDocsPoller {
                 // Fetch and save document content for agent context
                 match adapter.read_document_content(&doc.id) {
                     Ok(doc_content) => {
-                        let doc_content_path = workspace_dir.join("incoming_email").join("document_content.txt");
+                        let doc_content_path = workspace_dir
+                            .join("incoming_email")
+                            .join("document_content.txt");
                         if let Err(e) = std::fs::write(&doc_content_path, &doc_content) {
-                            warn!(
-                                "Failed to save document content for {}: {}",
-                                doc.id, e
-                            );
+                            warn!("Failed to save document content for {}: {}", doc.id, e);
                         } else {
                             info!(
                                 "Saved document content ({} chars) to {}",
@@ -365,10 +376,7 @@ impl GoogleDocsPoller {
                         }
                     }
                     Err(e) => {
-                        warn!(
-                            "Failed to fetch document content for {}: {}",
-                            doc.id, e
-                        );
+                        warn!("Failed to fetch document content for {}: {}", doc.id, e);
                     }
                 }
 
@@ -397,10 +405,15 @@ impl GoogleDocsPoller {
                 scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
 
                 // Mark as processed using the tracking_id
-                self.store.mark_processed_id(&doc.id, &actionable.tracking_id)?;
+                self.store
+                    .mark_processed_id(&doc.id, &actionable.tracking_id)?;
 
                 tasks_created += 1;
-                let item_type = if actionable.triggering_reply.is_some() { "reply" } else { "comment" };
+                let item_type = if actionable.triggering_reply.is_some() {
+                    "reply"
+                } else {
+                    "comment"
+                };
                 info!(
                     "Created task for Google Docs {} {} on {} ({})",
                     item_type, actionable.tracking_id, doc_name, doc.id
@@ -665,7 +678,11 @@ impl GoogleDocsPoller {
         );
     }
 
-    fn create_workspace(&self, document_id: &str, tracking_id: &str) -> Result<PathBuf, SchedulerError> {
+    fn create_workspace(
+        &self,
+        document_id: &str,
+        tracking_id: &str,
+    ) -> Result<PathBuf, SchedulerError> {
         // Sanitize tracking_id for use in filesystem path (replace : with _)
         let sanitized_id = tracking_id.replace(':', "_");
         let workspace_id = format!("gdocs_{}_{}", document_id, sanitized_id);
@@ -749,7 +766,8 @@ impl GoogleDocsPoller {
 
         let sender_name = message.sender_name.as_deref().unwrap_or(&message.sender);
 
-        let quoted_text = actionable.comment
+        let quoted_text = actionable
+            .comment
             .quoted_file_content
             .as_ref()
             .and_then(|q| q.value.as_deref())
@@ -757,7 +775,10 @@ impl GoogleDocsPoller {
 
         // Build conversation thread HTML if this is a reply
         let thread_html = if let Some(ref reply) = actionable.triggering_reply {
-            let original_author = actionable.comment.author.as_ref()
+            let original_author = actionable
+                .comment
+                .author
+                .as_ref()
                 .and_then(|a| a.display_name.as_deref())
                 .unwrap_or("Someone");
 
@@ -773,10 +794,7 @@ impl GoogleDocsPoller {
                 <p>{}</p>
             </div>
         </div>"#,
-                original_author,
-                actionable.comment.content,
-                sender_name,
-                reply.content
+                original_author, actionable.comment.content, sender_name, reply.content
             )
         } else {
             format!(
@@ -788,7 +806,11 @@ impl GoogleDocsPoller {
             )
         };
 
-        let item_type = if actionable.triggering_reply.is_some() { "Reply" } else { "Comment" };
+        let item_type = if actionable.triggering_reply.is_some() {
+            "Reply"
+        } else {
+            "Comment"
+        };
 
         format!(
             r#"<!DOCTYPE html>

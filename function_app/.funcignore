@@ -1,6 +1,0 @@
-.workspace/
-.e2e/
-*.log
-local.settings.json
-README.md
-scripts/

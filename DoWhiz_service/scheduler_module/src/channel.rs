@@ -18,8 +18,10 @@ pub enum Channel {
     Discord,
     /// SMS (e.g., Twilio)
     Sms,
-    /// Telegram (future)
+    /// Telegram
     Telegram,
+    /// WhatsApp via Meta Cloud API
+    WhatsApp,
     /// Google Docs collaboration via comments
     GoogleDocs,
     /// iMessage via BlueBubbles bridge
@@ -40,6 +42,7 @@ impl std::fmt::Display for Channel {
             Channel::Discord => write!(f, "discord"),
             Channel::Sms => write!(f, "sms"),
             Channel::Telegram => write!(f, "telegram"),
+            Channel::WhatsApp => write!(f, "whatsapp"),
             Channel::GoogleDocs => write!(f, "google_docs"),
             Channel::BlueBubbles => write!(f, "bluebubbles"),
         }
@@ -56,6 +59,7 @@ impl std::str::FromStr for Channel {
             "discord" => Ok(Channel::Discord),
             "sms" => Ok(Channel::Sms),
             "telegram" => Ok(Channel::Telegram),
+            "whatsapp" => Ok(Channel::WhatsApp),
             "google_docs" | "googledocs" => Ok(Channel::GoogleDocs),
             "bluebubbles" | "imessage" => Ok(Channel::BlueBubbles),
             _ => Err(format!("unknown channel: {}", s)),
@@ -127,6 +131,8 @@ pub struct ChannelMetadata {
     pub discord_channel_id: Option<u64>,
     /// Telegram-specific: Chat ID
     pub telegram_chat_id: Option<i64>,
+    /// WhatsApp-specific: Phone number (sender's phone)
+    pub whatsapp_phone_number: Option<String>,
     /// SMS-specific: From phone number
     pub sms_from: Option<String>,
     /// SMS-specific: To phone number

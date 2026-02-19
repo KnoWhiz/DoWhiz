@@ -304,6 +304,9 @@ fn secrets_persist_across_workspaces_and_load(
     ]);
     let _unset = EnvUnsetGuard::remove(&[env_key]);
 
+    dotenvy::dotenv().ok();
+    let ingestion_db_url =
+        std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
     let (employee_profile, employee_directory) = test_employee_directory();
     let config = ServiceConfig {
         host: "127.0.0.1".to_string(),
@@ -315,8 +318,7 @@ fn secrets_persist_across_workspaces_and_load(
         workspace_root: root.join("workspaces"),
         scheduler_state_path: state_root.join("tasks.db"),
         processed_ids_path: state_root.join("processed_ids.txt"),
-        ingestion_db_path: state_root.join("ingestion.db"),
-        ingestion_dedupe_path: state_root.join("ingestion_processed_ids.txt"),
+        ingestion_db_url,
         ingestion_poll_interval: Duration::from_millis(50),
         users_root: users_root.clone(),
         users_db_path: state_root.join("users.db"),
@@ -339,6 +341,10 @@ fn secrets_persist_across_workspaces_and_load(
         google_docs_enabled: false,
         bluebubbles_url: None,
         bluebubbles_password: None,
+        telegram_bot_token: None,
+        whatsapp_access_token: None,
+        whatsapp_phone_number_id: None,
+        whatsapp_verify_token: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path)?;

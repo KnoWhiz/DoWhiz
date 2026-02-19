@@ -6,7 +6,7 @@
 # port = 9100
 
 [storage]
-# db_path = "/home/azureuser/.dowhiz/DoWhiz/gateway/state/ingestion.db"
+# db_url = "postgresql://..."
 
 [defaults]
 # Global fallback route if no channel-specific rule matches.

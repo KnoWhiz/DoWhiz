@@ -16,9 +16,18 @@ fn normalize_email_handles_tags_and_case() {
 
 #[test]
 fn normalize_phone_handles_various_formats() {
-    assert_eq!(normalize_phone("+1 555 123 4567"), Some("+15551234567".to_string()));
-    assert_eq!(normalize_phone("555-123-4567"), Some("5551234567".to_string()));
-    assert_eq!(normalize_phone("+1(555)123-4567"), Some("+15551234567".to_string()));
+    assert_eq!(
+        normalize_phone("+1 555 123 4567"),
+        Some("+15551234567".to_string())
+    );
+    assert_eq!(
+        normalize_phone("555-123-4567"),
+        Some("5551234567".to_string())
+    );
+    assert_eq!(
+        normalize_phone("+1(555)123-4567"),
+        Some("+15551234567".to_string())
+    );
     assert_eq!(normalize_phone(""), None);
     assert_eq!(normalize_phone("   "), None);
 }
@@ -46,8 +55,12 @@ fn user_store_get_or_create_is_stable_for_email() {
     let db_path = temp.path().join("users.db");
     let store = UserStore::new(db_path).unwrap();
 
-    let first = store.get_or_create_user("email", "Alice@Example.com").unwrap();
-    let second = store.get_or_create_user("email", "alice@example.com").unwrap();
+    let first = store
+        .get_or_create_user("email", "Alice@Example.com")
+        .unwrap();
+    let second = store
+        .get_or_create_user("email", "alice@example.com")
+        .unwrap();
 
     assert_eq!(first.user_id, second.user_id);
     assert_eq!(first.identifier_type, "email");
@@ -60,7 +73,9 @@ fn user_store_get_or_create_is_stable_for_phone() {
     let db_path = temp.path().join("users.db");
     let store = UserStore::new(db_path).unwrap();
 
-    let first = store.get_or_create_user("phone", "+1 555 123 4567").unwrap();
+    let first = store
+        .get_or_create_user("phone", "+1 555 123 4567")
+        .unwrap();
     let second = store.get_or_create_user("phone", "+15551234567").unwrap();
 
     assert_eq!(first.user_id, second.user_id);
@@ -89,8 +104,12 @@ fn user_store_separates_by_identifier_type() {
     let store = UserStore::new(db_path).unwrap();
 
     // Same identifier, different types = different users
-    let email_user = store.get_or_create_user("email", "test@example.com").unwrap();
-    let gdocs_user = store.get_or_create_user("google_docs", "test@example.com").unwrap();
+    let email_user = store
+        .get_or_create_user("email", "test@example.com")
+        .unwrap();
+    let gdocs_user = store
+        .get_or_create_user("google_docs", "test@example.com")
+        .unwrap();
 
     assert_ne!(email_user.user_id, gdocs_user.user_id);
     assert_eq!(email_user.identifier_type, "email");
@@ -103,7 +122,9 @@ fn list_user_ids_returns_all_users() {
     let db_path = temp.path().join("users.db");
     let store = UserStore::new(db_path).unwrap();
 
-    let first = store.get_or_create_user("email", "first@example.com").unwrap();
+    let first = store
+        .get_or_create_user("email", "first@example.com")
+        .unwrap();
     let second = store.get_or_create_user("phone", "+15551234567").unwrap();
 
     let ids = store.list_user_ids().unwrap();

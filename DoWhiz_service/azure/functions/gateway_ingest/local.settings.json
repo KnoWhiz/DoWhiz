@@ -1,0 +1,15 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "SERVICE_BUS_CONNECTION_STRING": "",
+    "SERVICE_BUS_QUEUE_NAME": "ingestion",
+    "SERVICE_BUS_QUEUE_PER_EMPLOYEE": "true",
+    "AZURE_STORAGE_CONTAINER": "ingestion-raw",
+    "AZURE_STORAGE_CONTAINER_SAS_URL": "",
+    "POSTMARK_INBOUND_TOKEN": "",
+    "GATEWAY_CONFIG_PATH": "gateway.toml",
+    "EMPLOYEE_CONFIG_PATH": "employee.toml"
+  }
+}

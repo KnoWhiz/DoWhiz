@@ -105,7 +105,8 @@ impl TaskExecutor for RecordingExecutor {
                     runner: run.runner.clone(),
                     codex_disabled: run.codex_disabled,
                     channel: run.channel.to_string(),
-                    google_access_token: scheduler_module::load_google_access_token_from_service_env(),
+                    google_access_token:
+                        scheduler_module::load_google_access_token_from_service_env(),
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -204,6 +205,9 @@ fn thread_latest_epoch_end_to_end() {
     let _docker_guard = EnvGuard::set("RUN_TASK_DOCKER_IMAGE", "");
     let _home_guard = EnvGuard::set("HOME", &home_root);
 
+    dotenvy::dotenv().ok();
+    let ingestion_db_url =
+        std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
     let (employee_profile, employee_directory) = test_employee_directory(root);
     let config = ServiceConfig {
         host: "127.0.0.1".to_string(),
@@ -215,8 +219,7 @@ fn thread_latest_epoch_end_to_end() {
         workspace_root: root.join("workspaces"),
         scheduler_state_path: state_root.join("tasks.db"),
         processed_ids_path: state_root.join("processed_ids.txt"),
-        ingestion_db_path: state_root.join("ingestion.db"),
-        ingestion_dedupe_path: state_root.join("ingestion_processed_ids.txt"),
+        ingestion_db_url,
         ingestion_poll_interval: Duration::from_millis(50),
         users_root: users_root.clone(),
         users_db_path: state_root.join("users.db"),
@@ -239,6 +242,10 @@ fn thread_latest_epoch_end_to_end() {
         google_docs_enabled: false,
         bluebubbles_url: None,
         bluebubbles_password: None,
+        telegram_bot_token: None,
+        whatsapp_access_token: None,
+        whatsapp_phone_number_id: None,
+        whatsapp_verify_token: None,
     };
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");

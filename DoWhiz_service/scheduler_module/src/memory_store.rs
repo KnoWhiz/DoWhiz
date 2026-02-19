@@ -4,7 +4,27 @@ use std::path::{Path, PathBuf};
 
 use crate::RunTaskTask;
 
-const DEFAULT_MEMO_CONTENT: &str = "# Memo\n\n## Profile\n\n## Preferences\n\n## Projects\n\n## Contacts\n\n## Decisions\n\n## Processes\n";
+pub const DEFAULT_MEMO_CONTENT: &str = "# Memo\n\n## Profile\n\n## Preferences\n\n## Projects\n\n## Contacts\n\n## Decisions\n\n## Processes\n";
+
+/// Snapshot the current memo.md content for later diffing
+pub fn snapshot_memo_content(memory_dir: &Path) -> Option<String> {
+    let memo_path = memory_dir.join("memo.md");
+    if memo_path.exists() {
+        fs::read_to_string(&memo_path).ok()
+    } else {
+        Some(DEFAULT_MEMO_CONTENT.to_string())
+    }
+}
+
+/// Read the current memo.md content from a directory
+pub fn read_memo_content(memory_dir: &Path) -> Option<String> {
+    let memo_path = memory_dir.join("memo.md");
+    if memo_path.exists() {
+        fs::read_to_string(&memo_path).ok()
+    } else {
+        None
+    }
+}
 
 pub(crate) fn ensure_default_user_memo(memory_dir: &Path) -> Result<(), io::Error> {
     fs::create_dir_all(memory_dir)?;

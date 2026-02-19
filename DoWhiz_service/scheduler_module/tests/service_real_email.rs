@@ -1,7 +1,9 @@
 use lettre::message::header::{HeaderName, HeaderValue};
 use lettre::Transport;
 use rusqlite::OptionalExtension;
-use scheduler_module::employee_config::{load_employee_directory, EmployeeDirectory, EmployeeProfile};
+use scheduler_module::employee_config::{
+    load_employee_directory, EmployeeDirectory, EmployeeProfile,
+};
 use scheduler_module::service::{run_server, ServiceConfig, DEFAULT_INBOUND_BODY_MAX_BYTES};
 use scheduler_module::user_store::normalize_email;
 use scheduler_module::{
@@ -10,8 +12,10 @@ use scheduler_module::{
 use serde_json::{json, Value};
 use std::env;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
@@ -110,11 +114,45 @@ impl Drop for ChildGuard {
     }
 }
 
+#[derive(Clone)]
+struct LogCapture {
+    buffer: Arc<Mutex<Vec<u8>>>,
+}
+
+struct LogWriter {
+    buffer: Arc<Mutex<Vec<u8>>>,
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogCapture {
+    type Writer = LogWriter;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        LogWriter {
+            buffer: Arc::clone(&self.buffer),
+        }
+    }
+}
+
+impl Write for LogWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mut guard = self
+            .buffer
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        guard.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 fn write_gateway_config(
     path: &Path,
     host: &str,
     port: u16,
-    db_path: &Path,
+    db_url: &str,
     service_address: &str,
     employee_id: &str,
 ) -> Result<(), BoxError> {
@@ -124,7 +162,7 @@ host = "{host}"
 port = {port}
 
 [storage]
-db_path = "{db_path}"
+db_url = "{db_url}"
 
 [defaults]
 tenant_id = "default"
@@ -138,7 +176,7 @@ tenant_id = "default"
 "#,
         host = host,
         port = port,
-        db_path = db_path.display(),
+        db_url = db_url,
         service_address = service_address,
         employee_id = employee_id,
     );
@@ -148,7 +186,7 @@ tenant_id = "default"
 
 fn spawn_gateway(
     gateway_config_path: &Path,
-    ingestion_db_path: &Path,
+    ingestion_db_url: &str,
     employee_config_path: &Path,
     host: &str,
     port: u16,
@@ -176,7 +214,8 @@ fn spawn_gateway(
 
     let child = Command::new(gateway_bin)
         .env("GATEWAY_CONFIG_PATH", gateway_config_path)
-        .env("INGESTION_DB_PATH", ingestion_db_path)
+        .env("INGESTION_DB_URL", ingestion_db_url)
+        .env("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS", "1")
         .env("EMPLOYEE_CONFIG_PATH", employee_config_path)
         .env("GATEWAY_HOST", host)
         .env("GATEWAY_PORT", port.to_string())
@@ -190,11 +229,7 @@ fn spawn_gateway(
     Ok(ChildGuard { child })
 }
 
-fn wait_for_local_health(
-    host: &str,
-    port: u16,
-    timeout: Duration,
-) -> Result<(), BoxError> {
+fn wait_for_local_health(host: &str, port: u16, timeout: Duration) -> Result<(), BoxError> {
     let client = reqwest::blocking::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(5))
@@ -225,7 +260,12 @@ fn timestamp_suffix() -> u64 {
         .as_secs()
 }
 
-fn postmark_request(method: &str, url: &str, token: &str, payload: Option<Value>) -> Result<Value, BoxError> {
+fn postmark_request(
+    method: &str,
+    url: &str,
+    token: &str,
+    payload: Option<Value>,
+) -> Result<Value, BoxError> {
     let client = reqwest::blocking::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(30))
@@ -372,7 +412,10 @@ fn wait_for_workspace(root: &Path, timeout: Duration) -> Option<PathBuf> {
     }
 }
 
-fn wait_for_tasks_complete(tasks_path: &Path, timeout: Duration) -> Result<Vec<ScheduledTask>, BoxError> {
+fn wait_for_tasks_complete(
+    tasks_path: &Path,
+    timeout: Duration,
+) -> Result<Vec<ScheduledTask>, BoxError> {
     let start = SystemTime::now();
     loop {
         if tasks_path.exists() {
@@ -437,12 +480,21 @@ fn wait_for_user_id(
 
 #[test]
 fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
-    let _ = tracing_subscriber::fmt().with_target(false).try_init();
     load_env_from_repo();
+    env::set_var("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS", "1");
     if !env_enabled("RUST_SERVICE_LIVE_TEST") {
         eprintln!("Skipping Rust service live email test. Set RUST_SERVICE_LIVE_TEST=1 to run.");
         return Ok(());
     }
+    let log_buffer = Arc::new(Mutex::new(Vec::new()));
+    let log_capture = LogCapture {
+        buffer: Arc::clone(&log_buffer),
+    };
+    let subscriber = tracing_subscriber::fmt()
+        .with_target(false)
+        .with_writer(log_capture)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("set tracing subscriber");
 
     let token = env::var("POSTMARK_SERVER_TOKEN")
         .map_err(|_| "POSTMARK_SERVER_TOKEN must be set for live tests")?;
@@ -454,8 +506,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         .unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
     let (employee_profile, employee_directory, employee_config_path) =
         load_employee_for_address(&service_address)?;
-    let gateway_bind_host =
-        env::var("GATEWAY_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let gateway_bind_host = env::var("GATEWAY_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
     let gateway_health_host = if gateway_bind_host == "0.0.0.0" {
         "127.0.0.1".to_string()
     } else {
@@ -485,11 +536,12 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         previous_hook: previous_hook.clone(),
     };
 
+    dotenvy::dotenv().ok();
+    let ingestion_db_url = env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
     let temp = TempDir::new()?;
     let workspace_root = temp.path().join("workspaces");
     let state_dir = temp.path().join("state");
     let users_root = temp.path().join("users");
-    let ingestion_db_path = state_dir.join("ingestion.db");
     fs::create_dir_all(&workspace_root)?;
     fs::create_dir_all(&state_dir)?;
     fs::create_dir_all(&users_root)?;
@@ -512,8 +564,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         workspace_root: workspace_root.clone(),
         scheduler_state_path: state_dir.join("tasks.db"),
         processed_ids_path: state_dir.join("postmark_processed_ids.txt"),
-        ingestion_db_path: ingestion_db_path.clone(),
-        ingestion_dedupe_path: state_dir.join("ingestion_processed_ids.txt"),
+        ingestion_db_url: ingestion_db_url.clone(),
         ingestion_poll_interval: Duration::from_millis(50),
         users_root: users_root.clone(),
         users_db_path: state_dir.join("users.db"),
@@ -536,6 +587,10 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         google_docs_enabled: false,
         bluebubbles_url: None,
         bluebubbles_password: None,
+        telegram_bot_token: None,
+        whatsapp_access_token: None,
+        whatsapp_phone_number_id: None,
+        whatsapp_verify_token: None,
     };
 
     let gateway_config_path = state_dir.join("gateway.toml");
@@ -543,13 +598,13 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         &gateway_config_path,
         &gateway_bind_host,
         gateway_port,
-        &ingestion_db_path,
+        &ingestion_db_url,
         &service_address,
         &employee_id,
     )?;
     let _gateway = spawn_gateway(
         &gateway_config_path,
-        &ingestion_db_path,
+        &ingestion_db_url,
         &employee_config_path,
         &gateway_bind_host,
         gateway_port,
@@ -606,7 +661,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         &from_addr,
         workspace_timeout,
     )
-        .ok_or("timed out waiting for user record")?;
+    .ok_or("timed out waiting for user record")?;
     println!("User id resolved: {}", user_id);
     let workspace_root = users_root.join(&user_id).join("workspaces");
     println!("Waiting for workspace output...");
@@ -648,6 +703,16 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
 
     let _ = shutdown_tx.send(());
     let _ = rt.block_on(async { server_handle.await })?;
+    drop(_gateway);
+    temp.close()?;
+    std::thread::sleep(Duration::from_millis(200));
+    let log_guard = log_buffer
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let logs = String::from_utf8_lossy(&log_guard);
+    if logs.contains("unable to open database file") {
+        return Err("sqlite warning detected after cleanup".into());
+    }
 
     Ok(())
 }

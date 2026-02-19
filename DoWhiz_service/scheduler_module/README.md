@@ -21,7 +21,7 @@ let executor = ModuleExecutor::default();
 let mut scheduler = Scheduler::load(storage_path, executor)?;
 
 let task = SendReplyTask {
-    channel: Channel::Email,  // or Channel::Slack, Channel::Telegram
+    channel: Channel::Email,  // or Channel::Slack, Channel::Telegram, Channel::WhatsApp
     subject: "Hello".to_string(),
     html_path: PathBuf::from("/path/to/reply_email_draft.html"),
     attachments_dir: PathBuf::from("/path/to/reply_email_attachments"),
