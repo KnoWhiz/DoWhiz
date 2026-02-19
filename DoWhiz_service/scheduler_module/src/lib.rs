@@ -17,6 +17,7 @@ pub mod memory_diff;
 pub mod memory_queue;
 pub mod memory_store;
 pub mod past_emails;
+pub mod account_store;
 pub mod secrets_store;
 pub mod service;
 pub mod user_store;
