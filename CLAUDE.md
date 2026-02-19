@@ -150,7 +150,7 @@ After completing code changes, you must design targeted, detailed unit tests and
 - Canonical checklist: `test_plans/DoWhiz_service_tests.md`
 - After any DoWhiz_service change, run all relevant AUTO tests from the checklist.
 - For LIVE/MANUAL/PLANNED entries, mark SKIP with a reason unless explicitly run.
-- Always include the Test Report table from the checklist in your final response (PASS/FAIL/SKIP per Test ID).
+- If the user asks so, include the Test Report table from the checklist in your final response (PASS/FAIL/SKIP per Test ID). Otherwise by default summarize the tests results.
 - For real end-to-end tests requiring a public ngrok URL, use `https://shayne-laminar-lillian.ngrok-free.dev` and set up the environment accordingly.
 
 ## Coding Guidelines
