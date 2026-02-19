@@ -87,10 +87,14 @@ cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
 
 Now send an email to `oliver@dowhiz.com` (or any employee) and watch the magic happen!
 
+## Azure Deployment (Production)
+
+For Azure-managed ingress, queues, and storage, follow `DoWhiz_service/README.md` under **Azure Deployment (Functions + Service Bus + Blob + Workers)**. This flow uses Azure Functions for Postmark email ingress, Azure Service Bus for ingestion queues, Azure Blob for raw payloads, and worker services running on Azure VMs or containers.
+
 ## Architecture
 
 ```
-Inbound message -> Ingestion Gateway -> Ingestion Queue -> Scheduler -> Task runner -> Tools -> Outbound message
+Inbound message -> Ingress (Rust gateway or Azure Function) -> Ingestion Queue (Postgres or Service Bus) -> Scheduler -> Task runner -> Tools -> Outbound message
 ```
 
 **Core capabilities:**

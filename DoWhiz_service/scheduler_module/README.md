@@ -53,6 +53,6 @@ scheduler.run_loop(Duration::from_secs(1), &stop_flag)?;
 - Execution attempts are recorded in the `task_executions` table with status and error details.
 - Use `add_one_shot_in` to schedule “N minutes from now” tasks based on local time converted to UTC.
 
-## VM Deployment Workflow
+## Production Deployment
 
-For production VM setup, HTTPS, and systemd service configuration, follow the workflow in `DoWhiz_service/README.md` under “VM Deployment Workflow”.
+For Azure deployment (Functions + Service Bus + Blob + workers) or VM-based setups, follow the workflows in `DoWhiz_service/README.md` under “Azure Deployment (Functions + Service Bus + Blob + Workers)” and “VM Deployment (Gateway + ngrok)”.

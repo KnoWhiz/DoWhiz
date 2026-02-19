@@ -61,6 +61,6 @@ workspace/
    - reply_email_attachments/ exists (and contains any generated attachments).
    - Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.
 
-## VM Deployment Workflow
+## Production Deployment
 
-For production VM setup, HTTPS, and systemd service configuration, follow the workflow in `DoWhiz_service/README.md` under “VM Deployment Workflow”.
+For Azure deployment (Functions + Service Bus + Blob + workers) or VM-based setups, follow the workflows in `DoWhiz_service/README.md` under “Azure Deployment (Functions + Service Bus + Blob + Workers)” and “VM Deployment (Gateway + ngrok)”.
