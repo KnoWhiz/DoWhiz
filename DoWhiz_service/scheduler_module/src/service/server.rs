@@ -9,6 +9,7 @@ use axum::Router;
 use chrono::Utc;
 use tracing::{error, info};
 
+use crate::account_store::AccountStore;
 use crate::index_store::IndexStore;
 use crate::ingestion_queue::{build_queue_from_env, IngestionQueue};
 use crate::message_router::MessageRouter;
@@ -16,6 +17,8 @@ use crate::slack_store::{SlackInstallation, SlackStore};
 use crate::user_store::UserStore;
 use crate::{ModuleExecutor, Scheduler};
 use tokio::task;
+
+use super::auth::{auth_router, AuthState};
 
 use super::config::ServiceConfig;
 use super::ingestion::spawn_ingestion_consumer;
@@ -78,6 +81,19 @@ pub async fn run_server(
         slack_store,
     };
 
+    // Create account store for auth routes
+    let account_store = Arc::new(
+        task::spawn_blocking(AccountStore::from_env)
+            .await
+            .map_err(|err| -> BoxError { err.into() })??,
+    );
+    let supabase_url = std::env::var("SUPABASE_PROJECT_URL")
+        .unwrap_or_else(|_| "https://resmseutzmwumflevfqw.supabase.co".to_string());
+    let auth_state = AuthState {
+        account_store,
+        supabase_url,
+    };
+
     let host: IpAddr = config
         .host
         .parse()
@@ -91,6 +107,7 @@ pub async fn run_server(
         .route("/slack/install", get(slack_install))
         .route("/slack/oauth/callback", get(slack_oauth_callback))
         .with_state(state)
+        .merge(auth_router(auth_state))
         .layer(DefaultBodyLimit::max(config.inbound_body_max_bytes));
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

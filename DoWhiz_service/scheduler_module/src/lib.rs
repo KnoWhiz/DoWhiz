@@ -13,11 +13,13 @@ pub mod service_bus_queue;
 pub mod slack_store;
 pub(crate) mod thread_state;
 
+pub mod blob_store;
 pub mod index_store;
 pub mod memory_diff;
 pub mod memory_queue;
 pub mod memory_store;
 pub mod past_emails;
+pub mod account_store;
 pub mod secrets_store;
 pub mod service;
 pub mod user_store;

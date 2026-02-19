@@ -5,14 +5,20 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crossbeam_channel::{bounded, Sender};
-use tracing::info;
+use tracing::{error, info};
+use uuid::Uuid;
 
+use crate::blob_store::BlobStore;
 use crate::memory_diff::{apply_memory_diff, MemoryDiff};
 
 /// A queued memory write operation
 #[derive(Debug, Clone)]
 pub struct MemoryWriteRequest {
+    /// If set, use Azure Blob storage (unified account)
+    pub account_id: Option<Uuid>,
+    /// Legacy: user identifier for local storage
     pub user_id: String,
+    /// Legacy: local directory for memo.md
     pub user_memory_dir: PathBuf,
     pub diff: MemoryDiff,
 }
@@ -24,9 +30,30 @@ struct InternalRequest {
     done: Sender<Result<(), MemoryQueueError>>,
 }
 
+/// Lazy-initialized global BlobStore for unified accounts
+static BLOB_STORE: std::sync::OnceLock<Option<Arc<BlobStore>>> = std::sync::OnceLock::new();
+
+/// Get or initialize the global BlobStore (returns None if not configured)
+fn get_blob_store() -> Option<Arc<BlobStore>> {
+    BLOB_STORE
+        .get_or_init(|| {
+            match BlobStore::from_env() {
+                Ok(store) => {
+                    info!("BlobStore initialized for unified memo storage");
+                    Some(Arc::new(store))
+                }
+                Err(e) => {
+                    info!("BlobStore not available ({}), using local storage only", e);
+                    None
+                }
+            }
+        })
+        .clone()
+}
+
 /// Global memory write queue that ensures sequential writes per user
 pub struct MemoryWriteQueue {
-    /// Per-user channels for submitting diffs
+    /// Per-user/account channels for submitting diffs
     user_channels: Mutex<HashMap<String, Sender<InternalRequest>>>,
 }
 
@@ -40,7 +67,11 @@ impl MemoryWriteQueue {
     /// Submit a diff to be applied to a user's memo.md
     /// Blocks until the diff is applied by the worker thread
     pub fn submit(&self, request: MemoryWriteRequest) -> Result<(), MemoryQueueError> {
-        let user_id = request.user_id.clone();
+        // Use account_id as key if present, otherwise user_id
+        let queue_key = request
+            .account_id
+            .map(|id| format!("account:{}", id))
+            .unwrap_or_else(|| format!("user:{}", request.user_id));
 
         // Create completion channel
         let (done_tx, done_rx) = bounded::<Result<(), MemoryQueueError>>(1);
@@ -57,25 +88,38 @@ impl MemoryWriteQueue {
                 .lock()
                 .map_err(|_| MemoryQueueError::LockPoisoned)?;
 
-            if let Some(sender) = channels.get(&user_id) {
+            if let Some(sender) = channels.get(&queue_key) {
                 sender.clone()
             } else {
-                // Create a new channel and worker for this user
+                // Create a new channel and worker for this user/account
                 let (sender, receiver) = bounded::<InternalRequest>(100);
 
-                // Spawn worker thread for this user
-                let worker_user_id = user_id.clone();
+                // Spawn worker thread for this user/account
+                let worker_key = queue_key.clone();
                 thread::spawn(move || {
-                    info!("Memory queue worker started for user {}", worker_user_id);
+                    info!("Memory queue worker started for {}", worker_key);
+
+                    // Create a tokio runtime for async blob operations
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("Failed to create tokio runtime for memory queue worker");
+
                     for req in receiver {
-                        let result = apply_diff_to_file(&req.request);
+                        let result = if req.request.account_id.is_some() {
+                            // Use Azure Blob storage
+                            rt.block_on(apply_diff_to_blob(&req.request))
+                        } else {
+                            // Use local file storage
+                            apply_diff_to_file(&req.request)
+                        };
                         // Signal completion (ignore send error if receiver dropped)
                         let _ = req.done.send(result);
                     }
-                    info!("Memory queue worker stopped for user {}", worker_user_id);
+                    info!("Memory queue worker stopped for {}", worker_key);
                 });
 
-                channels.insert(user_id.clone(), sender.clone());
+                channels.insert(queue_key.clone(), sender.clone());
                 sender
             }
         };
@@ -98,7 +142,7 @@ impl Default for MemoryWriteQueue {
     }
 }
 
-/// Apply a diff to the user's memo.md file
+/// Apply a diff to the user's memo.md file (local storage)
 fn apply_diff_to_file(request: &MemoryWriteRequest) -> Result<(), MemoryQueueError> {
     let memo_path = request.user_memory_dir.join("memo.md");
 
@@ -128,6 +172,39 @@ fn apply_diff_to_file(request: &MemoryWriteRequest) -> Result<(), MemoryQueueErr
     Ok(())
 }
 
+/// Apply a diff to Azure Blob storage (unified account storage)
+async fn apply_diff_to_blob(request: &MemoryWriteRequest) -> Result<(), MemoryQueueError> {
+    let account_id = request
+        .account_id
+        .ok_or_else(|| MemoryQueueError::BlobStore("account_id required for blob storage".to_string()))?;
+
+    let blob_store = get_blob_store()
+        .ok_or_else(|| MemoryQueueError::BlobStore("BlobStore not configured".to_string()))?;
+
+    // Read current content from blob
+    let current_content = blob_store
+        .read_memo(account_id)
+        .await
+        .map_err(|e| MemoryQueueError::BlobStore(e.to_string()))?;
+
+    // Apply diff
+    let merged_content = apply_memory_diff(&current_content, &request.diff);
+
+    // Write back to blob
+    blob_store
+        .write_memo(account_id, &merged_content)
+        .await
+        .map_err(|e| MemoryQueueError::BlobStore(e.to_string()))?;
+
+    info!(
+        "Applied memory diff for account {} ({} sections changed)",
+        account_id,
+        request.diff.changed_sections.len()
+    );
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum MemoryQueueError {
     #[error("IO error: {0}")]
@@ -136,6 +213,8 @@ pub enum MemoryQueueError {
     LockPoisoned,
     #[error("Channel closed")]
     ChannelClosed,
+    #[error("Blob storage error: {0}")]
+    BlobStore(String),
 }
 
 impl From<std::io::Error> for MemoryQueueError {
@@ -186,6 +265,7 @@ mod tests {
         };
 
         let request = MemoryWriteRequest {
+            account_id: None,
             user_id: "test-user".to_string(),
             user_memory_dir: memory_dir.clone(),
             diff,
@@ -231,6 +311,7 @@ mod tests {
 
         queue
             .submit(MemoryWriteRequest {
+                account_id: None,
                 user_id: "test-user".to_string(),
                 user_memory_dir: memory_dir.clone(),
                 diff: diff1,
@@ -239,6 +320,7 @@ mod tests {
 
         queue
             .submit(MemoryWriteRequest {
+                account_id: None,
                 user_id: "test-user".to_string(),
                 user_memory_dir: memory_dir.clone(),
                 diff: diff2,
@@ -284,6 +366,7 @@ mod tests {
                     };
                     queue
                         .submit(MemoryWriteRequest {
+                            account_id: None,
                             user_id: "test-user".to_string(),
                             user_memory_dir: memory_dir.as_ref().clone(),
                             diff,

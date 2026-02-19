@@ -7,18 +7,21 @@ edition = "2021"
 axum = "0.7"
 azure_core = { version = "0.21", features = ["enable_reqwest"] }
 azure_messaging_servicebus = "0.21"
+azure_storage = "0.20"
+azure_storage_blobs = "0.20"
 base64 = "0.21"
 chrono = { version = "0.4", features = ["serde"] }
 crossbeam-channel = "0.5"
 cron = "0.12"
 dirs = "5"
 dotenvy = "0.15"
+futures = "0.3"
 hmac = "0.12"
 hex = "0.4"
 kuchiki = "0.8"
 md5 = "0.7"
 native-tls = "0.2"
-postgres = { version = "0.19", features = ["with-uuid-1"] }
+postgres = { version = "0.19", features = ["with-uuid-1", "with-chrono-0_4"] }
 postgres-native-tls = "0.5"
 r2d2 = "0.8"
 r2d2_postgres = "0.18"

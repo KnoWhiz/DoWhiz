@@ -1,5 +1,6 @@
 use tracing::{info, warn};
 
+use crate::account_store::lookup_account_by_channel;
 use crate::channel::Channel;
 use crate::memory_diff::compute_memory_diff;
 use crate::memory_queue::{global_memory_queue, MemoryWriteRequest};
@@ -140,7 +141,14 @@ impl TaskExecutor for ModuleExecutor {
                                     .unwrap_or("unknown")
                                     .to_string();
 
+                                // Try to look up unified account by channel identifier
+                                let account_id = task
+                                    .reply_to
+                                    .first()
+                                    .and_then(|identifier| lookup_account_by_channel(&task.channel, identifier));
+
                                 let request = MemoryWriteRequest {
+                                    account_id,
                                     user_id: user_id.clone(),
                                     user_memory_dir: user_memory_dir.clone(),
                                     diff,
