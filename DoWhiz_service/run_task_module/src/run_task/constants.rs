@@ -7,6 +7,9 @@ web_search = "live"
 ask_for_approval = "never"
 sandbox = "{sandbox_mode}"
 
+[sandbox_workspace_write]
+network_access = true
+
 [model_providers.azure]
 name = "Azure OpenAI"
 base_url = "{azure_endpoint}"
