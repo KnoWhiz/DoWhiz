@@ -557,13 +557,96 @@ pub async fn unlink_identifier(
 }
 
 // ============================================================================
+// Delete Account
+// ============================================================================
+
+/// DELETE /auth/account
+/// Delete the current user's DoWhiz account and all linked identifiers.
+pub async fn delete_account(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let token = match extract_bearer_token(&headers) {
+        Some(t) => t,
+        None => {
+            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
+                "error": "Missing Authorization header"
+            }))).into_response();
+        }
+    };
+
+    let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(id) => id,
+        Err((status, msg)) => {
+            return (status, Json(serde_json::json!({ "error": msg }))).into_response();
+        }
+    };
+
+    // Get account (run on blocking thread)
+    let store = state.account_store.clone();
+    let account_result = task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id))
+        .await
+        .map_err(|e| {
+            error!("spawn_blocking panicked: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Internal error" })))
+        });
+
+    let account = match account_result {
+        Ok(Ok(Some(acc))) => acc,
+        Ok(Ok(None)) => {
+            return (StatusCode::NOT_FOUND, Json(serde_json::json!({
+                "error": "Account not found"
+            }))).into_response();
+        }
+        Ok(Err(e)) => {
+            error!("Failed to get account: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "error": "Database error"
+            }))).into_response();
+        }
+        Err(resp) => return resp.into_response(),
+    };
+
+    // Delete account (run on blocking thread)
+    let account_id = account.id;
+    let store = state.account_store.clone();
+    let delete_result = task::spawn_blocking(move || store.delete_account(account_id))
+        .await
+        .map_err(|e| {
+            error!("spawn_blocking panicked: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Internal error" })))
+        });
+
+    match delete_result {
+        Ok(Ok(())) => {
+            info!("Deleted account {} for auth_user_id={}", account_id, auth_user_id);
+            (StatusCode::OK, Json(serde_json::json!({
+                "message": "Account deleted successfully"
+            }))).into_response()
+        }
+        Ok(Err(AccountStoreError::NotFound)) => {
+            (StatusCode::NOT_FOUND, Json(serde_json::json!({
+                "error": "Account not found"
+            }))).into_response()
+        }
+        Ok(Err(e)) => {
+            error!("Failed to delete account: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "error": "Failed to delete account"
+            }))).into_response()
+        }
+        Err(resp) => resp.into_response(),
+    }
+}
+
+// ============================================================================
 // Router
 // ============================================================================
 
 pub fn auth_router(state: AuthState) -> Router {
     Router::new()
         .route("/auth/signup", post(signup))
-        .route("/auth/account", get(get_account))
+        .route("/auth/account", get(get_account).delete(delete_account))
         .route("/auth/link", post(link_identifier))
         .route("/auth/verify", post(verify_identifier))
         .route("/auth/unlink", delete(unlink_identifier))

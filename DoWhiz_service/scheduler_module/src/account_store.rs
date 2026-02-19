@@ -262,5 +262,18 @@ impl AccountStore {
             })
             .collect())
     }
+
+    /// Delete an account and all its identifiers (CASCADE)
+    pub fn delete_account(&self, account_id: Uuid) -> Result<(), AccountStoreError> {
+        let mut conn = self.conn()?;
+        let deleted = conn.execute(
+            "DELETE FROM accounts WHERE id = $1",
+            &[&account_id],
+        )?;
+        if deleted == 0 {
+            return Err(AccountStoreError::NotFound);
+        }
+        Ok(())
+    }
 }
 

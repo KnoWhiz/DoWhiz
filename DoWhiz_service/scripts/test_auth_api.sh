@@ -146,4 +146,20 @@ ACCOUNT_INFO_FINAL=$(curl -s "${SERVICE_URL}/auth/account" \
 echo "Response: $ACCOUNT_INFO_FINAL"
 echo ""
 
+# Step 10: Delete the account
+echo "10. Deleting account (DELETE /auth/account)..."
+DELETE_RESPONSE=$(curl -s -X DELETE "${SERVICE_URL}/auth/account" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}")
+
+echo "Response: $DELETE_RESPONSE"
+echo ""
+
+# Step 11: Verify account is deleted
+echo "11. Verifying account is deleted (should return 404)..."
+VERIFY_DELETE=$(curl -s "${SERVICE_URL}/auth/account" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}")
+
+echo "Response: $VERIFY_DELETE"
+echo ""
+
 echo "=== Test Complete ==="
