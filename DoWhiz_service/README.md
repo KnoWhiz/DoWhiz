@@ -967,10 +967,12 @@ This reduces API costs and latency for simple interactions while preserving full
 | `SUPABASE_DB_URL` | - | Postgres connection string for the shared ingestion queue |
 | `INGESTION_DB_URL` | - | Optional alias for `SUPABASE_DB_URL` |
 | `DATABASE_URL` | - | Fallback Postgres connection string for the ingestion queue |
+| `SUPABASE_POOLER_URL` | - | Optional PgBouncer/Pooler URL for ingestion queue connections |
 | `SUPABASE_PROJECT_URL` | - | Supabase project URL for raw payload storage |
 | `SUPABASE_SECRET_KEY` | - | Supabase service role key for storage access |
 | `SUPABASE_STORAGE_BUCKET` | `ingestion-raw` | Bucket for raw payload blobs |
 | `INGESTION_QUEUE_TABLE` | `ingestion_queue` | Postgres table name for the queue |
+| `INGESTION_QUEUE_POOL_SIZE` | `8` | Max size for the ingestion queue Postgres pool |
 | `INGESTION_QUEUE_LEASE_SECS` | `60` | Lease timeout before reclaiming stuck jobs |
 | `INGESTION_QUEUE_MAX_ATTEMPTS` | `5` | Max retry attempts before marking failed |
 | `INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS` | `0` | Set to `1` to allow self-signed Postgres certificates (local/dev only) |
