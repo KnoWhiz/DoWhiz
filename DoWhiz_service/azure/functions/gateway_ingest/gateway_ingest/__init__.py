@@ -170,13 +170,24 @@ def resolve_container_sas_url() -> str:
     sas_url = os.getenv("AZURE_STORAGE_CONTAINER_SAS_URL")
     if sas_url:
         return sas_url.strip()
-    account = os.getenv("AZURE_STORAGE_ACCOUNT")
+    account = os.getenv("AZURE_STORAGE_ACCOUNT") or resolve_account_from_connection_string()
     container = os.getenv("AZURE_STORAGE_CONTAINER")
     sas_token = os.getenv("AZURE_STORAGE_SAS_TOKEN")
     if not account or not container or not sas_token:
         raise RuntimeError("Missing Azure storage SAS configuration")
     sas_token = sas_token.lstrip("?")
     return f"https://{account}.blob.core.windows.net/{container}?{sas_token}"
+
+
+def resolve_account_from_connection_string() -> Optional[str]:
+    conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING_INGEST")
+    if not conn_str:
+        return None
+    for segment in conn_str.split(";"):
+        key, _, value = segment.partition("=")
+        if key.strip() == "AccountName" and value.strip():
+            return value.strip()
+    return None
 
 
 def build_blob_url(container_sas_url: str, path: str) -> str:

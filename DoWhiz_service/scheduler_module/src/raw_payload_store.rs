@@ -59,7 +59,8 @@ fn resolve_azure_container_sas_url() -> Result<String, RawPayloadStoreError> {
     let account = std::env::var("AZURE_STORAGE_ACCOUNT")
         .ok()
         .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
+        .filter(|value| !value.is_empty())
+        .or_else(resolve_account_from_connection_string);
     let container = std::env::var("AZURE_STORAGE_CONTAINER")
         .ok()
         .map(|value| value.trim().to_string())
@@ -75,6 +76,23 @@ fn resolve_azure_container_sas_url() -> Result<String, RawPayloadStoreError> {
         )),
         _ => Err(RawPayloadStoreError::MissingAzureConfig),
     }
+}
+
+fn resolve_account_from_connection_string() -> Option<String> {
+    let conn_str = std::env::var("AZURE_STORAGE_CONNECTION_STRING_INGEST").ok()?;
+    parse_connection_string_kv(&conn_str, "AccountName")
+}
+
+fn parse_connection_string_kv(conn_str: &str, key: &str) -> Option<String> {
+    for segment in conn_str.split(';') {
+        let mut parts = segment.splitn(2, '=');
+        let candidate_key = parts.next()?.trim();
+        let value = parts.next()?.trim();
+        if candidate_key == key && !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+    None
 }
 
 fn resolve_project_url() -> Result<String, RawPayloadStoreError> {
@@ -459,6 +477,7 @@ fn upload_raw_payload_azure_blocking(
 mod tests {
     use super::*;
     use chrono::Utc;
+    use std::env;
     use uuid::Uuid;
 
     #[test]
@@ -477,5 +496,44 @@ mod tests {
             .expect("upload");
         let downloaded = download_raw_payload(&reference).expect("download");
         assert_eq!(payload.to_vec(), downloaded);
+    }
+
+    #[test]
+    fn azure_connection_string_fallback_for_account() {
+        let original_account = env::var("AZURE_STORAGE_ACCOUNT").ok();
+        let original_container = env::var("AZURE_STORAGE_CONTAINER").ok();
+        let original_sas = env::var("AZURE_STORAGE_SAS_TOKEN").ok();
+        let original_conn = env::var("AZURE_STORAGE_CONNECTION_STRING_INGEST").ok();
+
+        env::remove_var("AZURE_STORAGE_ACCOUNT");
+        env::set_var("AZURE_STORAGE_CONTAINER", "ingestion-raw");
+        env::set_var("AZURE_STORAGE_SAS_TOKEN", "sig=test");
+        env::set_var(
+            "AZURE_STORAGE_CONNECTION_STRING_INGEST",
+            "DefaultEndpointsProtocol=https;AccountName=testaccount;AccountKey=key;EndpointSuffix=core.windows.net",
+        );
+
+        let url = resolve_azure_container_sas_url().expect("sas url");
+        assert_eq!(
+            url,
+            "https://testaccount.blob.core.windows.net/ingestion-raw?sig=test"
+        );
+
+        match original_account {
+            Some(value) => env::set_var("AZURE_STORAGE_ACCOUNT", value),
+            None => env::remove_var("AZURE_STORAGE_ACCOUNT"),
+        }
+        match original_container {
+            Some(value) => env::set_var("AZURE_STORAGE_CONTAINER", value),
+            None => env::remove_var("AZURE_STORAGE_CONTAINER"),
+        }
+        match original_sas {
+            Some(value) => env::set_var("AZURE_STORAGE_SAS_TOKEN", value),
+            None => env::remove_var("AZURE_STORAGE_SAS_TOKEN"),
+        }
+        match original_conn {
+            Some(value) => env::set_var("AZURE_STORAGE_CONNECTION_STRING_INGEST", value),
+            None => env::remove_var("AZURE_STORAGE_CONNECTION_STRING_INGEST"),
+        }
     }
 }
