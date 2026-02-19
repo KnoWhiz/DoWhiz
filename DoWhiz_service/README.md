@@ -11,6 +11,7 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
   - [One-Command Local Run](#one-command-local-run)
   - [Manual Multi-Employee Setup](#manual-multi-employee-setup)
   - [Inbound Gateway (Recommended)](#inbound-gateway-recommended)
+  - [Azure Deployment (Functions + Service Bus + Blob + Workers)](#azure-deployment-functions--service-bus--blob--workers)
   - [VM Deployment (Gateway + ngrok)](#vm-deployment-gateway--ngrok)
   - [Fanout Gateway (Legacy)](#fanout-gateway-legacy)
   - [Docker Production](#docker-production)
@@ -230,7 +231,7 @@ Outputs appear under:
 
 ### Inbound Gateway (Recommended)
 
-The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/WhatsApp/Google Docs inbound traffic, deduplicates it, and enqueues messages into a shared ingestion queue. Workers poll that queue and send replies. Workers no longer expose `/postmark/inbound`.
+The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/WhatsApp/Google Docs inbound traffic, deduplicates it, and enqueues messages into a shared ingestion queue. The queue backend can be Postgres (Supabase) or Azure Service Bus (`INGESTION_QUEUE_BACKEND=servicebus`). Raw payloads are stored in Supabase by default; set `RAW_PAYLOAD_STORAGE_BACKEND=azure` to use Azure Blob Storage. Workers poll that queue and send replies. Workers no longer expose `/postmark/inbound`.
 
 HTTP endpoints:
 - `/postmark/inbound` (email)
@@ -250,15 +251,12 @@ Optional webhook verification:
 - `WHATSAPP_VERIFY_TOKEN` (validates WhatsApp webhook verification handshake)
 - `GATEWAY_MAX_BODY_BYTES` to override the default 25MB request limit
 
-### Azure Serverless Ingestion (Functions + Service Bus + Blob)
+### Azure Deployment (Functions + Service Bus + Blob + Workers)
 
-This replaces the Postgres ingestion queue and Supabase raw payload storage with Azure-managed services.
+This is the recommended Azure production flow. Azure Functions handles email ingress, Service Bus is the ingestion queue, and Azure Blob stores raw payloads. Workers (`rust_service`) run on Azure VMs or containers and poll Service Bus. For Slack/Discord/etc, run the Rust inbound gateway and point those webhooks to it. Email should use either the Azure Function or the Rust gateway, not both.
 
-**Overview**
-- HTTP ingress: Azure Functions (Python) at `DoWhiz_service/azure/functions/gateway_ingest`
-- Queue: Azure Service Bus (one queue per employee for ordering)
-- Raw payload storage: Azure Blob Storage
-- Optional edge: Azure API Management fronting the Function endpoint
+**Step 0: Choose ingress mode**
+Email-only ingress uses the Azure Function in `DoWhiz_service/azure/functions/gateway_ingest`. Multi-channel ingress uses the Rust `inbound_gateway` (see Step 6) and can also handle email if you want a single gateway.
 
 **Step 1: Provision Azure resources**
 ```bash
@@ -274,7 +272,10 @@ az functionapp create -g <rg> -n <function-app> --consumption-plan-location west
 az apim create -g <rg> -n <apim> --location westus2 --publisher-email proto@dowhiz.com --publisher-name DoWhiz --sku-name Consumption
 ```
 
-**Step 2: Deploy the Function**
+**Step 2: Configure gateway configs for the Function**
+Update `DoWhiz_service/azure/functions/gateway_ingest/gateway.toml` and `DoWhiz_service/azure/functions/gateway_ingest/employee.toml` to match your service addresses and routing. Keep these in sync with the worker configs in `DoWhiz_service/gateway.toml` and `DoWhiz_service/employee.toml`.
+
+**Step 3: Deploy the Function**
 ```bash
 cd DoWhiz_service/azure/functions/gateway_ingest
 mkdir -p .python_packages/lib/site-packages
@@ -284,7 +285,7 @@ zip -r /tmp/gateway_ingest.zip .
 az functionapp deployment source config-zip -g <rg> -n <function-app> --src /tmp/gateway_ingest.zip
 ```
 
-**Step 3: Configure Function App settings**
+**Step 4: Configure Function App settings**
 ```bash
 az functionapp config appsettings set -g <rg> -n <function-app> --settings \
   SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..." \
@@ -296,12 +297,15 @@ az functionapp config appsettings set -g <rg> -n <function-app> --settings \
   GATEWAY_CONFIG_PATH="gateway.toml" \
   EMPLOYEE_CONFIG_PATH="employee.toml"
 ```
+Optional settings:
+`AZURE_STORAGE_CONTAINER_SAS_URL` (full SAS URL), `POSTMARK_INBOUND_TOKEN` (verify `X-Postmark-Token`).
 
-**Step 4: Point Postmark to Azure**
-- Direct Function URL: `https://<function-app>.azurewebsites.net/api/postmark/inbound`
-- APIM URL (recommended): `https://<apim>.azure-api.net/gateway/postmark/inbound`
+**Step 5: Point Postmark to Azure**
+Direct Function URL: `https://<function-app>.azurewebsites.net/api/postmark/inbound`  
+APIM URL (recommended): `https://<apim>.azure-api.net/gateway/postmark/inbound`
 
-**Step 5: Run workers against Service Bus**
+**Step 6: Deploy workers against Service Bus**
+Set these on the worker host (VM or container) and start one worker per employee:
 ```bash
 export INGESTION_QUEUE_BACKEND=servicebus
 export SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..."
@@ -314,9 +318,19 @@ export AZURE_STORAGE_SAS_TOKEN="..."
 ./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004 --skip-hook --skip-ngrok
 ```
 
+**Step 7: Multi-channel ingress (optional)**
+If you need Slack/Discord/Telegram/SMS/WhatsApp/BlueBubbles/Google Docs, run the Rust gateway with the same Service Bus and Azure Blob settings:
+```bash
+INGESTION_QUEUE_BACKEND=servicebus \
+RAW_PAYLOAD_STORAGE_BACKEND=azure \
+AZURE_STORAGE_CONTAINER="ingestion-raw" \
+AZURE_STORAGE_SAS_TOKEN="..." \
+  ./DoWhiz_service/scripts/run_gateway_local.sh
+```
+
 Notes:
 - Ordering per employee is achieved by using one Service Bus queue per employee (`ingestion-<employee_id>`).
-- Update `gateway.toml` (and the copy shipped with the Function) when adding new routes.
+- Ensure the Function and worker configs stay in sync (`gateway.toml` and `employee.toml`).
 - The Function package should be built with Linux wheels; the Docker step avoids macOS/Windows artifacts.
 - `requirements.txt` pins `cryptography==41.0.7` to stay compatible with the Functions runtime glibc.
 
@@ -404,7 +418,7 @@ POSTMARK_TEST_SERVICE_ADDRESS=mini-mouse@dowhiz.com
 
 ### VM Deployment (Gateway + ngrok)
 
-This is the current production flow (oliver on `dowhizprod1`): run a single worker behind the inbound gateway and expose the gateway with ngrok.
+Single-VM deployment that runs a worker and the Rust inbound gateway, exposed via ngrok. Use this for quick production or staging setups when you do not need Azure-managed ingress/queue/storage. For Azure-managed ingress, queues, and blob storage, follow the Azure deployment flow above.
 
 1. Provision an Ubuntu VM and open inbound TCP ports `22`, `80`, `443`.
 Outbound SMTP (`25`) is often blocked on cloud VMs; run E2E senders from your local machine if needed.
@@ -1087,7 +1101,7 @@ This reduces API costs and latency for simple interactions while preserving full
 | `GATEWAY_MAX_BODY_BYTES` | `26214400` | Max inbound body size (25MB) |
 | `POSTMARK_INBOUND_TOKEN` | - | Verify Postmark webhook (`X-Postmark-Token`) |
 
-### Azure Serverless Ingestion
+### Azure Ingestion (Service Bus + Blob)
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `INGESTION_QUEUE_BACKEND` | `postgres` | `postgres` or `servicebus` |
