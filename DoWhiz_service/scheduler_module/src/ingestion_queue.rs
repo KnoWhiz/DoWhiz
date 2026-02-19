@@ -1,8 +1,9 @@
 use postgres_native_tls::MakeTlsConnector;
+use postgres::types::Type;
 use r2d2::{Pool, PooledConnection};
 use r2d2_postgres::PostgresConnectionManager;
 use std::env;
-use tracing::error;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 use crate::ingestion::IngestionEnvelope;
@@ -59,6 +60,7 @@ pub struct PostgresIngestionQueue {
     table: String,
     lease_secs: i64,
     max_attempts: i32,
+    use_typed_queries: bool,
 }
 
 impl PostgresIngestionQueue {
@@ -100,7 +102,8 @@ impl PostgresIngestionQueue {
             .build()
             .map_err(|err| IngestionQueueError::Config(err.to_string()))?;
         let tls_for_pool = MakeTlsConnector::new(tls_connector.clone());
-        let tls_for_direct = MakeTlsConnector::new(tls_connector);
+        let tls_for_direct = MakeTlsConnector::new(tls_connector.clone());
+        let tls_for_fallback = MakeTlsConnector::new(tls_connector);
 
         let manager = PostgresConnectionManager::new(pool_config, tls_for_pool);
         let pool = Pool::builder()
@@ -108,13 +111,27 @@ impl PostgresIngestionQueue {
             .idle_timeout(Some(std::time::Duration::from_secs(300))) // Close idle connections after 5 min
             .error_handler(Box::new(LoggingErrorHandler))
             .build(manager)?;
+        let use_typed_queries = pool_db_url != db_url;
         let queue = Self {
             pool: Some(pool),
             table,
             lease_secs,
             max_attempts,
+            use_typed_queries,
         };
-        queue.ensure_schema_with_config(&direct_config, tls_for_direct)?;
+        if let Err(err) = queue.ensure_schema_with_config(&direct_config, tls_for_direct) {
+            if pool_db_url != db_url {
+                warn!(
+                    "direct ingestion schema init failed; falling back to pooler: {}",
+                    err
+                );
+                let fallback_config: postgres::Config =
+                    pool_db_url.parse().map_err(IngestionQueueError::Postgres)?;
+                queue.ensure_schema_with_config(&fallback_config, tls_for_fallback)?;
+            } else {
+                return Err(err);
+            }
+        }
         Ok(queue)
     }
 
@@ -206,26 +223,46 @@ impl IngestionQueue for PostgresIngestionQueue {
     fn enqueue(&self, envelope: &IngestionEnvelope) -> Result<EnqueueResult, IngestionQueueError> {
         let mut conn = self.connection()?;
         let payload_json = serde_json::to_string(envelope)?;
-        let row = conn.execute(
-            &format!(
-                "INSERT INTO {table}
-                    (id, tenant_id, employee_id, channel, external_message_id, dedupe_key, payload_json, status, created_at, attempts)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', now(), 0)
-                 ON CONFLICT (dedupe_key) DO NOTHING",
-                table = self.table
-            ),
-            &[
-                &envelope.envelope_id,
-                &envelope.tenant_id,
-                &envelope.employee_id,
-                &envelope.channel.to_string(),
-                &envelope.external_message_id,
-                &envelope.dedupe_key,
-                &payload_json,
-            ],
-        )?;
-
-        Ok(EnqueueResult { inserted: row > 0 })
+        let statement = format!(
+            "INSERT INTO {table}
+                (id, tenant_id, employee_id, channel, external_message_id, dedupe_key, payload_json, status, created_at, attempts)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', now(), 0)
+             ON CONFLICT (dedupe_key) DO NOTHING
+             RETURNING 1",
+            table = self.table
+        );
+        if self.use_typed_queries {
+            let channel = envelope.channel.to_string();
+            let rows = conn.query_typed(
+                &statement,
+                &[
+                    (&envelope.envelope_id, Type::UUID),
+                    (&envelope.tenant_id, Type::TEXT),
+                    (&envelope.employee_id, Type::TEXT),
+                    (&channel, Type::TEXT),
+                    (&envelope.external_message_id, Type::TEXT),
+                    (&envelope.dedupe_key, Type::TEXT),
+                    (&payload_json, Type::TEXT),
+                ],
+            )?;
+            Ok(EnqueueResult {
+                inserted: !rows.is_empty(),
+            })
+        } else {
+            let row = conn.execute(
+                &statement,
+                &[
+                    &envelope.envelope_id,
+                    &envelope.tenant_id,
+                    &envelope.employee_id,
+                    &envelope.channel.to_string(),
+                    &envelope.external_message_id,
+                    &envelope.dedupe_key,
+                    &payload_json,
+                ],
+            )?;
+            Ok(EnqueueResult { inserted: row > 0 })
+        }
     }
 
     fn claim_next(&self, employee_id: &str) -> Result<Option<QueuedEnvelope>, IngestionQueueError> {
@@ -234,24 +271,37 @@ impl IngestionQueue for PostgresIngestionQueue {
         let lease_secs = self.lease_secs;
 
         let mut tx = conn.transaction()?;
-        let row = tx.query_opt(
-            &format!(
-                "SELECT id, payload_json
-                 FROM {table}
-                 WHERE employee_id = $1
-                   AND (
-                     status = 'pending'
-                     OR (status = 'processing' AND locked_at < now() - ($2::bigint * interval '1 second'))
-                   )
-                   AND (available_at IS NULL OR available_at <= now())
-                   AND attempts < $3
-                 ORDER BY created_at
-                 LIMIT 1
-                 FOR UPDATE SKIP LOCKED",
-                table = self.table
-            ),
-            &[&employee_id, &lease_secs, &self.max_attempts],
-        )?;
+        let select_statement = format!(
+            "SELECT id, payload_json
+             FROM {table}
+             WHERE employee_id = $1
+               AND (
+                 status = 'pending'
+                 OR (status = 'processing' AND locked_at < now() - ($2::bigint * interval '1 second'))
+               )
+               AND (available_at IS NULL OR available_at <= now())
+               AND attempts < $3
+             ORDER BY created_at
+             LIMIT 1
+             FOR UPDATE SKIP LOCKED",
+            table = self.table
+        );
+        let row = if self.use_typed_queries {
+            let mut rows = tx.query_typed(
+                &select_statement,
+                &[
+                    (&employee_id, Type::TEXT),
+                    (&lease_secs, Type::INT8),
+                    (&self.max_attempts, Type::INT4),
+                ],
+            )?;
+            rows.pop()
+        } else {
+            tx.query_opt(
+                &select_statement,
+                &[&employee_id, &lease_secs, &self.max_attempts],
+            )?
+        };
 
         let Some(row) = row else {
             tx.commit()?;
@@ -261,18 +311,25 @@ impl IngestionQueue for PostgresIngestionQueue {
         let id: Uuid = row.get(0);
         let payload_json: String = row.get(1);
 
-        let updated = tx.execute(
-            &format!(
-                "UPDATE {table}
-                 SET status = 'processing',
-                     locked_at = now(),
-                     locked_by = $2,
-                     attempts = attempts + 1
-                 WHERE id = $1",
-                table = self.table
-            ),
-            &[&id, &instance_id],
-        )?;
+        let update_statement = format!(
+            "UPDATE {table}
+             SET status = 'processing',
+                 locked_at = now(),
+                 locked_by = $2,
+                 attempts = attempts + 1
+             WHERE id = $1
+             RETURNING 1",
+            table = self.table
+        );
+        let updated = if self.use_typed_queries {
+            let rows = tx.query_typed(
+                &update_statement,
+                &[(&id, Type::UUID), (&instance_id, Type::TEXT)],
+            )?;
+            rows.len() as u64
+        } else {
+            tx.execute(&update_statement, &[&id, &instance_id])?
+        };
 
         if updated == 0 {
             tx.commit()?;
@@ -287,32 +344,34 @@ impl IngestionQueue for PostgresIngestionQueue {
 
     fn mark_done(&self, id: &Uuid) -> Result<(), IngestionQueueError> {
         let mut conn = self.connection()?;
-        conn.execute(
-            &format!(
-                "UPDATE {table}
-                 SET status = 'done',
-                     processed_at = now(),
-                     locked_at = NULL,
-                     locked_by = NULL
-                 WHERE id = $1",
-                table = self.table
-            ),
-            &[id],
-        )?;
+        let statement = format!(
+            "UPDATE {table}
+             SET status = 'done',
+                 processed_at = now(),
+                 locked_at = NULL,
+                 locked_by = NULL
+             WHERE id = $1",
+            table = self.table
+        );
+        if self.use_typed_queries {
+            let _ = conn.query_typed(&statement, &[(&id, Type::UUID)])?;
+        } else {
+            conn.execute(&statement, &[id])?;
+        }
         Ok(())
     }
 
     fn mark_failed(&self, id: &Uuid, error: &str) -> Result<(), IngestionQueueError> {
         let mut conn = self.connection()?;
-        let attempts: i32 = conn
-            .query_one(
-                &format!(
-                    "SELECT attempts FROM {table} WHERE id = $1",
-                    table = self.table
-                ),
-                &[id],
-            )?
-            .get(0);
+        let attempts_statement = format!("SELECT attempts FROM {table} WHERE id = $1", table = self.table);
+        let attempts: i32 = if self.use_typed_queries {
+            let rows = conn.query_typed(&attempts_statement, &[(&id, Type::UUID)])?;
+            rows.first()
+                .map(|row| row.get(0))
+                .unwrap_or(0)
+        } else {
+            conn.query_one(&attempts_statement, &[id])?.get(0)
+        };
 
         let (status, available_at) = if attempts >= self.max_attempts {
             ("failed", None)
@@ -322,45 +381,52 @@ impl IngestionQueue for PostgresIngestionQueue {
         };
 
         if let Some(backoff_secs) = available_at {
-            conn.execute(
-                &format!(
-                    "UPDATE {table}
-                     SET status = $2,
-                         processed_at = now(),
-                         locked_at = NULL,
-                         locked_by = NULL,
-                         available_at = now() + ($3::bigint * interval '1 second'),
-                         last_error = $4
-                     WHERE id = $1",
-                    table = self.table
-                ),
-                &[id, &status, &backoff_secs, &error],
-            )?;
+            let statement = format!(
+                "UPDATE {table}
+                 SET status = $2,
+                     processed_at = now(),
+                     locked_at = NULL,
+                     locked_by = NULL,
+                     available_at = now() + ($3::bigint * interval '1 second'),
+                     last_error = $4
+                 WHERE id = $1",
+                table = self.table
+            );
+            if self.use_typed_queries {
+                let _ = conn.query_typed(
+                    &statement,
+                    &[
+                        (&id, Type::UUID),
+                        (&status, Type::TEXT),
+                        (&backoff_secs, Type::INT8),
+                        (&error, Type::TEXT),
+                    ],
+                )?;
+            } else {
+                conn.execute(&statement, &[id, &status, &backoff_secs, &error])?;
+            }
         } else {
-            conn.execute(
-                &format!(
-                    "UPDATE {table}
-                     SET status = $2,
-                         processed_at = now(),
-                         locked_at = NULL,
-                         locked_by = NULL,
-                         available_at = NULL,
-                         last_error = $3
-                     WHERE id = $1",
-                    table = self.table
-                ),
-                &[id, &status, &error],
-            )?;
+            let statement = format!(
+                "UPDATE {table}
+                 SET status = $2,
+                     processed_at = now(),
+                     locked_at = NULL,
+                     locked_by = NULL,
+                     available_at = NULL,
+                     last_error = $3
+                 WHERE id = $1",
+                table = self.table
+            );
+            if self.use_typed_queries {
+                let _ = conn.query_typed(
+                    &statement,
+                    &[(&id, Type::UUID), (&status, Type::TEXT), (&error, Type::TEXT)],
+                )?;
+            } else {
+                conn.execute(&statement, &[id, &status, &error])?;
+            }
         }
         Ok(())
-    }
-}
-
-impl Drop for PostgresIngestionQueue {
-    fn drop(&mut self) {
-        if let Some(pool) = self.pool.take() {
-            std::thread::spawn(move || drop(pool));
-        }
     }
 }
 
