@@ -478,10 +478,21 @@ mod tests {
     use super::*;
     use chrono::Utc;
     use std::env;
+    use std::sync::{Mutex, OnceLock};
     use uuid::Uuid;
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env mutex poisoned")
+    }
 
     #[test]
     fn azure_upload_download_roundtrip() {
+        let _guard = lock_env();
         dotenvy::dotenv().ok();
         let backend = std::env::var("RAW_PAYLOAD_STORAGE_BACKEND")
             .unwrap_or_else(|_| "supabase".to_string());
@@ -500,14 +511,17 @@ mod tests {
 
     #[test]
     fn azure_connection_string_fallback_for_account() {
+        let _guard = lock_env();
         let original_account = env::var("AZURE_STORAGE_ACCOUNT").ok();
         let original_container = env::var("AZURE_STORAGE_CONTAINER").ok();
         let original_sas = env::var("AZURE_STORAGE_SAS_TOKEN").ok();
         let original_conn = env::var("AZURE_STORAGE_CONNECTION_STRING_INGEST").ok();
+        let original_container_sas_url = env::var("AZURE_STORAGE_CONTAINER_SAS_URL").ok();
 
         env::remove_var("AZURE_STORAGE_ACCOUNT");
         env::set_var("AZURE_STORAGE_CONTAINER", "ingestion-raw");
         env::set_var("AZURE_STORAGE_SAS_TOKEN", "sig=test");
+        env::remove_var("AZURE_STORAGE_CONTAINER_SAS_URL");
         env::set_var(
             "AZURE_STORAGE_CONNECTION_STRING_INGEST",
             "DefaultEndpointsProtocol=https;AccountName=testaccount;AccountKey=key;EndpointSuffix=core.windows.net",
@@ -534,6 +548,10 @@ mod tests {
         match original_conn {
             Some(value) => env::set_var("AZURE_STORAGE_CONNECTION_STRING_INGEST", value),
             None => env::remove_var("AZURE_STORAGE_CONNECTION_STRING_INGEST"),
+        }
+        match original_container_sas_url {
+            Some(value) => env::set_var("AZURE_STORAGE_CONTAINER_SAS_URL", value),
+            None => env::remove_var("AZURE_STORAGE_CONTAINER_SAS_URL"),
         }
     }
 }

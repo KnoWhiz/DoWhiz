@@ -51,7 +51,7 @@ impl r2d2::HandleError<postgres::Error> for LoggingErrorHandler {
 
 #[derive(Clone)]
 pub struct AccountStore {
-    pool: Pool<PostgresConnectionManager<MakeTlsConnector>>,
+    pool: Option<Pool<PostgresConnectionManager<MakeTlsConnector>>>,
 }
 
 impl AccountStore {
@@ -86,11 +86,14 @@ impl AccountStore {
             .error_handler(Box::new(LoggingErrorHandler))
             .build(manager)?;
 
-        Ok(Self { pool })
+        Ok(Self { pool: Some(pool) })
     }
 
     fn conn(&self) -> Result<PooledConnection<PostgresConnectionManager<MakeTlsConnector>>, AccountStoreError> {
-        Ok(self.pool.get()?)
+        let pool = self.pool.as_ref().ok_or_else(|| {
+            AccountStoreError::Config("account store pool dropped".to_string())
+        })?;
+        Ok(pool.get()?)
     }
 
     /// Create a new account linked to a Supabase auth user
@@ -277,6 +280,14 @@ impl AccountStore {
     }
 }
 
+impl Drop for AccountStore {
+    fn drop(&mut self) {
+        if let Some(pool) = self.pool.take() {
+            std::thread::spawn(move || drop(pool));
+        }
+    }
+}
+
 // ============================================================================
 // Global AccountStore accessor
 // ============================================================================
@@ -352,4 +363,3 @@ pub fn lookup_account_by_channel(
         }
     }
 }
-
