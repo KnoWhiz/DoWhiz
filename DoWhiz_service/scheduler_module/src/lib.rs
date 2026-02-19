@@ -9,6 +9,7 @@ pub mod ingestion_queue;
 pub mod mailbox;
 pub mod message_router;
 pub mod raw_payload_store;
+pub mod service_bus_queue;
 pub mod slack_store;
 pub(crate) mod thread_state;
 

@@ -1,0 +1,63 @@
+# Example ingestion gateway configuration.
+# Copy to gateway.toml and adjust routes for your tenants/channels.
+
+[server]
+# host = "0.0.0.0"
+# port = 9100
+
+[storage]
+# db_url = "postgresql://..."
+
+[defaults]
+tenant_id = "default"
+employee_id = "boiled_egg"
+
+# Route rules: channel + key -> employee/tenant
+# Use key = "*" to define a channel default.
+[[routes]]
+channel = "slack"
+key = "*"
+employee_id = "boiled_egg"
+tenant_id = "default"
+
+# Email routing by service address
+[[routes]]
+channel = "email"
+key = "proto@dowhiz.com"
+employee_id = "boiled_egg"
+tenant_id = "default"
+
+# Slack routing by team_id
+[[routes]]
+channel = "slack"
+key = "T12345678"
+employee_id = "boiled_egg"
+tenant_id = "acme"
+
+# Discord routing by guild_id (use "dm" for direct messages)
+[[routes]]
+channel = "discord"
+key = "123456789012345678"
+employee_id = "boiled_egg"
+tenant_id = "acme"
+
+# SMS routing by inbound phone number (To)
+[[routes]]
+channel = "sms"
+key = "+15551234567"
+employee_id = "little_bear"
+tenant_id = "default"
+
+# BlueBubbles routing by chat_guid
+[[routes]]
+channel = "bluebubbles"
+key = "iMessage;-;+15551234567"
+employee_id = "boiled_egg"
+tenant_id = "default"
+
+# Google Docs routing by document_id
+[[routes]]
+channel = "google_docs"
+key = "1AbCdEfGhIjKlMnOpQrStUvWxYz"
+employee_id = "little_bear"
+tenant_id = "default"

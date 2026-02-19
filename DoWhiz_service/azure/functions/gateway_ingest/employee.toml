@@ -1,0 +1,53 @@
+# Employee-specific configuration for DoWhiz service instances.
+
+# Optional default employee id if EMPLOYEE_ID is not set.
+default_employee_id = "little_bear"
+
+[[employees]]
+id = "little_bear"
+display_name = "Oliver"
+runner = "codex"
+model = "gpt-5.2-codex"
+addresses = ["oliver@dowhiz.com", "little-bear@dowhiz.com", "agent@dowhiz.com", "c9051c2176b203ca4b6da98e0a790e15@inbound.postmarkapp.com"]
+agents_path = "employees/little_bear/AGENTS.md"
+claude_path = "employees/little_bear/CLAUDE.md"
+soul_path = "employees/little_bear/SOUL.md"
+skills_dir = "skills"
+
+[[employees]]
+id = "mini_mouse"
+display_name = "Maggie"
+runner = "claude"
+model = "claude-opus-4-5"
+addresses = ["maggie@dowhiz.com", "mini-mouse@dowhiz.com"]
+agents_path = "employees/mini_mouse/AGENTS.md"
+claude_path = "employees/mini_mouse/CLAUDE.md"
+soul_path = "employees/mini_mouse/SOUL.md"
+skills_dir = "skills"
+
+[[employees]]
+id = "sticky_octopus"
+display_name = "Sticky-Octopus"
+runner = "codex"
+model = "gpt-5.2-codex"
+addresses = ["devin@dowhiz.com", "sticky-octopus@dowhiz.com", "coder@dowhiz.com"]
+runtime_root = ".workspace/sticky_octopus"
+agents_path = "employees/sticky_octopus/AGENTS.md"
+claude_path = "employees/sticky_octopus/CLAUDE.md"
+soul_path = "employees/sticky_octopus/SOUL.md"
+skills_dir = "skills"
+
+[[employees]]
+id = "boiled_egg"
+display_name = "Boiled-Egg"
+runner = "codex"
+model = "gpt-5.2-codex"
+addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com"]
+runtime_root = ".workspace/boiled_egg"
+agents_path = "employees/boiled_egg/AGENTS.md"
+claude_path = "employees/boiled_egg/CLAUDE.md"
+soul_path = "employees/boiled_egg/SOUL.md"
+skills_dir = "skills"
+discord_enabled = true
+slack_enabled = true
+bluebubbles_enabled = true

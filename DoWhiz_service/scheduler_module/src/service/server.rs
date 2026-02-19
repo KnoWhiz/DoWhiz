@@ -10,7 +10,7 @@ use chrono::Utc;
 use tracing::{error, info};
 
 use crate::index_store::IndexStore;
-use crate::ingestion_queue::{IngestionQueue, PostgresIngestionQueue};
+use crate::ingestion_queue::{build_queue_from_env, IngestionQueue};
 use crate::message_router::MessageRouter;
 use crate::slack_store::{SlackInstallation, SlackStore};
 use crate::user_store::UserStore;
@@ -34,11 +34,10 @@ pub async fn run_server(
     let index_store = Arc::new(IndexStore::new(&config.task_index_path)?);
     let slack_store = Arc::new(SlackStore::new(&config.slack_store_path)?);
     let ingestion_db_url = config.ingestion_db_url.clone();
-    let ingestion_queue: Arc<dyn IngestionQueue> = Arc::new(
-        task::spawn_blocking(move || PostgresIngestionQueue::new_from_url(&ingestion_db_url))
+    let ingestion_queue: Arc<dyn IngestionQueue> =
+        task::spawn_blocking(move || build_queue_from_env(Some(ingestion_db_url)))
             .await
-            .map_err(|err| -> BoxError { err.into() })??,
-    );
+            .map_err(|err| -> BoxError { err.into() })??;
     let message_router = Arc::new(MessageRouter::new());
     if let Ok(user_ids) = user_store.list_user_ids() {
         for user_id in user_ids {
