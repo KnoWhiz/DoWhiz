@@ -22,7 +22,7 @@ use tokio::task;
 use tracing::info;
 
 use scheduler_module::employee_config::load_employee_directory;
-use scheduler_module::ingestion_queue::{IngestionQueue, PostgresIngestionQueue};
+use scheduler_module::ingestion_queue::{build_queue_from_env, resolve_ingestion_queue_backend, IngestionQueue};
 
 use config::{
     load_gateway_config, resolve_employee_config_path, resolve_gateway_config_path,
@@ -63,15 +63,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or_else(|| config_file.server.port.unwrap_or(9100));
 
-    let db_url = resolve_ingestion_db_url(&config_file.storage)?;
+    let backend = resolve_ingestion_queue_backend();
+    let db_url = if backend == "postgres" {
+        Some(resolve_ingestion_db_url(&config_file.storage)?)
+    } else {
+        None
+    };
 
     let (routes, channel_defaults) = normalize_routes(&config_file.routes)?;
 
-    let queue: Arc<dyn IngestionQueue> = Arc::new(
-        task::spawn_blocking(move || PostgresIngestionQueue::new_from_url(&db_url))
+    let queue: Arc<dyn IngestionQueue> =
+        task::spawn_blocking(move || build_queue_from_env(db_url))
             .await
-            .map_err(|err| -> Box<dyn std::error::Error + Send + Sync> { err.into() })??,
-    );
+            .map_err(|err| -> Box<dyn std::error::Error + Send + Sync> { err.into() })??;
 
     let state = Arc::new(GatewayState {
         config: GatewayConfig {

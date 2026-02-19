@@ -7,6 +7,7 @@ use tracing::{error, warn};
 use uuid::Uuid;
 
 use crate::ingestion::IngestionEnvelope;
+use crate::service_bus_queue::ServiceBusIngestionQueue;
 
 /// Custom error handler that logs the actual connection error
 #[derive(Debug)]
@@ -34,6 +35,8 @@ pub enum IngestionQueueError {
     InvalidTableName(String),
     #[error("ingestion queue config error: {0}")]
     Config(String),
+    #[error("service bus error: {0}")]
+    ServiceBus(String),
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +64,33 @@ pub struct PostgresIngestionQueue {
     lease_secs: i64,
     max_attempts: i32,
     use_typed_queries: bool,
+}
+
+pub fn resolve_ingestion_queue_backend() -> String {
+    env::var("INGESTION_QUEUE_BACKEND")
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "postgres".to_string())
+}
+
+pub fn build_queue_from_env(
+    db_url_override: Option<String>,
+) -> Result<std::sync::Arc<dyn IngestionQueue>, IngestionQueueError> {
+    let backend = resolve_ingestion_queue_backend();
+    if backend == "servicebus" || backend == "service_bus" {
+        let queue = ServiceBusIngestionQueue::from_env()?;
+        return Ok(std::sync::Arc::new(queue));
+    }
+
+    if let Some(db_url) = db_url_override {
+        if !db_url.trim().is_empty() {
+            return Ok(std::sync::Arc::new(PostgresIngestionQueue::new_from_url(
+                &db_url,
+            )?));
+        }
+    }
+    Ok(std::sync::Arc::new(PostgresIngestionQueue::from_env()?))
 }
 
 impl PostgresIngestionQueue {
@@ -554,7 +584,10 @@ mod tests {
     use super::*;
     use crate::channel::{Channel, ChannelMetadata, InboundMessage};
     use crate::ingestion::IngestionPayload;
+    use crate::service_bus_queue::ServiceBusIngestionQueue;
     use chrono::Utc;
+    use std::thread;
+    use std::time::Duration;
 
     fn sample_envelope(employee_id: &str, dedupe_key: &str) -> IngestionEnvelope {
         let message = InboundMessage {
@@ -589,7 +622,11 @@ mod tests {
         }
     }
 
-    fn test_queue() -> PostgresIngestionQueue {
+    fn is_service_bus_backend() -> bool {
+        matches!(resolve_ingestion_queue_backend().as_str(), "servicebus" | "service_bus")
+    }
+
+    fn postgres_queue() -> PostgresIngestionQueue {
         dotenvy::dotenv().ok();
         env::set_var("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS", "true");
         let db_url = resolve_db_url().expect("SUPABASE_DB_URL required for ingestion queue tests");
@@ -599,23 +636,54 @@ mod tests {
 
     #[test]
     fn enqueue_and_claim_roundtrip() {
-        let queue = test_queue();
-        let envelope = sample_envelope("emp", "dedupe-1");
-        let result = queue.enqueue(&envelope).expect("enqueue");
-        assert!(result.inserted);
+        if is_service_bus_backend() {
+            dotenvy::dotenv().ok();
+            env::set_var("SERVICE_BUS_QUEUE_PER_EMPLOYEE", "0");
+            let test_queue =
+                env::var("SERVICE_BUS_TEST_QUEUE_NAME").unwrap_or_else(|_| "ingestion-test".to_string());
+            env::set_var("SERVICE_BUS_QUEUE_NAME", &test_queue);
+            let queue = ServiceBusIngestionQueue::from_env().expect("service bus queue");
+            let dedupe_key = format!("dedupe-{}", Uuid::new_v4());
+            let envelope = sample_envelope("emp", &dedupe_key);
+            let result = queue.enqueue(&envelope).expect("enqueue");
+            assert!(result.inserted);
 
-        let claimed = queue.claim_next("emp").expect("claim");
-        assert!(claimed.is_some());
-        let claimed = claimed.unwrap();
-        assert_eq!(claimed.envelope.dedupe_key, "dedupe-1");
+            let mut claimed = None;
+            for _ in 0..5 {
+                claimed = queue.claim_next("emp").expect("claim");
+                if claimed.is_some() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(200));
+            }
+            assert!(claimed.is_some());
+            let claimed = claimed.unwrap();
+            assert_eq!(claimed.envelope.dedupe_key, dedupe_key);
 
-        queue.mark_done(&claimed.id).expect("done");
-        queue.drop_table_for_tests();
+            queue.mark_done(&claimed.id).expect("done");
+        } else {
+            let queue = postgres_queue();
+            let envelope = sample_envelope("emp", "dedupe-1");
+            let result = queue.enqueue(&envelope).expect("enqueue");
+            assert!(result.inserted);
+
+            let claimed = queue.claim_next("emp").expect("claim");
+            assert!(claimed.is_some());
+            let claimed = claimed.unwrap();
+            assert_eq!(claimed.envelope.dedupe_key, "dedupe-1");
+
+            queue.mark_done(&claimed.id).expect("done");
+            queue.drop_table_for_tests();
+        }
     }
 
     #[test]
     fn enqueue_dedupe_prevents_duplicates() {
-        let queue = test_queue();
+        if is_service_bus_backend() {
+            eprintln!("Service Bus backend does not report dedupe insert results; skipping.");
+            return;
+        }
+        let queue = postgres_queue();
         let envelope = sample_envelope("emp", "dedupe-2");
         let first = queue.enqueue(&envelope).expect("enqueue");
         let second = queue.enqueue(&envelope).expect("enqueue");

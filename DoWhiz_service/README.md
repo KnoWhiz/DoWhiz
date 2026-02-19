@@ -250,6 +250,76 @@ Optional webhook verification:
 - `WHATSAPP_VERIFY_TOKEN` (validates WhatsApp webhook verification handshake)
 - `GATEWAY_MAX_BODY_BYTES` to override the default 25MB request limit
 
+### Azure Serverless Ingestion (Functions + Service Bus + Blob)
+
+This replaces the Postgres ingestion queue and Supabase raw payload storage with Azure-managed services.
+
+**Overview**
+- HTTP ingress: Azure Functions (Python) at `DoWhiz_service/azure/functions/gateway_ingest`
+- Queue: Azure Service Bus (one queue per employee for ordering)
+- Raw payload storage: Azure Blob Storage
+- Optional edge: Azure API Management fronting the Function endpoint
+
+**Step 1: Provision Azure resources**
+```bash
+# Example (use your own names/location)
+az group create -n <rg> -l westus2
+az storage account create -g <rg> -n <storage> -l westus2 --sku Standard_LRS --kind StorageV2
+az storage container create --account-name <storage> --name ingestion-raw
+az servicebus namespace create -g <rg> -n <sb-namespace> -l westus2 --sku Standard
+az servicebus queue create -g <rg> --namespace-name <sb-namespace> -n ingestion --enable-duplicate-detection true --duplicate-detection-history-time-window PT10M
+az servicebus queue create -g <rg> --namespace-name <sb-namespace> -n ingestion-test --enable-duplicate-detection true --duplicate-detection-history-time-window PT10M
+az servicebus queue create -g <rg> --namespace-name <sb-namespace> -n ingestion-<employee_id> --enable-duplicate-detection true --duplicate-detection-history-time-window PT10M
+az functionapp create -g <rg> -n <function-app> --consumption-plan-location westus2 --runtime python --runtime-version 3.11 --functions-version 4 --storage-account <storage> --os-type Linux
+az apim create -g <rg> -n <apim> --location westus2 --publisher-email proto@dowhiz.com --publisher-name DoWhiz --sku-name Consumption
+```
+
+**Step 2: Deploy the Function**
+```bash
+cd DoWhiz_service/azure/functions/gateway_ingest
+mkdir -p .python_packages/lib/site-packages
+docker run --rm --platform linux/amd64 -v "$PWD:/workspace" -w /workspace \
+  python:3.11-slim bash -lc "pip install --no-cache-dir -r requirements.txt -t .python_packages/lib/site-packages"
+zip -r /tmp/gateway_ingest.zip .
+az functionapp deployment source config-zip -g <rg> -n <function-app> --src /tmp/gateway_ingest.zip
+```
+
+**Step 3: Configure Function App settings**
+```bash
+az functionapp config appsettings set -g <rg> -n <function-app> --settings \
+  SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..." \
+  SERVICE_BUS_QUEUE_NAME="ingestion" \
+  SERVICE_BUS_QUEUE_PER_EMPLOYEE="true" \
+  AZURE_STORAGE_ACCOUNT="<storage>" \
+  AZURE_STORAGE_CONTAINER="ingestion-raw" \
+  AZURE_STORAGE_SAS_TOKEN="<sas>" \
+  GATEWAY_CONFIG_PATH="gateway.toml" \
+  EMPLOYEE_CONFIG_PATH="employee.toml"
+```
+
+**Step 4: Point Postmark to Azure**
+- Direct Function URL: `https://<function-app>.azurewebsites.net/api/postmark/inbound`
+- APIM URL (recommended): `https://<apim>.azure-api.net/gateway/postmark/inbound`
+
+**Step 5: Run workers against Service Bus**
+```bash
+export INGESTION_QUEUE_BACKEND=servicebus
+export SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..."
+export SERVICE_BUS_QUEUE_NAME="ingestion"
+export SERVICE_BUS_QUEUE_PER_EMPLOYEE=true
+export RAW_PAYLOAD_STORAGE_BACKEND=azure
+export AZURE_STORAGE_CONTAINER="ingestion-raw"
+export AZURE_STORAGE_SAS_TOKEN="..."
+
+./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004 --skip-hook --skip-ngrok
+```
+
+Notes:
+- Ordering per employee is achieved by using one Service Bus queue per employee (`ingestion-<employee_id>`).
+- Update `gateway.toml` (and the copy shipped with the Function) when adding new routes.
+- The Function package should be built with Linux wheels; the Docker step avoids macOS/Windows artifacts.
+- `requirements.txt` pins `cryptography==41.0.7` to stay compatible with the Functions runtime glibc.
+
 **Local gateway + Docker workers (shared ingestion queue)**
 
 **Step 1: Build the Docker image (once)**
@@ -1016,6 +1086,23 @@ This reduces API costs and latency for simple interactions while preserving full
 | `GATEWAY_PORT` | `9100` | Gateway bind port |
 | `GATEWAY_MAX_BODY_BYTES` | `26214400` | Max inbound body size (25MB) |
 | `POSTMARK_INBOUND_TOKEN` | - | Verify Postmark webhook (`X-Postmark-Token`) |
+
+### Azure Serverless Ingestion
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `INGESTION_QUEUE_BACKEND` | `postgres` | `postgres` or `servicebus` |
+| `SERVICE_BUS_CONNECTION_STRING` | - | Service Bus namespace connection string |
+| `SERVICE_BUS_QUEUE_NAME` | `ingestion` | Base queue name (per-employee suffix added when enabled) |
+| `SERVICE_BUS_QUEUE_PER_EMPLOYEE` | `true` | Use `ingestion-<employee_id>` queues for ordering |
+| `SERVICE_BUS_TEST_QUEUE_NAME` | `ingestion-test` | Queue used by Service Bus tests |
+| `SERVICE_BUS_PEEK_LOCK_TIMEOUT_SECS` | `30` | Peek-lock timeout for Service Bus receive |
+| `RAW_PAYLOAD_STORAGE_BACKEND` | `supabase` | `supabase` or `azure` |
+| `AZURE_STORAGE_ACCOUNT` | - | Azure Storage account name |
+| `AZURE_STORAGE_CONTAINER` | - | Azure Blob container name |
+| `AZURE_STORAGE_SAS_TOKEN` | - | SAS token for container access |
+| `AZURE_STORAGE_CONTAINER_SAS_URL` | - | Full container SAS URL (optional) |
+| `AZURE_FUNCTION_POSTMARK_URL` | - | Direct Function ingress URL |
+| `AZURE_APIM_POSTMARK_URL` | - | APIM ingress URL |
 
 ### Slack
 | Variable | Default | Description |
