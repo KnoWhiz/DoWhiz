@@ -1,6 +1,8 @@
+use std::path::Path;
 use tracing::{info, warn};
 
 use crate::account_store::lookup_account_by_channel;
+use crate::blob_store::get_blob_store;
 use crate::channel::Channel;
 use crate::memory_diff::compute_memory_diff;
 use crate::memory_queue::{global_memory_queue, MemoryWriteRequest};
@@ -12,6 +14,52 @@ use crate::secrets_store::{
     resolve_user_secrets_path, sync_user_secrets_to_workspace, sync_workspace_secrets_to_user,
 };
 use crate::thread_state::{current_thread_epoch, find_thread_state_path};
+use uuid::Uuid;
+
+/// Sync memo from Azure Blob to workspace directory.
+/// Returns the memo content if successful, None otherwise.
+fn sync_blob_memo_to_workspace(account_id: Uuid, workspace_memory_dir: &Path) -> Option<String> {
+    let blob_store = get_blob_store()?;
+
+    // Create a runtime for the async blob read
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(e) => {
+            warn!("Failed to create tokio runtime for blob read: {}", e);
+            return None;
+        }
+    };
+
+    // Read memo from blob
+    let memo_content = match rt.block_on(blob_store.read_memo(account_id)) {
+        Ok(content) => content,
+        Err(e) => {
+            warn!("Failed to read memo from blob for account {}: {}", account_id, e);
+            return None;
+        }
+    };
+
+    // Ensure workspace memory directory exists
+    if let Err(e) = std::fs::create_dir_all(workspace_memory_dir) {
+        warn!("Failed to create workspace memory dir: {}", e);
+        return None;
+    }
+
+    // Write memo to workspace
+    let memo_path = workspace_memory_dir.join("memo.md");
+    if let Err(e) = std::fs::write(&memo_path, &memo_content) {
+        warn!("Failed to write blob memo to workspace: {}", e);
+        return None;
+    }
+
+    info!(
+        "Synced memo from Azure Blob (account {}) to workspace ({} bytes)",
+        account_id,
+        memo_content.len()
+    );
+
+    Some(memo_content)
+}
 
 use super::outbound::{
     execute_bluebubbles_send, execute_discord_send, execute_email_send, execute_google_docs_send,
@@ -85,21 +133,53 @@ impl TaskExecutor for ModuleExecutor {
                 let user_memory_dir = resolve_user_memory_dir(task);
                 let user_secrets_path = resolve_user_secrets_path(task);
 
-                // Snapshot original memo content before syncing to workspace
-                let original_memo_snapshot = user_memory_dir
-                    .as_ref()
-                    .and_then(|dir| snapshot_memo_content(dir));
+                // Try to look up unified account by channel identifier
+                let account_id = task
+                    .reply_to
+                    .first()
+                    .and_then(|identifier| lookup_account_by_channel(&task.channel, identifier));
 
-                if let Some(user_memory_dir) = user_memory_dir.as_ref() {
-                    sync_user_memory_to_workspace(user_memory_dir, &workspace_memory_dir).map_err(
-                        |err| SchedulerError::TaskFailed(format!("memory sync failed: {}", err)),
-                    )?;
+                // Sync memo to workspace: prefer Azure Blob if account exists, else local storage
+                let original_memo_snapshot = if let Some(account_id) = account_id {
+                    // User has a unified account - try to sync from Azure Blob
+                    info!("Found unified account {} for channel {:?}, syncing from Azure Blob", account_id, task.channel);
+                    match sync_blob_memo_to_workspace(account_id, &workspace_memory_dir) {
+                        Some(content) => {
+                            // Successfully synced from blob - use blob content as snapshot
+                            Some(content)
+                        }
+                        None => {
+                            // Blob sync failed - fall back to local storage
+                            warn!("Blob sync failed for account {}, falling back to local storage", account_id);
+                            if let Some(user_memory_dir) = user_memory_dir.as_ref() {
+                                let snapshot = snapshot_memo_content(user_memory_dir);
+                                if let Err(e) = sync_user_memory_to_workspace(user_memory_dir, &workspace_memory_dir) {
+                                    warn!("Local memory sync also failed: {}", e);
+                                }
+                                snapshot
+                            } else {
+                                None
+                            }
+                        }
+                    }
                 } else {
-                    warn!(
-                        "unable to resolve user memory dir for workspace {}",
-                        task.workspace_dir.display()
-                    );
-                }
+                    // No unified account - use local storage (original behavior)
+                    let snapshot = user_memory_dir
+                        .as_ref()
+                        .and_then(|dir| snapshot_memo_content(dir));
+
+                    if let Some(user_memory_dir) = user_memory_dir.as_ref() {
+                        sync_user_memory_to_workspace(user_memory_dir, &workspace_memory_dir).map_err(
+                            |err| SchedulerError::TaskFailed(format!("memory sync failed: {}", err)),
+                        )?;
+                    } else {
+                        warn!(
+                            "unable to resolve user memory dir for workspace {}",
+                            task.workspace_dir.display()
+                        );
+                    }
+                    snapshot
+                };
                 if let Some(user_secrets_path) = user_secrets_path.as_ref() {
                     sync_user_secrets_to_workspace(user_secrets_path, &task.workspace_dir)
                         .map_err(|err| {

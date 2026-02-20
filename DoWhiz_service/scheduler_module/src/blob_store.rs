@@ -204,6 +204,27 @@ impl BlobStore {
     }
 }
 
+/// Lazy-initialized global BlobStore for unified accounts
+static BLOB_STORE: std::sync::OnceLock<Option<Arc<BlobStore>>> = std::sync::OnceLock::new();
+
+/// Get or initialize the global BlobStore (returns None if not configured)
+pub fn get_blob_store() -> Option<Arc<BlobStore>> {
+    BLOB_STORE
+        .get_or_init(|| {
+            match BlobStore::from_env() {
+                Ok(store) => {
+                    info!("BlobStore initialized for unified memo storage");
+                    Some(Arc::new(store))
+                }
+                Err(e) => {
+                    info!("BlobStore not available ({}), using local storage only", e);
+                    None
+                }
+            }
+        })
+        .clone()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
