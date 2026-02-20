@@ -382,6 +382,33 @@ function App() {
     }
   ];
 
+  const blogPosts = [
+    {
+      tag: 'Product Update',
+      title: 'Launching the DoWhiz blog',
+      date: 'Feb 20, 2026',
+      readTime: '4 min read',
+      excerpt: 'A new place to share product updates, workflow playbooks, and stories from teams working with digital employees.',
+      href: '/blog/'
+    },
+    {
+      tag: 'Playbook',
+      title: 'Inbox-first workflows that actually ship',
+      date: 'Feb 18, 2026',
+      readTime: '6 min read',
+      excerpt: 'How we structure requests, handoffs, and status updates so your team stays aligned without extra meetings.',
+      href: '/blog/'
+    },
+    {
+      tag: 'Operations',
+      title: 'From request to delivery in one thread',
+      date: 'Feb 15, 2026',
+      readTime: '5 min read',
+      excerpt: 'A walkthrough of the DoWhiz delivery loop and the artifacts you can expect back from your digital employees.',
+      href: '/blog/'
+    }
+  ];
+
   const teamMembers = [
     {
       name: 'Oliver',
@@ -516,6 +543,7 @@ function App() {
             <div className="nav-links">
               <a href="#roles" className="nav-btn">Team</a>
               <a href="#features" className="nav-btn">Features</a>
+              <a href="#blog" className="nav-btn">Blog</a>
               <a href="/user-guide/" className="nav-btn">User Guide</a>
             </div>
             <div className="nav-actions">
@@ -653,6 +681,38 @@ function App() {
                   <h3>{feature.title}</h3>
                   <p>{feature.desc}</p>
                 </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Blog */}
+        <section id="blog" className="section blog-section">
+          <div className="container">
+            <div className="blog-header">
+              <div>
+                <h2 className="section-title">From the DoWhiz blog</h2>
+                <p className="section-intro">
+                  Product notes, delivery playbooks, and behind-the-scenes stories from the team building digital employees.
+                </p>
+              </div>
+              <a className="btn btn-primary blog-cta" href="/blog/">Visit the blog</a>
+            </div>
+            <div className="blog-grid">
+              {blogPosts.map((post) => (
+                <article key={post.title} className="blog-card">
+                  <div className="blog-meta">
+                    <span className="blog-tag">{post.tag}</span>
+                    <span>{post.date}</span>
+                    <span>{post.readTime}</span>
+                  </div>
+                  <h3>{post.title}</h3>
+                  <p>{post.excerpt}</p>
+                  <a className="blog-link" href={post.href}>
+                    Read more
+                    <span aria-hidden="true">→</span>
+                  </a>
+                </article>
               ))}
             </div>
           </div>
