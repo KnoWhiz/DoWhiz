@@ -76,8 +76,8 @@ if [[ -z "${POSTMARK_SERVER_TOKEN:-}" ]]; then
 fi
 
 if [[ "${RUN_CODEX_E2E:-0}" == "1" ]]; then
-  if [[ -z "${AZURE_OPENAI_API_KEY_BACKUP:-}" ]] || [[ -z "${AZURE_OPENAI_ENDPOINT_BACKUP:-}" ]]; then
-    echo "AZURE_OPENAI_API_KEY_BACKUP and AZURE_OPENAI_ENDPOINT_BACKUP are required when RUN_CODEX_E2E=1." >&2
+  if [[ -z "${AZURE_OPENAI_API_KEY_BACKUP:-}" ]]; then
+    echo "AZURE_OPENAI_API_KEY_BACKUP is required when RUN_CODEX_E2E=1." >&2
     exit 1
   fi
 fi

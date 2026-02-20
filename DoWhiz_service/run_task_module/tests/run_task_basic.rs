@@ -51,18 +51,22 @@ value = "still"
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
-        ("CODEX_MODEL", "new-model"),
+        ("CODEX_MODEL", "override-model"),
         ("GH_AUTH_DISABLED", "1"),
     ]);
 
-    let mut params = build_params(&workspace);
-    params.model_name = "new-model".to_string();
+    let params = build_params(&workspace);
     let _result = run_task(&params).unwrap();
 
     let updated = fs::read_to_string(&config_path).unwrap();
     assert!(updated.contains("value = \"keep\""));
     assert!(updated.contains("value = \"still\""));
-    assert!(updated.contains("model = \"new-model\""));
-    assert!(!updated.contains("old-model"));
-    assert!(updated.contains("https://example.azure.com/openai/v1"));
+    assert!(updated.contains("model = \"gpt-5.2-codex\""));
+    assert!(!updated.contains("model = \"old-model\""));
+    assert!(!updated.contains("model = \"override-model\""));
+    assert!(updated.contains(
+        "https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1"
+    ));
+    assert!(!updated.contains("https://old.azure.com/openai/v1"));
+    assert!(!updated.contains("https://example.azure.com/openai/v1"));
 }

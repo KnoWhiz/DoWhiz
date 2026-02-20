@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 axum = "0.7"
+azure_core = { version = "0.21", features = ["enable_reqwest"] }
+azure_messaging_servicebus = "0.21"
 azure_storage = "0.20"
 azure_storage_blobs = "0.20"
 base64 = "0.21"

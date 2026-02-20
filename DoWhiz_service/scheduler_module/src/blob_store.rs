@@ -95,14 +95,21 @@ impl BlobStore {
             Ok(data) => {
                 let content = String::from_utf8(data)
                     .map_err(|e| BlobStoreError::Azure(format!("invalid UTF-8: {}", e)))?;
-                info!("Read memo.md for account {} ({} bytes)", account_id, content.len());
+                info!(
+                    "Read memo.md for account {} ({} bytes)",
+                    account_id,
+                    content.len()
+                );
                 Ok(content)
             }
             Err(e) => {
                 // Check if it's a 404 (blob not found)
                 let error_str = e.to_string();
                 if error_str.contains("BlobNotFound") || error_str.contains("404") {
-                    info!("Memo not found for account {}, returning default", account_id);
+                    info!(
+                        "Memo not found for account {}, returning default",
+                        account_id
+                    );
                     Ok(DEFAULT_MEMO_CONTENT.to_string())
                 } else {
                     error!("Failed to read memo for account {}: {}", account_id, e);
@@ -126,7 +133,11 @@ impl BlobStore {
                 BlobStoreError::Azure(e.to_string())
             })?;
 
-        info!("Wrote memo.md for account {} ({} bytes)", account_id, content.len());
+        info!(
+            "Wrote memo.md for account {} ({} bytes)",
+            account_id,
+            content.len()
+        );
         Ok(())
     }
 
@@ -193,6 +204,27 @@ impl BlobStore {
     }
 }
 
+/// Lazy-initialized global BlobStore for unified accounts
+static BLOB_STORE: std::sync::OnceLock<Option<Arc<BlobStore>>> = std::sync::OnceLock::new();
+
+/// Get or initialize the global BlobStore (returns None if not configured)
+pub fn get_blob_store() -> Option<Arc<BlobStore>> {
+    BLOB_STORE
+        .get_or_init(|| {
+            match BlobStore::from_env() {
+                Ok(store) => {
+                    info!("BlobStore initialized for unified memo storage");
+                    Some(Arc::new(store))
+                }
+                Err(e) => {
+                    info!("BlobStore not available ({}), using local storage only", e);
+                    None
+                }
+            }
+        })
+        .clone()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,7 +239,10 @@ mod tests {
         let test_content = "# Test Memo\n\n## Section\n- Item 1\n";
 
         // Write
-        store.write_memo(test_account_id, test_content).await.expect("write");
+        store
+            .write_memo(test_account_id, test_content)
+            .await
+            .expect("write");
 
         // Read back
         let read_content = store.read_memo(test_account_id).await.expect("read");
@@ -217,7 +252,10 @@ mod tests {
         store.delete_memo(test_account_id).await.expect("delete");
 
         // Verify returns default after delete
-        let after_delete = store.read_memo(test_account_id).await.expect("read after delete");
+        let after_delete = store
+            .read_memo(test_account_id)
+            .await
+            .expect("read after delete");
         assert_eq!(after_delete, DEFAULT_MEMO_CONTENT);
     }
 }

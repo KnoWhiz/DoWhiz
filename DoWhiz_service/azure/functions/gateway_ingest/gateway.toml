@@ -6,9 +6,8 @@
 # port = 9100
 
 [defaults]
-# Global fallback route if no channel-specific rule matches.
-# tenant_id = "default"
-# employee_id = "little_bear"
+tenant_id = "default"
+employee_id = "boiled_egg"
 
 # Route rules: channel + key -> employee/tenant
 # Use key = "*" to define a channel default.
@@ -21,8 +20,8 @@ tenant_id = "default"
 # Email routing by service address
 [[routes]]
 channel = "email"
-key = "oliver@dowhiz.com"
-employee_id = "little_bear"
+key = "proto@dowhiz.com"
+employee_id = "boiled_egg"
 tenant_id = "default"
 
 # Slack routing by team_id

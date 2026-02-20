@@ -59,6 +59,8 @@ Note: scheduler_module tests expect a Postgres ingestion queue; set `SUPABASE_DB
 | UT-SCH-32 | router_config_defaults | scheduler_module/src/message_router::RouterConfig | DoWhiz_service/scheduler_module/src/message_router.rs | Router defaults | Actual HTTP behavior | AUTO | cargo test -p scheduler_module |
 | UT-SCH-33 | forward_marker_detected | scheduler_module/src/message_router::FORWARD_MARKER | DoWhiz_service/scheduler_module/src/message_router.rs | Marker detection | Real LLM output | AUTO | cargo test -p scheduler_module |
 | UT-SCH-34 | test_config_validation | scheduler_module/src/google_auth::GoogleAuthConfig | DoWhiz_service/scheduler_module/src/google_auth.rs | Config validation | OAuth refresh | AUTO | cargo test -p scheduler_module |
+| UT-SCH-35 | azure_raw_payload_store_roundtrip | raw_payload_store::{upload_raw_payload_blocking, download_raw_payload} | DoWhiz_service/scheduler_module/src/raw_payload_store.rs | Azure blob upload + download | Supabase storage path | LIVE | RAW_PAYLOAD_STORAGE_BACKEND=azure + Azure blob env |
+| UT-SCH-36 | service_bus_enqueue_and_claim_roundtrip | ingestion_queue::IngestionQueue (ServiceBus) | DoWhiz_service/scheduler_module/src/ingestion_queue.rs | Service Bus enqueue/claim/mark_done | Dedupe enforcement | LIVE | INGESTION_QUEUE_BACKEND=servicebus + Service Bus env |
 
 ## Unit Tests: scheduler_module (adapters)
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
