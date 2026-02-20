@@ -31,6 +31,11 @@ pub enum RunTaskError {
         status: Option<i32>,
         output: String,
     },
+    CommandTimeout {
+        command: &'static str,
+        timeout_secs: u64,
+        output: String,
+    },
     GitHubAuthCommandNotFound {
         command: &'static str,
     },
@@ -81,6 +86,15 @@ impl fmt::Display for RunTaskError {
                 f,
                 "Docker run failed (status: {:?}). Output tail:\n{}",
                 status, output
+            ),
+            RunTaskError::CommandTimeout {
+                command,
+                timeout_secs,
+                output,
+            } => write!(
+                f,
+                "Command timed out ({} after {}s). Output tail:\n{}",
+                command, timeout_secs, output
             ),
             RunTaskError::GitHubAuthCommandNotFound { command } => {
                 write!(f, "GitHub auth command not found on PATH: {}", command)

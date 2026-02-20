@@ -1,3 +1,5 @@
+mod test_support;
+
 use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
 use scheduler_module::service::{run_server, ServiceConfig, DEFAULT_INBOUND_BODY_MAX_BYTES};
@@ -119,9 +121,11 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
         index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
     }
 
-    dotenvy::dotenv().ok();
-    let ingestion_db_url =
-        std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
+    let Some(ingestion_db_url) =
+        test_support::require_supabase_db_url("scheduler_parallelism_reduces_wall_clock_time")
+    else {
+        return Ok(());
+    };
     let port = pick_free_port()?;
     let (employee_profile, employee_directory) = test_employee_directory();
     let config = ServiceConfig {

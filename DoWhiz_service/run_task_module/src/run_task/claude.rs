@@ -11,7 +11,7 @@ use super::github_auth::{ensure_github_cli_auth, resolve_github_auth};
 use super::prompt::{build_prompt, load_memory_context};
 use super::scheduled::{extract_scheduled_tasks, extract_scheduler_actions};
 use super::types::{RunTaskOutput, RunTaskRequest};
-use super::utils::tail_string;
+use super::utils::{run_command_with_timeout, run_task_timeout, tail_string};
 
 pub(super) fn run_claude_task(
     request: RunTaskRequest<'_>,
@@ -201,17 +201,28 @@ fn run_claude_command(
     model_name: &str,
     env_overrides: &[(String, String)],
 ) -> Result<std::process::Output, RunTaskError> {
-    match build_claude_command(workspace_dir, prompt, model_name, env_overrides).output() {
+    let timeout = run_task_timeout();
+    match run_command_with_timeout(
+        build_claude_command(workspace_dir, prompt, model_name, env_overrides),
+        timeout,
+        "claude",
+    ) {
         Ok(output) => return Ok(output),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-        Err(err) => return Err(RunTaskError::Io(err)),
+        Err(RunTaskError::Io(err)) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err),
     }
 
     ensure_claude_cli_installed(env_overrides)?;
-    match build_claude_command(workspace_dir, prompt, model_name, env_overrides).output() {
+    match run_command_with_timeout(
+        build_claude_command(workspace_dir, prompt, model_name, env_overrides),
+        timeout,
+        "claude",
+    ) {
         Ok(output) => Ok(output),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Err(RunTaskError::ClaudeNotFound),
-        Err(err) => Err(RunTaskError::Io(err)),
+        Err(RunTaskError::Io(err)) if err.kind() == io::ErrorKind::NotFound => {
+            Err(RunTaskError::ClaudeNotFound)
+        }
+        Err(err) => Err(err),
     }
 }
 
