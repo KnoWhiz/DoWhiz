@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::constants::{
-    CODEX_CONFIG_BLOCK_TEMPLATE, CODEX_CONFIG_MARKER, DOCKER_CODEX_HOME_DIR, DOCKER_WORKSPACE_DIR,
+    CODEX_BASE_URL, CODEX_CONFIG_BLOCK_TEMPLATE, CODEX_CONFIG_MARKER, CODEX_MODEL_NAME,
+    CODEX_SANDBOX_MODE, DOCKER_CODEX_HOME_DIR, DOCKER_WORKSPACE_DIR,
 };
 use super::docker::{docker_cli_available, ensure_docker_image_available};
 use super::env::{env_enabled, read_env_list, read_env_trimmed};
@@ -25,7 +26,7 @@ pub(super) fn run_codex_task(
 ) -> Result<RunTaskOutput, RunTaskError> {
     super::env::load_env_sources(request.workspace_dir)?;
     let docker_image = read_env_trimmed("RUN_TASK_DOCKER_IMAGE");
-    let docker_requested = docker_image.is_some() || env_enabled("RUN_TASK_USE_DOCKER");
+    let docker_requested = env_enabled("RUN_TASK_USE_DOCKER");
     let docker_available = docker_requested && docker_cli_available();
     let docker_required = env_enabled("RUN_TASK_DOCKER_REQUIRED");
     let use_docker = docker_requested && docker_available;
@@ -67,27 +68,11 @@ pub(super) fn run_codex_task(
             key: "AZURE_OPENAI_API_KEY_BACKUP",
         });
     }
-    let azure_endpoint =
-        env::var("AZURE_OPENAI_ENDPOINT_BACKUP").map_err(|_| RunTaskError::MissingEnv {
-            key: "AZURE_OPENAI_ENDPOINT_BACKUP",
-        })?;
-    if azure_endpoint.trim().is_empty() {
-        return Err(RunTaskError::MissingEnv {
-            key: "AZURE_OPENAI_ENDPOINT_BACKUP",
-        });
-    }
-
-    let model_name = if request.model_name.trim().is_empty() {
-        env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string())
-    } else {
-        request.model_name.to_string()
-    };
-
+    let azure_endpoint = CODEX_BASE_URL.to_string();
+    let model_name = CODEX_MODEL_NAME.to_string();
     let sandbox_mode = codex_sandbox_mode();
-    // Bypass sandbox for GoogleDocs tasks to allow network access for Google APIs
-    let channel_lower = request.channel.to_lowercase();
-    let is_google_docs = channel_lower == "google_docs" || channel_lower == "googledocs";
-    let bypass_sandbox = codex_bypass_sandbox() || use_docker || is_google_docs;
+    let bypass_sandbox = codex_bypass_sandbox();
+    let add_dirs = codex_add_dirs(request.workspace_dir, use_docker)?;
     if use_docker {
         let codex_home = host_workspace_dir
             .as_ref()
@@ -206,6 +191,9 @@ pub(super) fn run_codex_task(
         if bypass_sandbox {
             cmd.arg("--yolo");
         }
+        for add_dir in &add_dirs {
+            cmd.arg("--add-dir").arg(add_dir);
+        }
         cmd.arg("--skip-git-repo-check")
             .arg("-m")
             .arg(&model_name)
@@ -234,6 +222,9 @@ pub(super) fn run_codex_task(
         if bypass_sandbox {
             cmd.arg("--yolo");
         }
+        for add_dir in &add_dirs {
+            cmd.arg("--add-dir").arg(add_dir);
+        }
         cmd.arg("--skip-git-repo-check")
             .arg("-m")
             .arg(&model_name)
@@ -249,6 +240,7 @@ pub(super) fn run_codex_task(
             .arg(request.workspace_dir)
             .arg(prompt)
             .env("AZURE_OPENAI_API_KEY_BACKUP", api_key)
+            .env("AZURE_OPENAI_ENDPOINT_BACKUP", &azure_endpoint)
             .current_dir(request.workspace_dir);
         // Extend PATH with DoWhiz bin directory for tools like google-docs
         let current_path = env::var("PATH").unwrap_or_default();
@@ -404,11 +396,26 @@ fn toml_escape(value: &str) -> String {
 }
 
 fn codex_sandbox_mode() -> String {
-    env::var("CODEX_SANDBOX").unwrap_or_else(|_| "workspace-write".to_string())
+    CODEX_SANDBOX_MODE.to_string()
 }
 
 fn codex_bypass_sandbox() -> bool {
-    env_enabled("CODEX_BYPASS_SANDBOX") || env_enabled("CODEX_DANGEROUSLY_BYPASS_SANDBOX")
+    matches!(env::var("CODEX_BYPASS_SANDBOX"), Ok(value) if value.trim() == "1")
+}
+
+fn codex_add_dirs(workspace_dir: &Path, use_docker: bool) -> Result<Vec<String>, RunTaskError> {
+    let mut add_dirs = Vec::new();
+    if use_docker {
+        let gh_config_dir = workspace_dir.join(".config").join("gh");
+        fs::create_dir_all(&gh_config_dir)?;
+        add_dirs.push(format!("{}/.config/gh", DOCKER_WORKSPACE_DIR));
+    } else {
+        let home = env::var("HOME").map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
+        let gh_config_dir = PathBuf::from(home).join(".config").join("gh");
+        fs::create_dir_all(&gh_config_dir)?;
+        add_dirs.push(gh_config_dir.to_string_lossy().into_owned());
+    }
+    Ok(add_dirs)
 }
 
 fn normalize_azure_endpoint(endpoint: &str) -> String {

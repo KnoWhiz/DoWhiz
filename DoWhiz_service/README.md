@@ -38,7 +38,7 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
 - Rust toolchain
 - System libs: `libsqlite3`, `libssl`, `pkg-config`, `ca-certificates`
 - Node.js 20 + npm
-- `codex` CLI on your PATH (only required for local execution; optional when `RUN_TASK_DOCKER_IMAGE` is set)
+- `codex` CLI on your PATH (only required for local execution; optional when `RUN_TASK_USE_DOCKER=1` and the image includes Codex)
 - `claude` CLI on your PATH (only required for employees with `runner = "claude"`)
 - `playwright-cli` + Chromium (required for browser automation skills)
 - `ngrok` (for exposing local service to webhooks)
@@ -47,12 +47,11 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
 
 **Required in `.env`** (copy from repo-root `.env.example` to `DoWhiz_service/.env`):
 - `POSTMARK_SERVER_TOKEN`
-- `AZURE_OPENAI_API_KEY_BACKUP` (required for Codex and Claude runners)
-- `AZURE_OPENAI_ENDPOINT_BACKUP` (required for Codex runner)
+- `AZURE_OPENAI_API_KEY_BACKUP` (required for Codex and Claude runners; Codex base URL is fixed in code)
 
 **Optional in `.env`**:
 - GitHub auth: `GH_TOKEN`/`GITHUB_TOKEN`/`GITHUB_PERSONAL_ACCESS_TOKEN` + `GITHUB_USERNAME`. Per-employee prefixes are supported (`OLIVER_`, `MAGGIE_`, `DEVIN_`, `PROTO_`) and can be overridden with `EMPLOYEE_GITHUB_ENV_PREFIX` or `GITHUB_ENV_PREFIX`.
-- `RUN_TASK_DOCKER_IMAGE` (run each task inside a disposable Docker container; use `dowhiz-service` for the repo image)
+- `RUN_TASK_USE_DOCKER=1` + `RUN_TASK_DOCKER_IMAGE` (run each task inside a disposable Docker container; use `dowhiz-service` for the repo image)
 - `RUN_TASK_DOCKER_AUTO_BUILD=1` to auto-build the image when missing (set `0` to disable)
 - `INGESTION_QUEUE_BACKEND=servicebus` + `SERVICE_BUS_CONNECTION_STRING` + `SERVICE_BUS_QUEUE_NAME` (ingestion queue)
 - `RAW_PAYLOAD_STORAGE_BACKEND=azure` + `AZURE_STORAGE_CONTAINER` + `AZURE_STORAGE_SAS_TOKEN` (raw payload storage)
@@ -234,7 +233,7 @@ Outputs appear under:
 
 ### Inbound Gateway (Recommended)
 
-The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/WhatsApp/Google Docs inbound traffic, deduplicates it, and enqueues messages into Azure Service Bus while storing raw payloads in Azure Blob Storage. The gateway requires `INGESTION_QUEUE_BACKEND=servicebus` and `RAW_PAYLOAD_STORAGE_BACKEND=azure`. Workers poll the queue and send replies. Workers no longer expose `/postmark/inbound`.
+The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/WhatsApp/Google Docs inbound traffic, deduplicates it, and enqueues messages into Azure Service Bus while storing raw payloads in Azure Blob Storage. The gateway requires `INGESTION_QUEUE_BACKEND=servicebus` and `RAW_PAYLOAD_STORAGE_BACKEND=azure`. Workers poll the shared queue and filter by `employee_id`; workers no longer expose `/postmark/inbound`.
 
 HTTP endpoints:
 - `/postmark/inbound` (email)
@@ -356,7 +355,7 @@ export AZURE_STORAGE_SAS_TOKEN="..."
 docker run --rm -p 9001:9001 \
   -e EMPLOYEE_ID=little_bear \
   -e RUST_SERVICE_PORT=9001 \
-  -e RUN_TASK_DOCKER_IMAGE= \
+  -e RUN_TASK_USE_DOCKER=0 \
   -e INGESTION_QUEUE_BACKEND="$INGESTION_QUEUE_BACKEND" \
   -e SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
   -e SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
@@ -370,7 +369,7 @@ docker run --rm -p 9001:9001 \
 docker run --rm -p 9002:9001 \
   -e EMPLOYEE_ID=mini_mouse \
   -e RUST_SERVICE_PORT=9001 \
-  -e RUN_TASK_DOCKER_IMAGE= \
+  -e RUN_TASK_USE_DOCKER=0 \
   -e INGESTION_QUEUE_BACKEND="$INGESTION_QUEUE_BACKEND" \
   -e SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
   -e SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
@@ -382,7 +381,7 @@ docker run --rm -p 9002:9001 \
   dowhiz-service
 ```
 
-Note: when running workers inside Docker, clear `RUN_TASK_DOCKER_IMAGE` to avoid nested Docker usage.
+Note: when running workers inside Docker, keep `RUN_TASK_USE_DOCKER=0` to avoid nested Docker usage.
 
 **Step 4: Configure the gateway routes**
 ```bash
@@ -481,7 +480,7 @@ EOF
 
 6. Start services (tmux recommended):
 ```bash
-tmux new-session -d -s oliver "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 RUN_TASK_DOCKER_IMAGE= cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001'"
+tmux new-session -d -s oliver "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 RUN_TASK_USE_DOCKER=0 cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001'"
 tmux new-session -d -s gateway "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && ./scripts/run_gateway_local.sh'"
 ngrok config add-authtoken "$NGROK_AUTHTOKEN"
 tmux new-session -d -s ngrok "ngrok http 9100 --url https://oliver.dowhiz.prod.ngrok.app"
@@ -605,7 +604,7 @@ docker run --rm -p 9100:9100 \
   dowhiz-service
 ```
 
-If `RUN_TASK_DOCKER_IMAGE` is set in your `.env`, each task runs inside a fresh Docker container and the image auto-builds on first use (unless disabled with `RUN_TASK_DOCKER_AUTO_BUILD=0`).
+If `RUN_TASK_USE_DOCKER=1` and `RUN_TASK_DOCKER_IMAGE` is set in your `.env`, each task runs inside a fresh Docker container and the image auto-builds on first use (unless disabled with `RUN_TASK_DOCKER_AUTO_BUILD=0`).
 
 **Docker E2E (Codex + playwright-cli):**
 ```bash
@@ -624,7 +623,16 @@ docker run --rm --entrypoint bash --user 10001:10001 \
     cat > \"$WORKDIR/.playwright/cli.config.json\" <<'EOF'
 { \"browser\": { \"browserName\": \"chromium\", \"userDataDir\": \"/workspace/tmp/playwright-user-data\", \"launchOptions\": { \"channel\": \"chrome\", \"chromiumSandbox\": false } } }
 EOF
-    codex exec --skip-git-repo-check -c web_search=\"disabled\" --cd \"$WORKDIR\" --dangerously-bypass-approvals-and-sandbox \
+    codex exec --skip-git-repo-check \
+      -m gpt-5.2-codex \
+      -c model_provider=\"azure\" \
+      -c web_search=\"live\" \
+      -c ask_for_approval=\"never\" \
+      -c sandbox=\"workspace-write\" \
+      -c model_providers.azure.base_url=\"https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1\" \
+      -c model_providers.azure.env_key=\"AZURE_OPENAI_API_KEY_BACKUP\" \
+      -c model_providers.azure.wire_api=\"responses\" \
+      --cd \"$WORKDIR\" \
     \"Test the \\\"add todo\\\" flow on https://demo.playwright.dev/todomvc using playwright-cli. Check playwright-cli --help for available commands.\""
 ```
 
@@ -632,7 +640,7 @@ EOF
 
 ## Per-Task Docker Execution
 
-When `RUN_TASK_DOCKER_IMAGE` is set, each RunTask spins up a fresh container, mounts the task workspace at `/workspace`, runs Codex inside the container, and removes the container when done.
+When `RUN_TASK_USE_DOCKER=1`, each RunTask spins up a fresh container, mounts the task workspace at `/workspace`, runs Codex inside the container, and removes the container when done.
 
 If the image is missing, the service will auto-build it (unless `RUN_TASK_DOCKER_AUTO_BUILD=0`).
 
@@ -669,7 +677,7 @@ cargo fmt --check
 - ngrok installed and authenticated
 - Postmark inbound address configured on the server
 - Sender signatures for all employee addresses and the `POSTMARK_TEST_FROM` address
-- `POSTMARK_SERVER_TOKEN`, `POSTMARK_TEST_FROM`, `AZURE_OPENAI_API_KEY_BACKUP`, and `AZURE_OPENAI_ENDPOINT_BACKUP` set
+- `POSTMARK_SERVER_TOKEN`, `POSTMARK_TEST_FROM`, and `AZURE_OPENAI_API_KEY_BACKUP` set
 - `RUN_CODEX_E2E=1` if you want Codex to execute real tasks (otherwise it is disabled in the live test)
 
 **Docker flow (worker in Docker, gateway on host):**
@@ -1062,12 +1070,12 @@ This reduces API costs and latency for simple interactions while preserving full
 ### Codex (OpenAI)
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CODEX_MODEL` | - | Model name |
+| `CODEX_MODEL` | `gpt-5.2-codex` (fixed) | Model name (overrides ignored) |
 | `CODEX_DISABLED` | `0` | Set to `1` to bypass Codex CLI |
-| `CODEX_SANDBOX` | `workspace-write` | Sandbox mode |
-| `CODEX_BYPASS_SANDBOX` | `0` | Set to `1` to bypass sandbox (sometimes required inside Docker) |
+| `CODEX_SANDBOX` | `workspace-write` (fixed) | Sandbox mode (overrides ignored) |
+| `CODEX_BYPASS_SANDBOX` | `0` | Set to `1` to pass `--yolo` (bypass approvals/sandbox) |
 | `AZURE_OPENAI_API_KEY_BACKUP` | - | Azure OpenAI API key |
-| `AZURE_OPENAI_ENDPOINT_BACKUP` | - | Azure OpenAI endpoint |
+| `AZURE_OPENAI_ENDPOINT_BACKUP` | `https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1` (fixed) | Azure OpenAI base URL (overrides ignored) |
 
 ### Claude (Anthropic)
 | Variable | Default | Description |
@@ -1078,8 +1086,8 @@ This reduces API costs and latency for simple interactions while preserving full
 ### Docker Execution
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RUN_TASK_DOCKER_IMAGE` | - | Enable per-task containers |
-| `RUN_TASK_USE_DOCKER` | `0` | Force Docker execution (requires `RUN_TASK_DOCKER_IMAGE`) |
+| `RUN_TASK_DOCKER_IMAGE` | - | Docker image to use when `RUN_TASK_USE_DOCKER=1` |
+| `RUN_TASK_USE_DOCKER` | `0` | Enable per-task Docker execution (requires `RUN_TASK_DOCKER_IMAGE`) |
 | `RUN_TASK_DOCKER_REQUIRED` | `0` | Fail when Docker CLI is missing instead of falling back to host execution |
 | `RUN_TASK_DOCKER_AUTO_BUILD` | `1` | Auto-build missing images |
 | `RUN_TASK_DOCKERFILE` | - | Override Dockerfile path |

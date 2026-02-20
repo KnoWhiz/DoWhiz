@@ -1,4 +1,8 @@
 pub(super) const CODEX_CONFIG_MARKER: &str = "# IMPORTANT: Use your Azure *deployment name* here";
+pub(super) const CODEX_MODEL_NAME: &str = "gpt-5.2-codex";
+pub(super) const CODEX_SANDBOX_MODE: &str = "workspace-write";
+pub(super) const CODEX_BASE_URL: &str =
+    "https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1";
 pub(super) const CODEX_CONFIG_BLOCK_TEMPLATE: &str = r#"# IMPORTANT: Use your Azure *deployment name* here (e.g., "gpt-5.2-codex")
 model = "{model_name}"
 model_provider = "azure"
