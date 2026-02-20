@@ -5,7 +5,7 @@
     "FUNCTIONS_WORKER_RUNTIME": "python",
     "SERVICE_BUS_CONNECTION_STRING": "",
     "SERVICE_BUS_QUEUE_NAME": "ingestion",
-    "AZURE_STORAGE_CONTAINER": "ingestion-raw",
+    "AZURE_STORAGE_CONTAINER_INGEST": "ingestion-raw",
     "AZURE_STORAGE_CONTAINER_SAS_URL": "",
     "POSTMARK_INBOUND_TOKEN": "",
     "GATEWAY_CONFIG_PATH": "gateway.toml",

@@ -42,7 +42,7 @@ fn resolve_raw_payload_backend() -> String {
 }
 
 fn resolve_azure_container() -> Result<String, RawPayloadStoreError> {
-    std::env::var("AZURE_STORAGE_CONTAINER")
+    std::env::var("AZURE_STORAGE_CONTAINER_INGEST")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -61,7 +61,7 @@ fn resolve_azure_container_sas_url() -> Result<String, RawPayloadStoreError> {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .or_else(resolve_account_from_connection_string);
-    let container = std::env::var("AZURE_STORAGE_CONTAINER")
+    let container = std::env::var("AZURE_STORAGE_CONTAINER_INGEST")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
@@ -513,13 +513,13 @@ mod tests {
     fn azure_connection_string_fallback_for_account() {
         let _guard = lock_env();
         let original_account = env::var("AZURE_STORAGE_ACCOUNT").ok();
-        let original_container = env::var("AZURE_STORAGE_CONTAINER").ok();
+        let original_container = env::var("AZURE_STORAGE_CONTAINER_INGEST").ok();
         let original_sas = env::var("AZURE_STORAGE_SAS_TOKEN").ok();
         let original_conn = env::var("AZURE_STORAGE_CONNECTION_STRING_INGEST").ok();
         let original_container_sas_url = env::var("AZURE_STORAGE_CONTAINER_SAS_URL").ok();
 
         env::remove_var("AZURE_STORAGE_ACCOUNT");
-        env::set_var("AZURE_STORAGE_CONTAINER", "ingestion-raw");
+        env::set_var("AZURE_STORAGE_CONTAINER_INGEST", "ingestion-raw");
         env::set_var("AZURE_STORAGE_SAS_TOKEN", "sig=test");
         env::remove_var("AZURE_STORAGE_CONTAINER_SAS_URL");
         env::set_var(
@@ -538,8 +538,8 @@ mod tests {
             None => env::remove_var("AZURE_STORAGE_ACCOUNT"),
         }
         match original_container {
-            Some(value) => env::set_var("AZURE_STORAGE_CONTAINER", value),
-            None => env::remove_var("AZURE_STORAGE_CONTAINER"),
+            Some(value) => env::set_var("AZURE_STORAGE_CONTAINER_INGEST", value),
+            None => env::remove_var("AZURE_STORAGE_CONTAINER_INGEST"),
         }
         match original_sas {
             Some(value) => env::set_var("AZURE_STORAGE_SAS_TOKEN", value),
