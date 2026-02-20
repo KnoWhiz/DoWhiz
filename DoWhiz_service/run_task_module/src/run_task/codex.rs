@@ -15,7 +15,7 @@ use super::github_auth::{ensure_github_cli_auth, resolve_github_auth};
 use super::prompt::{build_prompt, load_memory_context};
 use super::scheduled::{extract_scheduled_tasks, extract_scheduler_actions};
 use super::types::{RunTaskOutput, RunTaskRequest};
-use super::utils::tail_string;
+use super::utils::{run_command_with_timeout, run_task_timeout, tail_string};
 use super::workspace::{canonicalize_dir, workspace_path_in_container};
 
 pub(super) fn run_codex_task(
@@ -97,6 +97,7 @@ pub(super) fn run_codex_task(
         request.channel,
     );
 
+    let timeout = run_task_timeout();
     let output = if use_docker {
         ensure_docker_image_available(&docker_image)?;
         let host_workspace_dir = host_workspace_dir
@@ -198,12 +199,12 @@ pub(super) fn run_codex_task(
             .arg(DOCKER_WORKSPACE_DIR)
             .arg(prompt);
 
-        match cmd.output() {
+        match run_command_with_timeout(cmd, timeout, "docker run") {
             Ok(output) => output,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            Err(RunTaskError::Io(err)) if err.kind() == io::ErrorKind::NotFound => {
                 return Err(RunTaskError::DockerNotFound)
             }
-            Err(err) => return Err(RunTaskError::Io(err)),
+            Err(err) => return Err(err),
         }
     } else {
         let mut cmd = Command::new("codex");
@@ -264,12 +265,12 @@ pub(super) fn run_codex_task(
             cmd.env("GIT_TERMINAL_PROMPT", "0");
         }
 
-        match cmd.output() {
+        match run_command_with_timeout(cmd, timeout, "codex") {
             Ok(output) => output,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            Err(RunTaskError::Io(err)) if err.kind() == io::ErrorKind::NotFound => {
                 return Err(RunTaskError::CodexNotFound)
             }
-            Err(err) => return Err(RunTaskError::Io(err)),
+            Err(err) => return Err(err),
         }
     };
 
