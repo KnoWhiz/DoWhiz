@@ -21,14 +21,12 @@ When `RUN_CODEX_E2E=1` is set, `run_task_tests` runs a live Codex CLI test.
 
 Prereqs:
 - `codex` CLI installed.
-- `AZURE_OPENAI_API_KEY_BACKUP` and `AZURE_OPENAI_ENDPOINT_BACKUP` set.
-- Optional: `CODEX_MODEL` to override the default model.
+- `AZURE_OPENAI_API_KEY_BACKUP` set.
 
 Run:
 ```
 RUN_CODEX_E2E=1 \
 AZURE_OPENAI_API_KEY_BACKUP=... \
-AZURE_OPENAI_ENDPOINT_BACKUP=... \
 cargo test -p run_task_module --test run_task_tests -- --nocapture
 ```
 
@@ -54,7 +52,7 @@ workspace/
   references/
 ```
 
-2) Ensure AZURE_OPENAI_API_KEY_BACKUP and AZURE_OPENAI_ENDPOINT_BACKUP are set.
+2) Ensure AZURE_OPENAI_API_KEY_BACKUP is set.
 3) Run a small Rust harness that calls run_task from run_task_module (see `src/run_task/`).
 4) Verify the outputs:
    - reply_email_draft.html exists in the workspace root.

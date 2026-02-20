@@ -124,6 +124,9 @@ pub enum FakeCodexMode {
     NoOutput,
     Fail,
     GithubEnvCheck,
+    EnsureNoYolo,
+    EnsureYolo,
+    EnsureAddDir,
 }
 
 #[cfg(unix)]
@@ -169,6 +172,62 @@ check_env "GITHUB_TOKEN"
 check_env "GITHUB_USERNAME"
 if [ -z "$GIT_ASKPASS" ] || [ ! -x "$GIT_ASKPASS" ]; then
   echo "missing GIT_ASKPASS" >&2
+  exit 3
+fi
+echo "<html><body>Test reply</body></html>" > reply_email_draft.html
+mkdir -p reply_email_attachments
+echo "attachment" > reply_email_attachments/attachment.txt
+"#
+        }
+        FakeCodexMode::EnsureNoYolo => {
+            r#"#!/bin/sh
+set -e
+for arg in "$@"; do
+  if [ "$arg" = "--yolo" ]; then
+    echo "unexpected --yolo" >&2
+    exit 3
+  fi
+done
+echo "<html><body>Test reply</body></html>" > reply_email_draft.html
+mkdir -p reply_email_attachments
+echo "attachment" > reply_email_attachments/attachment.txt
+"#
+        }
+        FakeCodexMode::EnsureYolo => {
+            r#"#!/bin/sh
+set -e
+found="0"
+for arg in "$@"; do
+  if [ "$arg" = "--yolo" ]; then
+    found="1"
+  fi
+done
+if [ "$found" != "1" ]; then
+  echo "missing --yolo" >&2
+  exit 3
+fi
+echo "<html><body>Test reply</body></html>" > reply_email_draft.html
+mkdir -p reply_email_attachments
+echo "attachment" > reply_email_attachments/attachment.txt
+"#
+        }
+        FakeCodexMode::EnsureAddDir => {
+            r#"#!/bin/sh
+set -e
+expected="${EXPECTED_ADD_DIR:-}"
+found="0"
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--add-dir" ]; then
+    if [ -z "$expected" ] || [ "$arg" = "$expected" ]; then
+      found="1"
+      break
+    fi
+  fi
+  prev="$arg"
+done
+if [ "$found" != "1" ]; then
+  echo "missing --add-dir ${expected}" >&2
   exit 3
 fi
 echo "<html><body>Test reply</body></html>" > reply_email_draft.html
@@ -247,7 +306,7 @@ pub fn build_params(workspace: &Path) -> RunTaskParams {
         memory_dir: PathBuf::from("memory"),
         reference_dir: PathBuf::from("references"),
         reply_to: vec!["user@example.com".to_string()],
-        model_name: "test-model".to_string(),
+        model_name: "gpt-5.2-codex".to_string(),
         runner: "codex".to_string(),
         codex_disabled: false,
         channel: "email".to_string(),

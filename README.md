@@ -34,7 +34,7 @@ For full dependency install steps, see `DoWhiz_service/README.md`.
 ```bash
 cp .env.example DoWhiz_service/.env
 # Edit DoWhiz_service/.env and add your POSTMARK_SERVER_TOKEN
-# For Codex/Claude runners, also set AZURE_OPENAI_API_KEY_BACKUP (+ AZURE_OPENAI_ENDPOINT_BACKUP for Codex)
+# For Codex/Claude runners, also set AZURE_OPENAI_API_KEY_BACKUP
 ```
 
 ### 3. Start Service
