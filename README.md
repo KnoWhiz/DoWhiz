@@ -97,7 +97,7 @@ For Azure-managed ingress, queues, and storage, follow `DoWhiz_service/README.md
 ## Architecture
 
 ```
-Inbound message -> Ingress (Rust gateway or Azure Function) -> Ingestion Queue (Postgres or Service Bus) -> Scheduler -> Task runner -> Tools -> Outbound message
+Inbound message -> Ingress (Rust gateway or Azure Function) -> Raw payload storage (Azure Blob; Supabase legacy) -> Ingestion Queue (Service Bus for gateway; Postgres optional) -> Scheduler -> Task runner -> Tools -> Outbound message
 ```
 
 **Core capabilities:**

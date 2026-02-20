@@ -22,7 +22,7 @@ After any code change, consult this checklist, run all relevant AUTO tests, and 
 | UT-RUN-06 | extract_scheduler_actions_reports_invalid_json | run_task_module/src/run_task/scheduled.rs::extract_scheduler_actions | DoWhiz_service/run_task_module/src/run_task/scheduled.rs | Error path on invalid JSON | Error message detail | AUTO | cargo test -p run_task_module |
 
 ## Unit Tests: scheduler_module (core/data/stores)
-Note: scheduler_module tests expect a Postgres ingestion queue; set `SUPABASE_DB_URL` (or `INGESTION_DB_URL` / `DATABASE_URL`) before running `cargo test -p scheduler_module`.
+Note: ingestion-queue tests use Postgres by default; set `SUPABASE_DB_URL` (or `INGESTION_DB_URL` / `DATABASE_URL`). If `INGESTION_QUEUE_BACKEND=servicebus`, those tests hit Service Bus and require external creds (treat as LIVE). When no DB URL is set, Postgres ingestion tests skip.
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
 |---|---|---|---|---|---|---|---|
 | UT-SCH-01 | build_scheduler_snapshot_limits_to_window | scheduler_module/src/scheduler/snapshot | DoWhiz_service/scheduler_module/src/scheduler/tests.rs | Snapshot window trimming | Performance with large task sets | AUTO | cargo test -p scheduler_module |
@@ -61,6 +61,18 @@ Note: scheduler_module tests expect a Postgres ingestion queue; set `SUPABASE_DB
 | UT-SCH-34 | test_config_validation | scheduler_module/src/google_auth::GoogleAuthConfig | DoWhiz_service/scheduler_module/src/google_auth.rs | Config validation | OAuth refresh | AUTO | cargo test -p scheduler_module |
 | UT-SCH-35 | azure_raw_payload_store_roundtrip | raw_payload_store::{upload_raw_payload_blocking, download_raw_payload} | DoWhiz_service/scheduler_module/src/raw_payload_store.rs | Azure blob upload + download | Supabase storage path | LIVE | RAW_PAYLOAD_STORAGE_BACKEND=azure + Azure blob env |
 | UT-SCH-36 | service_bus_enqueue_and_claim_roundtrip | ingestion_queue::IngestionQueue (ServiceBus) | DoWhiz_service/scheduler_module/src/ingestion_queue.rs | Service Bus enqueue/claim/mark_done | Dedupe enforcement | LIVE | INGESTION_QUEUE_BACKEND=servicebus + Service Bus env |
+| UT-SCH-37 | parse_response_with_memory | message_router::MessageRouter::parse_response | DoWhiz_service/scheduler_module/src/message_router.rs | Memory block parsing | LLM call behavior | AUTO | cargo test -p scheduler_module |
+| UT-SCH-38 | parse_response_without_memory | message_router::MessageRouter::parse_response | DoWhiz_service/scheduler_module/src/message_router.rs | No-memory path | LLM call behavior | AUTO | cargo test -p scheduler_module |
+| UT-SCH-39 | azure_connection_string_fallback_for_account | raw_payload_store::resolve_azure_container_sas_url | DoWhiz_service/scheduler_module/src/raw_payload_store.rs | Builds SAS URL from connection string | Network/upload behavior | AUTO | cargo test -p scheduler_module |
+| UT-SCH-40 | test_compute_diff_added_lines | memory_diff::compute_memory_diff | DoWhiz_service/scheduler_module/src/memory_diff.rs | Detect added lines | Formatting of complex diffs | AUTO | cargo test -p scheduler_module |
+| UT-SCH-41 | test_compute_diff_new_section | memory_diff::compute_memory_diff | DoWhiz_service/scheduler_module/src/memory_diff.rs | Detect new section | Multi-section ordering | AUTO | cargo test -p scheduler_module |
+| UT-SCH-42 | test_apply_diff_adds_lines | memory_diff::apply_memory_diff | DoWhiz_service/scheduler_module/src/memory_diff.rs | Apply additions | Large file behavior | AUTO | cargo test -p scheduler_module |
+| UT-SCH-43 | test_apply_diff_no_duplicates | memory_diff::apply_memory_diff | DoWhiz_service/scheduler_module/src/memory_diff.rs | De-dup added lines | Fuzzy matching | AUTO | cargo test -p scheduler_module |
+| UT-SCH-44 | test_empty_diff | memory_diff::compute_memory_diff | DoWhiz_service/scheduler_module/src/memory_diff.rs | No-change diff detection | Whitespace normalization | AUTO | cargo test -p scheduler_module |
+| UT-SCH-45 | test_apply_diff_to_file | memory_queue::apply_diff_to_file | DoWhiz_service/scheduler_module/src/memory_queue.rs | File update from diff | Queue ordering | AUTO | cargo test -p scheduler_module |
+| UT-SCH-46 | test_queue_sequential_writes | memory_queue::MemoryWriteQueue | DoWhiz_service/scheduler_module/src/memory_queue.rs | Sequential queued writes | Cross-process locking | AUTO | cargo test -p scheduler_module |
+| UT-SCH-47 | test_concurrent_submits_serialized | memory_queue::MemoryWriteQueue | DoWhiz_service/scheduler_module/src/memory_queue.rs | Serialized concurrent submits | High contention | AUTO | cargo test -p scheduler_module |
+| UT-SCH-48 | test_blob_store_roundtrip | blob_store::BlobStore | DoWhiz_service/scheduler_module/src/blob_store.rs | Azure memo read/write/delete | Supabase/local fallback | LIVE | cargo test -p scheduler_module blob_store -- --ignored --nocapture |
 
 ## Unit Tests: scheduler_module (adapters)
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
@@ -99,6 +111,8 @@ Note: scheduler_module tests expect a Postgres ingestion queue; set `SUPABASE_DB
 | UT-AD-GD-01 | test_employee_mention_detection | adapters/google_docs.rs::contains_employee_mention | DoWhiz_service/scheduler_module/src/adapters/google_docs.rs | Mention detection | NLP edge cases | AUTO | cargo test -p scheduler_module |
 | UT-AD-GD-02 | test_extract_employee_name | adapters/google_docs.rs::extract_employee_name | DoWhiz_service/scheduler_module/src/adapters/google_docs.rs | Name extraction | Multi-language | AUTO | cargo test -p scheduler_module |
 | UT-AD-GD-03 | test_format_edit_proposal | adapters/google_docs.rs::format_edit_proposal | DoWhiz_service/scheduler_module/src/adapters/google_docs.rs | Proposal formatting | Real Docs API | AUTO | cargo test -p scheduler_module |
+| UT-AD-WA-01 | parse_text_message | adapters/whatsapp.rs::WhatsAppInboundAdapter::parse | DoWhiz_service/scheduler_module/src/adapters/whatsapp.rs | WhatsApp text payload parsing | Media attachments | AUTO | cargo test -p scheduler_module |
+| UT-AD-WA-02 | ignore_status_updates | adapters/whatsapp.rs::WhatsAppInboundAdapter::parse | DoWhiz_service/scheduler_module/src/adapters/whatsapp.rs | Status update filtering | Delivery receipts | AUTO | cargo test -p scheduler_module |
 
 ## Unit Tests: scheduler_module (service/config)
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
@@ -131,6 +145,7 @@ Note: scheduler_module tests expect a Postgres ingestion queue; set `SUPABASE_DB
 | IT-RUN-10 | run_task_codex_disabled_skips_placeholder_without_reply_to | run_task_module::run_task | DoWhiz_service/run_task_module/tests/run_task_tests.rs | No reply_to handling | Channel variations | AUTO | cargo test -p run_task_module |
 | IT-RUN-11 | run_task_real_codex_e2e_when_enabled | run_task_module::run_task | DoWhiz_service/run_task_module/tests/run_task_tests.rs | Real codex CLI flow | Content quality and tools | LIVE | RUN_CODEX_E2E=1 + AZURE creds |
 | IT-RUN-12 | run_task_updates_existing_config_block | run_task_module::run_task | DoWhiz_service/run_task_module/tests/run_task_basic.rs | Update config block | Multi-provider config | AUTO | cargo test -p run_task_module |
+| IT-RUN-13 | run_task_writes_expected_codex_block | run_task_module::run_task | DoWhiz_service/run_task_module/tests/run_task_basic.rs | Writes canonical Codex config block | CLI behavior | AUTO | cargo test -p run_task_module --test run_task_basic |
 
 ## Integration/E2E: scheduler_module
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
@@ -167,6 +182,7 @@ Note: scheduler_module tests expect a Postgres ingestion queue; set `SUPABASE_DB
 | LIVE-SCH-09 | google_docs_cli_e2e_full_suggestion_workflow | google-docs CLI | DoWhiz_service/scheduler_module/tests/google_docs_cli_e2e.rs | Full suggestion workflow | Network failures | LIVE | GOOGLE_DOCS_CLI_E2E=1 + doc id |
 | LIVE-SCH-10 | google_docs_cli_e2e_apply_edit | google-docs CLI | DoWhiz_service/scheduler_module/tests/google_docs_cli_e2e.rs | Apply edit | Text mismatch | LIVE | GOOGLE_DOCS_CLI_E2E=1 + doc id |
 | LIVE-SCH-11 | rust_service_real_email_end_to_end | run_server + gateway + Postmark | DoWhiz_service/scheduler_module/tests/service_real_email.rs | Real inbound/outbound email flow | Cost and external variance | LIVE | RUST_SERVICE_LIVE_TEST=1 + Postmark/ngrok |
+| LIVE-SCH-12 | unified_memo_azure_blob_routing | auth + memory queue + blob store | DoWhiz_service/scheduler_module/tests/unified_memo_e2e.rs | Supabase auth + account linkage + Azure memo write | Service availability | LIVE | cargo test -p scheduler_module --test unified_memo_e2e -- --ignored --nocapture (SERVICE_URL + SUPABASE_PROJECT_URL + SUPABASE_ANON_KEY + AZURE_STORAGE_CONNECTION_STRING + AZURE_STORAGE_CONTAINER + TEST_EMAIL/TEST_PASSWORD) |
 
 ## Integration/E2E: send_emails_module
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
@@ -192,7 +208,7 @@ Note: scheduler_module tests expect a Postgres ingestion queue; set `SUPABASE_DB
 | GAP-09 | P1 | SlackStore env fallback | slack_store::get_installation_or_env | Not tested | PLANNED | Set env + call fallback path |
 | GAP-10 | P2 | Cron timezone/DST edge behavior | scheduler cron parsing | No DST tests | MANUAL | Run around DST boundary |
 | GAP-11 | P2 | Postmark inbound payload edge cases | service/email.rs::process_inbound_payload | Limited payload variations | MANUAL | Create malformed/partial payloads |
-| GAP-12 | P1 | WhatsApp inbound adapter parsing | adapters/whatsapp.rs::WhatsAppInboundAdapter::parse | No webhook parsing tests | PLANNED | Add unit tests with sample webhook payloads |
+| GAP-12 | P1 | WhatsApp inbound media/interactive coverage | adapters/whatsapp.rs::WhatsAppInboundAdapter::parse | Media/interactive payloads not covered | PLANNED | Add unit tests for media + interactive payloads |
 | GAP-13 | P1 | WhatsApp outbound adapter send/error mapping | adapters/whatsapp.rs::WhatsAppOutboundAdapter::send | No outbound/mock coverage | PLANNED | Mock Graph API or inject base URL |
 | GAP-14 | P1 | Raw payload storage upload/download | raw_payload_store::{upload_raw_payload, download_raw_payload} | No Supabase storage tests | PLANNED | Run against a test bucket or mock HTTP |
 
