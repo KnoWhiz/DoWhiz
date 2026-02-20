@@ -68,7 +68,7 @@ pub(super) fn run_codex_task(
             key: "AZURE_OPENAI_API_KEY_BACKUP",
         });
     }
-    let azure_endpoint = CODEX_BASE_URL.to_string();
+    let azure_endpoint = normalize_azure_endpoint(CODEX_BASE_URL);
     let model_name = CODEX_MODEL_NAME.to_string();
     let sandbox_mode = codex_sandbox_mode();
     let bypass_sandbox = codex_bypass_sandbox();
@@ -78,20 +78,9 @@ pub(super) fn run_codex_task(
             .as_ref()
             .map(|dir| dir.join(DOCKER_CODEX_HOME_DIR))
             .unwrap_or_else(|| request.workspace_dir.join(DOCKER_CODEX_HOME_DIR));
-        ensure_codex_config_at(
-            &model_name,
-            &azure_endpoint,
-            &codex_home,
-            Path::new(DOCKER_WORKSPACE_DIR),
-            &sandbox_mode,
-        )?;
+        ensure_codex_config_at(&codex_home, Path::new(DOCKER_WORKSPACE_DIR))?;
     } else {
-        ensure_codex_config(
-            &model_name,
-            &azure_endpoint,
-            request.workspace_dir,
-            &sandbox_mode,
-        )?;
+        ensure_codex_config(request.workspace_dir)?;
     }
     ensure_github_cli_auth(&github_auth)?;
 
@@ -324,30 +313,13 @@ pub(super) fn run_codex_task(
     })
 }
 
-fn ensure_codex_config(
-    model_name: &str,
-    azure_endpoint: &str,
-    workspace_dir: &Path,
-    sandbox_mode: &str,
-) -> Result<(), RunTaskError> {
+fn ensure_codex_config(workspace_dir: &Path) -> Result<(), RunTaskError> {
     let home = env::var("HOME").map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
     let config_dir = PathBuf::from(home).join(".codex");
-    ensure_codex_config_at(
-        model_name,
-        azure_endpoint,
-        &config_dir,
-        workspace_dir,
-        sandbox_mode,
-    )
+    ensure_codex_config_at(&config_dir, workspace_dir)
 }
 
-fn ensure_codex_config_at(
-    model_name: &str,
-    azure_endpoint: &str,
-    config_dir: &Path,
-    trust_workspace_dir: &Path,
-    sandbox_mode: &str,
-) -> Result<(), RunTaskError> {
+fn ensure_codex_config_at(config_dir: &Path, trust_workspace_dir: &Path) -> Result<(), RunTaskError> {
     let config_path = config_dir.join("config.toml");
     let config_dir = config_path.parent().ok_or(RunTaskError::InvalidPath {
         label: "codex_config_dir",
@@ -356,11 +328,7 @@ fn ensure_codex_config_at(
     })?;
     fs::create_dir_all(config_dir)?;
 
-    let endpoint = normalize_azure_endpoint(azure_endpoint);
-    let block = CODEX_CONFIG_BLOCK_TEMPLATE
-        .replace("{model_name}", model_name)
-        .replace("{azure_endpoint}", &endpoint)
-        .replace("{sandbox_mode}", sandbox_mode);
+    let block = CODEX_CONFIG_BLOCK_TEMPLATE;
 
     let existing = if config_path.exists() {
         fs::read_to_string(&config_path)?
