@@ -149,5 +149,5 @@ jobs:
       - name: Restart DoWhiz services
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'
-          pm2 restart dowhiz_rust_service dowhiz_gateway dowhiz_ngrok dowhiz_ngrok_inbound_hook
+          pm2 restart dowhiz_rust_service
           EOF
