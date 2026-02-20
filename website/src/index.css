@@ -487,6 +487,101 @@ ul {
   line-height: 1.7;
 }
 
+/* Blog */
+.blog-section .section-title {
+  text-align: left;
+  margin-bottom: 1.5rem;
+}
+
+.blog-section .section-intro {
+  margin: 0;
+  text-align: left;
+}
+
+.blog-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2.5rem;
+  margin-bottom: 3.5rem;
+  flex-wrap: wrap;
+}
+
+.blog-cta {
+  white-space: nowrap;
+}
+
+.blog-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2rem;
+}
+
+.blog-card {
+  padding: 2.5rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 1.5rem;
+  display: grid;
+  gap: 1.25rem;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(12px);
+}
+
+.blog-card:hover {
+  border-color: var(--card-hover-border);
+  transform: translateY(-6px);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.blog-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.blog-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  color: var(--accent-color);
+  background: rgba(59, 130, 246, 0.15);
+  font-weight: 600;
+}
+
+.blog-card h3 {
+  font-size: 1.6rem;
+  line-height: 1.2;
+}
+
+.blog-card p {
+  color: var(--text-secondary);
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.blog-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.blog-link span {
+  transition: transform 0.2s ease;
+}
+
+.blog-link:hover span {
+  transform: translateX(4px);
+}
+
 /* Explore */
 .explore-grid {
   display: grid;
@@ -1055,6 +1150,10 @@ ul {
     grid-template-columns: 1fr 1fr;
   }
 
+  .blog-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .explore-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1164,6 +1263,7 @@ ul {
 
   /* Card Spacing */
   .features-grid,
+  .blog-grid,
   .explore-grid,
   .roles-grid,
   .security-grid {
@@ -1172,6 +1272,7 @@ ul {
   }
 
   .feature-card,
+  .blog-card,
   .explore-card,
   .role-card,
   .security-card {
