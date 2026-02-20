@@ -660,7 +660,18 @@ mod tests {
         }
     }
 
-    fn build_test_config(temp: &TempDir) -> ServiceConfig {
+    fn require_supabase_db_url() -> Option<String> {
+        dotenvy::dotenv().ok();
+        match std::env::var("SUPABASE_DB_URL") {
+            Ok(value) if !value.trim().is_empty() => Some(value),
+            _ => {
+                eprintln!("Skipping scheduler test; SUPABASE_DB_URL not set.");
+                None
+            }
+        }
+    }
+
+    fn build_test_config(temp: &TempDir) -> Option<ServiceConfig> {
         let workspace_root = temp.path().join("workspaces");
         let users_root = temp.path().join("users");
         let state_dir = temp.path().join("state");
@@ -695,11 +706,9 @@ mod tests {
             service_addresses: address_set,
         };
 
-        dotenvy::dotenv().ok();
-        let ingestion_db_url =
-            std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
+        let ingestion_db_url = require_supabase_db_url()?;
 
-        ServiceConfig {
+        Some(ServiceConfig {
             host: "127.0.0.1".to_string(),
             port: 0,
             employee_id: employee_profile.id.clone(),
@@ -736,14 +745,16 @@ mod tests {
             whatsapp_access_token: None,
             whatsapp_phone_number_id: None,
             whatsapp_verify_token: None,
-        }
+        })
     }
 
     #[test]
     fn stop_and_join_returns_quickly_with_short_watchdog_interval() {
         let _guard = EnvGuard::set("WATCHDOG_INTERVAL_MS", "100");
         let temp = TempDir::new().expect("tempdir");
-        let config = build_test_config(&temp);
+        let Some(config) = build_test_config(&temp) else {
+            return;
+        };
         let user_store = Arc::new(UserStore::new(&config.users_db_path).expect("user store"));
         let index_store = Arc::new(IndexStore::new(&config.task_index_path).expect("index store"));
 
