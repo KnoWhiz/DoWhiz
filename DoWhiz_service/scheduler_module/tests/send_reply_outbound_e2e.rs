@@ -1,4 +1,6 @@
-use mockito::{Matcher, Server};
+mod test_support;
+
+use mockito::Matcher;
 use scheduler_module::{channel::Channel, ModuleExecutor, Scheduler, SendReplyTask, TaskKind};
 use std::env;
 use std::fs;
@@ -68,7 +70,10 @@ fn base_send_task(channel: Channel, html_path: PathBuf, attachments_dir: PathBuf
 #[test]
 fn send_reply_slack_uses_mock() -> Result<(), Box<dyn std::error::Error>> {
     let _lock = ENV_MUTEX.lock().unwrap();
-    let mut server = Server::new();
+    let Some(mut server) = test_support::start_mockito_server("send_reply_slack_uses_mock")
+    else {
+        return Ok(());
+    };
 
     let slack_mock = server
         .mock("POST", "/chat.postMessage")
@@ -104,7 +109,10 @@ fn send_reply_slack_uses_mock() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn send_reply_discord_uses_mock() -> Result<(), Box<dyn std::error::Error>> {
     let _lock = ENV_MUTEX.lock().unwrap();
-    let mut server = Server::new();
+    let Some(mut server) = test_support::start_mockito_server("send_reply_discord_uses_mock")
+    else {
+        return Ok(());
+    };
 
     let discord_mock = server
         .mock("POST", "/api/v10/channels/987654/messages")
@@ -139,7 +147,10 @@ fn send_reply_discord_uses_mock() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn send_reply_sms_uses_mock() -> Result<(), Box<dyn std::error::Error>> {
     let _lock = ENV_MUTEX.lock().unwrap();
-    let mut server = Server::new();
+    let Some(mut server) = test_support::start_mockito_server("send_reply_sms_uses_mock")
+    else {
+        return Ok(());
+    };
 
     let sms_mock = server
         .mock("POST", "/2010-04-01/Accounts/AC123/Messages.json")

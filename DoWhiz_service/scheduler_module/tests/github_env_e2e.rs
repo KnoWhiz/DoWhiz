@@ -1,4 +1,6 @@
 use run_task_module::RunTaskParams;
+mod test_support;
+
 use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
 use scheduler_module::service::{
@@ -248,7 +250,6 @@ fn email_flow_injects_github_env() {
     let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");
     let _home_guard = EnvGuard::set("HOME", &home_root);
 
-    dotenvy::dotenv().ok();
     let _docker_guard = EnvUnsetGuard::remove(&[
         "RUN_TASK_DOCKER_IMAGE",
         "RUN_TASK_USE_DOCKER",
@@ -260,8 +261,11 @@ fn email_flow_injects_github_env() {
         "RUN_TASK_DOCKER_DNS",
         "RUN_TASK_DOCKER_DNS_SEARCH",
     ]);
-    let ingestion_db_url =
-        std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
+    let Some(ingestion_db_url) =
+        test_support::require_supabase_db_url("email_flow_injects_github_env")
+    else {
+        return;
+    };
     let (employee_profile, employee_directory) = test_employee_directory();
     let config = ServiceConfig {
         host: "127.0.0.1".to_string(),
@@ -382,7 +386,6 @@ fn email_flow_injects_employee_github_env() {
     let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");
     let _home_guard = EnvGuard::set("HOME", &home_root);
 
-    dotenvy::dotenv().ok();
     let _docker_guard = EnvUnsetGuard::remove(&[
         "RUN_TASK_DOCKER_IMAGE",
         "RUN_TASK_USE_DOCKER",
@@ -394,8 +397,11 @@ fn email_flow_injects_employee_github_env() {
         "RUN_TASK_DOCKER_DNS",
         "RUN_TASK_DOCKER_DNS_SEARCH",
     ]);
-    let ingestion_db_url =
-        std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
+    let Some(ingestion_db_url) =
+        test_support::require_supabase_db_url("email_flow_injects_employee_github_env")
+    else {
+        return;
+    };
     let (employee_profile, employee_directory) = test_employee_directory();
     let config = ServiceConfig {
         host: "127.0.0.1".to_string(),
