@@ -455,6 +455,10 @@ SERVICE_BUS_QUEUE_NAME=ingestion
 RAW_PAYLOAD_STORAGE_BACKEND=azure
 AZURE_STORAGE_CONTAINER=ingestion-raw
 AZURE_STORAGE_SAS_TOKEN=...
+# For GitHub PR creation from email (recommended):
+EMPLOYEE_ID=little_bear
+# Optional (dev only): if Supabase TLS fails with self-signed certs
+# INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS=true
 ```
 
 Optional: copy your local `.env` directly to the VM:
@@ -478,32 +482,56 @@ tenant_id = "default"
 EOF
 ```
 
-6. Start services (tmux recommended):
+6. Build release binaries (recommended on VM):
 ```bash
-tmux new-session -d -s oliver "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 RUN_TASK_USE_DOCKER=0 cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001'"
-tmux new-session -d -s gateway "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && ./scripts/run_gateway_local.sh'"
-ngrok config add-authtoken "$NGROK_AUTHTOKEN"
-tmux new-session -d -s ngrok "ngrok http 9100 --url https://oliver.dowhiz.prod.ngrok.app"
+source ~/.cargo/env
+cd ~/DoWhiz/DoWhiz_service
+cargo build -p scheduler_module --bin rust_service --bin inbound_gateway --release
 ```
-Note: if you run services under pm2/systemd (non-interactive shells), ensure PATH includes `~/.cargo/bin` or use the full cargo path so `cargo run` works.
 
-7. Health checks (VM):
+7. Start services (pm2 recommended):
+```bash
+pm2 start ~/DoWhiz/DoWhiz_service/target/release/inbound_gateway \
+  --name dowhiz_gateway \
+  --cwd ~/DoWhiz/DoWhiz_service
+
+pm2 start ~/DoWhiz/DoWhiz_service/target/release/rust_service \
+  --name dowhiz_rust_service \
+  --cwd ~/DoWhiz/DoWhiz_service -- --host 0.0.0.0 --port 9001
+
+pm2 save
+```
+
+tmux alternative:
+```bash
+tmux new-session -d -s oliver "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && ~/DoWhiz/DoWhiz_service/target/release/rust_service --host 0.0.0.0 --port 9001'"
+tmux new-session -d -s gateway "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && ~/DoWhiz/DoWhiz_service/target/release/inbound_gateway'"
+```
+Note: if you run services under pm2/systemd (non-interactive shells), ensure PATH includes `~/.cargo/bin` when building, or use absolute binary paths as above.
+
+8. Expose the gateway with ngrok (VM):
+```bash
+ngrok config add-authtoken "$NGROK_AUTHTOKEN"
+ngrok http 9100 --domain=shayne-laminar-lillian.ngrok-free.dev
+```
+
+9. Health checks (VM):
 ```bash
 curl -sS http://127.0.0.1:9001/health && echo
 curl -sS http://127.0.0.1:9100/health && echo
-curl -sS https://oliver.dowhiz.prod.ngrok.app/health && echo
+curl -sS https://shayne-laminar-lillian.ngrok-free.dev/health && echo
 ```
 
-8. Point Postmark to the gateway (VM):
+10. Point Postmark to the gateway (VM):
 ```bash
 cd ~/DoWhiz/DoWhiz_service
 cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
-  --hook-url https://oliver.dowhiz.prod.ngrok.app/postmark/inbound
+  --hook-url https://shayne-laminar-lillian.ngrok-free.dev/postmark/inbound
 ```
 
-9. Run live E2E (from your local machine if VM blocks SMTP 25):
+11. Run live E2E (from your local machine if VM blocks SMTP 25):
 ```
-POSTMARK_INBOUND_HOOK_URL=https://oliver.dowhiz.prod.ngrok.app/postmark/inbound
+POSTMARK_INBOUND_HOOK_URL=https://shayne-laminar-lillian.ngrok-free.dev/postmark/inbound
 POSTMARK_TEST_FROM=mini-mouse@deep-tutor.com
 POSTMARK_TEST_SERVICE_ADDRESS=oliver@dowhiz.com
 ```

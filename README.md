@@ -80,6 +80,16 @@ cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
 
 Now send an email to `oliver@dowhiz.com` (or any employee) and watch the magic happen!
 
+## Single-VM Deployment (Gateway + Worker)
+
+For a full single-VM deployment (no Docker) that runs the inbound gateway + an Oliver worker end-to-end, follow the **VM Deployment (Gateway + ngrok)** section in `DoWhiz_service/README.md`. Summary:
+
+1. Build release binaries (`inbound_gateway`, `rust_service`) on the VM.
+2. Start gateway + worker under `pm2`/`systemd` (recommended for long-running services).
+3. Expose the gateway (ngrok or Nginx) and set Postmark’s inbound hook to `https://<public>/postmark/inbound`.
+4. Ensure `.env` includes Service Bus + Azure Blob settings, plus `EMPLOYEE_ID=little_bear` for GitHub auth when creating PRs.
+5. Run the live E2E email test.
+
 ## Azure Deployment (Production)
 
 For Azure-managed ingress, queues, and storage, follow `DoWhiz_service/README.md` under **Azure Deployment (Functions + Service Bus + Blob + Workers)**. This flow uses Azure Functions for Postmark email ingress, Azure Service Bus for ingestion queues, Azure Blob for raw payloads, and worker services running on Azure VMs or containers.
