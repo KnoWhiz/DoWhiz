@@ -382,6 +382,30 @@ function App() {
     }
   ];
 
+  const blogPosts = [
+    {
+      tag: 'Launch Notes',
+      title: 'Inbox-native delegation',
+      date: 'February 2026',
+      excerpt: 'Why we started with email-first workflows and how that choice keeps every request simple, trackable, and fast.',
+      link: '/blog/#inbox-native'
+    },
+    {
+      tag: 'Workflow',
+      title: 'Inside the digital employee delivery loop',
+      date: 'February 2026',
+      excerpt: 'A closer look at how requests flow from brief to finished output, with clear checkpoints along the way.',
+      link: '/blog/#delivery-loop'
+    },
+    {
+      tag: 'Team',
+      title: 'Meet the first DoWhiz employees',
+      date: 'February 2026',
+      excerpt: 'How Oliver and Maggie turn messy inputs into crisp updates, docs, and action items in a single thread.',
+      link: '/blog/#meet-team'
+    }
+  ];
+
   const teamMembers = [
     {
       name: 'Oliver',
@@ -516,6 +540,7 @@ function App() {
             <div className="nav-links">
               <a href="#roles" className="nav-btn">Team</a>
               <a href="#features" className="nav-btn">Features</a>
+              <a href="/blog/" className="nav-btn">Blog</a>
               <a href="/user-guide/" className="nav-btn">User Guide</a>
             </div>
             <div className="nav-actions">
@@ -653,6 +678,35 @@ function App() {
                   <h3>{feature.title}</h3>
                   <p>{feature.desc}</p>
                 </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Blog */}
+        <section id="blog" className="section blog-section">
+          <div className="container">
+            <div className="blog-header">
+              <div>
+                <span className="blog-eyebrow">From the blog</span>
+                <h2 className="blog-title">Stories from the inbox</h2>
+                <p className="blog-intro">
+                  Notes on building digital employees, shipping new workflows, and making inbox work feel effortless.
+                </p>
+              </div>
+              <a className="btn btn-primary blog-header-btn" href="/blog/">View all posts</a>
+            </div>
+            <div className="blog-grid">
+              {blogPosts.map((post) => (
+                <article key={post.title} className="blog-card">
+                  <div className="blog-meta">
+                    <span className="blog-tag">{post.tag}</span>
+                    <span className="blog-date">{post.date}</span>
+                  </div>
+                  <h3>{post.title}</h3>
+                  <p>{post.excerpt}</p>
+                  <a className="blog-link" href={post.link}>Read on the blog</a>
+                </article>
               ))}
             </div>
           </div>
