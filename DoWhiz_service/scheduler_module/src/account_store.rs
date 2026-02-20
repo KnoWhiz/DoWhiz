@@ -81,8 +81,10 @@ impl AccountStore {
 
         let manager = PostgresConnectionManager::new(config, tls);
         let pool = Pool::builder()
-            .max_size(4)
-            .idle_timeout(Some(std::time::Duration::from_secs(300)))
+            .max_size(50)
+            .min_idle(Some(2))
+            .connection_timeout(std::time::Duration::from_secs(5))
+            .idle_timeout(Some(std::time::Duration::from_secs(60)))
             .error_handler(Box::new(LoggingErrorHandler))
             .build(manager)?;
 
