@@ -64,9 +64,9 @@ flowchart TD
 
   H --> I[Build IngestionEnvelope]
   I --> J[Compute dedupe_key]
-  J --> K[Store raw payload (Supabase or Azure Blob)]
-  K --> L[Enqueue ingestion queue (Postgres or Service Bus)]
-  L --> M[worker poll claim_next by employee_id]
+  J --> K[Store raw payload (Azure Blob)]
+  K --> L[Enqueue ingestion queue (Service Bus)]
+  L --> M[worker poll shared queue (filter by employee_id)]
   M --> O[process_ingestion_envelope]
 
   O --> P{Channel branch}

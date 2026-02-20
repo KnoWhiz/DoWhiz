@@ -1,10 +1,10 @@
+use chrono::{DateTime, Utc};
 use postgres_native_tls::MakeTlsConnector;
 use r2d2::{Pool, PooledConnection};
 use r2d2_postgres::PostgresConnectionManager;
 use std::env;
 use tracing::error;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone)]
 pub struct Account {
@@ -89,10 +89,14 @@ impl AccountStore {
         Ok(Self { pool: Some(pool) })
     }
 
-    fn conn(&self) -> Result<PooledConnection<PostgresConnectionManager<MakeTlsConnector>>, AccountStoreError> {
-        let pool = self.pool.as_ref().ok_or_else(|| {
-            AccountStoreError::Config("account store pool dropped".to_string())
-        })?;
+    fn conn(
+        &self,
+    ) -> Result<PooledConnection<PostgresConnectionManager<MakeTlsConnector>>, AccountStoreError>
+    {
+        let pool = self
+            .pool
+            .as_ref()
+            .ok_or_else(|| AccountStoreError::Config("account store pool dropped".to_string()))?;
         Ok(pool.get()?)
     }
 
@@ -114,7 +118,10 @@ impl AccountStore {
     }
 
     /// Get account by Supabase auth user ID
-    pub fn get_account_by_auth_user(&self, auth_user_id: Uuid) -> Result<Option<Account>, AccountStoreError> {
+    pub fn get_account_by_auth_user(
+        &self,
+        auth_user_id: Uuid,
+    ) -> Result<Option<Account>, AccountStoreError> {
         let mut conn = self.conn()?;
         let row = conn.query_opt(
             "SELECT id, auth_user_id, created_at FROM accounts WHERE auth_user_id = $1",
@@ -244,7 +251,10 @@ impl AccountStore {
     }
 
     /// List all identifiers for an account
-    pub fn list_identifiers(&self, account_id: Uuid) -> Result<Vec<AccountIdentifier>, AccountStoreError> {
+    pub fn list_identifiers(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Vec<AccountIdentifier>, AccountStoreError> {
         let mut conn = self.conn()?;
         let rows = conn.query(
             "SELECT id, account_id, identifier_type, identifier, verified, created_at
@@ -269,10 +279,7 @@ impl AccountStore {
     /// Delete an account and all its identifiers (CASCADE)
     pub fn delete_account(&self, account_id: Uuid) -> Result<(), AccountStoreError> {
         let mut conn = self.conn()?;
-        let deleted = conn.execute(
-            "DELETE FROM accounts WHERE id = $1",
-            &[&account_id],
-        )?;
+        let deleted = conn.execute("DELETE FROM accounts WHERE id = $1", &[&account_id])?;
         if deleted == 0 {
             return Err(AccountStoreError::NotFound);
         }
@@ -300,16 +307,17 @@ static ACCOUNT_STORE: std::sync::OnceLock<Option<Arc<AccountStore>>> = std::sync
 /// Get or initialize the global AccountStore (returns None if not configured)
 pub fn get_global_account_store() -> Option<Arc<AccountStore>> {
     ACCOUNT_STORE
-        .get_or_init(|| {
-            match AccountStore::from_env() {
-                Ok(store) => {
-                    tracing::info!("AccountStore initialized for account lookups");
-                    Some(Arc::new(store))
-                }
-                Err(e) => {
-                    tracing::info!("AccountStore not available ({}), account lookups disabled", e);
-                    None
-                }
+        .get_or_init(|| match AccountStore::from_env() {
+            Ok(store) => {
+                tracing::info!("AccountStore initialized for account lookups");
+                Some(Arc::new(store))
+            }
+            Err(e) => {
+                tracing::info!(
+                    "AccountStore not available ({}), account lookups disabled",
+                    e
+                );
+                None
             }
         })
         .clone()
@@ -343,21 +351,26 @@ pub fn lookup_account_by_channel(
         Ok(Some(account)) => {
             tracing::debug!(
                 "Found account {} for {}:{}",
-                account.id, identifier_type, identifier
+                account.id,
+                identifier_type,
+                identifier
             );
             Some(account.id)
         }
         Ok(None) => {
             tracing::debug!(
                 "No account found for {}:{}, using local storage",
-                identifier_type, identifier
+                identifier_type,
+                identifier
             );
             None
         }
         Err(e) => {
             tracing::warn!(
                 "Error looking up account for {}:{}: {}, using local storage",
-                identifier_type, identifier, e
+                identifier_type,
+                identifier,
+                e
             );
             None
         }

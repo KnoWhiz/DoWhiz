@@ -39,22 +39,15 @@ cp .env.example DoWhiz_service/.env
 
 ### 3. Start Service
 
-Set a shared ingestion queue database URL (add to `DoWhiz_service/.env` or export in each terminal before starting gateway/workers):
+Configure Service Bus + Azure Blob (add to `DoWhiz_service/.env` or export in each terminal before starting gateway/workers):
 
 ```bash
-export SUPABASE_DB_URL="postgresql://..."
-# or
-export INGESTION_DB_URL="postgresql://..."
-```
-Also set Supabase Storage credentials for raw payload blobs:
-```bash
-export SUPABASE_PROJECT_URL="https://<project>.supabase.co"
-export SUPABASE_SECRET_KEY="sb_secret_..."
-export SUPABASE_STORAGE_BUCKET="ingestion-raw"
-```
-If your Supabase DB hostname resolves to IPv6-only, ensure the VM has IPv6 outbound enabled (see VM deployment notes in `DoWhiz_service/README.md`). For Supabase DB TLS, you may also need:
-```bash
-export INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS=true
+export INGESTION_QUEUE_BACKEND=servicebus
+export SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..."
+export SERVICE_BUS_QUEUE_NAME="ingestion"
+export RAW_PAYLOAD_STORAGE_BACKEND=azure
+export AZURE_STORAGE_CONTAINER="ingestion-raw"
+export AZURE_STORAGE_SAS_TOKEN="..."
 ```
 For VM/pm2 deployments, prefer writing these into `DoWhiz_service/.env` so they survive restarts.
 
@@ -67,7 +60,7 @@ Run a gateway + worker (local, single employee):
 # Terminal 2: gateway
 cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
 # Edit gateway.toml routes to map your service address to little_bear
-# Ensure SUPABASE_DB_URL (or INGESTION_DB_URL) is set in this terminal
+# Ensure Service Bus + Azure Blob env vars are set in this terminal
 ./DoWhiz_service/scripts/run_gateway_local.sh
 
 # Terminal 3: expose gateway + set Postmark hook

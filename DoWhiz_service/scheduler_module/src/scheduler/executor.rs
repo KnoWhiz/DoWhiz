@@ -5,7 +5,8 @@ use crate::channel::Channel;
 use crate::memory_diff::compute_memory_diff;
 use crate::memory_queue::{global_memory_queue, MemoryWriteRequest};
 use crate::memory_store::{
-    read_memo_content, resolve_user_memory_dir, snapshot_memo_content, sync_user_memory_to_workspace,
+    read_memo_content, resolve_user_memory_dir, snapshot_memo_content,
+    sync_user_memory_to_workspace,
 };
 use crate::secrets_store::{
     resolve_user_secrets_path, sync_user_secrets_to_workspace, sync_workspace_secrets_to_user,
@@ -142,10 +143,9 @@ impl TaskExecutor for ModuleExecutor {
                                     .to_string();
 
                                 // Try to look up unified account by channel identifier
-                                let account_id = task
-                                    .reply_to
-                                    .first()
-                                    .and_then(|identifier| lookup_account_by_channel(&task.channel, identifier));
+                                let account_id = task.reply_to.first().and_then(|identifier| {
+                                    lookup_account_by_channel(&task.channel, identifier)
+                                });
 
                                 let request = MemoryWriteRequest {
                                     account_id,
@@ -161,10 +161,12 @@ impl TaskExecutor for ModuleExecutor {
                                         user_id, e
                                     );
                                     // Fall back to direct sync on queue failure
-                                    if let Err(e) = crate::memory_store::sync_workspace_memory_to_user(
-                                        &workspace_memory_dir,
-                                        user_memory_dir,
-                                    ) {
+                                    if let Err(e) =
+                                        crate::memory_store::sync_workspace_memory_to_user(
+                                            &workspace_memory_dir,
+                                            user_memory_dir,
+                                        )
+                                    {
                                         warn!("Fallback memory sync also failed: {}", e);
                                     }
                                 }

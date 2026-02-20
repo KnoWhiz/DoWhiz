@@ -408,7 +408,7 @@ fn is_azure_blob_url(url: &str) -> bool {
     lower.contains("blob.core.windows.net") || lower.contains("sig=")
 }
 
-async fn upload_raw_payload_azure(
+pub async fn upload_raw_payload_azure(
     envelope_id: Uuid,
     received_at: DateTime<Utc>,
     raw_payload: &[u8],
@@ -441,7 +441,7 @@ async fn upload_raw_payload_azure(
     Ok(to_azure_ref(&container, &path))
 }
 
-fn upload_raw_payload_azure_blocking(
+pub fn upload_raw_payload_azure_blocking(
     envelope_id: Uuid,
     received_at: DateTime<Utc>,
     raw_payload: &[u8],
@@ -494,8 +494,8 @@ mod tests {
     fn azure_upload_download_roundtrip() {
         let _guard = lock_env();
         dotenvy::dotenv().ok();
-        let backend = std::env::var("RAW_PAYLOAD_STORAGE_BACKEND")
-            .unwrap_or_else(|_| "supabase".to_string());
+        let backend =
+            std::env::var("RAW_PAYLOAD_STORAGE_BACKEND").unwrap_or_else(|_| "supabase".to_string());
         if backend.trim().to_ascii_lowercase() != "azure" {
             eprintln!("RAW_PAYLOAD_STORAGE_BACKEND is not azure; skipping.");
             return;
@@ -503,8 +503,8 @@ mod tests {
         let payload = b"azure-roundtrip-test";
         let envelope_id = Uuid::new_v4();
         let received_at = Utc::now();
-        let reference = upload_raw_payload_blocking(envelope_id, received_at, payload)
-            .expect("upload");
+        let reference =
+            upload_raw_payload_blocking(envelope_id, received_at, payload).expect("upload");
         let downloaded = download_raw_payload(&reference).expect("download");
         assert_eq!(payload.to_vec(), downloaded);
     }
