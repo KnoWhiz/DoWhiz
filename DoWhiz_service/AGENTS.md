@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `scheduler_module/`: inbound gateway (Postgres ingestion queue + raw payload storage), scheduling, and service binaries.
+- `scheduler_module/`: inbound gateway (Service Bus ingestion + Azure Blob raw payloads), scheduling, and service binaries. Postgres ingestion remains available for legacy/worker-only setups.
 - `send_emails_module/`: Postmark integration and email sending.
 - `run_task_module/`: task execution and workspace orchestration (`src/run_task/`).
 - `scripts/`: local run helpers (gateway, employees, E2E).
@@ -20,6 +20,7 @@
 - When using the inbound gateway, run workers with `--skip-hook --skip-ngrok` (workers only consume the ingestion queue; webhooks hit the gateway).
 - `cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001`: run the service directly.
 - `./scripts/run_gateway_local.sh`: start the inbound gateway locally.
+- The inbound gateway requires `INGESTION_QUEUE_BACKEND=servicebus` plus Service Bus + Azure Blob env vars; Postgres ingestion is legacy.
 - `docker build -t dowhiz-service .`: build the container image.
 
 ## Coding Style & Naming Conventions
