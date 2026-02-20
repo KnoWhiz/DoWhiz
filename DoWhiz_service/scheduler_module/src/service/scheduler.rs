@@ -1,9 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use tracing::{error, info, warn};
@@ -24,6 +24,42 @@ const DEFAULT_TASK_TIMEOUT_SECS: u64 = 600;
 const MAX_TASK_RETRIES: u32 = 3;
 /// Watchdog check interval in seconds
 const WATCHDOG_INTERVAL_SECS: u64 = 30;
+/// Minimum interval between busy logs for the same task
+const BUSY_LOG_THROTTLE_SECS: u64 = 10;
+
+struct RunningThreadGuard {
+    running_threads: Arc<Mutex<HashSet<String>>>,
+    key: String,
+}
+
+impl RunningThreadGuard {
+    fn new(running_threads: Arc<Mutex<HashSet<String>>>, key: String) -> Self {
+        Self { running_threads, key }
+    }
+}
+
+impl Drop for RunningThreadGuard {
+    fn drop(&mut self) {
+        if let Ok(mut running) = self.running_threads.lock() {
+            running.remove(&self.key);
+        }
+    }
+}
+
+fn should_log_busy(key: &str) -> bool {
+    static BUSY_LOGS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    let logs = BUSY_LOGS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut logs = logs.lock().unwrap_or_else(|poison| poison.into_inner());
+    let now = Instant::now();
+    let should_log = match logs.get(key) {
+        Some(last) => now.duration_since(*last) >= Duration::from_secs(BUSY_LOG_THROTTLE_SECS),
+        None => true,
+    };
+    if should_log {
+        logs.insert(key.to_string(), now);
+    }
+    should_log
+}
 
 pub(super) struct SchedulerControl {
     stop: Arc<AtomicBool>,
@@ -141,10 +177,16 @@ pub(super) fn start_scheduler_threads(
                                 }
                                 ClaimResult::TaskBusy => {
                                     if logged_task_busy.insert(task_key) {
-                                        info!(
-                                            "scheduler deferred task {} for user {} (task already running)",
+                                        let log_key = format!(
+                                            "task_busy:{}@{}",
                                             task_ref.task_id, task_ref.user_id
                                         );
+                                        if should_log_busy(&log_key) {
+                                            info!(
+                                                "scheduler deferred task {} for user {} (task already running)",
+                                                task_ref.task_id, task_ref.user_id
+                                            );
+                                        }
                                     }
                                     limiter.release();
                                     continue;
@@ -411,7 +453,7 @@ fn execute_due_task(
         "scheduler executing task_id={} user_id={} kind={} status={}",
         task_ref.task_id, task_ref.user_id, kind_label, status_label
     );
-    let mut thread_key: Option<String> = None;
+    let mut thread_guard: Option<RunningThreadGuard> = None;
     if let Some(task) = scheduler.tasks().iter().find(|task| task.id == task_id) {
         if let TaskKind::RunTask(run) = &task.kind {
             let key = run.workspace_dir.to_string_lossy().into_owned();
@@ -419,25 +461,28 @@ fn execute_due_task(
                 .lock()
                 .expect("running thread lock poisoned");
             if running.contains(&key) {
-                info!(
-                    "scheduler deferred run_task task_id={} user_id={} (thread busy)",
+                let log_key = format!(
+                    "thread_busy:{}@{}",
                     task_ref.task_id, task_ref.user_id
                 );
+                if should_log_busy(&log_key) {
+                    info!(
+                        "scheduler deferred run_task task_id={} user_id={} workspace_dir={} (thread busy)",
+                        task_ref.task_id,
+                        task_ref.user_id,
+                        run.workspace_dir.display()
+                    );
+                }
                 return Ok(());
             }
             running.insert(key.clone());
-            thread_key = Some(key);
+            thread_guard = Some(RunningThreadGuard::new(running_threads.clone(), key));
         }
     }
 
     let executed = scheduler.execute_task_by_id(task_id);
 
-    if let Some(key) = thread_key {
-        let mut running = running_threads
-            .lock()
-            .expect("running thread lock poisoned");
-        running.remove(&key);
-    }
+    drop(thread_guard);
     let executed = executed?;
     if executed {
         info!(

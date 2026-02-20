@@ -127,6 +127,7 @@ pub enum FakeCodexMode {
     EnsureNoYolo,
     EnsureYolo,
     EnsureAddDir,
+    Sleep,
 }
 
 #[cfg(unix)]
@@ -235,6 +236,12 @@ mkdir -p reply_email_attachments
 echo "attachment" > reply_email_attachments/attachment.txt
 "#
         }
+        FakeCodexMode::Sleep => {
+            r#"#!/bin/sh
+set -e
+sleep "${SLEEP_SECS:-2}"
+"#
+        }
     };
 
     fs::write(&script_path, script)?;
@@ -268,6 +275,44 @@ if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
 fi
 exit 0
 "#;
+    fs::write(&script_path, script)?;
+    let mut perms = fs::metadata(&script_path)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms)?;
+    Ok(script_path)
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy)]
+pub enum FakeClaudeMode {
+    Success,
+    Sleep,
+}
+
+#[cfg(unix)]
+#[allow(dead_code)]
+pub fn write_fake_claude(dir: &Path, mode: FakeClaudeMode) -> io::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let script_path = dir.join("claude");
+    let script = match mode {
+        FakeClaudeMode::Success => {
+            r#"#!/bin/sh
+set -e
+echo '{"type":"message_delta","delta":{"text":"ok"}}'
+echo "<html><body>Test reply</body></html>" > reply_email_draft.html
+mkdir -p reply_email_attachments
+echo "attachment" > reply_email_attachments/attachment.txt
+"#
+        }
+        FakeClaudeMode::Sleep => {
+            r#"#!/bin/sh
+set -e
+sleep "${SLEEP_SECS:-2}"
+"#
+        }
+    };
+
     fs::write(&script_path, script)?;
     let mut perms = fs::metadata(&script_path)?.permissions();
     perms.set_mode(0o755);

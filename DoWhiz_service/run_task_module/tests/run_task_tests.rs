@@ -5,8 +5,8 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use support::{
-    build_params, create_workspace, write_fake_codex, write_fake_gh, EnvGuard, EnvUnsetGuard,
-    FakeCodexMode, TempDir, ENV_MUTEX,
+    build_params, create_workspace, write_fake_claude, write_fake_codex, write_fake_gh, EnvGuard,
+    EnvUnsetGuard, FakeClaudeMode, FakeCodexMode, TempDir, ENV_MUTEX,
 };
 
 fn env_enabled(key: &str) -> bool {
@@ -206,6 +206,78 @@ fn run_task_reports_codex_failure() {
         err,
         RunTaskError::CodexFailed {
             status: Some(2),
+            ..
+        }
+    ));
+}
+
+#[test]
+#[cfg(unix)]
+fn run_task_times_out_with_codex() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("codex_task_timeout").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let home_dir = temp.path.join("home");
+    let bin_dir = temp.path.join("bin");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_fake_codex(&bin_dir, FakeCodexMode::Sleep).unwrap();
+
+    let old_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), old_path);
+    let _env = EnvGuard::set(&[
+        ("HOME", home_dir.to_str().unwrap()),
+        ("PATH", &new_path),
+        ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("GH_AUTH_DISABLED", "1"),
+        ("RUN_TASK_TIMEOUT_SECS", "1"),
+        ("SLEEP_SECS", "2"),
+    ]);
+
+    let params = build_params(&workspace);
+    let err = run_task(&params).unwrap_err();
+    assert!(matches!(
+        err,
+        RunTaskError::CommandTimeout {
+            command: "codex",
+            timeout_secs: 1,
+            ..
+        }
+    ));
+}
+
+#[test]
+#[cfg(unix)]
+fn run_task_times_out_with_claude() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("claude_task_timeout").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let home_dir = temp.path.join("home");
+    let bin_dir = temp.path.join("bin");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_fake_claude(&bin_dir, FakeClaudeMode::Sleep).unwrap();
+
+    let old_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), old_path);
+    let _env = EnvGuard::set(&[
+        ("HOME", home_dir.to_str().unwrap()),
+        ("PATH", &new_path),
+        ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("RUN_TASK_TIMEOUT_SECS", "1"),
+        ("SLEEP_SECS", "2"),
+    ]);
+
+    let mut params = build_params(&workspace);
+    params.runner = "claude".to_string();
+    let err = run_task(&params).unwrap_err();
+    assert!(matches!(
+        err,
+        RunTaskError::CommandTimeout {
+            command: "claude",
+            timeout_secs: 1,
             ..
         }
     ));
