@@ -44,9 +44,9 @@ RUST_SERVICE_LIVE_TEST=1 cargo test -p scheduler_module --test service_real_emai
 ```
 External Events (Postmark/Slack/Discord/GoogleDocs/BlueBubbles/Twilio SMS/Telegram/WhatsApp)
     ↓
-Inbound Gateway (port 9100) - deduplicates, stores raw payloads, routes to single employee
+Inbound Gateway (port 9100) - deduplicates, stores raw payloads in Azure Blob, routes to single employee
     ↓
-Postgres Ingestion Queue
+Ingestion Queue (Service Bus for gateway; Postgres optional/legacy)
     ↓
 Worker Service (ports 9001-9004) - per-employee consumer + HTTP server
     ↓
@@ -70,6 +70,8 @@ Outbound Delivery - send via channel adapter, archive to user mail
 - **scheduler_module/src/adapters/whatsapp.rs**: WhatsApp inbound/outbound adapter
 - **scheduler_module/src/bin/rust_service.rs**: Main entry point
 - **scheduler_module/src/bin/inbound_gateway.rs**: Message router/deduplicator
+- **scheduler_module/src/service_bus_queue.rs**: Azure Service Bus ingestion queue
+- **scheduler_module/src/raw_payload_store.rs**: Raw payload storage (Azure Blob / Supabase)
 
 ### Configuration Files
 
@@ -123,6 +125,11 @@ After completing code changes, you must design targeted, detailed unit tests and
 - `CODEX_DISABLED=1`: Bypass Codex CLI for testing
 - `CODEX_BYPASS_SANDBOX=1`: Required inside Docker sometimes
 - `RUN_TASK_DOCKER_IMAGE`: Enable per-task container execution
+- `INGESTION_QUEUE_BACKEND`: `servicebus` for gateway, `postgres` for legacy worker-only setups
+- `SERVICE_BUS_CONNECTION_STRING` / `SERVICE_BUS_QUEUE_NAME`: Service Bus ingestion queue config
+- `RAW_PAYLOAD_STORAGE_BACKEND`: `azure` for gateway, `supabase` for legacy payload storage
+- `AZURE_STORAGE_ACCOUNT` / `AZURE_STORAGE_CONTAINER` / `AZURE_STORAGE_SAS_TOKEN`: Azure Blob raw payload storage config
+- `SUPABASE_DB_URL`: Postgres ingestion queue (legacy)
 - `OPENAI_API_KEY`: Enable message router quick replies
 - `TELEGRAM_BOT_TOKEN`: Telegram bot token (or per-employee `DO_WHIZ_<EMPLOYEE>_BOT`)
 - `TWILIO_ACCOUNT_SID`: Twilio account SID (SMS outbound)

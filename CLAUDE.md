@@ -58,7 +58,7 @@ docker run --rm -p 9001:9001 \
 ## Architecture
 
 ### Workspace Structure (Cargo workspace)
-- **scheduler_module**: Core HTTP server (Axum), task scheduler, SQLite persistence, webhook handlers
+- **scheduler_module**: Core HTTP worker server (Axum), task scheduler, SQLite persistence, inbound gateway binary (webhooks + dedupe)
 - **send_emails_module**: Postmark API wrapper for email delivery
 - **run_task_module**: Codex/Claude CLI invocation for task execution
 - **website**: React 19 + Vite marketing site
@@ -66,8 +66,8 @@ docker run --rm -p 9001:9001 \
 ### Data Flow
 ```
 Inbound (Email/Slack/Discord/SMS/Telegram/WhatsApp/Google Docs/iMessage)
-    → Ingestion Gateway (dedupe + raw payload storage)
-    → Postgres Ingestion Queue
+    → Ingestion Gateway (dedupe + raw payload storage in Azure Blob)
+    → Ingestion Queue (Service Bus for gateway; Postgres optional/legacy)
     → Worker Service (per-employee)
     → Scheduler (SQLite) → Task Execution (Codex/Claude) → Outbound Reply
 ```
@@ -141,6 +141,8 @@ Optional:
 - `RUN_TASK_DOCKER_IMAGE` - Enable per-task Docker isolation
 - `GITHUB_USERNAME`, `GITHUB_PERSONAL_ACCESS_TOKEN` - GitHub access for agents
 - `OPENAI_API_KEY` - Enable message router quick replies
+- `INGESTION_QUEUE_BACKEND=servicebus` + `SERVICE_BUS_CONNECTION_STRING` + `SERVICE_BUS_QUEUE_NAME` - Required when running the inbound gateway
+- `AZURE_STORAGE_ACCOUNT`/`AZURE_STORAGE_CONTAINER`/`AZURE_STORAGE_SAS_TOKEN` - Required for gateway raw payload storage (Azure Blob)
 
 ## Testing Expectations
 
