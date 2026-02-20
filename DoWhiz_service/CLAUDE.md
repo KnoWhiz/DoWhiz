@@ -128,7 +128,8 @@ After completing code changes, you must design targeted, detailed unit tests and
 - `INGESTION_QUEUE_BACKEND`: `servicebus` for gateway, `postgres` for legacy worker-only setups
 - `SERVICE_BUS_CONNECTION_STRING` / `SERVICE_BUS_QUEUE_NAME`: Service Bus ingestion queue config
 - `RAW_PAYLOAD_STORAGE_BACKEND`: `azure` for gateway, `supabase` for legacy payload storage
-- `AZURE_STORAGE_ACCOUNT` / `AZURE_STORAGE_CONTAINER` / `AZURE_STORAGE_SAS_TOKEN`: Azure Blob raw payload storage config
+- `AZURE_STORAGE_ACCOUNT` / `AZURE_STORAGE_CONTAINER_INGEST` / `AZURE_STORAGE_SAS_TOKEN`: Azure Blob raw payload storage config
+- `AZURE_STORAGE_CONNECTION_STRING` / `AZURE_STORAGE_CONTAINER`: Azure Blob memo storage config
 - `SUPABASE_DB_URL`: Postgres ingestion queue (legacy)
 - `OPENAI_API_KEY`: Enable message router quick replies
 - `TELEGRAM_BOT_TOKEN`: Telegram bot token (or per-employee `DO_WHIZ_<EMPLOYEE>_BOT`)

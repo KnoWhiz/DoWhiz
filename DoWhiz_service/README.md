@@ -54,7 +54,7 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
 - `RUN_TASK_USE_DOCKER=1` + `RUN_TASK_DOCKER_IMAGE` (run each task inside a disposable Docker container; use `dowhiz-service` for the repo image)
 - `RUN_TASK_DOCKER_AUTO_BUILD=1` to auto-build the image when missing (set `0` to disable)
 - `INGESTION_QUEUE_BACKEND=servicebus` + `SERVICE_BUS_CONNECTION_STRING` + `SERVICE_BUS_QUEUE_NAME` (ingestion queue)
-- `RAW_PAYLOAD_STORAGE_BACKEND=azure` + `AZURE_STORAGE_CONTAINER` + `AZURE_STORAGE_SAS_TOKEN` (raw payload storage)
+- `RAW_PAYLOAD_STORAGE_BACKEND=azure` + `AZURE_STORAGE_CONTAINER_INGEST` + `AZURE_STORAGE_SAS_TOKEN` (raw payload storage)
 - `OPENAI_API_KEY` (enables message router quick replies)
 
 ---
@@ -158,7 +158,7 @@ export INGESTION_QUEUE_BACKEND=servicebus
 export SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..."
 export SERVICE_BUS_QUEUE_NAME="ingestion"
 export RAW_PAYLOAD_STORAGE_BACKEND=azure
-export AZURE_STORAGE_CONTAINER="ingestion-raw"
+export AZURE_STORAGE_CONTAINER_INGEST="ingestion-raw"
 export AZURE_STORAGE_SAS_TOKEN="..."
 ```
 
@@ -292,7 +292,7 @@ az functionapp config appsettings set -g <rg> -n <function-app> --settings \
   SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..." \
   SERVICE_BUS_QUEUE_NAME="ingestion" \
   AZURE_STORAGE_ACCOUNT="<storage>" \
-  AZURE_STORAGE_CONTAINER="ingestion-raw" \
+  AZURE_STORAGE_CONTAINER_INGEST="ingestion-raw" \
   AZURE_STORAGE_SAS_TOKEN="<sas>" \
   GATEWAY_CONFIG_PATH="gateway.toml" \
   EMPLOYEE_CONFIG_PATH="employee.toml"
@@ -311,7 +311,7 @@ export INGESTION_QUEUE_BACKEND=servicebus
 export SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..."
 export SERVICE_BUS_QUEUE_NAME="ingestion"
 export RAW_PAYLOAD_STORAGE_BACKEND=azure
-export AZURE_STORAGE_CONTAINER="ingestion-raw"
+export AZURE_STORAGE_CONTAINER_INGEST="ingestion-raw"
 export AZURE_STORAGE_SAS_TOKEN="..."
 
 ./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004 --skip-hook --skip-ngrok
@@ -322,7 +322,7 @@ If you need Slack/Discord/Telegram/SMS/WhatsApp/BlueBubbles/Google Docs, run the
 ```bash
 INGESTION_QUEUE_BACKEND=servicebus \
 RAW_PAYLOAD_STORAGE_BACKEND=azure \
-AZURE_STORAGE_CONTAINER="ingestion-raw" \
+AZURE_STORAGE_CONTAINER_INGEST="ingestion-raw" \
 AZURE_STORAGE_SAS_TOKEN="..." \
   ./DoWhiz_service/scripts/run_gateway_local.sh
 ```
@@ -346,7 +346,7 @@ export INGESTION_QUEUE_BACKEND=servicebus
 export SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..."
 export SERVICE_BUS_QUEUE_NAME="ingestion"
 export RAW_PAYLOAD_STORAGE_BACKEND=azure
-export AZURE_STORAGE_CONTAINER="ingestion-raw"
+export AZURE_STORAGE_CONTAINER_INGEST="ingestion-raw"
 export AZURE_STORAGE_SAS_TOKEN="..."
 ```
 
@@ -360,7 +360,7 @@ docker run --rm -p 9001:9001 \
   -e SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
   -e SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
   -e RAW_PAYLOAD_STORAGE_BACKEND="$RAW_PAYLOAD_STORAGE_BACKEND" \
-  -e AZURE_STORAGE_CONTAINER="$AZURE_STORAGE_CONTAINER" \
+  -e AZURE_STORAGE_CONTAINER_INGEST="$AZURE_STORAGE_CONTAINER_INGEST" \
   -e AZURE_STORAGE_SAS_TOKEN="$AZURE_STORAGE_SAS_TOKEN" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
   -v dowhiz-workspace-oliver:/app/.workspace \
@@ -374,7 +374,7 @@ docker run --rm -p 9002:9001 \
   -e SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
   -e SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
   -e RAW_PAYLOAD_STORAGE_BACKEND="$RAW_PAYLOAD_STORAGE_BACKEND" \
-  -e AZURE_STORAGE_CONTAINER="$AZURE_STORAGE_CONTAINER" \
+  -e AZURE_STORAGE_CONTAINER_INGEST="$AZURE_STORAGE_CONTAINER_INGEST" \
   -e AZURE_STORAGE_SAS_TOKEN="$AZURE_STORAGE_SAS_TOKEN" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
   -v dowhiz-workspace-maggie:/app/.workspace \
@@ -395,7 +395,7 @@ INGESTION_QUEUE_BACKEND="$INGESTION_QUEUE_BACKEND" \
 SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
 SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
 RAW_PAYLOAD_STORAGE_BACKEND="$RAW_PAYLOAD_STORAGE_BACKEND" \
-AZURE_STORAGE_CONTAINER="$AZURE_STORAGE_CONTAINER" \
+AZURE_STORAGE_CONTAINER_INGEST="$AZURE_STORAGE_CONTAINER_INGEST" \
 AZURE_STORAGE_SAS_TOKEN="$AZURE_STORAGE_SAS_TOKEN" \
   ./DoWhiz_service/scripts/run_gateway_local.sh
 ```
@@ -453,7 +453,7 @@ INGESTION_QUEUE_BACKEND=servicebus
 SERVICE_BUS_CONNECTION_STRING=Endpoint=sb://...
 SERVICE_BUS_QUEUE_NAME=ingestion
 RAW_PAYLOAD_STORAGE_BACKEND=azure
-AZURE_STORAGE_CONTAINER=ingestion-raw
+AZURE_STORAGE_CONTAINER_INGEST=ingestion-raw
 AZURE_STORAGE_SAS_TOKEN=...
 # For GitHub PR creation from email (recommended):
 EMPLOYEE_ID=little_bear
@@ -609,7 +609,7 @@ docker run --rm -p 9001:9001 \
   -e SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
   -e SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
   -e RAW_PAYLOAD_STORAGE_BACKEND="$RAW_PAYLOAD_STORAGE_BACKEND" \
-  -e AZURE_STORAGE_CONTAINER="$AZURE_STORAGE_CONTAINER" \
+  -e AZURE_STORAGE_CONTAINER_INGEST="$AZURE_STORAGE_CONTAINER_INGEST" \
   -e AZURE_STORAGE_SAS_TOKEN="$AZURE_STORAGE_SAS_TOKEN" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
   -v dowhiz-workspace:/app/.workspace \
@@ -625,7 +625,7 @@ docker run --rm -p 9100:9100 \
   -e SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
   -e SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
   -e RAW_PAYLOAD_STORAGE_BACKEND="$RAW_PAYLOAD_STORAGE_BACKEND" \
-  -e AZURE_STORAGE_CONTAINER="$AZURE_STORAGE_CONTAINER" \
+  -e AZURE_STORAGE_CONTAINER_INGEST="$AZURE_STORAGE_CONTAINER_INGEST" \
   -e AZURE_STORAGE_SAS_TOKEN="$AZURE_STORAGE_SAS_TOKEN" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
   -v "$PWD/DoWhiz_service/gateway.toml:/app/DoWhiz_service/gateway.toml:ro" \
@@ -716,7 +716,7 @@ export INGESTION_QUEUE_BACKEND=servicebus
 export SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..."
 export SERVICE_BUS_QUEUE_NAME="ingestion"
 export RAW_PAYLOAD_STORAGE_BACKEND=azure
-export AZURE_STORAGE_CONTAINER="ingestion-raw"
+export AZURE_STORAGE_CONTAINER_INGEST="ingestion-raw"
 export AZURE_STORAGE_SAS_TOKEN="..."
 ```
 
@@ -730,7 +730,7 @@ docker run --rm -p 9002:9002 \
   -e SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
   -e SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
   -e RAW_PAYLOAD_STORAGE_BACKEND="$RAW_PAYLOAD_STORAGE_BACKEND" \
-  -e AZURE_STORAGE_CONTAINER="$AZURE_STORAGE_CONTAINER" \
+  -e AZURE_STORAGE_CONTAINER_INGEST="$AZURE_STORAGE_CONTAINER_INGEST" \
   -e AZURE_STORAGE_SAS_TOKEN="$AZURE_STORAGE_SAS_TOKEN" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
   -v dowhiz-workspace:/app/.workspace \
@@ -745,7 +745,7 @@ INGESTION_QUEUE_BACKEND="$INGESTION_QUEUE_BACKEND" \
 SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
 SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
 RAW_PAYLOAD_STORAGE_BACKEND="$RAW_PAYLOAD_STORAGE_BACKEND" \
-AZURE_STORAGE_CONTAINER="$AZURE_STORAGE_CONTAINER" \
+AZURE_STORAGE_CONTAINER_INGEST="$AZURE_STORAGE_CONTAINER_INGEST" \
 AZURE_STORAGE_SAS_TOKEN="$AZURE_STORAGE_SAS_TOKEN" \
   ./DoWhiz_service/scripts/run_gateway_local.sh
 ```
@@ -1144,11 +1144,17 @@ This reduces API costs and latency for simple interactions while preserving full
 | `SERVICE_BUS_PEEK_LOCK_TIMEOUT_SECS` | `30` | Peek-lock timeout for Service Bus receive |
 | `RAW_PAYLOAD_STORAGE_BACKEND` | `supabase` | `supabase` or `azure` (gateway requires `azure`) |
 | `AZURE_STORAGE_ACCOUNT` | - | Azure Storage account name |
-| `AZURE_STORAGE_CONTAINER` | - | Azure Blob container name |
+| `AZURE_STORAGE_CONTAINER_INGEST` | - | Azure Blob container for raw payloads |
 | `AZURE_STORAGE_SAS_TOKEN` | - | SAS token for container access |
 | `AZURE_STORAGE_CONTAINER_SAS_URL` | - | Full container SAS URL (optional) |
 | `AZURE_FUNCTION_POSTMARK_URL` | - | Direct Function ingress URL |
 | `AZURE_APIM_POSTMARK_URL` | - | APIM ingress URL |
+
+### Azure Memo Storage
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AZURE_STORAGE_CONNECTION_STRING` | - | Azure Blob connection string for memo storage |
+| `AZURE_STORAGE_CONTAINER` | - | Azure Blob container for memo.md (e.g., `memos`) |
 
 ### Slack
 | Variable | Default | Description |

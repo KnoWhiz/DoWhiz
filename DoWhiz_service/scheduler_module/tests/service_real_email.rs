@@ -539,7 +539,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
             return Ok(());
         }
     };
-    let azure_container = env::var("AZURE_STORAGE_CONTAINER")
+    let azure_container = env::var("AZURE_STORAGE_CONTAINER_INGEST")
         .ok()
         .filter(|value| !value.trim().is_empty());
     let azure_sas_url = env::var("AZURE_STORAGE_CONTAINER_SAS_URL")
@@ -560,7 +560,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
                 && (azure_account.is_some() || azure_conn_str.is_some())));
     if !has_azure_blob {
         eprintln!(
-            "Skipping live test: Azure Blob SAS configuration is required (AZURE_STORAGE_CONTAINER_SAS_URL or AZURE_STORAGE_CONTAINER + AZURE_STORAGE_SAS_TOKEN + AZURE_STORAGE_ACCOUNT/AZURE_STORAGE_CONNECTION_STRING_INGEST)."
+            "Skipping live test: Azure Blob SAS configuration is required (AZURE_STORAGE_CONTAINER_SAS_URL or AZURE_STORAGE_CONTAINER_INGEST + AZURE_STORAGE_SAS_TOKEN + AZURE_STORAGE_ACCOUNT/AZURE_STORAGE_CONNECTION_STRING_INGEST)."
         );
         return Ok(());
     }

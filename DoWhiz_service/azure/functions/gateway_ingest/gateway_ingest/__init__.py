@@ -171,7 +171,7 @@ def resolve_container_sas_url() -> str:
     if sas_url:
         return sas_url.strip()
     account = os.getenv("AZURE_STORAGE_ACCOUNT") or resolve_account_from_connection_string()
-    container = os.getenv("AZURE_STORAGE_CONTAINER")
+    container = os.getenv("AZURE_STORAGE_CONTAINER_INGEST")
     sas_token = os.getenv("AZURE_STORAGE_SAS_TOKEN")
     if not account or not container or not sas_token:
         raise RuntimeError("Missing Azure storage SAS configuration")
@@ -199,9 +199,9 @@ def build_blob_url(container_sas_url: str, path: str) -> str:
 
 
 def upload_raw_payload(raw_payload: bytes, envelope_id: str, received_at: datetime.datetime) -> str:
-    container = os.getenv("AZURE_STORAGE_CONTAINER")
+    container = os.getenv("AZURE_STORAGE_CONTAINER_INGEST")
     if not container:
-        raise RuntimeError("AZURE_STORAGE_CONTAINER is required")
+        raise RuntimeError("AZURE_STORAGE_CONTAINER_INGEST is required")
     date_prefix = received_at.strftime("%Y/%m/%d")
     blob_path = f"ingestion_raw/{date_prefix}/{envelope_id}.bin"
     container_sas_url = resolve_container_sas_url()
