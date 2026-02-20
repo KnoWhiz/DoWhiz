@@ -34,24 +34,36 @@ async fn validate_supabase_token(
     let resp = client
         .get(format!("{}/auth/v1/user", supabase_url))
         .header("Authorization", format!("Bearer {}", token))
-        .header("apikey", std::env::var("SUPABASE_ANON_KEY").unwrap_or_default())
+        .header(
+            "apikey",
+            std::env::var("SUPABASE_ANON_KEY").unwrap_or_default(),
+        )
         .send()
         .await
         .map_err(|e| {
             error!("Failed to validate token with Supabase: {}", e);
-            (StatusCode::BAD_GATEWAY, "Failed to validate token".to_string())
+            (
+                StatusCode::BAD_GATEWAY,
+                "Failed to validate token".to_string(),
+            )
         })?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         error!("Supabase auth validation failed: {} - {}", status, body);
-        return Err((StatusCode::UNAUTHORIZED, "Invalid or expired token".to_string()));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "Invalid or expired token".to_string(),
+        ));
     }
 
     let user: SupabaseUser = resp.json().await.map_err(|e| {
         error!("Failed to parse Supabase user response: {}", e);
-        (StatusCode::BAD_GATEWAY, "Invalid response from auth service".to_string())
+        (
+            StatusCode::BAD_GATEWAY,
+            "Invalid response from auth service".to_string(),
+        )
     })?;
 
     Ok(user.id)
@@ -80,16 +92,17 @@ pub struct SignupResponse {
 /// POST /auth/signup
 /// Creates a DoWhiz account for the authenticated Supabase user.
 /// Requires: Authorization: Bearer <supabase_access_token>
-pub async fn signup(
-    State(state): State<AuthState>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+pub async fn signup(State(state): State<AuthState>, headers: HeaderMap) -> impl IntoResponse {
     let token = match extract_bearer_token(&headers) {
         Some(t) => t,
         None => {
-            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-                "error": "Missing Authorization header"
-            }))).into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response();
         }
     };
 
@@ -106,27 +119,38 @@ pub async fn signup(
         .await
         .map_err(|e| {
             error!("spawn_blocking panicked: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Internal error" })))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
         });
 
     let existing = match existing {
         Ok(Ok(existing)) => existing,
         Ok(Err(e)) => {
             error!("Failed to check existing account: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": "Database error"
-            }))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Database error"
+                })),
+            )
+                .into_response();
         }
         Err(resp) => return resp.into_response(),
     };
 
     if let Some(existing) = existing {
         info!("Account already exists for auth_user_id={}", auth_user_id);
-        return (StatusCode::OK, Json(SignupResponse {
-            account_id: existing.id,
-            auth_user_id: existing.auth_user_id,
-            created: false,
-        })).into_response();
+        return (
+            StatusCode::OK,
+            Json(SignupResponse {
+                account_id: existing.id,
+                auth_user_id: existing.auth_user_id,
+                created: false,
+            }),
+        )
+            .into_response();
     }
 
     // Create new account (run on blocking thread)
@@ -135,23 +159,37 @@ pub async fn signup(
         .await
         .map_err(|e| {
             error!("spawn_blocking panicked: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Internal error" })))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
         });
 
     match result {
         Ok(Ok(account)) => {
-            info!("Created account {} for auth_user_id={}", account.id, auth_user_id);
-            (StatusCode::CREATED, Json(SignupResponse {
-                account_id: account.id,
-                auth_user_id: account.auth_user_id,
-                created: true,
-            })).into_response()
+            info!(
+                "Created account {} for auth_user_id={}",
+                account.id, auth_user_id
+            );
+            (
+                StatusCode::CREATED,
+                Json(SignupResponse {
+                    account_id: account.id,
+                    auth_user_id: account.auth_user_id,
+                    created: true,
+                }),
+            )
+                .into_response()
         }
         Ok(Err(e)) => {
             error!("Failed to create account: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": "Failed to create account"
-            }))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to create account"
+                })),
+            )
+                .into_response()
         }
         Err(resp) => resp.into_response(),
     }
@@ -177,16 +215,17 @@ pub struct IdentifierResponse {
 
 /// GET /auth/account
 /// Returns the current user's account and linked identifiers.
-pub async fn get_account(
-    State(state): State<AuthState>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+pub async fn get_account(State(state): State<AuthState>, headers: HeaderMap) -> impl IntoResponse {
     let token = match extract_bearer_token(&headers) {
         Some(t) => t,
         None => {
-            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-                "error": "Missing Authorization header"
-            }))).into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response();
         }
     };
 
@@ -203,21 +242,32 @@ pub async fn get_account(
         .await
         .map_err(|e| {
             error!("spawn_blocking panicked: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Internal error" })))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
         });
 
     let account = match account_result {
         Ok(Ok(Some(acc))) => acc,
         Ok(Ok(None)) => {
-            return (StatusCode::NOT_FOUND, Json(serde_json::json!({
-                "error": "Account not found. Please sign up first."
-            }))).into_response();
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "error": "Account not found. Please sign up first."
+                })),
+            )
+                .into_response();
         }
         Ok(Err(e)) => {
             error!("Failed to get account: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": "Database error"
-            }))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Database error"
+                })),
+            )
+                .into_response();
         }
         Err(resp) => return resp.into_response(),
     };
@@ -229,29 +279,43 @@ pub async fn get_account(
         .await
         .map_err(|e| {
             error!("spawn_blocking panicked: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Internal error" })))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
         });
 
     let identifiers = match identifiers_result {
         Ok(Ok(ids)) => ids,
         Ok(Err(e)) => {
             error!("Failed to list identifiers: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": "Database error"
-            }))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Database error"
+                })),
+            )
+                .into_response();
         }
         Err(resp) => return resp.into_response(),
     };
 
-    (StatusCode::OK, Json(AccountResponse {
-        account_id: account.id,
-        auth_user_id: account.auth_user_id,
-        identifiers: identifiers.into_iter().map(|i| IdentifierResponse {
-            identifier_type: i.identifier_type,
-            identifier: i.identifier,
-            verified: i.verified,
-        }).collect(),
-    })).into_response()
+    (
+        StatusCode::OK,
+        Json(AccountResponse {
+            account_id: account.id,
+            auth_user_id: account.auth_user_id,
+            identifiers: identifiers
+                .into_iter()
+                .map(|i| IdentifierResponse {
+                    identifier_type: i.identifier_type,
+                    identifier: i.identifier,
+                    verified: i.verified,
+                })
+                .collect(),
+        }),
+    )
+        .into_response()
 }
 
 // ============================================================================
@@ -283,9 +347,13 @@ pub async fn link_identifier(
     let token = match extract_bearer_token(&headers) {
         Some(t) => t,
         None => {
-            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-                "error": "Missing Authorization header"
-            }))).into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response();
         }
     };
 
@@ -302,21 +370,32 @@ pub async fn link_identifier(
         .await
         .map_err(|e| {
             error!("spawn_blocking panicked: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Internal error" })))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
         });
 
     let account = match account_result {
         Ok(Ok(Some(acc))) => acc,
         Ok(Ok(None)) => {
-            return (StatusCode::NOT_FOUND, Json(serde_json::json!({
-                "error": "Account not found. Please sign up first."
-            }))).into_response();
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "error": "Account not found. Please sign up first."
+                })),
+            )
+                .into_response();
         }
         Ok(Err(e)) => {
             error!("Failed to get account: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": "Database error"
-            }))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Database error"
+                })),
+            )
+                .into_response();
         }
         Err(resp) => return resp.into_response(),
     };
@@ -326,12 +405,17 @@ pub async fn link_identifier(
     let identifier_type = req.identifier_type.clone();
     let identifier = req.identifier.clone();
     let store = state.account_store.clone();
-    let create_result = task::spawn_blocking(move || store.create_identifier(account_id, &identifier_type, &identifier))
-        .await
-        .map_err(|e| {
-            error!("spawn_blocking panicked: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Internal error" })))
-        });
+    let create_result = task::spawn_blocking(move || {
+        store.create_identifier(account_id, &identifier_type, &identifier)
+    })
+    .await
+    .map_err(|e| {
+        error!("spawn_blocking panicked: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Internal error" })),
+        )
+    });
 
     match create_result {
         Ok(Ok(identifier)) => {
@@ -340,23 +424,33 @@ pub async fn link_identifier(
                 req.identifier_type, req.identifier, account.id
             );
             // TODO: Send verification code for phone/email channels
-            (StatusCode::CREATED, Json(LinkResponse {
-                identifier_type: identifier.identifier_type,
-                identifier: identifier.identifier,
-                verified: identifier.verified,
-                message: "Identifier linked. Verification may be required.".to_string(),
-            })).into_response()
+            (
+                StatusCode::CREATED,
+                Json(LinkResponse {
+                    identifier_type: identifier.identifier_type,
+                    identifier: identifier.identifier,
+                    verified: identifier.verified,
+                    message: "Identifier linked. Verification may be required.".to_string(),
+                }),
+            )
+                .into_response()
         }
-        Ok(Err(AccountStoreError::IdentifierTaken)) => {
-            (StatusCode::CONFLICT, Json(serde_json::json!({
+        Ok(Err(AccountStoreError::IdentifierTaken)) => (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
                 "error": "This identifier is already linked to another account"
-            }))).into_response()
-        }
+            })),
+        )
+            .into_response(),
         Ok(Err(e)) => {
             error!("Failed to link identifier: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": "Failed to link identifier"
-            }))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to link identifier"
+                })),
+            )
+                .into_response()
         }
         Err(resp) => resp.into_response(),
     }
@@ -384,9 +478,13 @@ pub async fn verify_identifier(
     let token = match extract_bearer_token(&headers) {
         Some(t) => t,
         None => {
-            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-                "error": "Missing Authorization header"
-            }))).into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response();
         }
     };
 
@@ -403,21 +501,32 @@ pub async fn verify_identifier(
         .await
         .map_err(|e| {
             error!("spawn_blocking panicked: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Internal error" })))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
         });
 
     let account = match account_result {
         Ok(Ok(Some(acc))) => acc,
         Ok(Ok(None)) => {
-            return (StatusCode::NOT_FOUND, Json(serde_json::json!({
-                "error": "Account not found"
-            }))).into_response();
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "error": "Account not found"
+                })),
+            )
+                .into_response();
         }
         Ok(Err(e)) => {
             error!("Failed to get account: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": "Database error"
-            }))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Database error"
+                })),
+            )
+                .into_response();
         }
         Err(resp) => return resp.into_response(),
     };
@@ -428,12 +537,17 @@ pub async fn verify_identifier(
     let identifier_type = req.identifier_type.clone();
     let identifier = req.identifier.clone();
     let store = state.account_store.clone();
-    let verify_result = task::spawn_blocking(move || store.verify_identifier(account_id, &identifier_type, &identifier))
-        .await
-        .map_err(|e| {
-            error!("spawn_blocking panicked: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Internal error" })))
-        });
+    let verify_result = task::spawn_blocking(move || {
+        store.verify_identifier(account_id, &identifier_type, &identifier)
+    })
+    .await
+    .map_err(|e| {
+        error!("spawn_blocking panicked: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Internal error" })),
+        )
+    });
 
     match verify_result {
         Ok(Ok(())) => {
@@ -441,21 +555,31 @@ pub async fn verify_identifier(
                 "Verified identifier {}:{} for account {}",
                 req.identifier_type, req.identifier, account.id
             );
-            (StatusCode::OK, Json(serde_json::json!({
-                "verified": true,
-                "message": "Identifier verified successfully"
-            }))).into_response()
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "verified": true,
+                    "message": "Identifier verified successfully"
+                })),
+            )
+                .into_response()
         }
-        Ok(Err(AccountStoreError::NotFound)) => {
-            (StatusCode::NOT_FOUND, Json(serde_json::json!({
+        Ok(Err(AccountStoreError::NotFound)) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
                 "error": "Identifier not found"
-            }))).into_response()
-        }
+            })),
+        )
+            .into_response(),
         Ok(Err(e)) => {
             error!("Failed to verify identifier: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": "Failed to verify identifier"
-            }))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to verify identifier"
+                })),
+            )
+                .into_response()
         }
         Err(resp) => resp.into_response(),
     }
@@ -481,9 +605,13 @@ pub async fn unlink_identifier(
     let token = match extract_bearer_token(&headers) {
         Some(t) => t,
         None => {
-            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-                "error": "Missing Authorization header"
-            }))).into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response();
         }
     };
 
@@ -500,21 +628,32 @@ pub async fn unlink_identifier(
         .await
         .map_err(|e| {
             error!("spawn_blocking panicked: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Internal error" })))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
         });
 
     let account = match account_result {
         Ok(Ok(Some(acc))) => acc,
         Ok(Ok(None)) => {
-            return (StatusCode::NOT_FOUND, Json(serde_json::json!({
-                "error": "Account not found"
-            }))).into_response();
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "error": "Account not found"
+                })),
+            )
+                .into_response();
         }
         Ok(Err(e)) => {
             error!("Failed to get account: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": "Database error"
-            }))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Database error"
+                })),
+            )
+                .into_response();
         }
         Err(resp) => return resp.into_response(),
     };
@@ -524,12 +663,17 @@ pub async fn unlink_identifier(
     let identifier_type = req.identifier_type.clone();
     let identifier = req.identifier.clone();
     let store = state.account_store.clone();
-    let delete_result = task::spawn_blocking(move || store.delete_identifier(account_id, &identifier_type, &identifier))
-        .await
-        .map_err(|e| {
-            error!("spawn_blocking panicked: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Internal error" })))
-        });
+    let delete_result = task::spawn_blocking(move || {
+        store.delete_identifier(account_id, &identifier_type, &identifier)
+    })
+    .await
+    .map_err(|e| {
+        error!("spawn_blocking panicked: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Internal error" })),
+        )
+    });
 
     match delete_result {
         Ok(Ok(())) => {
@@ -537,20 +681,30 @@ pub async fn unlink_identifier(
                 "Unlinked identifier {}:{} from account {}",
                 req.identifier_type, req.identifier, account.id
             );
-            (StatusCode::OK, Json(serde_json::json!({
-                "message": "Identifier unlinked successfully"
-            }))).into_response()
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "message": "Identifier unlinked successfully"
+                })),
+            )
+                .into_response()
         }
-        Ok(Err(AccountStoreError::NotFound)) => {
-            (StatusCode::NOT_FOUND, Json(serde_json::json!({
+        Ok(Err(AccountStoreError::NotFound)) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
                 "error": "Identifier not found"
-            }))).into_response()
-        }
+            })),
+        )
+            .into_response(),
         Ok(Err(e)) => {
             error!("Failed to unlink identifier: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": "Failed to unlink identifier"
-            }))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to unlink identifier"
+                })),
+            )
+                .into_response()
         }
         Err(resp) => resp.into_response(),
     }
@@ -569,9 +723,13 @@ pub async fn delete_account(
     let token = match extract_bearer_token(&headers) {
         Some(t) => t,
         None => {
-            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-                "error": "Missing Authorization header"
-            }))).into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response();
         }
     };
 
@@ -588,21 +746,32 @@ pub async fn delete_account(
         .await
         .map_err(|e| {
             error!("spawn_blocking panicked: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Internal error" })))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
         });
 
     let account = match account_result {
         Ok(Ok(Some(acc))) => acc,
         Ok(Ok(None)) => {
-            return (StatusCode::NOT_FOUND, Json(serde_json::json!({
-                "error": "Account not found"
-            }))).into_response();
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "error": "Account not found"
+                })),
+            )
+                .into_response();
         }
         Ok(Err(e)) => {
             error!("Failed to get account: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": "Database error"
-            }))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Database error"
+                })),
+            )
+                .into_response();
         }
         Err(resp) => return resp.into_response(),
     };
@@ -614,26 +783,42 @@ pub async fn delete_account(
         .await
         .map_err(|e| {
             error!("spawn_blocking panicked: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Internal error" })))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
         });
 
     match delete_result {
         Ok(Ok(())) => {
-            info!("Deleted account {} for auth_user_id={}", account_id, auth_user_id);
-            (StatusCode::OK, Json(serde_json::json!({
-                "message": "Account deleted successfully"
-            }))).into_response()
+            info!(
+                "Deleted account {} for auth_user_id={}",
+                account_id, auth_user_id
+            );
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "message": "Account deleted successfully"
+                })),
+            )
+                .into_response()
         }
-        Ok(Err(AccountStoreError::NotFound)) => {
-            (StatusCode::NOT_FOUND, Json(serde_json::json!({
+        Ok(Err(AccountStoreError::NotFound)) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
                 "error": "Account not found"
-            }))).into_response()
-        }
+            })),
+        )
+            .into_response(),
         Ok(Err(e)) => {
             error!("Failed to delete account: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": "Failed to delete account"
-            }))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to delete account"
+                })),
+            )
+                .into_response()
         }
         Err(resp) => resp.into_response(),
     }

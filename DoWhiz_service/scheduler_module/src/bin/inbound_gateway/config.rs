@@ -7,8 +7,6 @@ pub(super) struct GatewayConfigFile {
     #[serde(default)]
     pub(super) server: GatewayServerConfig,
     #[serde(default)]
-    pub(super) storage: GatewayStorageConfig,
-    #[serde(default)]
     pub(super) defaults: GatewayDefaultsConfig,
     #[serde(default)]
     pub(super) routes: Vec<GatewayRouteConfig>,
@@ -18,11 +16,6 @@ pub(super) struct GatewayConfigFile {
 pub(super) struct GatewayServerConfig {
     pub(super) host: Option<String>,
     pub(super) port: Option<u16>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub(super) struct GatewayStorageConfig {
-    pub(super) db_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
@@ -85,26 +78,4 @@ pub(super) fn load_gateway_config(path: &Path) -> Result<GatewayConfigFile, Stri
         .map_err(|err| format!("failed to read gateway config: {}", err))?;
     toml::from_str::<GatewayConfigFile>(&content)
         .map_err(|err| format!("failed to parse gateway config: {}", err))
-}
-
-pub(super) fn resolve_ingestion_db_url(config: &GatewayStorageConfig) -> Result<String, String> {
-    if let Ok(value) = env::var("INGESTION_DB_URL") {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_string());
-        }
-    }
-    if let Ok(value) = env::var("SUPABASE_DB_URL") {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_string());
-        }
-    }
-    if let Some(value) = config.db_url.as_ref() {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_string());
-        }
-    }
-    Err("INGESTION_DB_URL or SUPABASE_DB_URL must be set for the gateway".to_string())
 }

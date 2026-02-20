@@ -56,11 +56,15 @@ struct IdentifierInfo {
 async fn test_unified_memo_azure_blob_routing() {
     dotenvy::dotenv().ok();
 
-    let service_url = std::env::var("SERVICE_URL").unwrap_or_else(|_| "http://localhost:9001".to_string());
-    let supabase_url = std::env::var("SUPABASE_PROJECT_URL").expect("SUPABASE_PROJECT_URL required");
+    let service_url =
+        std::env::var("SERVICE_URL").unwrap_or_else(|_| "http://localhost:9001".to_string());
+    let supabase_url =
+        std::env::var("SUPABASE_PROJECT_URL").expect("SUPABASE_PROJECT_URL required");
     let supabase_anon_key = std::env::var("SUPABASE_ANON_KEY").expect("SUPABASE_ANON_KEY required");
-    let test_email = std::env::var("TEST_EMAIL").unwrap_or_else(|_| "dylantang12@gmail.com".to_string());
-    let test_password = std::env::var("TEST_PASSWORD").unwrap_or_else(|_| "testpassword123".to_string());
+    let test_email =
+        std::env::var("TEST_EMAIL").unwrap_or_else(|_| "dylantang12@gmail.com".to_string());
+    let test_password =
+        std::env::var("TEST_PASSWORD").unwrap_or_else(|_| "testpassword123".to_string());
 
     let client = reqwest::Client::new();
     let blob_store = BlobStore::from_env().expect("BlobStore::from_env");
@@ -68,10 +72,16 @@ async fn test_unified_memo_azure_blob_routing() {
     // Step 1: Login to Supabase to get access token
     println!("Step 1: Logging into Supabase...");
     let login_resp = client
-        .post(format!("{}/auth/v1/token?grant_type=password", supabase_url))
+        .post(format!(
+            "{}/auth/v1/token?grant_type=password",
+            supabase_url
+        ))
         .header("apikey", &supabase_anon_key)
         .header("Content-Type", "application/json")
-        .body(format!(r#"{{"email": "{}", "password": "{}"}}"#, test_email, test_password))
+        .body(format!(
+            r#"{{"email": "{}", "password": "{}"}}"#,
+            test_email, test_password
+        ))
         .send()
         .await
         .expect("login request");
@@ -92,7 +102,8 @@ async fn test_unified_memo_azure_blob_routing() {
         .await
         .expect("signup request");
 
-    let signup_body: DoWhizSignupResponse = signup_resp.json().await.expect("parse signup response");
+    let signup_body: DoWhizSignupResponse =
+        signup_resp.json().await.expect("parse signup response");
     let account_id = signup_body.account_id;
     println!("✅ Account ID: {}", account_id);
 
@@ -108,12 +119,19 @@ async fn test_unified_memo_azure_blob_routing() {
         .post(format!("{}/auth/link", service_url))
         .header("Authorization", format!("Bearer {}", access_token))
         .header("Content-Type", "application/json")
-        .body(format!(r#"{{"identifier_type": "phone", "identifier": "{}"}}"#, test_phone))
+        .body(format!(
+            r#"{{"identifier_type": "phone", "identifier": "{}"}}"#,
+            test_phone
+        ))
         .send()
         .await
         .expect("link request");
 
-    assert!(link_resp.status().is_success(), "Link failed: {:?}", link_resp.text().await);
+    assert!(
+        link_resp.status().is_success(),
+        "Link failed: {:?}",
+        link_resp.text().await
+    );
     println!("✅ Phone linked");
 
     // Step 4: Verify the identifier
@@ -122,12 +140,19 @@ async fn test_unified_memo_azure_blob_routing() {
         .post(format!("{}/auth/verify", service_url))
         .header("Authorization", format!("Bearer {}", access_token))
         .header("Content-Type", "application/json")
-        .body(format!(r#"{{"identifier_type": "phone", "identifier": "{}", "code": "123456"}}"#, test_phone))
+        .body(format!(
+            r#"{{"identifier_type": "phone", "identifier": "{}", "code": "123456"}}"#,
+            test_phone
+        ))
         .send()
         .await
         .expect("verify request");
 
-    assert!(verify_resp.status().is_success(), "Verify failed: {:?}", verify_resp.text().await);
+    assert!(
+        verify_resp.status().is_success(),
+        "Verify failed: {:?}",
+        verify_resp.text().await
+    );
     println!("✅ Phone verified");
 
     // Step 5: Test account lookup (simulating what executor does)
@@ -165,12 +190,10 @@ async fn test_unified_memo_azure_blob_routing() {
         diff,
     };
 
-    tokio::task::spawn_blocking(move || {
-        global_memory_queue().submit(request)
-    })
-    .await
-    .expect("spawn_blocking")
-    .expect("submit to memory queue");
+    tokio::task::spawn_blocking(move || global_memory_queue().submit(request))
+        .await
+        .expect("spawn_blocking")
+        .expect("submit to memory queue");
     println!("✅ Memory diff submitted");
 
     // Step 7: Verify memo was written to Azure Blob
@@ -199,7 +222,10 @@ async fn test_unified_memo_azure_blob_routing() {
         .delete(format!("{}/auth/unlink", service_url))
         .header("Authorization", format!("Bearer {}", access_token))
         .header("Content-Type", "application/json")
-        .body(format!(r#"{{"identifier_type": "phone", "identifier": "{}"}}"#, test_phone))
+        .body(format!(
+            r#"{{"identifier_type": "phone", "identifier": "{}"}}"#,
+            test_phone
+        ))
         .send()
         .await
         .expect("unlink request");
@@ -232,11 +258,15 @@ async fn test_unified_memo_azure_blob_routing() {
 async fn test_multiple_memory_diffs() {
     dotenvy::dotenv().ok();
 
-    let service_url = std::env::var("SERVICE_URL").unwrap_or_else(|_| "http://localhost:9001".to_string());
-    let supabase_url = std::env::var("SUPABASE_PROJECT_URL").expect("SUPABASE_PROJECT_URL required");
+    let service_url =
+        std::env::var("SERVICE_URL").unwrap_or_else(|_| "http://localhost:9001".to_string());
+    let supabase_url =
+        std::env::var("SUPABASE_PROJECT_URL").expect("SUPABASE_PROJECT_URL required");
     let supabase_anon_key = std::env::var("SUPABASE_ANON_KEY").expect("SUPABASE_ANON_KEY required");
-    let test_email = std::env::var("TEST_EMAIL").unwrap_or_else(|_| "dylantang12@gmail.com".to_string());
-    let test_password = std::env::var("TEST_PASSWORD").unwrap_or_else(|_| "testpassword123".to_string());
+    let test_email =
+        std::env::var("TEST_EMAIL").unwrap_or_else(|_| "dylantang12@gmail.com".to_string());
+    let test_password =
+        std::env::var("TEST_PASSWORD").unwrap_or_else(|_| "testpassword123".to_string());
 
     let client = reqwest::Client::new();
     let blob_store = BlobStore::from_env().expect("BlobStore::from_env");
@@ -244,10 +274,16 @@ async fn test_multiple_memory_diffs() {
     // Login to Supabase
     println!("Logging into Supabase...");
     let login_resp = client
-        .post(format!("{}/auth/v1/token?grant_type=password", supabase_url))
+        .post(format!(
+            "{}/auth/v1/token?grant_type=password",
+            supabase_url
+        ))
         .header("apikey", &supabase_anon_key)
         .header("Content-Type", "application/json")
-        .body(format!(r#"{{"email": "{}", "password": "{}"}}"#, test_email, test_password))
+        .body(format!(
+            r#"{{"email": "{}", "password": "{}"}}"#,
+            test_email, test_password
+        ))
         .send()
         .await
         .expect("login request");
@@ -266,7 +302,8 @@ async fn test_multiple_memory_diffs() {
         .await
         .expect("signup request");
 
-    let signup_body: DoWhizSignupResponse = signup_resp.json().await.expect("parse signup response");
+    let signup_body: DoWhizSignupResponse =
+        signup_resp.json().await.expect("parse signup response");
     let account_id = signup_body.account_id;
     println!("Account ID: {}", account_id);
 
@@ -350,7 +387,10 @@ async fn test_multiple_memory_diffs() {
     // Check all additions are present
     assert!(memo_content.contains("Alice"), "Should contain Alice");
     assert!(memo_content.contains("Bob"), "Should contain Bob");
-    assert!(memo_content.contains("dark mode"), "Should contain preference");
+    assert!(
+        memo_content.contains("dark mode"),
+        "Should contain preference"
+    );
 
     println!("\n========================================");
     println!("✅ Multiple diffs test passed!");
@@ -361,7 +401,10 @@ async fn test_multiple_memory_diffs() {
     println!("  - All accumulated correctly: ✅");
 
     // Cleanup
-    blob_store.delete_memo(account_id).await.expect("delete blob");
+    blob_store
+        .delete_memo(account_id)
+        .await
+        .expect("delete blob");
     println!("\n✅ Cleaned up blob");
 }
 

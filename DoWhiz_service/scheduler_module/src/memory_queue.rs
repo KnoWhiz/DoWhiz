@@ -36,16 +36,14 @@ static BLOB_STORE: std::sync::OnceLock<Option<Arc<BlobStore>>> = std::sync::Once
 /// Get or initialize the global BlobStore (returns None if not configured)
 fn get_blob_store() -> Option<Arc<BlobStore>> {
     BLOB_STORE
-        .get_or_init(|| {
-            match BlobStore::from_env() {
-                Ok(store) => {
-                    info!("BlobStore initialized for unified memo storage");
-                    Some(Arc::new(store))
-                }
-                Err(e) => {
-                    info!("BlobStore not available ({}), using local storage only", e);
-                    None
-                }
+        .get_or_init(|| match BlobStore::from_env() {
+            Ok(store) => {
+                info!("BlobStore initialized for unified memo storage");
+                Some(Arc::new(store))
+            }
+            Err(e) => {
+                info!("BlobStore not available ({}), using local storage only", e);
+                None
             }
         })
         .clone()
@@ -174,9 +172,9 @@ fn apply_diff_to_file(request: &MemoryWriteRequest) -> Result<(), MemoryQueueErr
 
 /// Apply a diff to Azure Blob storage (unified account storage)
 async fn apply_diff_to_blob(request: &MemoryWriteRequest) -> Result<(), MemoryQueueError> {
-    let account_id = request
-        .account_id
-        .ok_or_else(|| MemoryQueueError::BlobStore("account_id required for blob storage".to_string()))?;
+    let account_id = request.account_id.ok_or_else(|| {
+        MemoryQueueError::BlobStore("account_id required for blob storage".to_string())
+    })?;
 
     let blob_store = get_blob_store()
         .ok_or_else(|| MemoryQueueError::BlobStore("BlobStore not configured".to_string()))?;
