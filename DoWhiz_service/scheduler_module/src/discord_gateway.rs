@@ -3,7 +3,7 @@
 //! This module provides a serenity-based event handler that connects to Discord's
 //! Gateway WebSocket and processes incoming messages, converting them to tasks.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,9 +14,13 @@ use serenity::async_trait;
 use serenity::Client;
 use tracing::{error, info, warn};
 
+use crate::account_store::lookup_account_by_channel;
 use crate::adapters::discord::{DiscordInboundAdapter, DiscordOutboundAdapter};
+use crate::blob_store::get_blob_store;
 use crate::channel::Channel;
 use crate::index_store::IndexStore;
+use crate::memory_diff::{MemoryDiff, SectionChange};
+use crate::memory_queue::{global_memory_queue, MemoryWriteRequest};
 use crate::message_router::{MessageRouter, RouterDecision};
 use crate::service::ServiceConfig;
 use crate::user_store::UserStore;
@@ -135,7 +139,10 @@ impl EventHandler for DiscordEventHandler {
 
         // Try local router first for simple queries
         if let Some(text) = &inbound.text_body {
-            // Look up user and get memory
+            // Look up unified account first
+            let account_id = lookup_account_by_channel(&Channel::Discord, &inbound.sender);
+
+            // Look up legacy user for fallback
             let (memory, user_paths) = match self
                 .state
                 .user_store
@@ -146,7 +153,23 @@ impl EventHandler for DiscordEventHandler {
                         .state
                         .user_store
                         .user_paths(&self.state.config.users_root, &user.user_id);
-                    let memo = fs::read_to_string(paths.memory_dir.join("memo.md")).ok();
+
+                    // Read memo from blob storage if account linked, else from local file
+                    let memo = if let Some(aid) = account_id {
+                        if let Some(blob_store) = get_blob_store() {
+                            match blob_store.read_memo(aid).await {
+                                Ok(content) => Some(content),
+                                Err(e) => {
+                                    warn!("Failed to read memo from blob for account {}: {}", aid, e);
+                                    fs::read_to_string(paths.memory_dir.join("memo.md")).ok()
+                                }
+                            }
+                        } else {
+                            fs::read_to_string(paths.memory_dir.join("memo.md")).ok()
+                        }
+                    } else {
+                        fs::read_to_string(paths.memory_dir.join("memo.md")).ok()
+                    };
                     (memo, Some((user.user_id, paths)))
                 }
                 Err(e) => {
@@ -167,23 +190,29 @@ impl EventHandler for DiscordEventHandler {
                 } => {
                     info!("Router handled message locally, sending quick response");
 
-                    // Write memory update if present
+                    // Write memory update if present (to blob storage if account linked)
                     if let (Some(update), Some((user_id, paths))) = (memory_update, &user_paths) {
-                        if let Err(e) = fs::create_dir_all(&paths.memory_dir) {
-                            warn!("Failed to create memory dir: {}", e);
+                        // Create diff for memory queue
+                        let diff = MemoryDiff {
+                            changed_sections: HashMap::from([(
+                                "Notes".to_string(),
+                                SectionChange::Added(vec![update.clone()]),
+                            )]),
+                        };
+
+                        let request = MemoryWriteRequest {
+                            account_id,
+                            user_id: user_id.clone(),
+                            user_memory_dir: paths.memory_dir.clone(),
+                            diff,
+                        };
+
+                        if let Err(e) = global_memory_queue().submit(request) {
+                            warn!("Failed to write memory update: {}", e);
+                        } else if let Some(aid) = account_id {
+                            info!("Updated memory for unified account {}", aid);
                         } else {
-                            let memo_path = paths.memory_dir.join("memo.md");
-                            let existing = fs::read_to_string(&memo_path).unwrap_or_default();
-                            let new_content = if existing.trim().is_empty() {
-                                format!("# Memo\n\n{}\n", update.trim())
-                            } else {
-                                format!("{}\n\n{}\n", existing.trim_end(), update.trim())
-                            };
-                            if let Err(e) = fs::write(&memo_path, new_content) {
-                                warn!("Failed to write memory update: {}", e);
-                            } else {
-                                info!("Updated memory for user {}", user_id);
-                            }
+                            info!("Updated memory for legacy user {}", user_id);
                         }
                     }
 

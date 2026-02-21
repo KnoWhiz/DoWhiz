@@ -1,35 +1,83 @@
-use std::io;
 use std::path::Path;
 
 use tracing::{info, warn};
 
+use crate::account_store::lookup_account_by_channel;
 use crate::adapters::bluebubbles::send_quick_bluebubbles_response;
 use crate::adapters::telegram::send_quick_telegram_response;
 use crate::adapters::whatsapp::send_quick_whatsapp_response;
+use crate::blob_store::get_blob_store;
+use crate::channel::Channel;
+use crate::memory_diff::{MemoryDiff, SectionChange};
+use crate::memory_queue::{global_memory_queue, MemoryWriteRequest};
 use crate::message_router::{MessageRouter, RouterDecision};
 use crate::slack_store::SlackStore;
 use crate::user_store::UserStore;
+use uuid::Uuid;
 
 use super::super::config::ServiceConfig;
 use super::super::BoxError;
 
-/// Read memo.md from a user's memory directory
-fn read_user_memo(memory_dir: &Path) -> Option<String> {
+/// Read memo.md from a user's memory directory (local file)
+fn read_user_memo_local(memory_dir: &Path) -> Option<String> {
     let memo_path = memory_dir.join("memo.md");
     std::fs::read_to_string(&memo_path).ok()
 }
 
-/// Append memory update to a user's memo.md
-fn append_user_memo(memory_dir: &Path, update: &str) -> io::Result<()> {
-    std::fs::create_dir_all(memory_dir)?;
-    let memo_path = memory_dir.join("memo.md");
-    let existing = std::fs::read_to_string(&memo_path).unwrap_or_default();
-    let new_content = if existing.trim().is_empty() {
-        format!("# Memo\n\n{}\n", update.trim())
-    } else {
-        format!("{}\n\n{}\n", existing.trim_end(), update.trim())
+/// Read memo from Azure Blob Storage (unified account)
+fn read_user_memo_blob(
+    runtime: &tokio::runtime::Handle,
+    account_id: Uuid,
+) -> Option<String> {
+    let blob_store = get_blob_store()?;
+    match runtime.block_on(blob_store.read_memo(account_id)) {
+        Ok(content) => Some(content),
+        Err(e) => {
+            warn!("Failed to read memo from blob for account {}: {}", account_id, e);
+            None
+        }
+    }
+}
+
+/// Read memo - tries blob storage first if account exists, falls back to local
+fn read_user_memo(
+    runtime: &tokio::runtime::Handle,
+    account_id: Option<Uuid>,
+    memory_dir: &Path,
+) -> Option<String> {
+    if let Some(account_id) = account_id {
+        if let Some(content) = read_user_memo_blob(runtime, account_id) {
+            return Some(content);
+        }
+    }
+    read_user_memo_local(memory_dir)
+}
+
+/// Write memory update via queue - uses blob storage if account_id is set
+fn write_memory_update(
+    account_id: Option<Uuid>,
+    user_id: &str,
+    memory_dir: &Path,
+    update: &str,
+) -> Result<(), String> {
+    // Create a simple diff that appends to the "Notes" section
+    let diff = MemoryDiff {
+        changed_sections: std::collections::HashMap::from([(
+            "Notes".to_string(),
+            SectionChange::Added(vec![update.to_string()]),
+        )]),
     };
-    std::fs::write(&memo_path, new_content)
+
+    let request = MemoryWriteRequest {
+        account_id,
+        user_id: user_id.to_string(),
+        user_memory_dir: memory_dir.to_path_buf(),
+        diff,
+    };
+
+    global_memory_queue()
+        .submit(request)
+        .map_err(|e| e.to_string())
 }
 
 pub(crate) fn try_quick_response_slack(
@@ -48,10 +96,11 @@ pub(crate) fn try_quick_response_slack(
         None => return Ok(false),
     };
 
-    // Look up user and get memory
+    // Look up unified account first, fall back to legacy user_store
+    let account_id = lookup_account_by_channel(&Channel::Slack, &message.sender);
     let user = user_store.get_or_create_user("slack", &message.sender)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
-    let memory = read_user_memo(&user_paths.memory_dir);
+    let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 
     let cleaned_text = text
         .split_whitespace()
@@ -65,12 +114,14 @@ pub(crate) fn try_quick_response_slack(
             response,
             memory_update,
         } => {
-            // Write memory update if present
+            // Write memory update if present (to blob storage if account linked)
             if let Some(update) = memory_update {
-                if let Err(e) = append_user_memo(&user_paths.memory_dir, &update) {
+                if let Err(e) = write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update) {
                     warn!("Failed to write memory update: {}", e);
+                } else if let Some(aid) = account_id {
+                    info!("Updated memory for unified account {}", aid);
                 } else {
-                    info!("Updated memory for user {}", user.user_id);
+                    info!("Updated memory for legacy user {}", user.user_id);
                 }
             }
 
@@ -131,10 +182,11 @@ pub(crate) fn try_quick_response_bluebubbles(
         return Ok(false);
     };
 
-    // Look up user and get memory
+    // Look up unified account first, fall back to legacy user_store
+    let account_id = lookup_account_by_channel(&Channel::BlueBubbles, &message.sender);
     let user = user_store.get_or_create_user("phone", &message.sender)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
-    let memory = read_user_memo(&user_paths.memory_dir);
+    let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 
     let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
     match decision {
@@ -142,12 +194,14 @@ pub(crate) fn try_quick_response_bluebubbles(
             response,
             memory_update,
         } => {
-            // Write memory update if present
+            // Write memory update if present (to blob storage if account linked)
             if let Some(update) = memory_update {
-                if let Err(e) = append_user_memo(&user_paths.memory_dir, &update) {
+                if let Err(e) = write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update) {
                     warn!("Failed to write memory update: {}", e);
+                } else if let Some(aid) = account_id {
+                    info!("Updated memory for unified account {}", aid);
                 } else {
-                    info!("Updated memory for user {}", user.user_id);
+                    info!("Updated memory for legacy user {}", user.user_id);
                 }
             }
 
@@ -185,10 +239,11 @@ pub(crate) fn try_quick_response_discord(
         None => return Ok(false),
     };
 
-    // Look up user and get memory
+    // Look up unified account first, fall back to legacy user_store
+    let account_id = lookup_account_by_channel(&Channel::Discord, &message.sender);
     let user = user_store.get_or_create_user("discord", &message.sender)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
-    let memory = read_user_memo(&user_paths.memory_dir);
+    let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 
     let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
     match decision {
@@ -196,12 +251,14 @@ pub(crate) fn try_quick_response_discord(
             response,
             memory_update,
         } => {
-            // Write memory update if present
+            // Write memory update if present (to blob storage if account linked)
             if let Some(update) = memory_update {
-                if let Err(e) = append_user_memo(&user_paths.memory_dir, &update) {
+                if let Err(e) = write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update) {
                     warn!("Failed to write memory update: {}", e);
+                } else if let Some(aid) = account_id {
+                    info!("Updated memory for unified account {}", aid);
                 } else {
-                    info!("Updated memory for user {}", user.user_id);
+                    info!("Updated memory for legacy user {}", user.user_id);
                 }
             }
 
@@ -232,10 +289,11 @@ pub(crate) fn try_quick_response_telegram(
         return Ok(false);
     };
 
-    // Look up user and get memory
+    // Look up unified account first, fall back to legacy user_store
+    let account_id = lookup_account_by_channel(&Channel::Telegram, &message.sender);
     let user = user_store.get_or_create_user("telegram", &message.sender)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
-    let memory = read_user_memo(&user_paths.memory_dir);
+    let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 
     let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
     match decision {
@@ -243,12 +301,14 @@ pub(crate) fn try_quick_response_telegram(
             response,
             memory_update,
         } => {
-            // Write memory update if present
+            // Write memory update if present (to blob storage if account linked)
             if let Some(update) = memory_update {
-                if let Err(e) = append_user_memo(&user_paths.memory_dir, &update) {
+                if let Err(e) = write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update) {
                     warn!("Failed to write memory update: {}", e);
+                } else if let Some(aid) = account_id {
+                    info!("Updated memory for unified account {}", aid);
                 } else {
-                    info!("Updated memory for user {}", user.user_id);
+                    info!("Updated memory for legacy user {}", user.user_id);
                 }
             }
 
@@ -376,10 +436,11 @@ pub(crate) fn try_quick_response_whatsapp(
         return Ok(false);
     };
 
-    // Look up user and get memory
+    // Look up unified account first, fall back to legacy user_store
+    let account_id = lookup_account_by_channel(&Channel::WhatsApp, &message.sender);
     let user = user_store.get_or_create_user("whatsapp", &message.sender)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
-    let memory = read_user_memo(&user_paths.memory_dir);
+    let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 
     let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
     match decision {
@@ -387,12 +448,14 @@ pub(crate) fn try_quick_response_whatsapp(
             response,
             memory_update,
         } => {
-            // Write memory update if present
+            // Write memory update if present (to blob storage if account linked)
             if let Some(update) = memory_update {
-                if let Err(e) = append_user_memo(&user_paths.memory_dir, &update) {
+                if let Err(e) = write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update) {
                     warn!("Failed to write memory update: {}", e);
+                } else if let Some(aid) = account_id {
+                    info!("Updated memory for unified account {}", aid);
                 } else {
-                    info!("Updated memory for user {}", user.user_id);
+                    info!("Updated memory for legacy user {}", user.user_id);
                 }
             }
 

@@ -7,9 +7,11 @@ use axum::response::{IntoResponse, Redirect};
 use axum::routing::get;
 use axum::Router;
 use chrono::Utc;
+use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
 
 use crate::account_store::AccountStore;
+use crate::blob_store::get_blob_store;
 use crate::index_store::IndexStore;
 use crate::ingestion_queue::{build_queue_from_env, IngestionQueue};
 use crate::message_router::MessageRouter;
@@ -89,8 +91,10 @@ pub async fn run_server(
     );
     let supabase_url = std::env::var("SUPABASE_PROJECT_URL")
         .unwrap_or_else(|_| "https://resmseutzmwumflevfqw.supabase.co".to_string());
+    let blob_store = get_blob_store();
     let auth_state = AuthState {
         account_store,
+        blob_store,
         supabase_url,
     };
 
@@ -108,7 +112,13 @@ pub async fn run_server(
         .route("/slack/oauth/callback", get(slack_oauth_callback))
         .with_state(state)
         .merge(auth_router(auth_state))
-        .layer(DefaultBodyLimit::max(config.inbound_body_max_bytes));
+        .layer(DefaultBodyLimit::max(config.inbound_body_max_bytes))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        );
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let serve_result = axum::serve(listener, app)

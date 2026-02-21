@@ -10,11 +10,13 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::account_store::{AccountStore, AccountStoreError};
+use crate::blob_store::BlobStore;
 
 /// State for auth routes
 #[derive(Clone)]
 pub struct AuthState {
     pub account_store: Arc<AccountStore>,
+    pub blob_store: Option<Arc<BlobStore>>,
     pub supabase_url: String,
 }
 
@@ -825,6 +827,116 @@ pub async fn delete_account(
 }
 
 // ============================================================================
+// Get Memo
+// ============================================================================
+
+#[derive(Debug, Serialize)]
+pub struct MemoResponse {
+    pub account_id: Uuid,
+    pub content: String,
+}
+
+/// GET /auth/memo
+/// Returns the memo.md content for the current user's account.
+pub async fn get_memo(State(state): State<AuthState>, headers: HeaderMap) -> impl IntoResponse {
+    let token = match extract_bearer_token(&headers) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(id) => id,
+        Err((status, msg)) => {
+            return (status, Json(serde_json::json!({ "error": msg }))).into_response();
+        }
+    };
+
+    // Get account (run on blocking thread)
+    let store = state.account_store.clone();
+    let account_result = task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id))
+        .await
+        .map_err(|e| {
+            error!("spawn_blocking panicked: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
+        });
+
+    let account = match account_result {
+        Ok(Ok(Some(acc))) => acc,
+        Ok(Ok(None)) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "error": "Account not found. Please sign up first."
+                })),
+            )
+                .into_response();
+        }
+        Ok(Err(e)) => {
+            error!("Failed to get account: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Database error"
+                })),
+            )
+                .into_response();
+        }
+        Err(resp) => return resp.into_response(),
+    };
+
+    // Check if blob store is available
+    let blob_store = match &state.blob_store {
+        Some(store) => store.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Memo storage not configured"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Read memo from blob storage
+    let account_id = account.id;
+    match blob_store.read_memo(account_id).await {
+        Ok(content) => {
+            info!("Retrieved memo for account {}", account_id);
+            (
+                StatusCode::OK,
+                Json(MemoResponse {
+                    account_id,
+                    content,
+                }),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            error!("Failed to read memo for account {}: {}", account_id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to read memo"
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ============================================================================
 // Router
 // ============================================================================
 
@@ -835,5 +947,6 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/auth/link", post(link_identifier))
         .route("/auth/verify", post(verify_identifier))
         .route("/auth/unlink", delete(unlink_identifier))
+        .route("/auth/memo", get(get_memo))
         .with_state(state)
 }
