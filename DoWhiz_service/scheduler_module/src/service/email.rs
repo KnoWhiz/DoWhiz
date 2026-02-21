@@ -85,7 +85,14 @@ pub fn process_inbound_payload(
         &config.employee_profile,
         config.skills_source_dir.as_deref(),
     )?;
-    let reply_from = Some(inbound_service_mailbox.formatted());
+    // Use the first configured address (verified sender) as reply_from,
+    // not the inbound address which may be receive-only (e.g., Postmark inbound hook)
+    let reply_from = config
+        .employee_profile
+        .addresses
+        .first()
+        .cloned()
+        .or_else(|| Some(inbound_service_mailbox.formatted()));
     let model_name = match config.employee_profile.model.clone() {
         Some(model) => model,
         None => {

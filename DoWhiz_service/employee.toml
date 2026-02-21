@@ -43,6 +43,7 @@ display_name = "Boiled-Egg"
 runner = "codex"
 model = "gpt-5.2-codex"
 # First address is used as FROM for replies (must be verified in Postmark)
+# Inbound address is kept for routing but code uses first address for reply_from
 addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com", "c9051c2176b203ca4b6da98e0a790e15@inbound.postmarkapp.com"]
 runtime_root = ".workspace/boiled_egg"
 agents_path = "employees/boiled_egg/AGENTS.md"

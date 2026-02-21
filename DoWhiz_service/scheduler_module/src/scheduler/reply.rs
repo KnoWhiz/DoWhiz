@@ -53,9 +53,40 @@ impl PostmarkInboundLite {
 }
 
 pub(crate) fn load_reply_context(workspace_dir: &Path) -> ReplyContext {
-    let payload_path = workspace_dir
-        .join("incoming_email")
-        .join("postmark_payload.json");
+    let incoming_dir = workspace_dir.join("incoming_email");
+
+    // Try Google Docs metadata first
+    let gdocs_metadata_path = incoming_dir.join("google_docs_metadata.json");
+    if let Ok(content) = fs::read_to_string(&gdocs_metadata_path) {
+        if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&content) {
+            let document_id = metadata
+                .get("document_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let comment_id = metadata
+                .get("comment_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let document_name = metadata
+                .get("document_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Document");
+
+            if !document_id.is_empty() && !comment_id.is_empty() {
+                // For Google Docs, in_reply_to format is "document_id:comment_id"
+                let in_reply_to = format!("{}:{}", document_id, comment_id);
+                return ReplyContext {
+                    subject: format!("Re: Comment on {}", document_name),
+                    in_reply_to: Some(in_reply_to),
+                    references: None,
+                    from: None,
+                };
+            }
+        }
+    }
+
+    // Fall back to Postmark (email) payload
+    let payload_path = incoming_dir.join("postmark_payload.json");
     let payload = fs::read_to_string(&payload_path)
         .ok()
         .and_then(|content| serde_json::from_str::<PostmarkInboundLite>(&content).ok());
