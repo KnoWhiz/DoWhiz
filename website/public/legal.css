@@ -240,3 +240,57 @@ h1 {
     transition: none;
   }
 }
+
+/* Light mode overrides */
+[data-theme="light"] {
+  --bg: #f8fafc;
+  --card: rgba(255, 255, 255, 0.8);
+  --border: rgba(0, 0, 0, 0.1);
+  --text: #1e293b;
+  --muted: #64748b;
+}
+
+[data-theme="light"] body {
+  background:
+    radial-gradient(circle at top, rgba(59, 130, 246, 0.08), transparent 55%),
+    radial-gradient(circle at 20% 70%, rgba(14, 116, 144, 0.1), transparent 60%),
+    var(--bg);
+}
+
+[data-theme="light"] .brand {
+  color: var(--text);
+}
+
+[data-theme="light"] .page-header {
+  border-bottom-color: var(--border);
+}
+
+[data-theme="light"] .legal-card {
+  background: var(--card);
+  border-color: var(--border);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .related-item {
+  background: rgba(255, 255, 255, 0.6);
+  border-color: var(--border);
+}
+
+[data-theme="light"] .related-item:hover {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+[data-theme="light"] .page-footer {
+  border-top-color: var(--border);
+}
+
+[data-theme="light"] .back-link {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+[data-theme="light"] .back-link:hover {
+  background: rgba(0, 0, 0, 0.08);
+}

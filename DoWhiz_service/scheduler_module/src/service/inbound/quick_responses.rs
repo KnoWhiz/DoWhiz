@@ -182,9 +182,12 @@ pub(crate) fn try_quick_response_bluebubbles(
         return Ok(false);
     };
 
+    // Normalize phone number (strip + prefix) for lookup
+    let normalized_phone = message.sender.trim_start_matches('+');
+
     // Look up unified account first, fall back to legacy user_store
-    let account_id = lookup_account_by_channel(&Channel::BlueBubbles, &message.sender);
-    let user = user_store.get_or_create_user("phone", &message.sender)?;
+    let account_id = lookup_account_by_channel(&Channel::BlueBubbles, normalized_phone);
+    let user = user_store.get_or_create_user("phone", normalized_phone)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 
@@ -436,9 +439,12 @@ pub(crate) fn try_quick_response_whatsapp(
         return Ok(false);
     };
 
+    // Normalize phone number (strip + prefix) for lookup
+    let normalized_phone = message.sender.trim_start_matches('+');
+
     // Look up unified account first, fall back to legacy user_store
-    let account_id = lookup_account_by_channel(&Channel::WhatsApp, &message.sender);
-    let user = user_store.get_or_create_user("whatsapp", &message.sender)?;
+    let account_id = lookup_account_by_channel(&Channel::WhatsApp, normalized_phone);
+    let user = user_store.get_or_create_user("whatsapp", normalized_phone)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 

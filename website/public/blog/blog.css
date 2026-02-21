@@ -83,3 +83,13 @@
     padding: 1.5rem;
   }
 }
+
+/* Light mode overrides */
+[data-theme="light"] .blog-card {
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .blog-actions .back-link.secondary {
+  border-color: rgba(0, 0, 0, 0.15);
+}

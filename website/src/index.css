@@ -142,6 +142,29 @@
   .footer-bottom {
     border-top: 1px solid rgba(15, 23, 42, 0.08);
   }
+
+  .user-profile-btn {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.1);
+  }
+
+  .user-profile-btn:hover {
+    background: rgba(0, 0, 0, 0.08);
+  }
+
+  .user-dropdown {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(0, 0, 0, 0.1);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+  }
+
+  .dropdown-item {
+    color: var(--text-primary);
+  }
+
+  .dropdown-item:hover {
+    background: rgba(0, 0, 0, 0.05);
+  }
 }
 
 /* Reset & Base */
