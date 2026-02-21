@@ -336,7 +336,7 @@ pub fn channel_to_identifier_type(channel: &crate::channel::Channel) -> &'static
         Channel::Slack => "slack",
         Channel::Discord => "discord",
         Channel::BlueBubbles => "phone",
-        Channel::GoogleDocs => "email",
+        Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => "email",
     }
 }
 
