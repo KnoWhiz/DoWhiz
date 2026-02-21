@@ -556,6 +556,46 @@ ul {
   line-height: 1.7;
 }
 
+/* FAQ */
+.faq-section {
+  padding-top: 6rem;
+}
+
+.faq-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2rem;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.faq-card {
+  padding: 2.5rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 1.5rem;
+  transition: all 0.4s ease;
+  backdrop-filter: blur(10px);
+}
+
+.faq-card:hover {
+  border-color: var(--card-hover-border);
+  background: rgba(255, 255, 255, 0.06);
+  transform: translateY(-4px);
+}
+
+.faq-card h3 {
+  font-size: 1.35rem;
+  margin-bottom: 0.75rem;
+  letter-spacing: -0.01em;
+}
+
+.faq-card p {
+  color: var(--text-secondary);
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
 /* Blog */
 .blog-section {
   padding-top: 6rem;
@@ -1236,6 +1276,10 @@ ul {
     grid-template-columns: 1fr 1fr;
   }
 
+  .faq-grid {
+    grid-template-columns: 1fr;
+  }
+
   .blog-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -1349,6 +1393,7 @@ ul {
 
   /* Card Spacing */
   .features-grid,
+  .faq-grid,
   .blog-grid,
   .explore-grid,
   .roles-grid,
@@ -1358,6 +1403,7 @@ ul {
   }
 
   .feature-card,
+  .faq-card,
   .blog-card,
   .explore-card,
   .role-card,

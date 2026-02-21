@@ -16,6 +16,10 @@ import fluffyElephantImg from './assets/Fluffy-Elephant.jpg';
 import plushAxolotlImg from './assets/Plush-Axolotl.jpg';
 
 const WAITLIST_FORM_URL = 'https://docs.google.com/forms/d/1UgZpFgYxq0uSjmVdai1mpjbfj2GxcWakFt3YKL8by34/viewform';
+const SITE_URL = 'https://dowhiz.com';
+const LOGO_URL = `${SITE_URL}/do-whiz-mark.svg`;
+const SUPPORT_EMAIL = 'admin@dowhiz.com';
+const ORG_NAME = 'DoWhiz';
 const DAY_START_HOUR = 7;
 const NIGHT_START_HOUR = 19;
 
@@ -444,6 +448,64 @@ function App() {
     }
   ];
 
+  const faqItems = [
+    {
+      question: 'What is DoWhiz?',
+      answer: 'DoWhiz is a digital employee team you can email to delegate work and receive finished outputs in the same thread.'
+    },
+    {
+      question: 'How do I get started?',
+      answer: 'Join the waitlist, then email a DoWhiz employee with your request. We will follow up with clarifying questions and deliver completed work.'
+    },
+    {
+      question: 'What kinds of tasks can the employees handle?',
+      answer: 'Writing, project updates, summaries, research, formatting docs and spreadsheets, and other day-to-day ops tasks handled by role-specific employees.'
+    },
+    {
+      question: 'How does delivery work?',
+      answer: 'You send a request by email, we confirm the brief, execute the task, and return results with clear next steps.'
+    },
+    {
+      question: 'Do I need to install any software?',
+      answer: 'No. DoWhiz is email-first today, with Slack, phone, Discord, WhatsApp, and more planned next.'
+    }
+  ];
+
+  const structuredData = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'Organization',
+        '@id': `${SITE_URL}/#organization`,
+        name: ORG_NAME,
+        url: `${SITE_URL}/`,
+        logo: LOGO_URL,
+        email: `mailto:${SUPPORT_EMAIL}`,
+        contactPoint: [
+          {
+            '@type': 'ContactPoint',
+            email: SUPPORT_EMAIL,
+            contactType: 'customer support',
+            availableLanguage: ['English']
+          }
+        ],
+        sameAs: ['https://github.com/KnoWhiz/DoWhiz']
+      },
+      {
+        '@type': 'FAQPage',
+        '@id': `${SITE_URL}/#faq`,
+        mainEntity: faqItems.map((item) => ({
+          '@type': 'Question',
+          name: item.question,
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: item.answer
+          }
+        }))
+      }
+    ]
+  };
+
   const teamMembers = [
     {
       name: 'Oliver',
@@ -570,6 +632,10 @@ function App() {
   return (
     <div className="app-container">
       {enableMouseField ? <MouseField theme={theme} /> : null}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
       <div className="content-layer">
         {/* Navigation */}
         <nav className="navbar">
@@ -578,6 +644,7 @@ function App() {
             <div className="nav-links">
               <a href="#roles" className="nav-btn">Team</a>
               <a href="#features" className="nav-btn">Features</a>
+              <a href="#faq" className="nav-btn">FAQ</a>
               <a href="/blog/" className="nav-btn">Blog</a>
               <a href="/user-guide/" className="nav-btn">User Guide</a>
             </div>
@@ -758,6 +825,24 @@ function App() {
                   <h3>{feature.title}</h3>
                   <p>{feature.desc}</p>
                 </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* FAQ */}
+        <section id="faq" className="section faq-section">
+          <div className="container">
+            <h2 className="section-title">Frequently Asked Questions</h2>
+            <p className="section-intro">
+              Quick answers to the most common questions about working with the DoWhiz digital employee team.
+            </p>
+            <div className="faq-grid">
+              {faqItems.map((item) => (
+                <article key={item.question} className="faq-card">
+                  <h3>{item.question}</h3>
+                  <p>{item.answer}</p>
+                </article>
               ))}
             </div>
           </div>
