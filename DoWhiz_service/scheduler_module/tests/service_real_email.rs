@@ -152,7 +152,6 @@ fn write_gateway_config(
     path: &Path,
     host: &str,
     port: u16,
-    db_url: &str,
     service_address: &str,
     employee_id: &str,
 ) -> Result<(), BoxError> {
@@ -160,9 +159,6 @@ fn write_gateway_config(
         r#"[server]
 host = "{host}"
 port = {port}
-
-[storage]
-db_url = "{db_url}"
 
 [defaults]
 tenant_id = "default"
@@ -176,7 +172,6 @@ tenant_id = "default"
 "#,
         host = host,
         port = port,
-        db_url = db_url,
         service_address = service_address,
         employee_id = employee_id,
     );
@@ -186,7 +181,6 @@ tenant_id = "default"
 
 fn spawn_gateway(
     gateway_config_path: &Path,
-    ingestion_db_url: &str,
     employee_config_path: &Path,
     host: &str,
     port: u16,
@@ -214,8 +208,8 @@ fn spawn_gateway(
 
     let child = Command::new(gateway_bin)
         .env("GATEWAY_CONFIG_PATH", gateway_config_path)
-        .env("INGESTION_DB_URL", ingestion_db_url)
-        .env("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS", "1")
+        .env("INGESTION_QUEUE_BACKEND", "servicebus")
+        .env("RAW_PAYLOAD_STORAGE_BACKEND", "azure")
         .env("EMPLOYEE_CONFIG_PATH", employee_config_path)
         .env("GATEWAY_HOST", host)
         .env("GATEWAY_PORT", port.to_string())
@@ -481,7 +475,6 @@ fn wait_for_user_id(
 #[test]
 fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
     load_env_from_repo();
-    env::set_var("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS", "1");
     if !env_enabled("RUST_SERVICE_LIVE_TEST") {
         eprintln!("Skipping Rust service live email test. Set RUST_SERVICE_LIVE_TEST=1 to run.");
         return Ok(());
@@ -537,7 +530,42 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
     };
 
     dotenvy::dotenv().ok();
-    let ingestion_db_url = env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
+    let _service_bus_connection = match env::var("SERVICE_BUS_CONNECTION_STRING") {
+        Ok(value) if !value.trim().is_empty() => value,
+        _ => {
+            eprintln!(
+                "Skipping live test: SERVICE_BUS_CONNECTION_STRING required for Service Bus ingestion."
+            );
+            return Ok(());
+        }
+    };
+    let azure_container = env::var("AZURE_STORAGE_CONTAINER_INGEST")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let azure_sas_url = env::var("AZURE_STORAGE_CONTAINER_SAS_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let azure_sas_token = env::var("AZURE_STORAGE_SAS_TOKEN")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let azure_account = env::var("AZURE_STORAGE_ACCOUNT")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let azure_conn_str = env::var("AZURE_STORAGE_CONNECTION_STRING_INGEST")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let has_azure_blob = azure_container.is_some()
+        && (azure_sas_url.is_some()
+            || (azure_sas_token.is_some()
+                && (azure_account.is_some() || azure_conn_str.is_some())));
+    if !has_azure_blob {
+        eprintln!(
+            "Skipping live test: Azure Blob SAS configuration is required (AZURE_STORAGE_CONTAINER_SAS_URL or AZURE_STORAGE_CONTAINER_INGEST + AZURE_STORAGE_SAS_TOKEN + AZURE_STORAGE_ACCOUNT/AZURE_STORAGE_CONNECTION_STRING_INGEST)."
+        );
+        return Ok(());
+    }
+    env::set_var("INGESTION_QUEUE_BACKEND", "servicebus");
+    env::set_var("RAW_PAYLOAD_STORAGE_BACKEND", "azure");
     let temp = TempDir::new()?;
     let workspace_root = temp.path().join("workspaces");
     let state_dir = temp.path().join("state");
@@ -564,7 +592,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         workspace_root: workspace_root.clone(),
         scheduler_state_path: state_dir.join("tasks.db"),
         processed_ids_path: state_dir.join("postmark_processed_ids.txt"),
-        ingestion_db_url: ingestion_db_url.clone(),
+        ingestion_db_url: String::new(),
         ingestion_poll_interval: Duration::from_millis(50),
         users_root: users_root.clone(),
         users_db_path: state_dir.join("users.db"),
@@ -598,13 +626,11 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         &gateway_config_path,
         &gateway_bind_host,
         gateway_port,
-        &ingestion_db_url,
         &service_address,
         &employee_id,
     )?;
     let _gateway = spawn_gateway(
         &gateway_config_path,
-        &ingestion_db_url,
         &employee_config_path,
         &gateway_bind_host,
         gateway_port,

@@ -1,5 +1,5 @@
-use postgres_native_tls::MakeTlsConnector;
 use postgres::types::Type;
+use postgres_native_tls::MakeTlsConnector;
 use r2d2::{Pool, PooledConnection};
 use r2d2_postgres::PostgresConnectionManager;
 use std::env;
@@ -91,6 +91,12 @@ pub fn build_queue_from_env(
         }
     }
     Ok(std::sync::Arc::new(PostgresIngestionQueue::from_env()?))
+}
+
+pub fn build_servicebus_queue_from_env(
+) -> Result<std::sync::Arc<dyn IngestionQueue>, IngestionQueueError> {
+    let queue = ServiceBusIngestionQueue::from_env()?;
+    Ok(std::sync::Arc::new(queue))
 }
 
 impl PostgresIngestionQueue {
@@ -393,12 +399,13 @@ impl IngestionQueue for PostgresIngestionQueue {
 
     fn mark_failed(&self, id: &Uuid, error: &str) -> Result<(), IngestionQueueError> {
         let mut conn = self.connection()?;
-        let attempts_statement = format!("SELECT attempts FROM {table} WHERE id = $1", table = self.table);
+        let attempts_statement = format!(
+            "SELECT attempts FROM {table} WHERE id = $1",
+            table = self.table
+        );
         let attempts: i32 = if self.use_typed_queries {
             let rows = conn.query_typed(&attempts_statement, &[(&id, Type::UUID)])?;
-            rows.first()
-                .map(|row| row.get(0))
-                .unwrap_or(0)
+            rows.first().map(|row| row.get(0)).unwrap_or(0)
         } else {
             conn.query_one(&attempts_statement, &[id])?.get(0)
         };
@@ -450,7 +457,11 @@ impl IngestionQueue for PostgresIngestionQueue {
             if self.use_typed_queries {
                 let _ = conn.query_typed(
                     &statement,
-                    &[(&id, Type::UUID), (&status, Type::TEXT), (&error, Type::TEXT)],
+                    &[
+                        (&id, Type::UUID),
+                        (&status, Type::TEXT),
+                        (&error, Type::TEXT),
+                    ],
                 )?;
             } else {
                 conn.execute(&statement, &[id, &status, &error])?;
@@ -623,15 +634,30 @@ mod tests {
     }
 
     fn is_service_bus_backend() -> bool {
-        matches!(resolve_ingestion_queue_backend().as_str(), "servicebus" | "service_bus")
+        matches!(
+            resolve_ingestion_queue_backend().as_str(),
+            "servicebus" | "service_bus"
+        )
     }
 
-    fn postgres_queue() -> PostgresIngestionQueue {
+    fn postgres_queue() -> Option<PostgresIngestionQueue> {
         dotenvy::dotenv().ok();
         env::set_var("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS", "true");
-        let db_url = resolve_db_url().expect("SUPABASE_DB_URL required for ingestion queue tests");
+        let db_url = match resolve_db_url() {
+            Ok(url) if !url.trim().is_empty() => url,
+            Err(err) => {
+                eprintln!(
+                    "Skipping ingestion queue postgres tests; database URL not set: {err}"
+                );
+                return None;
+            }
+            _ => {
+                eprintln!("Skipping ingestion queue postgres tests; database URL is empty.");
+                return None;
+            }
+        };
         let table = format!("ingestion_queue_test_{}", Uuid::new_v4().simple());
-        PostgresIngestionQueue::new(&db_url, &table, 10, 5).expect("queue")
+        Some(PostgresIngestionQueue::new(&db_url, &table, 10, 5).expect("queue"))
     }
 
     #[test]
@@ -639,8 +665,8 @@ mod tests {
         if is_service_bus_backend() {
             dotenvy::dotenv().ok();
             env::set_var("SERVICE_BUS_QUEUE_PER_EMPLOYEE", "0");
-            let test_queue =
-                env::var("SERVICE_BUS_TEST_QUEUE_NAME").unwrap_or_else(|_| "ingestion-test".to_string());
+            let test_queue = env::var("SERVICE_BUS_TEST_QUEUE_NAME")
+                .unwrap_or_else(|_| "ingestion-test".to_string());
             env::set_var("SERVICE_BUS_QUEUE_NAME", &test_queue);
             let queue = ServiceBusIngestionQueue::from_env().expect("service bus queue");
             let dedupe_key = format!("dedupe-{}", Uuid::new_v4());
@@ -662,7 +688,9 @@ mod tests {
 
             queue.mark_done(&claimed.id).expect("done");
         } else {
-            let queue = postgres_queue();
+            let Some(queue) = postgres_queue() else {
+                return;
+            };
             let envelope = sample_envelope("emp", "dedupe-1");
             let result = queue.enqueue(&envelope).expect("enqueue");
             assert!(result.inserted);
@@ -683,7 +711,9 @@ mod tests {
             eprintln!("Service Bus backend does not report dedupe insert results; skipping.");
             return;
         }
-        let queue = postgres_queue();
+        let Some(queue) = postgres_queue() else {
+            return;
+        };
         let envelope = sample_envelope("emp", "dedupe-2");
         let first = queue.enqueue(&envelope).expect("enqueue");
         let second = queue.enqueue(&envelope).expect("enqueue");

@@ -42,6 +42,6 @@ println!("Sent: {}", response.message_id);
 - Use `POSTMARK_TEST_TO` to control the live-test recipient address.
 - Use `POSTMARK_BATCH_COUNT` to control the batch live-test size (capped at 5).
 
-## VM Deployment Workflow
+## Production Deployment
 
-For production VM setup, HTTPS, and systemd service configuration, follow the workflow in `DoWhiz_service/README.md` under “VM Deployment Workflow”.
+For Azure deployment (Functions + Service Bus + Blob + workers) or VM-based setups, follow the workflows in `DoWhiz_service/README.md` under “Azure Deployment (Functions + Service Bus + Blob + Workers)” and “VM Deployment (Gateway + ngrok)”.

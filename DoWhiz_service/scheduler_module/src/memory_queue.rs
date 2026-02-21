@@ -5,10 +5,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crossbeam_channel::{bounded, Sender};
-use tracing::{error, info};
+use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::blob_store::BlobStore;
+use crate::blob_store::get_blob_store;
 use crate::memory_diff::{apply_memory_diff, MemoryDiff};
 
 /// A queued memory write operation
@@ -28,27 +28,6 @@ struct InternalRequest {
     request: MemoryWriteRequest,
     /// Channel to signal completion (with result)
     done: Sender<Result<(), MemoryQueueError>>,
-}
-
-/// Lazy-initialized global BlobStore for unified accounts
-static BLOB_STORE: std::sync::OnceLock<Option<Arc<BlobStore>>> = std::sync::OnceLock::new();
-
-/// Get or initialize the global BlobStore (returns None if not configured)
-fn get_blob_store() -> Option<Arc<BlobStore>> {
-    BLOB_STORE
-        .get_or_init(|| {
-            match BlobStore::from_env() {
-                Ok(store) => {
-                    info!("BlobStore initialized for unified memo storage");
-                    Some(Arc::new(store))
-                }
-                Err(e) => {
-                    info!("BlobStore not available ({}), using local storage only", e);
-                    None
-                }
-            }
-        })
-        .clone()
 }
 
 /// Global memory write queue that ensures sequential writes per user
@@ -174,9 +153,9 @@ fn apply_diff_to_file(request: &MemoryWriteRequest) -> Result<(), MemoryQueueErr
 
 /// Apply a diff to Azure Blob storage (unified account storage)
 async fn apply_diff_to_blob(request: &MemoryWriteRequest) -> Result<(), MemoryQueueError> {
-    let account_id = request
-        .account_id
-        .ok_or_else(|| MemoryQueueError::BlobStore("account_id required for blob storage".to_string()))?;
+    let account_id = request.account_id.ok_or_else(|| {
+        MemoryQueueError::BlobStore("account_id required for blob storage".to_string())
+    })?;
 
     let blob_store = get_blob_store()
         .ok_or_else(|| MemoryQueueError::BlobStore("BlobStore not configured".to_string()))?;

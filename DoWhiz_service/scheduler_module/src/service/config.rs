@@ -133,29 +133,28 @@ impl ServiceConfig {
                     .into_owned()
             }))?;
         let ingestion_backend = resolve_ingestion_queue_backend();
-        let ingestion_db_url = if ingestion_backend == "servicebus"
-            || ingestion_backend == "service_bus"
-        {
-            String::new()
-        } else {
-            env::var("INGESTION_DB_URL")
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .or_else(|| {
-                    env::var("SUPABASE_DB_URL")
-                        .ok()
-                        .map(|value| value.trim().to_string())
-                        .filter(|value| !value.is_empty())
-                })
-                .or_else(|| {
-                    env::var("DATABASE_URL")
-                        .ok()
-                        .map(|value| value.trim().to_string())
-                        .filter(|value| !value.is_empty())
-                })
-                .ok_or_else(|| "missing INGESTION_DB_URL or SUPABASE_DB_URL".to_string())?
-        };
+        let ingestion_db_url =
+            if ingestion_backend == "servicebus" || ingestion_backend == "service_bus" {
+                String::new()
+            } else {
+                env::var("INGESTION_DB_URL")
+                    .ok()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+                    .or_else(|| {
+                        env::var("SUPABASE_DB_URL")
+                            .ok()
+                            .map(|value| value.trim().to_string())
+                            .filter(|value| !value.is_empty())
+                    })
+                    .or_else(|| {
+                        env::var("DATABASE_URL")
+                            .ok()
+                            .map(|value| value.trim().to_string())
+                            .filter(|value| !value.is_empty())
+                    })
+                    .ok_or_else(|| "missing INGESTION_DB_URL or SUPABASE_DB_URL".to_string())?
+            };
         let users_root = resolve_path(env::var("USERS_ROOT").unwrap_or_else(|_| {
             employee_runtime_root
                 .join("users")

@@ -11,6 +11,7 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
   - [One-Command Local Run](#one-command-local-run)
   - [Manual Multi-Employee Setup](#manual-multi-employee-setup)
   - [Inbound Gateway (Recommended)](#inbound-gateway-recommended)
+  - [Azure Deployment (Functions + Service Bus + Blob + Workers)](#azure-deployment-functions--service-bus--blob--workers)
   - [VM Deployment (Gateway + ngrok)](#vm-deployment-gateway--ngrok)
   - [Fanout Gateway (Legacy)](#fanout-gateway-legacy)
   - [Docker Production](#docker-production)
@@ -37,7 +38,7 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
 - Rust toolchain
 - System libs: `libsqlite3`, `libssl`, `pkg-config`, `ca-certificates`
 - Node.js 20 + npm
-- `codex` CLI on your PATH (only required for local execution; optional when `RUN_TASK_DOCKER_IMAGE` is set)
+- `codex` CLI on your PATH (only required for local execution; optional when `RUN_TASK_USE_DOCKER=1` and the image includes Codex)
 - `claude` CLI on your PATH (only required for employees with `runner = "claude"`)
 - `playwright-cli` + Chromium (required for browser automation skills)
 - `ngrok` (for exposing local service to webhooks)
@@ -46,15 +47,14 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
 
 **Required in `.env`** (copy from repo-root `.env.example` to `DoWhiz_service/.env`):
 - `POSTMARK_SERVER_TOKEN`
-- `AZURE_OPENAI_API_KEY_BACKUP` (required for Codex and Claude runners)
-- `AZURE_OPENAI_ENDPOINT_BACKUP` (required for Codex runner)
+- `AZURE_OPENAI_API_KEY_BACKUP` (required for Codex and Claude runners; Codex base URL is fixed in code)
 
 **Optional in `.env`**:
 - GitHub auth: `GH_TOKEN`/`GITHUB_TOKEN`/`GITHUB_PERSONAL_ACCESS_TOKEN` + `GITHUB_USERNAME`. Per-employee prefixes are supported (`OLIVER_`, `MAGGIE_`, `DEVIN_`, `PROTO_`) and can be overridden with `EMPLOYEE_GITHUB_ENV_PREFIX` or `GITHUB_ENV_PREFIX`.
-- `RUN_TASK_DOCKER_IMAGE` (run each task inside a disposable Docker container; use `dowhiz-service` for the repo image)
+- `RUN_TASK_USE_DOCKER=1` + `RUN_TASK_DOCKER_IMAGE` (run each task inside a disposable Docker container; use `dowhiz-service` for the repo image)
 - `RUN_TASK_DOCKER_AUTO_BUILD=1` to auto-build the image when missing (set `0` to disable)
-- `SUPABASE_DB_URL` (shared Postgres queue for the inbound gateway + workers)
-- `SUPABASE_PROJECT_URL` + `SUPABASE_SECRET_KEY` + `SUPABASE_STORAGE_BUCKET` (raw payload storage references)
+- `INGESTION_QUEUE_BACKEND=servicebus` + `SERVICE_BUS_CONNECTION_STRING` + `SERVICE_BUS_QUEUE_NAME` (ingestion queue)
+- `RAW_PAYLOAD_STORAGE_BACKEND=azure` + `AZURE_STORAGE_CONTAINER_INGEST` + `AZURE_STORAGE_SAS_TOKEN` (raw payload storage)
 - `OPENAI_API_KEY` (enables message router quick replies)
 
 ---
@@ -151,12 +151,15 @@ scripts/run_employee.sh --employee <id> --port <port> [--public-url <url>] [--sk
 
 ### Manual Multi-Employee Setup
 
-**Step 0: Choose a shared ingestion queue (same for gateway + all workers)**
+**Step 0: Configure Azure ingestion (required for gateway)**
 Add these to `DoWhiz_service/.env` (recommended) or export in each terminal before starting gateway/workers.
 ```bash
-export SUPABASE_DB_URL="postgresql://..."
-# or
-export INGESTION_DB_URL="postgresql://..."
+export INGESTION_QUEUE_BACKEND=servicebus
+export SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..."
+export SERVICE_BUS_QUEUE_NAME="ingestion"
+export RAW_PAYLOAD_STORAGE_BACKEND=azure
+export AZURE_STORAGE_CONTAINER_INGEST="ingestion-raw"
+export AZURE_STORAGE_SAS_TOKEN="..."
 ```
 
 **Step 1: Start workers (one per employee)**
@@ -200,7 +203,7 @@ EOF
 
 **Step 3: Start the inbound gateway (Terminal 2)**
 ```bash
-# Ensure SUPABASE_DB_URL (or INGESTION_DB_URL) is set in this terminal
+# Ensure Service Bus + Azure Blob env vars are set in this terminal
 ./DoWhiz_service/scripts/run_gateway_local.sh
 ```
 
@@ -230,7 +233,7 @@ Outputs appear under:
 
 ### Inbound Gateway (Recommended)
 
-The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/WhatsApp/Google Docs inbound traffic, deduplicates it, and enqueues messages into a shared ingestion queue. Workers poll that queue and send replies. Workers no longer expose `/postmark/inbound`.
+The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/WhatsApp/Google Docs inbound traffic, deduplicates it, and enqueues messages into Azure Service Bus while storing raw payloads in Azure Blob Storage. The gateway requires `INGESTION_QUEUE_BACKEND=servicebus` and `RAW_PAYLOAD_STORAGE_BACKEND=azure`. Workers poll the shared queue and filter by `employee_id`; workers no longer expose `/postmark/inbound`.
 
 HTTP endpoints:
 - `/postmark/inbound` (email)
@@ -250,15 +253,12 @@ Optional webhook verification:
 - `WHATSAPP_VERIFY_TOKEN` (validates WhatsApp webhook verification handshake)
 - `GATEWAY_MAX_BODY_BYTES` to override the default 25MB request limit
 
-### Azure Serverless Ingestion (Functions + Service Bus + Blob)
+### Azure Deployment (Functions + Service Bus + Blob + Workers)
 
-This replaces the Postgres ingestion queue and Supabase raw payload storage with Azure-managed services.
+This is the recommended Azure production flow. Azure Functions handles email ingress, Service Bus is the ingestion queue, and Azure Blob stores raw payloads. Workers (`rust_service`) run on Azure VMs or containers and poll Service Bus. For Slack/Discord/etc, run the Rust inbound gateway and point those webhooks to it. Email should use either the Azure Function or the Rust gateway, not both.
 
-**Overview**
-- HTTP ingress: Azure Functions (Python) at `DoWhiz_service/azure/functions/gateway_ingest`
-- Queue: Azure Service Bus (one queue per employee for ordering)
-- Raw payload storage: Azure Blob Storage
-- Optional edge: Azure API Management fronting the Function endpoint
+**Step 0: Choose ingress mode**
+Email-only ingress uses the Azure Function in `DoWhiz_service/azure/functions/gateway_ingest`. Multi-channel ingress uses the Rust `inbound_gateway` (see Step 6) and can also handle email if you want a single gateway.
 
 **Step 1: Provision Azure resources**
 ```bash
@@ -269,12 +269,14 @@ az storage container create --account-name <storage> --name ingestion-raw
 az servicebus namespace create -g <rg> -n <sb-namespace> -l westus2 --sku Standard
 az servicebus queue create -g <rg> --namespace-name <sb-namespace> -n ingestion --enable-duplicate-detection true --duplicate-detection-history-time-window PT10M
 az servicebus queue create -g <rg> --namespace-name <sb-namespace> -n ingestion-test --enable-duplicate-detection true --duplicate-detection-history-time-window PT10M
-az servicebus queue create -g <rg> --namespace-name <sb-namespace> -n ingestion-<employee_id> --enable-duplicate-detection true --duplicate-detection-history-time-window PT10M
 az functionapp create -g <rg> -n <function-app> --consumption-plan-location westus2 --runtime python --runtime-version 3.11 --functions-version 4 --storage-account <storage> --os-type Linux
 az apim create -g <rg> -n <apim> --location westus2 --publisher-email proto@dowhiz.com --publisher-name DoWhiz --sku-name Consumption
 ```
 
-**Step 2: Deploy the Function**
+**Step 2: Configure gateway configs for the Function**
+Update `DoWhiz_service/azure/functions/gateway_ingest/gateway.toml` and `DoWhiz_service/azure/functions/gateway_ingest/employee.toml` to match your service addresses and routing. Keep these in sync with the worker configs in `DoWhiz_service/gateway.toml` and `DoWhiz_service/employee.toml`.
+
+**Step 3: Deploy the Function**
 ```bash
 cd DoWhiz_service/azure/functions/gateway_ingest
 mkdir -p .python_packages/lib/site-packages
@@ -284,55 +286,68 @@ zip -r /tmp/gateway_ingest.zip .
 az functionapp deployment source config-zip -g <rg> -n <function-app> --src /tmp/gateway_ingest.zip
 ```
 
-**Step 3: Configure Function App settings**
+**Step 4: Configure Function App settings**
 ```bash
 az functionapp config appsettings set -g <rg> -n <function-app> --settings \
   SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..." \
   SERVICE_BUS_QUEUE_NAME="ingestion" \
-  SERVICE_BUS_QUEUE_PER_EMPLOYEE="true" \
   AZURE_STORAGE_ACCOUNT="<storage>" \
-  AZURE_STORAGE_CONTAINER="ingestion-raw" \
+  AZURE_STORAGE_CONTAINER_INGEST="ingestion-raw" \
   AZURE_STORAGE_SAS_TOKEN="<sas>" \
   GATEWAY_CONFIG_PATH="gateway.toml" \
   EMPLOYEE_CONFIG_PATH="employee.toml"
 ```
+Optional settings:
+`AZURE_STORAGE_CONTAINER_SAS_URL` (full SAS URL), `POSTMARK_INBOUND_TOKEN` (verify `X-Postmark-Token`).
 
-**Step 4: Point Postmark to Azure**
-- Direct Function URL: `https://<function-app>.azurewebsites.net/api/postmark/inbound`
-- APIM URL (recommended): `https://<apim>.azure-api.net/gateway/postmark/inbound`
+**Step 5: Point Postmark to Azure**
+Direct Function URL: `https://<function-app>.azurewebsites.net/api/postmark/inbound`  
+APIM URL (recommended): `https://<apim>.azure-api.net/gateway/postmark/inbound`
 
-**Step 5: Run workers against Service Bus**
+**Step 6: Deploy workers against Service Bus**
+Set these on the worker host (VM or container) and start one worker per employee:
 ```bash
 export INGESTION_QUEUE_BACKEND=servicebus
 export SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..."
 export SERVICE_BUS_QUEUE_NAME="ingestion"
-export SERVICE_BUS_QUEUE_PER_EMPLOYEE=true
 export RAW_PAYLOAD_STORAGE_BACKEND=azure
-export AZURE_STORAGE_CONTAINER="ingestion-raw"
+export AZURE_STORAGE_CONTAINER_INGEST="ingestion-raw"
 export AZURE_STORAGE_SAS_TOKEN="..."
 
 ./DoWhiz_service/scripts/run_employee.sh boiled_egg 9004 --skip-hook --skip-ngrok
 ```
 
+**Step 7: Multi-channel ingress (optional)**
+If you need Slack/Discord/Telegram/SMS/WhatsApp/BlueBubbles/Google Docs, run the Rust gateway with the same Service Bus and Azure Blob settings:
+```bash
+INGESTION_QUEUE_BACKEND=servicebus \
+RAW_PAYLOAD_STORAGE_BACKEND=azure \
+AZURE_STORAGE_CONTAINER_INGEST="ingestion-raw" \
+AZURE_STORAGE_SAS_TOKEN="..." \
+  ./DoWhiz_service/scripts/run_gateway_local.sh
+```
+
 Notes:
-- Ordering per employee is achieved by using one Service Bus queue per employee (`ingestion-<employee_id>`).
-- Update `gateway.toml` (and the copy shipped with the Function) when adding new routes.
+- All employees share the same Service Bus queue; workers filter by `employee_id` in the envelope.
+- Ensure the Function and worker configs stay in sync (`gateway.toml` and `employee.toml`).
 - The Function package should be built with Linux wheels; the Docker step avoids macOS/Windows artifacts.
 - `requirements.txt` pins `cryptography==41.0.7` to stay compatible with the Functions runtime glibc.
 
-**Local gateway + Docker workers (shared ingestion queue)**
+**Local gateway + Docker workers (Service Bus + Azure Blob)**
 
 **Step 1: Build the Docker image (once)**
 ```bash
 docker build -t dowhiz-service .
 ```
 
-**Step 2: Configure a shared Postgres ingestion queue**
+**Step 2: Configure Service Bus + Azure Blob**
 ```bash
-export SUPABASE_DB_URL="postgresql://..."
-export SUPABASE_PROJECT_URL="https://<project>.supabase.co"
-export SUPABASE_SECRET_KEY="sb_secret_..."
-export SUPABASE_STORAGE_BUCKET="ingestion-raw"
+export INGESTION_QUEUE_BACKEND=servicebus
+export SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..."
+export SERVICE_BUS_QUEUE_NAME="ingestion"
+export RAW_PAYLOAD_STORAGE_BACKEND=azure
+export AZURE_STORAGE_CONTAINER_INGEST="ingestion-raw"
+export AZURE_STORAGE_SAS_TOKEN="..."
 ```
 
 **Step 3: Start workers in Docker (mount shared ingestion dir)**
@@ -340,11 +355,13 @@ export SUPABASE_STORAGE_BUCKET="ingestion-raw"
 docker run --rm -p 9001:9001 \
   -e EMPLOYEE_ID=little_bear \
   -e RUST_SERVICE_PORT=9001 \
-  -e RUN_TASK_DOCKER_IMAGE= \
-  -e SUPABASE_DB_URL="$SUPABASE_DB_URL" \
-  -e SUPABASE_PROJECT_URL="$SUPABASE_PROJECT_URL" \
-  -e SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
-  -e SUPABASE_STORAGE_BUCKET="$SUPABASE_STORAGE_BUCKET" \
+  -e RUN_TASK_USE_DOCKER=0 \
+  -e INGESTION_QUEUE_BACKEND="$INGESTION_QUEUE_BACKEND" \
+  -e SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
+  -e SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
+  -e RAW_PAYLOAD_STORAGE_BACKEND="$RAW_PAYLOAD_STORAGE_BACKEND" \
+  -e AZURE_STORAGE_CONTAINER_INGEST="$AZURE_STORAGE_CONTAINER_INGEST" \
+  -e AZURE_STORAGE_SAS_TOKEN="$AZURE_STORAGE_SAS_TOKEN" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
   -v dowhiz-workspace-oliver:/app/.workspace \
   dowhiz-service
@@ -352,17 +369,19 @@ docker run --rm -p 9001:9001 \
 docker run --rm -p 9002:9001 \
   -e EMPLOYEE_ID=mini_mouse \
   -e RUST_SERVICE_PORT=9001 \
-  -e RUN_TASK_DOCKER_IMAGE= \
-  -e SUPABASE_DB_URL="$SUPABASE_DB_URL" \
-  -e SUPABASE_PROJECT_URL="$SUPABASE_PROJECT_URL" \
-  -e SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
-  -e SUPABASE_STORAGE_BUCKET="$SUPABASE_STORAGE_BUCKET" \
+  -e RUN_TASK_USE_DOCKER=0 \
+  -e INGESTION_QUEUE_BACKEND="$INGESTION_QUEUE_BACKEND" \
+  -e SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
+  -e SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
+  -e RAW_PAYLOAD_STORAGE_BACKEND="$RAW_PAYLOAD_STORAGE_BACKEND" \
+  -e AZURE_STORAGE_CONTAINER_INGEST="$AZURE_STORAGE_CONTAINER_INGEST" \
+  -e AZURE_STORAGE_SAS_TOKEN="$AZURE_STORAGE_SAS_TOKEN" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
   -v dowhiz-workspace-maggie:/app/.workspace \
   dowhiz-service
 ```
 
-Note: when running workers inside Docker, clear `RUN_TASK_DOCKER_IMAGE` to avoid nested Docker usage.
+Note: when running workers inside Docker, keep `RUN_TASK_USE_DOCKER=0` to avoid nested Docker usage.
 
 **Step 4: Configure the gateway routes**
 ```bash
@@ -372,10 +391,12 @@ cp DoWhiz_service/gateway.example.toml DoWhiz_service/gateway.toml
 
 **Step 5: Start the gateway (host)**
 ```bash
-SUPABASE_DB_URL="$SUPABASE_DB_URL" \
-SUPABASE_PROJECT_URL="$SUPABASE_PROJECT_URL" \
-SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
-SUPABASE_STORAGE_BUCKET="$SUPABASE_STORAGE_BUCKET" \
+INGESTION_QUEUE_BACKEND="$INGESTION_QUEUE_BACKEND" \
+SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
+SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
+RAW_PAYLOAD_STORAGE_BACKEND="$RAW_PAYLOAD_STORAGE_BACKEND" \
+AZURE_STORAGE_CONTAINER_INGEST="$AZURE_STORAGE_CONTAINER_INGEST" \
+AZURE_STORAGE_SAS_TOKEN="$AZURE_STORAGE_SAS_TOKEN" \
   ./DoWhiz_service/scripts/run_gateway_local.sh
 ```
 
@@ -404,34 +425,12 @@ POSTMARK_TEST_SERVICE_ADDRESS=mini-mouse@dowhiz.com
 
 ### VM Deployment (Gateway + ngrok)
 
-This is the current production flow (oliver on `dowhizprod1`): run a single worker behind the inbound gateway and expose the gateway with ngrok.
+Single-VM deployment that runs a worker and the Rust inbound gateway, exposed via ngrok. This flow still uses Azure Service Bus + Blob for ingestion/payload storage; ngrok only provides public ingress. If you prefer Azure Functions for ingress, follow the Azure deployment flow above.
 
 1. Provision an Ubuntu VM and open inbound TCP ports `22`, `80`, `443`.
 Outbound SMTP (`25`) is often blocked on cloud VMs; run E2E senders from your local machine if needed.
 
-2. (Azure) If your Supabase DB hostname resolves to IPv6-only, enable IPv6 outbound on the VM's VNet/NIC:
-```bash
-# Example (dowhizprod1)
-RG=DoWhiz-prod1
-VNET=vnet-westus2
-SUBNET=snet-westus2-1
-NIC=dowhiz-vm-prod1694-2a8516e1
-ZONE=2
-
-az network vnet update -g "$RG" -n "$VNET" \
-  --add addressSpace.addressPrefixes "fd00:7c3a:9b5e::/56"
-az network vnet subnet update -g "$RG" --vnet-name "$VNET" -n "$SUBNET" \
-  --add addressPrefixes "fd00:7c3a:9b5e:0::/64"
-az network public-ip create -g "$RG" -n dowhiz-prod1-ipv6 \
-  --sku Standard --version IPv6 --zone "$ZONE" --allocation-method Static
-az network nic ip-config create -g "$RG" --nic-name "$NIC" -n ipv6config \
-  --private-ip-address-version IPv6 --subnet "$SUBNET" --vnet-name "$VNET" \
-  --public-ip-address dowhiz-prod1-ipv6
-
-# Verify on the VM
-ip -6 addr show dev eth0
-nc -6 -z -w5 db.<project>.supabase.co 5432
-```
+2. Ensure the VM can reach Azure Service Bus and Azure Blob Storage over HTTPS (port 443).
 
 3. Install dependencies + ngrok (VM):
 ```bash
@@ -449,12 +448,17 @@ git clone https://github.com/KnoWhiz/DoWhiz.git
 cd DoWhiz
 cp .env.example DoWhiz_service/.env
 # Edit DoWhiz_service/.env with production secrets
-# Add shared Postgres queue + storage settings (used by gateway + worker):
-SUPABASE_DB_URL=postgresql://...
-SUPABASE_PROJECT_URL=https://<project>.supabase.co
-SUPABASE_SECRET_KEY=sb_secret_...
-SUPABASE_STORAGE_BUCKET=ingestion-raw
-INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS=true  # Supabase DB uses a custom CA
+# Add Service Bus + Azure Blob settings (used by gateway + worker):
+INGESTION_QUEUE_BACKEND=servicebus
+SERVICE_BUS_CONNECTION_STRING=Endpoint=sb://...
+SERVICE_BUS_QUEUE_NAME=ingestion
+RAW_PAYLOAD_STORAGE_BACKEND=azure
+AZURE_STORAGE_CONTAINER_INGEST=ingestion-raw
+AZURE_STORAGE_SAS_TOKEN=...
+# For GitHub PR creation from email (recommended):
+EMPLOYEE_ID=little_bear
+# Optional (dev only): if Supabase TLS fails with self-signed certs
+# INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS=true
 ```
 
 Optional: copy your local `.env` directly to the VM:
@@ -478,32 +482,56 @@ tenant_id = "default"
 EOF
 ```
 
-6. Start services (tmux recommended):
+6. Build release binaries (recommended on VM):
 ```bash
-tmux new-session -d -s oliver "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 RUN_TASK_DOCKER_IMAGE= cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001'"
-tmux new-session -d -s gateway "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && ./scripts/run_gateway_local.sh'"
-ngrok config add-authtoken "$NGROK_AUTHTOKEN"
-tmux new-session -d -s ngrok "ngrok http 9100 --url https://oliver.dowhiz.prod.ngrok.app"
+source ~/.cargo/env
+cd ~/DoWhiz/DoWhiz_service
+cargo build -p scheduler_module --bin rust_service --bin inbound_gateway --release
 ```
-Note: if you run services under pm2/systemd (non-interactive shells), ensure PATH includes `~/.cargo/bin` or use the full cargo path so `cargo run` works.
 
-7. Health checks (VM):
+7. Start services (pm2 recommended):
+```bash
+pm2 start ~/DoWhiz/DoWhiz_service/target/release/inbound_gateway \
+  --name dowhiz_gateway \
+  --cwd ~/DoWhiz/DoWhiz_service
+
+pm2 start ~/DoWhiz/DoWhiz_service/target/release/rust_service \
+  --name dowhiz_rust_service \
+  --cwd ~/DoWhiz/DoWhiz_service -- --host 0.0.0.0 --port 9001
+
+pm2 save
+```
+
+tmux alternative:
+```bash
+tmux new-session -d -s oliver "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && ~/DoWhiz/DoWhiz_service/target/release/rust_service --host 0.0.0.0 --port 9001'"
+tmux new-session -d -s gateway "bash -lc 'cd ~/DoWhiz/DoWhiz_service && set -a && source .env && set +a && ~/DoWhiz/DoWhiz_service/target/release/inbound_gateway'"
+```
+Note: if you run services under pm2/systemd (non-interactive shells), ensure PATH includes `~/.cargo/bin` when building, or use absolute binary paths as above.
+
+8. Expose the gateway with ngrok (VM):
+```bash
+ngrok config add-authtoken "$NGROK_AUTHTOKEN"
+ngrok http 9100 --domain=shayne-laminar-lillian.ngrok-free.dev
+```
+
+9. Health checks (VM):
 ```bash
 curl -sS http://127.0.0.1:9001/health && echo
 curl -sS http://127.0.0.1:9100/health && echo
-curl -sS https://oliver.dowhiz.prod.ngrok.app/health && echo
+curl -sS https://shayne-laminar-lillian.ngrok-free.dev/health && echo
 ```
 
-8. Point Postmark to the gateway (VM):
+10. Point Postmark to the gateway (VM):
 ```bash
 cd ~/DoWhiz/DoWhiz_service
 cargo run -p scheduler_module --bin set_postmark_inbound_hook -- \
-  --hook-url https://oliver.dowhiz.prod.ngrok.app/postmark/inbound
+  --hook-url https://shayne-laminar-lillian.ngrok-free.dev/postmark/inbound
 ```
 
-9. Run live E2E (from your local machine if VM blocks SMTP 25):
+11. Run live E2E (from your local machine if VM blocks SMTP 25):
 ```
-POSTMARK_INBOUND_HOOK_URL=https://oliver.dowhiz.prod.ngrok.app/postmark/inbound
+POSTMARK_INBOUND_HOOK_URL=https://shayne-laminar-lillian.ngrok-free.dev/postmark/inbound
 POSTMARK_TEST_FROM=mini-mouse@deep-tutor.com
 POSTMARK_TEST_SERVICE_ADDRESS=oliver@dowhiz.com
 ```
@@ -577,10 +605,12 @@ Build the image from the repo root and run it with the same `.env` file mounted:
 ```bash
 docker build -t dowhiz-service .
 docker run --rm -p 9001:9001 \
-  -e SUPABASE_DB_URL="$SUPABASE_DB_URL" \
-  -e SUPABASE_PROJECT_URL="$SUPABASE_PROJECT_URL" \
-  -e SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
-  -e SUPABASE_STORAGE_BUCKET="$SUPABASE_STORAGE_BUCKET" \
+  -e INGESTION_QUEUE_BACKEND="$INGESTION_QUEUE_BACKEND" \
+  -e SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
+  -e SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
+  -e RAW_PAYLOAD_STORAGE_BACKEND="$RAW_PAYLOAD_STORAGE_BACKEND" \
+  -e AZURE_STORAGE_CONTAINER_INGEST="$AZURE_STORAGE_CONTAINER_INGEST" \
+  -e AZURE_STORAGE_SAS_TOKEN="$AZURE_STORAGE_SAS_TOKEN" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
   -v dowhiz-workspace:/app/.workspace \
   dowhiz-service
@@ -591,16 +621,18 @@ This runs a worker only. For inbound webhooks, run the inbound gateway separatel
 docker run --rm -p 9100:9100 \
   --entrypoint /app/inbound_gateway \
   -e GATEWAY_PORT=9100 \
-  -e SUPABASE_DB_URL="$SUPABASE_DB_URL" \
-  -e SUPABASE_PROJECT_URL="$SUPABASE_PROJECT_URL" \
-  -e SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
-  -e SUPABASE_STORAGE_BUCKET="$SUPABASE_STORAGE_BUCKET" \
+  -e INGESTION_QUEUE_BACKEND="$INGESTION_QUEUE_BACKEND" \
+  -e SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
+  -e SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
+  -e RAW_PAYLOAD_STORAGE_BACKEND="$RAW_PAYLOAD_STORAGE_BACKEND" \
+  -e AZURE_STORAGE_CONTAINER_INGEST="$AZURE_STORAGE_CONTAINER_INGEST" \
+  -e AZURE_STORAGE_SAS_TOKEN="$AZURE_STORAGE_SAS_TOKEN" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
   -v "$PWD/DoWhiz_service/gateway.toml:/app/DoWhiz_service/gateway.toml:ro" \
   dowhiz-service
 ```
 
-If `RUN_TASK_DOCKER_IMAGE` is set in your `.env`, each task runs inside a fresh Docker container and the image auto-builds on first use (unless disabled with `RUN_TASK_DOCKER_AUTO_BUILD=0`).
+If `RUN_TASK_USE_DOCKER=1` and `RUN_TASK_DOCKER_IMAGE` is set in your `.env`, each task runs inside a fresh Docker container and the image auto-builds on first use (unless disabled with `RUN_TASK_DOCKER_AUTO_BUILD=0`).
 
 **Docker E2E (Codex + playwright-cli):**
 ```bash
@@ -619,7 +651,16 @@ docker run --rm --entrypoint bash --user 10001:10001 \
     cat > \"$WORKDIR/.playwright/cli.config.json\" <<'EOF'
 { \"browser\": { \"browserName\": \"chromium\", \"userDataDir\": \"/workspace/tmp/playwright-user-data\", \"launchOptions\": { \"channel\": \"chrome\", \"chromiumSandbox\": false } } }
 EOF
-    codex exec --skip-git-repo-check -c web_search=\"disabled\" --cd \"$WORKDIR\" --dangerously-bypass-approvals-and-sandbox \
+    codex exec --skip-git-repo-check \
+      -m gpt-5.2-codex \
+      -c model_provider=\"azure\" \
+      -c web_search=\"live\" \
+      -c ask_for_approval=\"never\" \
+      -c sandbox=\"workspace-write\" \
+      -c model_providers.azure.base_url=\"https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1\" \
+      -c model_providers.azure.env_key=\"AZURE_OPENAI_API_KEY_BACKUP\" \
+      -c model_providers.azure.wire_api=\"responses\" \
+      --cd \"$WORKDIR\" \
     \"Test the \\\"add todo\\\" flow on https://demo.playwright.dev/todomvc using playwright-cli. Check playwright-cli --help for available commands.\""
 ```
 
@@ -627,7 +668,7 @@ EOF
 
 ## Per-Task Docker Execution
 
-When `RUN_TASK_DOCKER_IMAGE` is set, each RunTask spins up a fresh container, mounts the task workspace at `/workspace`, runs Codex inside the container, and removes the container when done.
+When `RUN_TASK_USE_DOCKER=1`, each RunTask spins up a fresh container, mounts the task workspace at `/workspace`, runs Codex inside the container, and removes the container when done.
 
 If the image is missing, the service will auto-build it (unless `RUN_TASK_DOCKER_AUTO_BUILD=0`).
 
@@ -664,17 +705,19 @@ cargo fmt --check
 - ngrok installed and authenticated
 - Postmark inbound address configured on the server
 - Sender signatures for all employee addresses and the `POSTMARK_TEST_FROM` address
-- `POSTMARK_SERVER_TOKEN`, `POSTMARK_TEST_FROM`, `AZURE_OPENAI_API_KEY_BACKUP`, and `AZURE_OPENAI_ENDPOINT_BACKUP` set
+- `POSTMARK_SERVER_TOKEN`, `POSTMARK_TEST_FROM`, and `AZURE_OPENAI_API_KEY_BACKUP` set
 - `RUN_CODEX_E2E=1` if you want Codex to execute real tasks (otherwise it is disabled in the live test)
 
 **Docker flow (worker in Docker, gateway on host):**
 
-1. Configure the shared Postgres queue + storage:
+1. Configure Service Bus + Azure Blob:
 ```bash
-export SUPABASE_DB_URL="postgresql://..."
-export SUPABASE_PROJECT_URL="https://<project>.supabase.co"
-export SUPABASE_SECRET_KEY="sb_secret_..."
-export SUPABASE_STORAGE_BUCKET="ingestion-raw"
+export INGESTION_QUEUE_BACKEND=servicebus
+export SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..."
+export SERVICE_BUS_QUEUE_NAME="ingestion"
+export RAW_PAYLOAD_STORAGE_BACKEND=azure
+export AZURE_STORAGE_CONTAINER_INGEST="ingestion-raw"
+export AZURE_STORAGE_SAS_TOKEN="..."
 ```
 
 2. Start the worker container:
@@ -683,10 +726,12 @@ docker run --rm -p 9002:9002 \
   -e EMPLOYEE_ID=mini_mouse \
   -e RUST_SERVICE_PORT=9002 \
   -e RUN_TASK_SKIP_WORKSPACE_REMAP=1 \
-  -e SUPABASE_DB_URL="$SUPABASE_DB_URL" \
-  -e SUPABASE_PROJECT_URL="$SUPABASE_PROJECT_URL" \
-  -e SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
-  -e SUPABASE_STORAGE_BUCKET="$SUPABASE_STORAGE_BUCKET" \
+  -e INGESTION_QUEUE_BACKEND="$INGESTION_QUEUE_BACKEND" \
+  -e SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
+  -e SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
+  -e RAW_PAYLOAD_STORAGE_BACKEND="$RAW_PAYLOAD_STORAGE_BACKEND" \
+  -e AZURE_STORAGE_CONTAINER_INGEST="$AZURE_STORAGE_CONTAINER_INGEST" \
+  -e AZURE_STORAGE_SAS_TOKEN="$AZURE_STORAGE_SAS_TOKEN" \
   -v "$PWD/DoWhiz_service/.env:/app/.env:ro" \
   -v dowhiz-workspace:/app/.workspace \
   dowhiz-service
@@ -696,10 +741,12 @@ For `little_bear` (Codex), add `-e CODEX_BYPASS_SANDBOX=1` if Codex fails with L
 
 3. Ensure `DoWhiz_service/gateway.toml` routes the test address to your worker, then start the inbound gateway on the host:
 ```bash
-SUPABASE_DB_URL="$SUPABASE_DB_URL" \
-SUPABASE_PROJECT_URL="$SUPABASE_PROJECT_URL" \
-SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
-SUPABASE_STORAGE_BUCKET="$SUPABASE_STORAGE_BUCKET" \
+INGESTION_QUEUE_BACKEND="$INGESTION_QUEUE_BACKEND" \
+SERVICE_BUS_CONNECTION_STRING="$SERVICE_BUS_CONNECTION_STRING" \
+SERVICE_BUS_QUEUE_NAME="$SERVICE_BUS_QUEUE_NAME" \
+RAW_PAYLOAD_STORAGE_BACKEND="$RAW_PAYLOAD_STORAGE_BACKEND" \
+AZURE_STORAGE_CONTAINER_INGEST="$AZURE_STORAGE_CONTAINER_INGEST" \
+AZURE_STORAGE_SAS_TOKEN="$AZURE_STORAGE_SAS_TOKEN" \
   ./DoWhiz_service/scripts/run_gateway_local.sh
 ```
 
@@ -1034,13 +1081,13 @@ This reduces API costs and latency for simple interactions while preserving full
 ### Ingestion Queue
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SUPABASE_DB_URL` | - | Postgres connection string for the shared ingestion queue |
-| `INGESTION_DB_URL` | - | Optional alias for `SUPABASE_DB_URL` |
-| `DATABASE_URL` | - | Fallback Postgres connection string for the ingestion queue |
-| `SUPABASE_POOLER_URL` | - | Optional PgBouncer/Pooler URL for ingestion queue connections |
-| `SUPABASE_PROJECT_URL` | - | Supabase project URL for raw payload storage |
-| `SUPABASE_SECRET_KEY` | - | Supabase service role key for storage access |
-| `SUPABASE_STORAGE_BUCKET` | `ingestion-raw` | Bucket for raw payload blobs |
+| `SUPABASE_DB_URL` | - | Legacy Postgres ingestion backend (not used by inbound gateway) |
+| `INGESTION_DB_URL` | - | Legacy alias for `SUPABASE_DB_URL` |
+| `DATABASE_URL` | - | Legacy Postgres connection string for ingestion |
+| `SUPABASE_POOLER_URL` | - | Legacy PgBouncer/Pooler URL for Postgres ingestion |
+| `SUPABASE_PROJECT_URL` | - | Legacy Supabase raw payload storage (not used by inbound gateway) |
+| `SUPABASE_SECRET_KEY` | - | Legacy Supabase storage key |
+| `SUPABASE_STORAGE_BUCKET` | `ingestion-raw` | Legacy Supabase storage bucket |
 | `INGESTION_QUEUE_TABLE` | `ingestion_queue` | Postgres table name for the queue |
 | `INGESTION_QUEUE_POOL_SIZE` | `8` | Max size for the ingestion queue Postgres pool |
 | `INGESTION_QUEUE_LEASE_SECS` | `60` | Lease timeout before reclaiming stuck jobs |
@@ -1051,12 +1098,12 @@ This reduces API costs and latency for simple interactions while preserving full
 ### Codex (OpenAI)
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CODEX_MODEL` | - | Model name |
+| `CODEX_MODEL` | `gpt-5.2-codex` (fixed) | Model name (overrides ignored) |
 | `CODEX_DISABLED` | `0` | Set to `1` to bypass Codex CLI |
-| `CODEX_SANDBOX` | `workspace-write` | Sandbox mode |
-| `CODEX_BYPASS_SANDBOX` | `0` | Set to `1` to bypass sandbox (sometimes required inside Docker) |
+| `CODEX_SANDBOX` | `workspace-write` (fixed) | Sandbox mode (overrides ignored) |
+| `CODEX_BYPASS_SANDBOX` | `0` | Set to `1` to pass `--yolo` (bypass approvals/sandbox) |
 | `AZURE_OPENAI_API_KEY_BACKUP` | - | Azure OpenAI API key |
-| `AZURE_OPENAI_ENDPOINT_BACKUP` | - | Azure OpenAI endpoint |
+| `AZURE_OPENAI_ENDPOINT_BACKUP` | `https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1` (fixed) | Azure OpenAI base URL (overrides ignored) |
 
 ### Claude (Anthropic)
 | Variable | Default | Description |
@@ -1067,8 +1114,8 @@ This reduces API costs and latency for simple interactions while preserving full
 ### Docker Execution
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RUN_TASK_DOCKER_IMAGE` | - | Enable per-task containers |
-| `RUN_TASK_USE_DOCKER` | `0` | Force Docker execution (requires `RUN_TASK_DOCKER_IMAGE`) |
+| `RUN_TASK_DOCKER_IMAGE` | - | Docker image to use when `RUN_TASK_USE_DOCKER=1` |
+| `RUN_TASK_USE_DOCKER` | `0` | Enable per-task Docker execution (requires `RUN_TASK_DOCKER_IMAGE`) |
 | `RUN_TASK_DOCKER_REQUIRED` | `0` | Fail when Docker CLI is missing instead of falling back to host execution |
 | `RUN_TASK_DOCKER_AUTO_BUILD` | `1` | Auto-build missing images |
 | `RUN_TASK_DOCKERFILE` | - | Override Dockerfile path |
@@ -1087,22 +1134,27 @@ This reduces API costs and latency for simple interactions while preserving full
 | `GATEWAY_MAX_BODY_BYTES` | `26214400` | Max inbound body size (25MB) |
 | `POSTMARK_INBOUND_TOKEN` | - | Verify Postmark webhook (`X-Postmark-Token`) |
 
-### Azure Serverless Ingestion
+### Azure Ingestion (Service Bus + Blob)
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INGESTION_QUEUE_BACKEND` | `postgres` | `postgres` or `servicebus` |
+| `INGESTION_QUEUE_BACKEND` | `postgres` | `postgres` or `servicebus` (gateway requires `servicebus`) |
 | `SERVICE_BUS_CONNECTION_STRING` | - | Service Bus namespace connection string |
-| `SERVICE_BUS_QUEUE_NAME` | `ingestion` | Base queue name (per-employee suffix added when enabled) |
-| `SERVICE_BUS_QUEUE_PER_EMPLOYEE` | `true` | Use `ingestion-<employee_id>` queues for ordering |
+| `SERVICE_BUS_QUEUE_NAME` | `ingestion` | Shared queue name for all employees |
 | `SERVICE_BUS_TEST_QUEUE_NAME` | `ingestion-test` | Queue used by Service Bus tests |
 | `SERVICE_BUS_PEEK_LOCK_TIMEOUT_SECS` | `30` | Peek-lock timeout for Service Bus receive |
-| `RAW_PAYLOAD_STORAGE_BACKEND` | `supabase` | `supabase` or `azure` |
+| `RAW_PAYLOAD_STORAGE_BACKEND` | `supabase` | `supabase` or `azure` (gateway requires `azure`) |
 | `AZURE_STORAGE_ACCOUNT` | - | Azure Storage account name |
-| `AZURE_STORAGE_CONTAINER` | - | Azure Blob container name |
+| `AZURE_STORAGE_CONTAINER_INGEST` | - | Azure Blob container for raw payloads |
 | `AZURE_STORAGE_SAS_TOKEN` | - | SAS token for container access |
 | `AZURE_STORAGE_CONTAINER_SAS_URL` | - | Full container SAS URL (optional) |
 | `AZURE_FUNCTION_POSTMARK_URL` | - | Direct Function ingress URL |
 | `AZURE_APIM_POSTMARK_URL` | - | APIM ingress URL |
+
+### Azure Memo Storage
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AZURE_STORAGE_CONNECTION_STRING` | - | Azure Blob connection string for memo storage |
+| `AZURE_STORAGE_CONTAINER` | - | Azure Blob container for memo.md (e.g., `memos`) |
 
 ### Slack
 | Variable | Default | Description |

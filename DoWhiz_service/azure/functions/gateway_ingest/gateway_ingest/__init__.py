@@ -171,7 +171,7 @@ def resolve_container_sas_url() -> str:
     if sas_url:
         return sas_url.strip()
     account = os.getenv("AZURE_STORAGE_ACCOUNT") or resolve_account_from_connection_string()
-    container = os.getenv("AZURE_STORAGE_CONTAINER")
+    container = os.getenv("AZURE_STORAGE_CONTAINER_INGEST")
     sas_token = os.getenv("AZURE_STORAGE_SAS_TOKEN")
     if not account or not container or not sas_token:
         raise RuntimeError("Missing Azure storage SAS configuration")
@@ -199,9 +199,9 @@ def build_blob_url(container_sas_url: str, path: str) -> str:
 
 
 def upload_raw_payload(raw_payload: bytes, envelope_id: str, received_at: datetime.datetime) -> str:
-    container = os.getenv("AZURE_STORAGE_CONTAINER")
+    container = os.getenv("AZURE_STORAGE_CONTAINER_INGEST")
     if not container:
-        raise RuntimeError("AZURE_STORAGE_CONTAINER is required")
+        raise RuntimeError("AZURE_STORAGE_CONTAINER_INGEST is required")
     date_prefix = received_at.strftime("%Y/%m/%d")
     blob_path = f"ingestion_raw/{date_prefix}/{envelope_id}.bin"
     container_sas_url = resolve_container_sas_url()
@@ -221,19 +221,15 @@ def build_dedupe_key(tenant_id: str, employee_id: str, channel: str, external_id
     return f"{tenant_id}:{employee_id}:{channel}:{base}"
 
 
-def resolve_queue_name(employee_id: str) -> str:
-    base = os.getenv("SERVICE_BUS_QUEUE_NAME", "ingestion")
-    per_employee = os.getenv("SERVICE_BUS_QUEUE_PER_EMPLOYEE", "true").lower() in {"1", "true", "yes", "on"}
-    if per_employee:
-        return f"{base}-{employee_id}"
-    return base
+def resolve_queue_name() -> str:
+    return os.getenv("SERVICE_BUS_QUEUE_NAME", "ingestion")
 
 
 def enqueue_message(envelope: Dict[str, Any]) -> None:
     connection_string = os.getenv("SERVICE_BUS_CONNECTION_STRING")
     if not connection_string:
         raise RuntimeError("SERVICE_BUS_CONNECTION_STRING is required")
-    queue_name = resolve_queue_name(envelope["employee_id"])
+    queue_name = resolve_queue_name()
     dedupe_key = envelope.get("dedupe_key")
     message = ServiceBusMessage(json.dumps(envelope), message_id=dedupe_key)
     with ServiceBusClient.from_connection_string(connection_string) as client:

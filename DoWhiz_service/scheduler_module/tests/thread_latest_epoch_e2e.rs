@@ -1,3 +1,5 @@
+mod test_support;
+
 use run_task_module::RunTaskParams;
 use scheduler_module::collaboration_store::CollaborationStore;
 use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
@@ -205,9 +207,11 @@ fn thread_latest_epoch_end_to_end() {
     let _docker_guard = EnvGuard::set("RUN_TASK_DOCKER_IMAGE", "");
     let _home_guard = EnvGuard::set("HOME", &home_root);
 
-    dotenvy::dotenv().ok();
-    let ingestion_db_url =
-        std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
+    let Some(ingestion_db_url) =
+        test_support::require_supabase_db_url("thread_latest_epoch_end_to_end")
+    else {
+        return;
+    };
     let (employee_profile, employee_directory) = test_employee_directory(root);
     let config = ServiceConfig {
         host: "127.0.0.1".to_string(),

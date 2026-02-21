@@ -124,6 +124,10 @@ pub enum FakeCodexMode {
     NoOutput,
     Fail,
     GithubEnvCheck,
+    EnsureNoYolo,
+    EnsureYolo,
+    EnsureAddDir,
+    Sleep,
 }
 
 #[cfg(unix)]
@@ -176,6 +180,68 @@ mkdir -p reply_email_attachments
 echo "attachment" > reply_email_attachments/attachment.txt
 "#
         }
+        FakeCodexMode::EnsureNoYolo => {
+            r#"#!/bin/sh
+set -e
+for arg in "$@"; do
+  if [ "$arg" = "--yolo" ]; then
+    echo "unexpected --yolo" >&2
+    exit 3
+  fi
+done
+echo "<html><body>Test reply</body></html>" > reply_email_draft.html
+mkdir -p reply_email_attachments
+echo "attachment" > reply_email_attachments/attachment.txt
+"#
+        }
+        FakeCodexMode::EnsureYolo => {
+            r#"#!/bin/sh
+set -e
+found="0"
+for arg in "$@"; do
+  if [ "$arg" = "--yolo" ]; then
+    found="1"
+  fi
+done
+if [ "$found" != "1" ]; then
+  echo "missing --yolo" >&2
+  exit 3
+fi
+echo "<html><body>Test reply</body></html>" > reply_email_draft.html
+mkdir -p reply_email_attachments
+echo "attachment" > reply_email_attachments/attachment.txt
+"#
+        }
+        FakeCodexMode::EnsureAddDir => {
+            r#"#!/bin/sh
+set -e
+expected="${EXPECTED_ADD_DIR:-}"
+found="0"
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--add-dir" ]; then
+    if [ -z "$expected" ] || [ "$arg" = "$expected" ]; then
+      found="1"
+      break
+    fi
+  fi
+  prev="$arg"
+done
+if [ "$found" != "1" ]; then
+  echo "missing --add-dir ${expected}" >&2
+  exit 3
+fi
+echo "<html><body>Test reply</body></html>" > reply_email_draft.html
+mkdir -p reply_email_attachments
+echo "attachment" > reply_email_attachments/attachment.txt
+"#
+        }
+        FakeCodexMode::Sleep => {
+            r#"#!/bin/sh
+set -e
+sleep "${SLEEP_SECS:-2}"
+"#
+        }
     };
 
     fs::write(&script_path, script)?;
@@ -216,6 +282,44 @@ exit 0
     Ok(script_path)
 }
 
+#[allow(dead_code)]
+#[derive(Clone, Copy)]
+pub enum FakeClaudeMode {
+    Success,
+    Sleep,
+}
+
+#[cfg(unix)]
+#[allow(dead_code)]
+pub fn write_fake_claude(dir: &Path, mode: FakeClaudeMode) -> io::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let script_path = dir.join("claude");
+    let script = match mode {
+        FakeClaudeMode::Success => {
+            r#"#!/bin/sh
+set -e
+echo '{"type":"message_delta","delta":{"text":"ok"}}'
+echo "<html><body>Test reply</body></html>" > reply_email_draft.html
+mkdir -p reply_email_attachments
+echo "attachment" > reply_email_attachments/attachment.txt
+"#
+        }
+        FakeClaudeMode::Sleep => {
+            r#"#!/bin/sh
+set -e
+sleep "${SLEEP_SECS:-2}"
+"#
+        }
+    };
+
+    fs::write(&script_path, script)?;
+    let mut perms = fs::metadata(&script_path)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms)?;
+    Ok(script_path)
+}
+
 pub fn create_workspace(root: &Path) -> io::Result<PathBuf> {
     let workspace = root.join("workspace");
     fs::create_dir_all(&workspace)?;
@@ -247,7 +351,7 @@ pub fn build_params(workspace: &Path) -> RunTaskParams {
         memory_dir: PathBuf::from("memory"),
         reference_dir: PathBuf::from("references"),
         reply_to: vec!["user@example.com".to_string()],
-        model_name: "test-model".to_string(),
+        model_name: "gpt-5.2-codex".to_string(),
         runner: "codex".to_string(),
         codex_disabled: false,
         channel: "email".to_string(),

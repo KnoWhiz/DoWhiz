@@ -22,11 +22,13 @@ use tokio::task;
 use tracing::info;
 
 use scheduler_module::employee_config::load_employee_directory;
-use scheduler_module::ingestion_queue::{build_queue_from_env, resolve_ingestion_queue_backend, IngestionQueue};
+use scheduler_module::ingestion_queue::{
+    build_servicebus_queue_from_env, resolve_ingestion_queue_backend, IngestionQueue,
+};
 
 use config::{
     load_gateway_config, resolve_employee_config_path, resolve_gateway_config_path,
-    resolve_ingestion_db_url, GatewayConfigFile,
+    GatewayConfigFile,
 };
 use discord::spawn_discord_gateway;
 use google_docs::spawn_google_docs_poller;
@@ -64,18 +66,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .unwrap_or_else(|| config_file.server.port.unwrap_or(9100));
 
     let backend = resolve_ingestion_queue_backend();
-    let db_url = if backend == "postgres" {
-        Some(resolve_ingestion_db_url(&config_file.storage)?)
-    } else {
-        None
-    };
+    if backend != "servicebus" && backend != "service_bus" {
+        return Err(format!(
+            "inbound gateway requires INGESTION_QUEUE_BACKEND=servicebus (got '{}')",
+            backend
+        )
+        .into());
+    }
 
     let (routes, channel_defaults) = normalize_routes(&config_file.routes)?;
 
-    let queue: Arc<dyn IngestionQueue> =
-        task::spawn_blocking(move || build_queue_from_env(db_url))
-            .await
-            .map_err(|err| -> Box<dyn std::error::Error + Send + Sync> { err.into() })??;
+    let queue: Arc<dyn IngestionQueue> = task::spawn_blocking(build_servicebus_queue_from_env)
+        .await
+        .map_err(|err| -> Box<dyn std::error::Error + Send + Sync> { err.into() })??;
 
     let state = Arc::new(GatewayState {
         config: GatewayConfig {
@@ -89,10 +92,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
 
     info!(
-        "ingestion gateway config path={}, host={}, port={}, db_url=***",
+        "ingestion gateway config path={}, host={}, port={}, backend={}",
         config_path.display(),
         host,
-        port
+        port,
+        backend
     );
 
     spawn_discord_gateway(state.clone()).await;

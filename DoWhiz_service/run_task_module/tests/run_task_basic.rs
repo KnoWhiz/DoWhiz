@@ -7,6 +7,23 @@ use support::{
     build_params, create_workspace, write_fake_codex, EnvGuard, FakeCodexMode, TempDir, ENV_MUTEX,
 };
 
+const EXPECTED_CODEX_BLOCK: &str = r#"# IMPORTANT: Use your Azure *deployment name* here (e.g., "gpt-5.2-codex")
+model = "gpt-5.2-codex"
+model_provider = "azure"
+model_reasoning_effort = "xhigh"
+web_search = "live"
+ask_for_approval = "never"
+sandbox = "workspace-write"
+
+[sandbox_workspace_write]
+network_access=true
+
+[model_providers.azure]
+name = "Azure OpenAI"
+base_url = "https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1"
+env_key = "AZURE_OPENAI_API_KEY_BACKUP"
+wire_api = "responses""#;
+
 #[test]
 #[cfg(unix)]
 fn run_task_updates_existing_config_block() {
@@ -51,18 +68,55 @@ value = "still"
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
-        ("CODEX_MODEL", "new-model"),
+        ("CODEX_MODEL", "override-model"),
         ("GH_AUTH_DISABLED", "1"),
     ]);
 
-    let mut params = build_params(&workspace);
-    params.model_name = "new-model".to_string();
+    let params = build_params(&workspace);
     let _result = run_task(&params).unwrap();
 
     let updated = fs::read_to_string(&config_path).unwrap();
     assert!(updated.contains("value = \"keep\""));
     assert!(updated.contains("value = \"still\""));
-    assert!(updated.contains("model = \"new-model\""));
-    assert!(!updated.contains("old-model"));
-    assert!(updated.contains("https://example.azure.com/openai/v1"));
+    assert!(updated.contains("model = \"gpt-5.2-codex\""));
+    assert!(!updated.contains("model = \"old-model\""));
+    assert!(!updated.contains("model = \"override-model\""));
+    assert!(updated.contains(
+        "https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1"
+    ));
+    assert!(!updated.contains("https://old.azure.com/openai/v1"));
+    assert!(!updated.contains("https://example.azure.com/openai/v1"));
+}
+
+#[test]
+#[cfg(unix)]
+fn run_task_writes_expected_codex_block() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("codex_task_expected_block").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let home_dir = temp.path.join("home");
+    let bin_dir = temp.path.join("bin");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_fake_codex(&bin_dir, FakeCodexMode::Success).unwrap();
+
+    let old_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), old_path);
+    let _env = EnvGuard::set(&[
+        ("HOME", home_dir.to_str().unwrap()),
+        ("PATH", &new_path),
+        ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("GH_AUTH_DISABLED", "1"),
+    ]);
+
+    let params = build_params(&workspace);
+    let _result = run_task(&params).unwrap();
+
+    let config_path = home_dir.join(".codex").join("config.toml");
+    let config = fs::read_to_string(&config_path).unwrap();
+    assert!(
+        config.contains(EXPECTED_CODEX_BLOCK),
+        "codex config block should match the expected canonical content"
+    );
 }

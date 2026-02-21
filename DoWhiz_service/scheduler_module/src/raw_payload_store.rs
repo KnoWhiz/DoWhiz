@@ -42,7 +42,7 @@ fn resolve_raw_payload_backend() -> String {
 }
 
 fn resolve_azure_container() -> Result<String, RawPayloadStoreError> {
-    std::env::var("AZURE_STORAGE_CONTAINER")
+    std::env::var("AZURE_STORAGE_CONTAINER_INGEST")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -61,7 +61,7 @@ fn resolve_azure_container_sas_url() -> Result<String, RawPayloadStoreError> {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .or_else(resolve_account_from_connection_string);
-    let container = std::env::var("AZURE_STORAGE_CONTAINER")
+    let container = std::env::var("AZURE_STORAGE_CONTAINER_INGEST")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
@@ -408,7 +408,7 @@ fn is_azure_blob_url(url: &str) -> bool {
     lower.contains("blob.core.windows.net") || lower.contains("sig=")
 }
 
-async fn upload_raw_payload_azure(
+pub async fn upload_raw_payload_azure(
     envelope_id: Uuid,
     received_at: DateTime<Utc>,
     raw_payload: &[u8],
@@ -441,7 +441,7 @@ async fn upload_raw_payload_azure(
     Ok(to_azure_ref(&container, &path))
 }
 
-fn upload_raw_payload_azure_blocking(
+pub fn upload_raw_payload_azure_blocking(
     envelope_id: Uuid,
     received_at: DateTime<Utc>,
     raw_payload: &[u8],
@@ -494,8 +494,8 @@ mod tests {
     fn azure_upload_download_roundtrip() {
         let _guard = lock_env();
         dotenvy::dotenv().ok();
-        let backend = std::env::var("RAW_PAYLOAD_STORAGE_BACKEND")
-            .unwrap_or_else(|_| "supabase".to_string());
+        let backend =
+            std::env::var("RAW_PAYLOAD_STORAGE_BACKEND").unwrap_or_else(|_| "supabase".to_string());
         if backend.trim().to_ascii_lowercase() != "azure" {
             eprintln!("RAW_PAYLOAD_STORAGE_BACKEND is not azure; skipping.");
             return;
@@ -503,8 +503,8 @@ mod tests {
         let payload = b"azure-roundtrip-test";
         let envelope_id = Uuid::new_v4();
         let received_at = Utc::now();
-        let reference = upload_raw_payload_blocking(envelope_id, received_at, payload)
-            .expect("upload");
+        let reference =
+            upload_raw_payload_blocking(envelope_id, received_at, payload).expect("upload");
         let downloaded = download_raw_payload(&reference).expect("download");
         assert_eq!(payload.to_vec(), downloaded);
     }
@@ -513,13 +513,13 @@ mod tests {
     fn azure_connection_string_fallback_for_account() {
         let _guard = lock_env();
         let original_account = env::var("AZURE_STORAGE_ACCOUNT").ok();
-        let original_container = env::var("AZURE_STORAGE_CONTAINER").ok();
+        let original_container = env::var("AZURE_STORAGE_CONTAINER_INGEST").ok();
         let original_sas = env::var("AZURE_STORAGE_SAS_TOKEN").ok();
         let original_conn = env::var("AZURE_STORAGE_CONNECTION_STRING_INGEST").ok();
         let original_container_sas_url = env::var("AZURE_STORAGE_CONTAINER_SAS_URL").ok();
 
         env::remove_var("AZURE_STORAGE_ACCOUNT");
-        env::set_var("AZURE_STORAGE_CONTAINER", "ingestion-raw");
+        env::set_var("AZURE_STORAGE_CONTAINER_INGEST", "ingestion-raw");
         env::set_var("AZURE_STORAGE_SAS_TOKEN", "sig=test");
         env::remove_var("AZURE_STORAGE_CONTAINER_SAS_URL");
         env::set_var(
@@ -538,8 +538,8 @@ mod tests {
             None => env::remove_var("AZURE_STORAGE_ACCOUNT"),
         }
         match original_container {
-            Some(value) => env::set_var("AZURE_STORAGE_CONTAINER", value),
-            None => env::remove_var("AZURE_STORAGE_CONTAINER"),
+            Some(value) => env::set_var("AZURE_STORAGE_CONTAINER_INGEST", value),
+            None => env::remove_var("AZURE_STORAGE_CONTAINER_INGEST"),
         }
         match original_sas {
             Some(value) => env::set_var("AZURE_STORAGE_SAS_TOKEN", value),

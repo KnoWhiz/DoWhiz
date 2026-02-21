@@ -444,7 +444,10 @@ pub(super) async fn build_envelope(
     let raw_payload_ref = if raw_payload.is_empty() {
         None
     } else {
-        Some(raw_payload_store::upload_raw_payload(envelope_id, received_at, raw_payload).await?)
+        Some(
+            raw_payload_store::upload_raw_payload_azure(envelope_id, received_at, raw_payload)
+                .await?,
+        )
     };
     Ok(IngestionEnvelope {
         envelope_id,
@@ -478,7 +481,7 @@ pub(super) fn build_envelope_blocking(
     let raw_payload_ref = if raw_payload.is_empty() {
         None
     } else {
-        Some(raw_payload_store::upload_raw_payload_blocking(
+        Some(raw_payload_store::upload_raw_payload_azure_blocking(
             envelope_id,
             received_at,
             raw_payload,

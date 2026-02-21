@@ -1,16 +1,20 @@
 ```mermaid
 flowchart TD
-  A[Input: external message] --> B{Ingress type}
-  B -->|Email/Postmark| C1[HTTP /postmark/inbound]
-  B -->|Slack Events| C2[HTTP /slack/events]
-  B -->|BlueBubbles| C3[HTTP /bluebubbles/webhook]
-  B -->|SMS/Twilio| C4[HTTP /sms/twilio]
-  B -->|Discord WS| C5[Discord Gateway]
-  B -->|Telegram| C6[HTTP /telegram/webhook]
-  B -->|Google Docs| C7[Docs Poller]
-  B -->|WhatsApp| C8[HTTP /whatsapp/webhook]
+  A[Input: external message] --> B{Ingress runtime}
+  B -->|Rust inbound gateway| C{Ingress type}
+  B -->|Azure Function (email only)| AZ1[HTTP /api/postmark/inbound]
+
+  C -->|Email/Postmark| C1[HTTP /postmark/inbound]
+  C -->|Slack Events| C2[HTTP /slack/events]
+  C -->|BlueBubbles| C3[HTTP /bluebubbles/webhook]
+  C -->|SMS/Twilio| C4[HTTP /sms/twilio]
+  C -->|Discord WS| C5[Discord Gateway]
+  C -->|Telegram| C6[HTTP /telegram/webhook]
+  C -->|Google Docs| C7[Docs Poller]
+  C -->|WhatsApp| C8[HTTP /whatsapp/webhook]
 
   C1 --> D1{Verify token?}
+  AZ1 --> D1
   C2 --> D2{URL verification?}
   C3 --> D3{Verify token?}
   C4 --> D4{Verify Twilio signature?}
@@ -19,6 +23,7 @@ flowchart TD
   C8 --> D8{Webhook verify?}
 
   D1 -->|fail| X1[401/400]
+  D1 -->|ok| E1[Parse Postmark payload]
   D2 -->|yes| X2[return challenge]
   D2 -->|no| E2
   D3 -->|fail| X1
@@ -27,7 +32,8 @@ flowchart TD
   D5 -->|yes| E5
   D8 -->|yes| X5[return challenge]
   D8 -->|no| E8
-  E1[Parse Postmark payload] --> F1[Extract service address]
+
+  E1 --> F1[Extract service address]
   E2[Parse Slack payload] --> F2[Extract team_id]
   E3[Parse BlueBubbles payload] --> F3[Extract chat_guid]
   E4[Parse SMS form] --> F4[Extract To/From]
@@ -36,7 +42,6 @@ flowchart TD
   E7[Build GoogleDocs InboundMessage] --> F7[doc_id]
   E8[Parse WhatsApp payload] --> F8[Extract phone_number]
 
-  C1 --> E1
   C2 --> E2
   C3 --> E3
   C4 --> E4
@@ -59,9 +64,9 @@ flowchart TD
 
   H --> I[Build IngestionEnvelope]
   I --> J[Compute dedupe_key]
-  J --> K[Store raw payload (Supabase)]
-  K --> L[Enqueue ingestion_queue (Postgres, dedupe key)]
-  L --> M[worker poll claim_next by employee_id]
+  J --> K[Store raw payload (Azure Blob)]
+  K --> L[Enqueue ingestion queue (Service Bus)]
+  L --> M[worker poll shared queue (filter by employee_id)]
   M --> O[process_ingestion_envelope]
 
   O --> P{Channel branch}

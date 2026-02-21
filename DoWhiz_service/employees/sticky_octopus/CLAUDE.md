@@ -100,8 +100,7 @@ Required in `.env`:
 Replies are sent from the inbound service address detected in the received email.
 
 For Codex AI:
-- `AZURE_OPENAI_API_KEY_BACKUP`, `AZURE_OPENAI_ENDPOINT_BACKUP`
-- `CODEX_MODEL` - Model name
+- `AZURE_OPENAI_API_KEY_BACKUP`
 - `CODEX_DISABLED=1` - Bypass Codex (uses placeholder replies)
 
 Scheduler tuning:

@@ -5,8 +5,8 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use support::{
-    build_params, create_workspace, write_fake_codex, write_fake_gh, EnvGuard, EnvUnsetGuard,
-    FakeCodexMode, TempDir, ENV_MUTEX,
+    build_params, create_workspace, write_fake_claude, write_fake_codex, write_fake_gh, EnvGuard,
+    EnvUnsetGuard, FakeClaudeMode, FakeCodexMode, TempDir, ENV_MUTEX,
 };
 
 fn env_enabled(key: &str) -> bool {
@@ -40,7 +40,7 @@ fn run_task_success_with_fake_codex() {
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
-        ("CODEX_MODEL", "test-model"),
+        ("CODEX_MODEL", "override-model"),
         ("GH_AUTH_DISABLED", "1"),
     ]);
 
@@ -51,8 +51,102 @@ fn run_task_success_with_fake_codex() {
 
     let config_path = home_dir.join(".codex").join("config.toml");
     let config = fs::read_to_string(config_path).unwrap();
-    assert!(config.contains("model = \"test-model\""));
-    assert!(config.contains("https://example.azure.com/openai/v1"));
+    assert!(config.contains("model = \"gpt-5.2-codex\""));
+    assert!(config.contains(
+        "https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1"
+    ));
+    assert!(!config.contains("model = \"override-model\""));
+    assert!(!config.contains("https://example.azure.com/openai/v1"));
+}
+
+#[test]
+#[cfg(unix)]
+fn run_task_skips_yolo_without_bypass() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("codex_task_no_yolo").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let home_dir = temp.path.join("home");
+    let bin_dir = temp.path.join("bin");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_fake_codex(&bin_dir, FakeCodexMode::EnsureNoYolo).unwrap();
+
+    let old_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), old_path);
+    let _env = EnvGuard::set(&[
+        ("HOME", home_dir.to_str().unwrap()),
+        ("PATH", &new_path),
+        ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("CODEX_BYPASS_SANDBOX", "0"),
+        ("GH_AUTH_DISABLED", "1"),
+    ]);
+
+    let params = build_params(&workspace);
+    let result = run_task(&params).unwrap();
+    assert!(result.reply_html_path.exists());
+    assert!(result.reply_attachments_dir.is_dir());
+}
+
+#[test]
+#[cfg(unix)]
+fn run_task_uses_yolo_with_bypass() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("codex_task_yolo").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let home_dir = temp.path.join("home");
+    let bin_dir = temp.path.join("bin");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_fake_codex(&bin_dir, FakeCodexMode::EnsureYolo).unwrap();
+
+    let old_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), old_path);
+    let _env = EnvGuard::set(&[
+        ("HOME", home_dir.to_str().unwrap()),
+        ("PATH", &new_path),
+        ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("CODEX_BYPASS_SANDBOX", "1"),
+        ("GH_AUTH_DISABLED", "1"),
+    ]);
+
+    let params = build_params(&workspace);
+    let result = run_task(&params).unwrap();
+    assert!(result.reply_html_path.exists());
+    assert!(result.reply_attachments_dir.is_dir());
+}
+
+#[test]
+#[cfg(unix)]
+fn run_task_passes_add_dir_for_gh_config() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("codex_task_add_dir").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let home_dir = temp.path.join("home");
+    let bin_dir = temp.path.join("bin");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_fake_codex(&bin_dir, FakeCodexMode::EnsureAddDir).unwrap();
+
+    let gh_config_dir = home_dir.join(".config").join("gh");
+    let expected_add_dir = gh_config_dir.to_str().unwrap();
+
+    let old_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), old_path);
+    let _env = EnvGuard::set(&[
+        ("HOME", home_dir.to_str().unwrap()),
+        ("PATH", &new_path),
+        ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("GH_AUTH_DISABLED", "1"),
+        ("EXPECTED_ADD_DIR", expected_add_dir),
+    ]);
+
+    let params = build_params(&workspace);
+    let result = run_task(&params).unwrap();
+    assert!(result.reply_html_path.exists());
+    assert!(result.reply_attachments_dir.is_dir());
 }
 
 #[test]
@@ -112,6 +206,78 @@ fn run_task_reports_codex_failure() {
         err,
         RunTaskError::CodexFailed {
             status: Some(2),
+            ..
+        }
+    ));
+}
+
+#[test]
+#[cfg(unix)]
+fn run_task_times_out_with_codex() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("codex_task_timeout").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let home_dir = temp.path.join("home");
+    let bin_dir = temp.path.join("bin");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_fake_codex(&bin_dir, FakeCodexMode::Sleep).unwrap();
+
+    let old_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), old_path);
+    let _env = EnvGuard::set(&[
+        ("HOME", home_dir.to_str().unwrap()),
+        ("PATH", &new_path),
+        ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("GH_AUTH_DISABLED", "1"),
+        ("RUN_TASK_TIMEOUT_SECS", "1"),
+        ("SLEEP_SECS", "2"),
+    ]);
+
+    let params = build_params(&workspace);
+    let err = run_task(&params).unwrap_err();
+    assert!(matches!(
+        err,
+        RunTaskError::CommandTimeout {
+            command: "codex",
+            timeout_secs: 1,
+            ..
+        }
+    ));
+}
+
+#[test]
+#[cfg(unix)]
+fn run_task_times_out_with_claude() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("claude_task_timeout").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let home_dir = temp.path.join("home");
+    let bin_dir = temp.path.join("bin");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_fake_claude(&bin_dir, FakeClaudeMode::Sleep).unwrap();
+
+    let old_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), old_path);
+    let _env = EnvGuard::set(&[
+        ("HOME", home_dir.to_str().unwrap()),
+        ("PATH", &new_path),
+        ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("RUN_TASK_TIMEOUT_SECS", "1"),
+        ("SLEEP_SECS", "2"),
+    ]);
+
+    let mut params = build_params(&workspace);
+    params.runner = "claude".to_string();
+    let err = run_task(&params).unwrap_err();
+    assert!(matches!(
+        err,
+        RunTaskError::CommandTimeout {
+            command: "claude",
+            timeout_secs: 1,
             ..
         }
     ));
@@ -328,7 +494,6 @@ fn run_task_real_codex_e2e_when_enabled() {
     }
 
     require_env("AZURE_OPENAI_API_KEY_BACKUP");
-    require_env("AZURE_OPENAI_ENDPOINT_BACKUP");
 
     let temp = TempDir::new("codex_task_real_e2e").unwrap();
     let workspace = create_workspace(&temp.path).unwrap();
@@ -337,8 +502,7 @@ fn run_task_real_codex_e2e_when_enabled() {
     fs::create_dir_all(&home_dir).unwrap();
     let _env = EnvGuard::set(&[("HOME", home_dir.to_str().unwrap())]);
 
-    let mut params = build_params(&workspace);
-    params.model_name = env::var("CODEX_MODEL").unwrap_or_default();
+    let params = build_params(&workspace);
 
     let result = run_task(&params).unwrap_or_else(|err| {
         panic!("Real Codex E2E test failed: {err}");

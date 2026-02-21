@@ -1,3 +1,5 @@
+mod test_support;
+
 use scheduler_module::collaboration_store::CollaborationStore;
 use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
@@ -80,9 +82,11 @@ fn test_employee_directory() -> (EmployeeProfile, EmployeeDirectory) {
 
 #[test]
 fn inbound_email_html_is_sanitized() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    dotenvy::dotenv().ok();
-    let ingestion_db_url =
-        std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
+    let Some(ingestion_db_url) =
+        test_support::require_supabase_db_url("inbound_email_html_is_sanitized")
+    else {
+        return Ok(());
+    };
 
     let temp = TempDir::new()?;
     let root = temp.path();

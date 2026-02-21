@@ -1,4 +1,6 @@
-use mockito::{Matcher, Server};
+mod test_support;
+
+use mockito::Matcher;
 use scheduler_module::{
     channel::Channel, RunTaskTask, Scheduler, SchedulerError, TaskExecution, TaskExecutor, TaskKind,
 };
@@ -52,7 +54,11 @@ fn success_body(to: &str) -> String {
 fn run_task_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Error>> {
     let _lock = ENV_MUTEX.lock().unwrap();
 
-    let mut server = Server::new();
+    let Some(mut server) =
+        test_support::start_mockito_server("run_task_failure_retries_and_notifies")
+    else {
+        return Ok(());
+    };
     let admin_addr = "admin@example.com";
     let user_addr = "user@example.com";
 

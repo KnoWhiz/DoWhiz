@@ -1,3 +1,5 @@
+mod test_support;
+
 use mockito::{Matcher, Server};
 use scheduler_module::collaboration_store::CollaborationStore;
 use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
@@ -274,7 +276,9 @@ fn secrets_persist_across_workspaces_and_load(
 
     let old_path = env::var("PATH").unwrap_or_default();
     let new_path = format!("{}:{}", bin_root.display(), old_path);
-    let mut server = Server::new();
+    let Some(mut server) = test_support::start_mockito_server("secrets_e2e") else {
+        return Ok(());
+    };
     let mock_response = json!({
         "ErrorCode": 0,
         "Message": "OK",
@@ -304,9 +308,11 @@ fn secrets_persist_across_workspaces_and_load(
     ]);
     let _unset = EnvUnsetGuard::remove(&[env_key]);
 
-    dotenvy::dotenv().ok();
-    let ingestion_db_url =
-        std::env::var("SUPABASE_DB_URL").expect("SUPABASE_DB_URL required for tests");
+    let Some(ingestion_db_url) =
+        test_support::require_supabase_db_url("secrets_e2e")
+    else {
+        return Ok(());
+    };
     let (employee_profile, employee_directory) = test_employee_directory();
     let config = ServiceConfig {
         host: "127.0.0.1".to_string(),

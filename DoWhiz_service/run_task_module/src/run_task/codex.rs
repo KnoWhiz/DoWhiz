@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::constants::{
-    CODEX_CONFIG_BLOCK_TEMPLATE, CODEX_CONFIG_MARKER, DOCKER_CODEX_HOME_DIR, DOCKER_WORKSPACE_DIR,
+    CODEX_BASE_URL, CODEX_CONFIG_BLOCK_TEMPLATE, CODEX_CONFIG_MARKER, CODEX_MODEL_NAME,
+    CODEX_SANDBOX_MODE, DOCKER_CODEX_HOME_DIR, DOCKER_WORKSPACE_DIR,
 };
 use super::docker::{docker_cli_available, ensure_docker_image_available};
 use super::env::{env_enabled, read_env_list, read_env_trimmed};
@@ -14,7 +15,7 @@ use super::github_auth::{ensure_github_cli_auth, resolve_github_auth};
 use super::prompt::{build_prompt, load_memory_context};
 use super::scheduled::{extract_scheduled_tasks, extract_scheduler_actions};
 use super::types::{RunTaskOutput, RunTaskRequest};
-use super::utils::tail_string;
+use super::utils::{run_command_with_timeout, run_task_timeout, tail_string};
 use super::workspace::{canonicalize_dir, workspace_path_in_container};
 
 pub(super) fn run_codex_task(
@@ -25,7 +26,7 @@ pub(super) fn run_codex_task(
 ) -> Result<RunTaskOutput, RunTaskError> {
     super::env::load_env_sources(request.workspace_dir)?;
     let docker_image = read_env_trimmed("RUN_TASK_DOCKER_IMAGE");
-    let docker_requested = docker_image.is_some() || env_enabled("RUN_TASK_USE_DOCKER");
+    let docker_requested = env_enabled("RUN_TASK_USE_DOCKER");
     let docker_available = docker_requested && docker_cli_available();
     let docker_required = env_enabled("RUN_TASK_DOCKER_REQUIRED");
     let use_docker = docker_requested && docker_available;
@@ -67,22 +68,8 @@ pub(super) fn run_codex_task(
             key: "AZURE_OPENAI_API_KEY_BACKUP",
         });
     }
-    let azure_endpoint =
-        env::var("AZURE_OPENAI_ENDPOINT_BACKUP").map_err(|_| RunTaskError::MissingEnv {
-            key: "AZURE_OPENAI_ENDPOINT_BACKUP",
-        })?;
-    if azure_endpoint.trim().is_empty() {
-        return Err(RunTaskError::MissingEnv {
-            key: "AZURE_OPENAI_ENDPOINT_BACKUP",
-        });
-    }
-
-    let model_name = if request.model_name.trim().is_empty() {
-        env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string())
-    } else {
-        request.model_name.to_string()
-    };
-
+    let azure_endpoint = normalize_azure_endpoint(CODEX_BASE_URL);
+    let model_name = CODEX_MODEL_NAME.to_string();
     let sandbox_mode = codex_sandbox_mode();
     // Bypass sandbox for GoogleDocs tasks to allow network access for Google APIs
     let channel_lower = request.channel.to_lowercase();
@@ -90,25 +77,15 @@ pub(super) fn run_codex_task(
     // Also bypass sandbox if workspace has .google_access_token (indicates Google Docs artifacts)
     let has_google_token = request.workspace_dir.join(".google_access_token").exists();
     let bypass_sandbox = codex_bypass_sandbox() || use_docker || is_google_docs || has_google_token;
+    let add_dirs = codex_add_dirs(request.workspace_dir, use_docker)?;
     if use_docker {
         let codex_home = host_workspace_dir
             .as_ref()
             .map(|dir| dir.join(DOCKER_CODEX_HOME_DIR))
             .unwrap_or_else(|| request.workspace_dir.join(DOCKER_CODEX_HOME_DIR));
-        ensure_codex_config_at(
-            &model_name,
-            &azure_endpoint,
-            &codex_home,
-            Path::new(DOCKER_WORKSPACE_DIR),
-            &sandbox_mode,
-        )?;
+        ensure_codex_config_at(&codex_home, Path::new(DOCKER_WORKSPACE_DIR))?;
     } else {
-        ensure_codex_config(
-            &model_name,
-            &azure_endpoint,
-            request.workspace_dir,
-            &sandbox_mode,
-        )?;
+        ensure_codex_config(request.workspace_dir)?;
     }
     ensure_github_cli_auth(&github_auth)?;
 
@@ -125,6 +102,7 @@ pub(super) fn run_codex_task(
         request.channel,
     );
 
+    let timeout = run_task_timeout();
     let output = if use_docker {
         ensure_docker_image_available(&docker_image)?;
         let host_workspace_dir = host_workspace_dir
@@ -208,6 +186,9 @@ pub(super) fn run_codex_task(
         if bypass_sandbox {
             cmd.arg("--yolo");
         }
+        for add_dir in &add_dirs {
+            cmd.arg("--add-dir").arg(add_dir);
+        }
         cmd.arg("--skip-git-repo-check")
             .arg("-m")
             .arg(&model_name)
@@ -223,18 +204,21 @@ pub(super) fn run_codex_task(
             .arg(DOCKER_WORKSPACE_DIR)
             .arg(prompt);
 
-        match cmd.output() {
+        match run_command_with_timeout(cmd, timeout, "docker run") {
             Ok(output) => output,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            Err(RunTaskError::Io(err)) if err.kind() == io::ErrorKind::NotFound => {
                 return Err(RunTaskError::DockerNotFound)
             }
-            Err(err) => return Err(RunTaskError::Io(err)),
+            Err(err) => return Err(err),
         }
     } else {
         let mut cmd = Command::new("codex");
         cmd.arg("exec");
         if bypass_sandbox {
             cmd.arg("--yolo");
+        }
+        for add_dir in &add_dirs {
+            cmd.arg("--add-dir").arg(add_dir);
         }
         cmd.arg("--skip-git-repo-check")
             .arg("-m")
@@ -251,6 +235,7 @@ pub(super) fn run_codex_task(
             .arg(request.workspace_dir)
             .arg(prompt)
             .env("AZURE_OPENAI_API_KEY_BACKUP", api_key)
+            .env("AZURE_OPENAI_ENDPOINT_BACKUP", &azure_endpoint)
             .current_dir(request.workspace_dir);
         // Extend PATH with DoWhiz bin directory for tools like google-docs
         let current_path = env::var("PATH").unwrap_or_default();
@@ -285,12 +270,12 @@ pub(super) fn run_codex_task(
             cmd.env("GIT_TERMINAL_PROMPT", "0");
         }
 
-        match cmd.output() {
+        match run_command_with_timeout(cmd, timeout, "codex") {
             Ok(output) => output,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            Err(RunTaskError::Io(err)) if err.kind() == io::ErrorKind::NotFound => {
                 return Err(RunTaskError::CodexNotFound)
             }
-            Err(err) => return Err(RunTaskError::Io(err)),
+            Err(err) => return Err(err),
         }
     };
 
@@ -334,30 +319,13 @@ pub(super) fn run_codex_task(
     })
 }
 
-fn ensure_codex_config(
-    model_name: &str,
-    azure_endpoint: &str,
-    workspace_dir: &Path,
-    sandbox_mode: &str,
-) -> Result<(), RunTaskError> {
+fn ensure_codex_config(workspace_dir: &Path) -> Result<(), RunTaskError> {
     let home = env::var("HOME").map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
     let config_dir = PathBuf::from(home).join(".codex");
-    ensure_codex_config_at(
-        model_name,
-        azure_endpoint,
-        &config_dir,
-        workspace_dir,
-        sandbox_mode,
-    )
+    ensure_codex_config_at(&config_dir, workspace_dir)
 }
 
-fn ensure_codex_config_at(
-    model_name: &str,
-    azure_endpoint: &str,
-    config_dir: &Path,
-    trust_workspace_dir: &Path,
-    sandbox_mode: &str,
-) -> Result<(), RunTaskError> {
+fn ensure_codex_config_at(config_dir: &Path, trust_workspace_dir: &Path) -> Result<(), RunTaskError> {
     let config_path = config_dir.join("config.toml");
     let config_dir = config_path.parent().ok_or(RunTaskError::InvalidPath {
         label: "codex_config_dir",
@@ -366,11 +334,7 @@ fn ensure_codex_config_at(
     })?;
     fs::create_dir_all(config_dir)?;
 
-    let endpoint = normalize_azure_endpoint(azure_endpoint);
-    let block = CODEX_CONFIG_BLOCK_TEMPLATE
-        .replace("{model_name}", model_name)
-        .replace("{azure_endpoint}", &endpoint)
-        .replace("{sandbox_mode}", sandbox_mode);
+    let block = CODEX_CONFIG_BLOCK_TEMPLATE;
 
     let existing = if config_path.exists() {
         fs::read_to_string(&config_path)?
@@ -406,11 +370,26 @@ fn toml_escape(value: &str) -> String {
 }
 
 fn codex_sandbox_mode() -> String {
-    env::var("CODEX_SANDBOX").unwrap_or_else(|_| "workspace-write".to_string())
+    CODEX_SANDBOX_MODE.to_string()
 }
 
 fn codex_bypass_sandbox() -> bool {
-    env_enabled("CODEX_BYPASS_SANDBOX") || env_enabled("CODEX_DANGEROUSLY_BYPASS_SANDBOX")
+    matches!(env::var("CODEX_BYPASS_SANDBOX"), Ok(value) if value.trim() == "1")
+}
+
+fn codex_add_dirs(workspace_dir: &Path, use_docker: bool) -> Result<Vec<String>, RunTaskError> {
+    let mut add_dirs = Vec::new();
+    if use_docker {
+        let gh_config_dir = workspace_dir.join(".config").join("gh");
+        fs::create_dir_all(&gh_config_dir)?;
+        add_dirs.push(format!("{}/.config/gh", DOCKER_WORKSPACE_DIR));
+    } else {
+        let home = env::var("HOME").map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
+        let gh_config_dir = PathBuf::from(home).join(".config").join("gh");
+        fs::create_dir_all(&gh_config_dir)?;
+        add_dirs.push(gh_config_dir.to_string_lossy().into_owned());
+    }
+    Ok(add_dirs)
 }
 
 fn normalize_azure_endpoint(endpoint: &str) -> String {

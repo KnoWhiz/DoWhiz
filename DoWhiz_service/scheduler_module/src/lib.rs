@@ -14,6 +14,7 @@ pub mod service_bus_queue;
 pub mod slack_store;
 pub(crate) mod thread_state;
 
+pub mod account_store;
 pub mod blob_store;
 pub mod index_store;
 pub mod memory_diff;
