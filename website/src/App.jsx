@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import oliverImg from './assets/Oliver.jpg';
+
+// Supabase client
+const supabase = createClient(
+  'https://resmseutzmwumflevfqw.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlc21zZXV0em13dW1mbGV2ZnF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAxNTQ1MjIsImV4cCI6MjA4NTczMDUyMn0.-QMndwi4m8nBtjMeS5WbDmrHZSe2l1UFY-UQJCl0Frc'
+);
 import miniMouseImg from './assets/Mini-Mouse.jpg';
 import stickyOctopusImg from './assets/Sticky-Octopus.jpg';
 import skyDragonImg from './assets/Sky-Dragon.jpg';
@@ -281,6 +288,37 @@ function MouseField({ theme }) {
 function App() {
   const [theme, setTheme] = useState(() => getThemeForLocalTime());
   const [enableMouseField, setEnableMouseField] = useState(false);
+  const [user, setUser] = useState(null);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const userMenuRef = useRef(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+        setShowUserMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Check for Supabase session on load
+  useEffect(() => {
+    console.log('App: Checking for Supabase session...');
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log('App: getSession result:', session);
+      console.log('App: User:', session?.user);
+      setUser(session?.user ?? null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('App: Auth state change:', event, session?.user);
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     let timeoutId;
@@ -564,6 +602,48 @@ function App() {
                   </svg>
                   <span>Contact</span>
                 </a>
+                {user ? (
+                  <div className="user-menu-container" ref={userMenuRef}>
+                    <div className="user-profile-btn" onClick={() => setShowUserMenu(!showUserMenu)}>
+                      <img
+                        src={user.user_metadata?.avatar_url || user.user_metadata?.picture}
+                        alt={user.user_metadata?.full_name || user.email}
+                        className="user-avatar"
+                      />
+                      <span className="user-name">{user.user_metadata?.full_name?.split(' ')[0] || user.email?.split('@')[0]}</span>
+                    </div>
+                    {showUserMenu && (
+                      <div className="user-dropdown">
+                        <a href="/auth/index.html" className="dropdown-item">
+                          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" strokeWidth="2" fill="none">
+                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                          </svg>
+                          Integrations
+                        </a>
+                        <button className="dropdown-item" onClick={async () => {
+                          await supabase.auth.signOut();
+                          setUser(null);
+                          setShowUserMenu(false);
+                        }}>
+                          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" strokeWidth="2" fill="none">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                            <polyline points="16 17 21 12 16 7"/>
+                            <line x1="21" y1="12" x2="9" y2="12"/>
+                          </svg>
+                          Sign Out
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <a className="btn-small" href="/auth/index.html" aria-label="Sign In">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                    <span>Sign In</span>
+                  </a>
+                )}
               </div>
             </div>
           </div>

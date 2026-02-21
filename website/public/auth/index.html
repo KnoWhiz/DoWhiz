@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Sign in to DoWhiz to manage your digital employee integrations." />
+    <link rel="icon" type="image/svg+xml" href="/do-whiz-mark.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="stylesheet" href="/legal.css" />
+    <title>Sign In | DoWhiz</title>
+    <style>
+      .auth-container {
+        max-width: 400px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+      .auth-form {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      .auth-input {
+        padding: 0.75rem 1rem;
+        border: 1px solid var(--border, #333);
+        border-radius: 8px;
+        font-size: 1rem;
+        background: var(--surface, #1a1a1a);
+        color: var(--text, #fff);
+      }
+      .auth-input:focus {
+        outline: none;
+        border-color: var(--accent, #38bdf8);
+      }
+      .auth-btn {
+        padding: 0.75rem 1.5rem;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .auth-btn-primary {
+        background: linear-gradient(135deg, #38bdf8, #6366f1);
+        color: white;
+      }
+      .auth-btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+      }
+      .auth-btn-oauth {
+        background: var(--surface, #1a1a1a);
+        border: 1px solid var(--border, #333);
+        color: var(--text, #fff);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+      }
+      .auth-btn-oauth:hover {
+        border-color: var(--accent, #38bdf8);
+      }
+      .auth-divider {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin: 1rem 0;
+        color: var(--text-muted, #888);
+      }
+      .auth-divider::before,
+      .auth-divider::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: var(--border, #333);
+      }
+      .auth-message {
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+      }
+      .auth-message.error {
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        color: #ef4444;
+      }
+      .auth-message.success {
+        background: rgba(34, 197, 94, 0.1);
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        color: #22c55e;
+      }
+      .auth-toggle {
+        text-align: center;
+        margin-top: 1rem;
+        color: var(--text-muted, #888);
+      }
+      .auth-toggle a {
+        color: var(--accent, #38bdf8);
+        text-decoration: none;
+      }
+      .auth-toggle a:hover {
+        text-decoration: underline;
+      }
+      .hidden {
+        display: none !important;
+      }
+      .dashboard-section {
+        margin-top: 2rem;
+      }
+      .identifier-list {
+        list-style: none;
+        padding: 0;
+        margin: 1rem 0;
+      }
+      .identifier-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem;
+        background: var(--surface, #1a1a1a);
+        border: 1px solid var(--border, #333);
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+      }
+      .identifier-badge {
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        background: rgba(34, 197, 94, 0.2);
+        color: #22c55e;
+      }
+      .identifier-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .unlink-btn {
+        padding: 0.25rem 0.5rem;
+        border: 1px solid rgba(239, 68, 68, 0.5);
+        border-radius: 4px;
+        font-size: 0.75rem;
+        background: transparent;
+        color: #ef4444;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .unlink-btn:hover {
+        background: rgba(239, 68, 68, 0.1);
+        border-color: #ef4444;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-header">
+        <a class="brand" href="/">Do<span class="accent">Whiz</span></a>
+        <nav class="header-links">
+          <a href="/user-guide/">User Guide</a>
+          <a href="mailto:admin@dowhiz.com">Contact</a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="legal-hero">
+          <div class="eyebrow">Account</div>
+          <h1 id="page-title">Sign in to DoWhiz</h1>
+          <p class="lead" id="page-subtitle">
+            Connect your channels to sync your memo across all devices.
+          </p>
+        </section>
+
+        <div class="auth-container">
+          <!-- Message display -->
+          <div id="auth-message" class="auth-message hidden"></div>
+
+          <!-- Sign In Form -->
+          <div id="signin-form-container">
+            <form id="signin-form" class="auth-form">
+              <input type="email" id="signin-email" class="auth-input" placeholder="Email" required />
+              <input type="password" id="signin-password" class="auth-input" placeholder="Password" required />
+              <button type="submit" class="auth-btn auth-btn-primary">Sign In</button>
+            </form>
+
+            <div class="auth-divider">or</div>
+
+            <button id="google-signin" class="auth-btn auth-btn-oauth" style="width: 100%;">
+              <svg width="20" height="20" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+              Continue with Google
+            </button>
+
+            <p class="auth-toggle">
+              Don't have an account? <a href="#" id="show-signup">Sign up</a>
+            </p>
+          </div>
+
+          <!-- Sign Up Form -->
+          <div id="signup-form-container" class="hidden">
+            <form id="signup-form" class="auth-form">
+              <input type="email" id="signup-email" class="auth-input" placeholder="Email" required />
+              <input type="password" id="signup-password" class="auth-input" placeholder="Password (min 6 characters)" required minlength="6" />
+              <button type="submit" class="auth-btn auth-btn-primary">Sign Up</button>
+            </form>
+
+            <p class="auth-toggle">
+              Already have an account? <a href="#" id="show-signin">Sign in</a>
+            </p>
+          </div>
+
+          <!-- Dashboard (shown after auth) -->
+          <div id="dashboard-container" class="hidden">
+            <section class="legal-card dashboard-section">
+              <h2>Your Account</h2>
+              <p>Account ID: <code id="account-id">Loading...</code></p>
+              <p>Email: <code id="user-email">Loading...</code></p>
+            </section>
+
+            <section class="legal-card dashboard-section">
+              <h2>Linked Channels</h2>
+              <p>These channels are connected to your unified memo.</p>
+              <ul id="identifier-list" class="identifier-list">
+                <li class="identifier-item">Loading...</li>
+              </ul>
+            </section>
+
+            <section class="legal-card dashboard-section">
+              <h2>Your Memo</h2>
+              <p>This is your unified memo synced across all channels.</p>
+              <div id="memo-container" style="margin-top: 1rem;">
+                <pre id="memo-content" style="
+                  background: var(--surface, #1a1a1a);
+                  border: 1px solid var(--border, #333);
+                  border-radius: 8px;
+                  padding: 1rem;
+                  white-space: pre-wrap;
+                  word-wrap: break-word;
+                  font-family: monospace;
+                  font-size: 0.9rem;
+                  max-height: 400px;
+                  overflow-y: auto;
+                  color: var(--text, #fff);
+                ">Loading memo...</pre>
+                <button id="refresh-memo-btn" class="auth-btn auth-btn-oauth" style="margin-top: 0.5rem;">
+                  Refresh Memo
+                </button>
+              </div>
+            </section>
+
+            <section class="legal-card dashboard-section">
+              <h2>Link New Channel</h2>
+              <form id="link-form" class="auth-form">
+                <select id="link-type" class="auth-input">
+                  <option value="phone">Phone (SMS)</option>
+                  <option value="discord">Discord</option>
+                  <option value="slack">Slack</option>
+                  <option value="telegram">Telegram</option>
+                </select>
+                <input type="text" id="link-identifier" class="auth-input" placeholder="e.g., +15551234567" required />
+                <p id="link-help" style="font-size: 0.85rem; color: var(--text-muted, #888); margin: 0;">
+                  Enter your phone number with country code (e.g., +1 for US)
+                </p>
+                <button type="submit" class="auth-btn auth-btn-primary">Link Channel</button>
+              </form>
+            </section>
+
+            <button id="signout-btn" class="auth-btn auth-btn-oauth" style="width: 100%; margin-top: 2rem;">
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </main>
+
+      <footer class="page-footer">
+        <a class="back-link" href="/">Back to DoWhiz</a>
+        <span>Need help? Contact admin@dowhiz.com.</span>
+      </footer>
+    </div>
+
+    <script type="module">
+      import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+      // Configuration
+      const SUPABASE_URL = 'https://resmseutzmwumflevfqw.supabase.co';
+      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlc21zZXV0em13dW1mbGV2ZnF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAxNTQ1MjIsImV4cCI6MjA4NTczMDUyMn0.-QMndwi4m8nBtjMeS5WbDmrHZSe2l1UFY-UQJCl0Frc';
+      const DOWHIZ_API_URL = 'http://localhost:9001'; // TODO: Update for production
+
+      const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+          detectSessionInUrl: true,
+          flowType: 'implicit'
+        }
+      });
+
+      // DOM elements
+      const signinFormContainer = document.getElementById('signin-form-container');
+      const signupFormContainer = document.getElementById('signup-form-container');
+      const dashboardContainer = document.getElementById('dashboard-container');
+      const authMessage = document.getElementById('auth-message');
+      const pageTitle = document.getElementById('page-title');
+      const pageSubtitle = document.getElementById('page-subtitle');
+
+      // Show message
+      function showMessage(message, type = 'error') {
+        authMessage.textContent = message;
+        authMessage.className = `auth-message ${type}`;
+        authMessage.classList.remove('hidden');
+      }
+
+      function hideMessage() {
+        authMessage.classList.add('hidden');
+      }
+
+      // Switch between forms
+      document.getElementById('show-signup').addEventListener('click', (e) => {
+        e.preventDefault();
+        signinFormContainer.classList.add('hidden');
+        signupFormContainer.classList.remove('hidden');
+        hideMessage();
+      });
+
+      document.getElementById('show-signin').addEventListener('click', (e) => {
+        e.preventDefault();
+        signupFormContainer.classList.add('hidden');
+        signinFormContainer.classList.remove('hidden');
+        hideMessage();
+      });
+
+      // Sign in with email/password
+      document.getElementById('signin-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideMessage();
+        const email = document.getElementById('signin-email').value;
+        const password = document.getElementById('signin-password').value;
+
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+          showMessage(error.message);
+        } else {
+          await handleAuthSuccess(data.session);
+        }
+      });
+
+      // Sign up with email/password
+      document.getElementById('signup-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideMessage();
+        const email = document.getElementById('signup-email').value;
+        const password = document.getElementById('signup-password').value;
+
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) {
+          showMessage(error.message);
+        } else if (data.user && !data.session) {
+          showMessage('Check your email for a confirmation link!', 'success');
+        } else if (data.session) {
+          await handleAuthSuccess(data.session);
+        }
+      });
+
+      // Google OAuth
+      document.getElementById('google-signin').addEventListener('click', async () => {
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: { redirectTo: window.location.origin + '/auth/index.html' }
+        });
+        if (error) showMessage(error.message);
+      });
+
+      // Sign out
+      document.getElementById('signout-btn').addEventListener('click', async () => {
+        await supabase.auth.signOut();
+        window.location.reload();
+      });
+
+      // Handle successful auth
+      async function handleAuthSuccess(session) {
+        try {
+          // Create/get DoWhiz account
+          const signupRes = await fetch(`${DOWHIZ_API_URL}/auth/signup`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${session.access_token}` }
+          });
+
+          if (!signupRes.ok) {
+            const errText = await signupRes.text();
+            throw new Error(`Failed to create DoWhiz account: ${errText}`);
+          }
+
+          const accountData = await signupRes.json();
+          showDashboard(session, accountData);
+        } catch (err) {
+          showMessage(err.message);
+        }
+      }
+
+      // Show dashboard
+      async function showDashboard(session, accountData) {
+        signinFormContainer.classList.add('hidden');
+        signupFormContainer.classList.add('hidden');
+        dashboardContainer.classList.remove('hidden');
+        pageTitle.textContent = 'Your Dashboard';
+        pageSubtitle.textContent = 'Manage your linked channels and integrations.';
+
+        document.getElementById('account-id').textContent = accountData.account_id;
+        document.getElementById('user-email').textContent = session.user.email;
+
+        // Load identifiers and memo in parallel
+        await Promise.all([
+          loadIdentifiers(session.access_token),
+          loadMemo(session.access_token)
+        ]);
+      }
+
+      // Load linked identifiers
+      async function loadIdentifiers(accessToken) {
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/auth/account`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (!res.ok) throw new Error('Failed to load account');
+
+          const data = await res.json();
+          const list = document.getElementById('identifier-list');
+
+          if (data.identifiers && data.identifiers.length > 0) {
+            list.innerHTML = data.identifiers.map(id => `
+              <li class="identifier-item">
+                <span><strong>${id.identifier_type}</strong>: ${id.identifier}</span>
+                <div class="identifier-actions">
+                  <span class="identifier-badge">${id.verified ? 'Verified' : 'Pending'}</span>
+                  <button class="unlink-btn" data-type="${id.identifier_type}" data-id="${id.identifier}">Unlink</button>
+                </div>
+              </li>
+            `).join('');
+
+            // Add click handlers for unlink buttons
+            list.querySelectorAll('.unlink-btn').forEach(btn => {
+              btn.addEventListener('click', async (e) => {
+                const identifierType = e.target.dataset.type;
+                const identifier = e.target.dataset.id;
+                if (confirm(`Unlink ${identifierType}: ${identifier}?`)) {
+                  await unlinkIdentifier(accessToken, identifierType, identifier);
+                }
+              });
+            });
+          } else {
+            list.innerHTML = '<li class="identifier-item">No channels linked yet.</li>';
+          }
+        } catch (err) {
+          console.error('Failed to load identifiers:', err);
+        }
+      }
+
+      // Unlink an identifier
+      async function unlinkIdentifier(accessToken, identifierType, identifier) {
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/auth/unlink`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ identifier_type: identifierType, identifier })
+          });
+
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to unlink');
+          }
+
+          showMessage('Channel unlinked successfully!', 'success');
+          await loadIdentifiers(accessToken);
+        } catch (err) {
+          showMessage(err.message);
+        }
+      }
+
+      // Load memo content
+      async function loadMemo(accessToken) {
+        const memoContent = document.getElementById('memo-content');
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/auth/memo`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to load memo');
+          }
+
+          const data = await res.json();
+          memoContent.textContent = data.content;
+        } catch (err) {
+          console.error('Failed to load memo:', err);
+          memoContent.textContent = `Error loading memo: ${err.message}`;
+        }
+      }
+
+      // Refresh memo button
+      document.getElementById('refresh-memo-btn').addEventListener('click', async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          document.getElementById('memo-content').textContent = 'Loading...';
+          await loadMemo(session.access_token);
+        }
+      });
+
+      // Channel type placeholders and help text
+      const channelInfo = {
+        phone: {
+          placeholder: 'e.g., +15551234567',
+          help: 'Enter your phone number with country code (e.g., +1 for US)'
+        },
+        discord: {
+          placeholder: 'e.g., 123456789012345678',
+          help: 'Enter your Discord User ID (numeric). To find it: Enable Developer Mode in Discord Settings → User Settings → Advanced, then right-click your name → Copy User ID'
+        },
+        slack: {
+          placeholder: 'e.g., U08ABC1D2EF',
+          help: 'Enter your Slack Member ID. To find it: Click your profile picture → Profile → click the ⋮ menu → Copy member ID'
+        },
+        telegram: {
+          placeholder: 'e.g., 123456789',
+          help: 'Enter your Telegram numeric user ID. To find it: Message @userinfobot on Telegram and it will reply with your ID'
+        }
+      };
+
+      // Update placeholder when channel type changes
+      document.getElementById('link-type').addEventListener('change', (e) => {
+        const info = channelInfo[e.target.value];
+        document.getElementById('link-identifier').placeholder = info.placeholder;
+        document.getElementById('link-help').textContent = info.help;
+      });
+
+      // Link new channel
+      document.getElementById('link-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideMessage();
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return showMessage('Please sign in first');
+
+        const identifierType = document.getElementById('link-type').value;
+        const identifier = document.getElementById('link-identifier').value;
+
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/auth/link`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ identifier_type: identifierType, identifier })
+          });
+
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText);
+          }
+
+          showMessage('Channel linked successfully!', 'success');
+          document.getElementById('link-identifier').value = '';
+          await loadIdentifiers(session.access_token);
+        } catch (err) {
+          showMessage(err.message);
+        }
+      });
+
+      // Handle OAuth callback - manually parse hash and set session
+      async function handleOAuthCallback() {
+        const hash = window.location.hash;
+        console.log('Checking for OAuth tokens in hash...');
+
+        if (hash && hash.includes('access_token')) {
+          console.log('Found tokens in URL hash, parsing...');
+
+          // Parse the hash parameters
+          const params = new URLSearchParams(hash.substring(1));
+          const access_token = params.get('access_token');
+          const refresh_token = params.get('refresh_token');
+
+          if (access_token && refresh_token) {
+            console.log('Setting session with tokens...');
+
+            // Manually set the session
+            const { data, error } = await supabase.auth.setSession({
+              access_token,
+              refresh_token
+            });
+
+            console.log('setSession result:', data);
+            if (error) console.error('setSession error:', error);
+
+            if (data.session) {
+              console.log('Session established! User:', data.session.user.email);
+
+              // Create DoWhiz account if needed
+              try {
+                const res = await fetch(`${DOWHIZ_API_URL}/auth/signup`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${data.session.access_token}` }
+                });
+                console.log('DoWhiz signup response:', res.status);
+              } catch (err) {
+                console.error('Failed to create DoWhiz account:', err);
+              }
+
+              // Redirect to home page after OAuth
+              window.location.href = '/';
+            } else {
+              showMessage('Failed to establish session. Please try again.');
+            }
+          }
+          return true; // OAuth callback was handled
+        }
+        return false; // No OAuth callback
+      }
+
+      // Initialize page - check for OAuth callback or existing session
+      async function initPage() {
+        const wasOAuthCallback = await handleOAuthCallback();
+
+        // If this was an OAuth callback, we've already redirected, so stop here
+        if (wasOAuthCallback) return;
+
+        // Check for existing session (user came directly to this page)
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (session) {
+          console.log('Existing session found, showing dashboard...');
+          // User is already logged in - show the dashboard
+          await handleAuthSuccess(session);
+        }
+        // Otherwise, show sign-in form (default state)
+      }
+
+      initPage();
+    </script>
+  </body>
+</html>

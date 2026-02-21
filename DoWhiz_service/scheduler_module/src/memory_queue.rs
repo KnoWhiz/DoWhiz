@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crossbeam_channel::{bounded, Sender};
-use tracing::{info, warn};
+use tracing::info;
 use uuid::Uuid;
 
 use crate::blob_store::get_blob_store;

@@ -81,10 +81,12 @@ impl AccountStore {
 
         let manager = PostgresConnectionManager::new(config, tls);
         let pool = Pool::builder()
-            .max_size(50)
-            .min_idle(Some(2))
-            .connection_timeout(std::time::Duration::from_secs(5))
-            .idle_timeout(Some(std::time::Duration::from_secs(60)))
+            .max_size(10)
+            .min_idle(Some(0))
+            .connection_timeout(std::time::Duration::from_secs(10))
+            .idle_timeout(Some(std::time::Duration::from_secs(30)))
+            .max_lifetime(Some(std::time::Duration::from_secs(300)))
+            .test_on_check_out(true)
             .error_handler(Box::new(LoggingErrorHandler))
             .build(manager)?;
 
@@ -195,10 +197,11 @@ impl AccountStore {
             }
         }
 
+        // TODO: Auto-verify for MVP. Add real verification (SMS/email codes) later.
         let row = conn.query_one(
             "INSERT INTO account_identifiers (id, account_id, identifier_type, identifier, verified, created_at)
-             VALUES ($1, $2, $3, $4, false, NOW())
-             ON CONFLICT (identifier_type, identifier) DO UPDATE SET account_id = $2
+             VALUES ($1, $2, $3, $4, true, NOW())
+             ON CONFLICT (identifier_type, identifier) DO UPDATE SET account_id = $2, verified = true
              RETURNING id, account_id, identifier_type, identifier, verified, created_at",
             &[&id, &account_id, &identifier_type, &identifier],
         )?;
