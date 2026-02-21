@@ -157,7 +157,120 @@
         background: rgba(239, 68, 68, 0.1);
         border-color: #ef4444;
       }
+
+      /* Light mode overrides */
+      [data-theme="light"] {
+        --bg: #f8fafc;
+        --card: rgba(255, 255, 255, 0.8);
+        --border: rgba(0, 0, 0, 0.1);
+        --text: #1e293b;
+        --muted: #64748b;
+        --surface: #ffffff;
+        --text-muted: #64748b;
+      }
+
+      [data-theme="light"] body {
+        background:
+          radial-gradient(circle at top, rgba(59, 130, 246, 0.08), transparent 55%),
+          radial-gradient(circle at 20% 70%, rgba(14, 116, 144, 0.1), transparent 60%),
+          var(--bg);
+      }
+
+      [data-theme="light"] .auth-input {
+        background: var(--surface);
+        border-color: var(--border);
+        color: var(--text);
+      }
+
+      [data-theme="light"] .auth-btn-oauth {
+        background: var(--surface);
+        border-color: var(--border);
+        color: var(--text);
+      }
+
+      [data-theme="light"] .identifier-item {
+        background: var(--surface);
+        border-color: var(--border);
+      }
+
+      [data-theme="light"] .legal-card {
+        background: var(--card);
+        border-color: var(--border);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      }
+
+      [data-theme="light"] #memo-content {
+        background: var(--surface) !important;
+        border-color: var(--border) !important;
+        color: var(--text) !important;
+      }
+
+      [data-theme="light"] .brand {
+        color: var(--text);
+      }
+
+      [data-theme="light"] .page-header {
+        border-bottom-color: var(--border);
+      }
+
+      [data-theme="light"] .page-footer {
+        border-top-color: var(--border);
+      }
+
+      [data-theme="light"] .back-link {
+        background: rgba(0, 0, 0, 0.04);
+        border-color: var(--border);
+        color: var(--text);
+      }
+
+      [data-theme="light"] .back-link:hover {
+        background: rgba(0, 0, 0, 0.08);
+      }
+
+      [data-theme="light"] code {
+        background: rgba(0, 0, 0, 0.05);
+        color: var(--text);
+      }
     </style>
+    <script>
+      // Time-based theme switching (7 AM - 7 PM = light, 7 PM - 7 AM = dark)
+      const DAY_START_HOUR = 7;
+      const NIGHT_START_HOUR = 19;
+
+      function getThemeForLocalTime() {
+        const hour = new Date().getHours();
+        return hour >= DAY_START_HOUR && hour < NIGHT_START_HOUR ? 'light' : 'dark';
+      }
+
+      function applyTheme() {
+        document.documentElement.setAttribute('data-theme', getThemeForLocalTime());
+      }
+
+      function scheduleNextThemeSwitch() {
+        const now = new Date();
+        const hour = now.getHours();
+        const next = new Date(now);
+
+        if (hour >= DAY_START_HOUR && hour < NIGHT_START_HOUR) {
+          next.setHours(NIGHT_START_HOUR, 0, 0, 0);
+        } else {
+          next.setHours(DAY_START_HOUR, 0, 0, 0);
+          if (hour >= NIGHT_START_HOUR) {
+            next.setDate(next.getDate() + 1);
+          }
+        }
+
+        const delay = Math.max(next.getTime() - now.getTime(), 0);
+        setTimeout(() => {
+          applyTheme();
+          scheduleNextThemeSwitch();
+        }, delay);
+      }
+
+      // Apply theme immediately
+      applyTheme();
+      scheduleNextThemeSwitch();
+    </script>
   </head>
   <body>
     <div class="page">
@@ -268,9 +381,9 @@
                   <option value="slack">Slack</option>
                   <option value="telegram">Telegram</option>
                 </select>
-                <input type="text" id="link-identifier" class="auth-input" placeholder="e.g., +15551234567" required />
+                <input type="text" id="link-identifier" class="auth-input" placeholder="e.g., 15551234567" required />
                 <p id="link-help" style="font-size: 0.85rem; color: var(--text-muted, #888); margin: 0;">
-                  Enter your phone number with country code (e.g., +1 for US)
+                  Enter your phone number with country code (e.g., 16309153426 for US)
                 </p>
                 <button type="submit" class="auth-btn auth-btn-primary">Link Channel</button>
               </form>
@@ -522,8 +635,8 @@
       // Channel type placeholders and help text
       const channelInfo = {
         phone: {
-          placeholder: 'e.g., +15551234567',
-          help: 'Enter your phone number with country code (e.g., +1 for US)'
+          placeholder: 'e.g., 15551234567',
+          help: 'Enter your phone number with country code (e.g., 16309153426 for US)'
         },
         discord: {
           placeholder: 'e.g., 123456789012345678',
