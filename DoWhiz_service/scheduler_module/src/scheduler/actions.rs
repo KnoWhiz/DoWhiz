@@ -85,7 +85,7 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
     }
 
     // Non-email channels use plain text reply_message.txt
-    // Email and GoogleDocs use HTML reply_email_draft.html
+    // Email and Google Workspace use HTML reply_email_draft.html
     let (reply_filename, attachments_dirname) = match task.channel {
         Channel::Slack
         | Channel::Discord
@@ -93,7 +93,7 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         | Channel::Telegram
         | Channel::WhatsApp
         | Channel::Sms => ("reply_message.txt", "reply_attachments"),
-        Channel::Email | Channel::GoogleDocs => {
+        Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
             ("reply_email_draft.html", "reply_email_attachments")
         }
     };
