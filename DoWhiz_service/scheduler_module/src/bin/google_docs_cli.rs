@@ -13,7 +13,7 @@ use std::process::exit;
 
 fn print_usage() {
     eprintln!(
-        r#"Usage: google-docs <command> [arguments]
+        r##"Usage: google-docs <command> [arguments]
 
 Commands:
   list-documents                     List all documents shared with you
@@ -25,6 +25,10 @@ Direct Edit Operations:
   apply-edit <doc_id> --find="text" --replace="new text"
   insert-text <doc_id> --after="anchor" --text="text to insert"
   delete-text <doc_id> --find="text to delete"
+
+Style Operations:
+  get-styles <doc_id>                Get existing styles from document (headings, fonts, colors)
+  set-style <doc_id> --find="text" [--color="#FF0000"] [--font="Arial"] [--size=12] [--bold] [--italic]
 
 Suggesting Mode Operations:
   mark-deletion <doc_id> --find="text to mark"
@@ -42,7 +46,12 @@ Environment Variables:
 
 Note: In sandbox environments without network access, set GOOGLE_ACCESS_TOKEN
       to a pre-generated token. This avoids the need for OAuth token refresh.
-"#
+
+Style Tips:
+  - Use get-styles first to see what styles exist in the document
+  - Match existing heading colors and fonts for consistency
+  - Color format: "#RRGGBB" (e.g., "#1B263B" for dark blue)
+"##
     );
 }
 
@@ -255,6 +264,38 @@ fn main() {
                 exit(1);
             }
             cmd_discard_suggestions(&args[2])
+        }
+        "get-styles" => {
+            if args.len() < 3 {
+                eprintln!("Error: document ID required");
+                print_usage();
+                exit(1);
+            }
+            cmd_get_styles(&args[2])
+        }
+        "set-style" => {
+            if args.len() < 3 {
+                eprintln!("Error: document ID required");
+                print_usage();
+                exit(1);
+            }
+            let find = parse_arg(&args, "--find").unwrap_or_default();
+            if find.is_empty() {
+                eprintln!("Error: --find is required");
+                exit(1);
+            }
+            let color = parse_arg(&args, "--color");
+            let font = parse_arg(&args, "--font");
+            let size = parse_arg(&args, "--size").and_then(|s| s.parse::<f64>().ok());
+            let bold = args.iter().any(|a| a == "--bold");
+            let italic = args.iter().any(|a| a == "--italic");
+            let no_bold = args.iter().any(|a| a == "--no-bold");
+            let no_italic = args.iter().any(|a| a == "--no-italic");
+
+            let bold_opt = if bold { Some(true) } else if no_bold { Some(false) } else { None };
+            let italic_opt = if italic { Some(true) } else if no_italic { Some(false) } else { None };
+
+            cmd_set_style(&args[2], &find, color.as_deref(), font.as_deref(), size, bold_opt, italic_opt)
         }
         "--help" | "-h" | "help" => {
             print_usage();
@@ -473,4 +514,99 @@ fn cmd_discard_suggestions(doc_id: &str) -> Result<String, String> {
         .map_err(|e| format!("Failed to discard suggestions: {}", e))?;
 
     Ok("Successfully discarded all suggestions (deleted blue text, restored red text)".to_string())
+}
+
+fn cmd_get_styles(doc_id: &str) -> Result<String, String> {
+    let auth = get_auth()?;
+    let adapter = GoogleDocsOutboundAdapter::new(auth);
+
+    let styles = adapter.get_document_styles(doc_id)
+        .map_err(|e| format!("Failed to get document styles: {}", e))?;
+
+    let mut output = String::new();
+    output.push_str("Document Styles:\n\n");
+
+    // Helper to format style info
+    fn format_style(name: &str, style: &Option<scheduler_module::adapters::google_docs::TextStyleInfo>) -> String {
+        match style {
+            Some(s) => {
+                let mut parts = Vec::new();
+                if let Some(c) = &s.foreground_color { parts.push(format!("color={}", c)); }
+                if let Some(f) = &s.font_family { parts.push(format!("font=\"{}\"", f)); }
+                if let Some(sz) = s.font_size { parts.push(format!("size={}pt", sz)); }
+                if let Some(true) = s.bold { parts.push("bold".to_string()); }
+                if let Some(true) = s.italic { parts.push("italic".to_string()); }
+                if parts.is_empty() {
+                    format!("{}: (default)\n", name)
+                } else {
+                    format!("{}: {}\n", name, parts.join(", "))
+                }
+            }
+            None => format!("{}: (not defined)\n", name),
+        }
+    }
+
+    output.push_str("=== Named Styles ===\n");
+    output.push_str(&format_style("Title", &styles.title));
+    output.push_str(&format_style("Subtitle", &styles.subtitle));
+    output.push_str(&format_style("Heading 1", &styles.heading_1));
+    output.push_str(&format_style("Heading 2", &styles.heading_2));
+    output.push_str(&format_style("Heading 3", &styles.heading_3));
+    output.push_str(&format_style("Heading 4", &styles.heading_4));
+    output.push_str(&format_style("Normal Text", &styles.normal_text));
+
+    output.push_str("\n=== Actual Styles Found in Document ===\n");
+    if let Some((text, style)) = &styles.heading_1_sample {
+        let preview = if text.len() > 40 { format!("{}...", &text[..40]) } else { text.clone() };
+        output.push_str(&format!("H1 Sample: \"{}\"\n", preview));
+        output.push_str(&format!("  -> {}\n", format_style("Style", &Some(style.clone())).trim()));
+    }
+    if let Some((text, style)) = &styles.heading_2_sample {
+        let preview = if text.len() > 40 { format!("{}...", &text[..40]) } else { text.clone() };
+        output.push_str(&format!("H2 Sample: \"{}\"\n", preview));
+        output.push_str(&format!("  -> {}\n", format_style("Style", &Some(style.clone())).trim()));
+    }
+    if let Some((text, style)) = &styles.heading_3_sample {
+        let preview = if text.len() > 40 { format!("{}...", &text[..40]) } else { text.clone() };
+        output.push_str(&format!("H3 Sample: \"{}\"\n", preview));
+        output.push_str(&format!("  -> {}\n", format_style("Style", &Some(style.clone())).trim()));
+    }
+
+    output.push_str("\n=== Usage Tips ===\n");
+    output.push_str("To apply consistent styles, use the colors and fonts shown above.\n");
+    output.push_str("Example: google-docs set-style <doc_id> --find=\"My Heading\" --color=\"#1B263B\" --bold\n");
+
+    Ok(output)
+}
+
+fn cmd_set_style(
+    doc_id: &str,
+    find: &str,
+    color: Option<&str>,
+    font: Option<&str>,
+    size: Option<f64>,
+    bold: Option<bool>,
+    italic: Option<bool>,
+) -> Result<String, String> {
+    let auth = get_auth()?;
+    let adapter = GoogleDocsOutboundAdapter::new(auth);
+
+    // At least one style property must be specified
+    if color.is_none() && font.is_none() && size.is_none() && bold.is_none() && italic.is_none() {
+        return Err("At least one style property must be specified (--color, --font, --size, --bold, --italic)".to_string());
+    }
+
+    adapter.set_text_style(doc_id, find, color, font, size, bold, italic)
+        .map_err(|e| format!("Failed to set style: {}", e))?;
+
+    let mut applied = Vec::new();
+    if let Some(c) = color { applied.push(format!("color={}", c)); }
+    if let Some(f) = font { applied.push(format!("font=\"{}\"", f)); }
+    if let Some(s) = size { applied.push(format!("size={}pt", s)); }
+    if let Some(true) = bold { applied.push("bold".to_string()); }
+    if let Some(false) = bold { applied.push("no-bold".to_string()); }
+    if let Some(true) = italic { applied.push("italic".to_string()); }
+    if let Some(false) = italic { applied.push("no-italic".to_string()); }
+
+    Ok(format!("Successfully applied style to \"{}\": {}", find, applied.join(", ")))
 }

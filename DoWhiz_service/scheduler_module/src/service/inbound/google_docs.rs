@@ -6,7 +6,7 @@ use tracing::{info, warn};
 
 use crate::adapters::google_docs::ActionableComment;
 use crate::channel::Channel;
-use crate::google_auth::GoogleAuth;
+use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
 use crate::index_store::IndexStore;
 use crate::user_store::{extract_emails, UserStore};
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
@@ -64,7 +64,25 @@ pub(crate) fn process_google_docs_message(
         thread_state.last_email_seq,
     )?;
 
-    if let Ok(auth) = GoogleAuth::from_env() {
+    // Use employee-specific OAuth credentials (same pattern as email processing)
+    let auth_config = GoogleAuthConfig::from_env_for_employee(Some(&config.employee_profile.id));
+    if let Ok(auth) = GoogleAuth::new(auth_config) {
+        // Write access token to workspace for agent to use
+        // (google-docs CLI will read this file since it can't access env vars in sandbox)
+        match auth.get_access_token() {
+            Ok(token) => {
+                let token_path = workspace.join(".google_access_token");
+                if let Err(e) = std::fs::write(&token_path, &token) {
+                    warn!("failed to write .google_access_token: {}", e);
+                } else {
+                    info!("wrote .google_access_token to workspace for Google Docs comment");
+                }
+            }
+            Err(e) => {
+                warn!("failed to get Google access token for workspace: {}", e);
+            }
+        }
+
         let adapter = GoogleDocsInboundAdapter::new(auth, HashSet::new());
         match adapter.read_document_content(document_id) {
             Ok(doc_content) => {

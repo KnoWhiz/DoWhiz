@@ -21,6 +21,7 @@ pub(crate) fn execute_email_send(task: &SendReplyTask) -> Result<(), SchedulerEr
         bcc: task.bcc.clone(),
         in_reply_to: task.in_reply_to.clone(),
         references: task.references.clone(),
+        reply_to: None,
     };
     let response = send_emails_module::send_email(&params)
         .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;

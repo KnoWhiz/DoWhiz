@@ -184,6 +184,7 @@ impl OutboundAdapter for PostmarkOutboundAdapter {
             bcc: message.bcc.clone(),
             in_reply_to: message.metadata.in_reply_to.clone(),
             references: message.metadata.references.clone(),
+            reply_to: message.metadata.reply_to_header.clone(),
         };
 
         // For now, if html_path is provided, use the existing send_email function

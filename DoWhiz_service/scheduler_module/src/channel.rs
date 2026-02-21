@@ -119,6 +119,8 @@ pub struct ChannelMetadata {
     pub in_reply_to: Option<String>,
     /// Email-specific: References header
     pub references: Option<String>,
+    /// Email-specific: Reply-To header (where replies should be sent)
+    pub reply_to_header: Option<String>,
     /// Slack-specific: Channel ID
     pub slack_channel_id: Option<String>,
     /// Slack-specific: Team ID
@@ -143,6 +145,29 @@ pub struct ChannelMetadata {
     pub google_docs_document_name: Option<String>,
     /// BlueBubbles-specific: Chat GUID (e.g., "iMessage;-;+1234567890")
     pub bluebubbles_chat_guid: Option<String>,
+
+    // =========================================================================
+    // Multi-channel collaboration support
+    // =========================================================================
+
+    /// Collaboration session ID linking multiple messages across channels.
+    /// When set, this message is part of a collaboration session.
+    pub collaboration_session_id: Option<String>,
+
+    /// Artifacts extracted from this message (Google Docs, GitHub PRs, etc.).
+    /// Used for linking messages to collaboration sessions.
+    pub extracted_artifacts: Option<Vec<ExtractedArtifactRef>>,
+}
+
+/// Reference to an extracted artifact (lightweight version for metadata).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtractedArtifactRef {
+    /// Type of artifact (e.g., "google_docs", "github_pr", "notion")
+    pub artifact_type: String,
+    /// External ID of the artifact
+    pub artifact_id: String,
+    /// Full URL to the artifact
+    pub url: String,
 }
 
 /// Normalized outbound message to any channel.

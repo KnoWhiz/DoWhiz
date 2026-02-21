@@ -7,7 +7,10 @@ use base64::Engine;
 use chrono::Utc;
 use tracing::{error, info, warn};
 
-use crate::channel::Channel;
+use crate::artifact_extractor::extract_artifacts_from_email;
+use crate::channel::{Channel, ExtractedArtifactRef};
+use crate::collaboration_store::CollaborationStore;
+use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
 use crate::index_store::IndexStore;
 use crate::mailbox;
 use crate::user_store::{extract_emails, UserStore};
@@ -82,7 +85,14 @@ pub fn process_inbound_payload(
         &config.employee_profile,
         config.skills_source_dir.as_deref(),
     )?;
-    let reply_from = Some(inbound_service_mailbox.formatted());
+    // Use the first configured address (verified sender) as reply_from,
+    // not the inbound address which may be receive-only (e.g., Postmark inbound hook)
+    let reply_from = config
+        .employee_profile
+        .addresses
+        .first()
+        .cloned()
+        .or_else(|| Some(inbound_service_mailbox.formatted()));
     let model_name = match config.employee_profile.model.clone() {
         Some(model) => model,
         None => {
@@ -119,6 +129,56 @@ pub fn process_inbound_payload(
         thread_key,
         thread_state.epoch
     );
+
+    // Extract artifacts (Google Docs links, etc.) from email
+    let extracted_artifacts = extract_artifacts_from_email(
+        payload.text_body.as_deref(),
+        payload.html_body.as_deref(),
+        payload.subject.as_deref(),
+    );
+
+    // If artifacts found (e.g., Google Docs links), write access token for agent
+    if !extracted_artifacts.is_empty() {
+        info!(
+            "found {} artifacts in email, writing access token to workspace",
+            extracted_artifacts.len()
+        );
+
+        // Use employee-specific OAuth credentials
+        let auth_config = GoogleAuthConfig::from_env_for_employee(Some(&config.employee_profile.id));
+        if let Ok(auth) = GoogleAuth::new(auth_config) {
+            match auth.get_access_token() {
+                Ok(token) => {
+                    let token_path = workspace.join(".google_access_token");
+                    if let Err(e) = std::fs::write(&token_path, &token) {
+                        warn!("failed to write .google_access_token: {}", e);
+                    } else {
+                        info!("wrote .google_access_token to workspace for agent");
+                    }
+                }
+                Err(e) => {
+                    warn!("failed to get Google access token: {}", e);
+                }
+            }
+        }
+
+        // Write artifact metadata for agent context
+        for artifact in &extracted_artifacts {
+            if artifact.artifact_type == "google_docs" {
+                let meta_path = workspace.join("google_docs_metadata.json");
+                let meta = serde_json::json!({
+                    "document_id": artifact.artifact_id,
+                    "url": artifact.url,
+                    "context": artifact.context_snippet,
+                    "source": "email_extraction"
+                });
+                if let Err(e) = std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap_or_default()) {
+                    warn!("failed to write google_docs_metadata.json: {}", e);
+                }
+                break; // Only write first Google Docs artifact
+            }
+        }
+    }
 
     let run_task = RunTaskTask {
         workspace_dir: workspace.clone(),

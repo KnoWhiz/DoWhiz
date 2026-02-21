@@ -15,7 +15,34 @@ This skill enables you to collaborate on Google Docs as a digital co-author. Use
 Use this skill when:
 - You receive a task from Google Docs (check `incoming_email/*_gdocs_comment.json`)
 - The user has mentioned you in a document comment (proto, oliver, @proto, etc.)
+- **You receive an email containing a Google Docs link** (check `collaboration/` directory for artifact info)
 - You need to read document content, propose edits, or respond to feedback
+
+### Email → Google Docs Direct Modification
+
+When a user sends you an email with a Google Docs link (instead of commenting in the doc), you can directly modify the document:
+
+1. **Check for collaboration context**: Look for `collaboration/session_info.json` which contains the linked document ID
+2. **Extract document ID**: The `artifact_id` field contains the Google Docs document ID
+3. **Read the document**: Use `google-docs read-document <document_id>` or check `incoming_email/document_content.txt` if pre-fetched
+4. **Apply changes**: Follow the user's instructions from the email and modify the document directly
+
+**Example workflow:**
+
+User email: "Proto, please review this doc and suggest grammar improvements: https://docs.google.com/document/d/1abc123..."
+
+```bash
+# 1. Read the document
+google-docs read-document 1abc123
+
+# 2. Detect mode from email ("suggest" mentioned)
+# → Use suggesting mode
+
+# 3. Apply suggestions
+google-docs suggest-replace 1abc123 --find="original text" --replace="improved text"
+```
+
+Then reply via email confirming the changes were made.
 
 ## Workflow
 
@@ -36,19 +63,55 @@ incoming_email/document_content.txt
 
 This file contains the complete document as plain text. **Always read this file first** to understand the full context before responding to comments or making edit suggestions.
 
-### 3. Ask User's Preference (IMPORTANT!)
+### 3. Determine Editing Mode (Intelligent Detection)
 
-**Before making any edits, always ask the user which mode they prefer:**
+**Intelligently detect the user's preference from context. Only ask if unclear.**
+
+#### Check for Explicit Preference First:
+
+Look for preference indicators in the user's message:
+
+| User Says | Detected Mode |
+|-----------|---------------|
+| "suggest", "suggestion", "track changes", "revision marks", "review first", "let me review", "show me changes" | **Suggesting Mode** |
+| "direct", "just do it", "apply directly", "make the changes", "edit directly", "no need to review" | **Direct Mode** |
+| "help me improve", "fix this" (ambiguous - no explicit preference) | **Ask User** |
+
+#### Examples of Intelligent Detection:
+
+**Example 1 - User says "suggest" in email:**
+> "Proto, please review this document and suggest improvements. I want to see what you'd change before applying."
+
+→ **Auto-detect: Suggesting Mode** (no need to ask)
+
+**Example 2 - User says "just fix it" in email:**
+> "Proto, there are some grammar errors in this doc. Just fix them directly."
+
+→ **Auto-detect: Direct Mode** (no need to ask)
+
+**Example 3 - Ambiguous request:**
+> "Proto, can you help improve this paragraph?"
+
+→ **Ask User** (preference unclear)
+
+#### When to Ask (only if genuinely unclear):
 
 ```html
 <!-- reply_email_draft.html -->
-<p>I understand you'd like me to [summarize the request]. Before I proceed, would you prefer:</p>
+<p>I understand you'd like me to [summarize the request]. How would you like me to proceed?</p>
 <ul>
   <li><strong>Direct editing</strong> - I'll make the changes directly to your document</li>
-  <li><strong>Suggesting mode</strong> - I'll show my proposed changes with revision marks (red strikethrough for deletions, blue for additions) so you can review before applying</li>
+  <li><strong>Suggesting mode</strong> - I'll show my proposed changes with revision marks so you can review first</li>
 </ul>
-<p>Reply "direct" or "suggest" to let me know your preference.</p>
+<p>Reply "direct" or "suggest", or I'll default to suggesting mode for safety.</p>
 ```
+
+#### Remember User Preferences:
+
+If this is a **continuation of a collaboration session** (check `collaboration/session_info.json`), the user may have already expressed their preference in an earlier message. Check:
+1. `collaboration/context_summary.md` - Original request may contain preference
+2. `collaboration/message_history.json` - Previous interactions may indicate preference
+3. If user said "suggest" in the original email, continue using suggesting mode for follow-up comments
 
 ### 4. Editing Modes
 
@@ -164,6 +227,44 @@ google-docs apply-suggestions <document_id>
 google-docs discard-suggestions <document_id>
 ```
 
+### Style Operations (NEW)
+
+```bash
+# Get existing styles from document (ALWAYS run this first!)
+google-docs get-styles <document_id>
+
+# Set text style - color, font, size, bold, italic
+google-docs set-style <document_id> --find="Heading Text" --color="#1B263B" --bold
+google-docs set-style <document_id> --find="Body text" --font="Arial" --size=11
+google-docs set-style <document_id> --find="Important" --color="#FF0000" --bold --italic
+```
+
+#### IMPORTANT: Match Existing Document Styles
+
+**Before applying any style changes, ALWAYS:**
+
+1. Run `google-docs get-styles <document_id>` to see the document's existing style patterns
+2. Note the colors, fonts, and sizes used for each heading level (H1, H2, H3)
+3. Apply styles that **match the existing patterns** in the document
+
+**Example Workflow:**
+
+```bash
+# Step 1: Check existing styles
+google-docs get-styles 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+
+# Output shows:
+# Heading 1: color=#1B263B, font="Georgia", size=24pt, bold
+# Heading 2: color=#415A77, font="Georgia", size=18pt, bold
+# Heading 3: color=#778DA9, font="Georgia", size=14pt, bold
+
+# Step 2: Apply matching styles to new headings
+google-docs set-style <doc_id> --find="New Section Title" --color="#1B263B" --font="Georgia" --size=24 --bold
+google-docs set-style <doc_id> --find="Subsection" --color="#415A77" --font="Georgia" --size=18 --bold
+```
+
+**Never invent new styles** - always match what the user has already defined in their document.
+
 ## Response Format Examples
 
 ### Example 1: Initial Response to Edit Request
@@ -230,12 +331,15 @@ User comment: "Proto, review the entire document for grammar and clarity"
 ## Important Guidelines
 
 1. **Read document_content.txt first** - Always read `incoming_email/document_content.txt` before responding
-2. **Always ask for editing mode preference** - Let user choose between direct editing and suggesting mode
-3. **Use revision marks in suggesting mode** - Red strikethrough for deletions, blue for additions
-4. **Explain changes clearly** - List what changes were made and why
-5. **Wait for "apply" in suggesting mode** - Don't finalize until user explicitly approves
-6. **Keep replies concise** - Google Docs comments have limited space
-7. **Match existing document formatting** - When applying changes, preserve the user's text formatting (font, size, etc.)
+2. **Intelligently detect editing mode** - Check if user already specified "suggest"/"direct" preference; only ask if genuinely unclear
+3. **Check collaboration context** - If `collaboration/` directory exists, read it for prior preferences and context
+4. **Use revision marks in suggesting mode** - Red strikethrough for deletions, blue for additions
+5. **Explain changes clearly** - List what changes were made and why
+6. **Wait for "apply" in suggesting mode** - Don't finalize until user explicitly approves
+7. **Keep replies concise** - Google Docs comments have limited space
+8. **Match existing document formatting** - When applying changes, preserve the user's text formatting (font, size, etc.)
+9. **Default to suggesting mode** - When in doubt, use suggesting mode (safer, non-destructive)
+10. **For style changes, ALWAYS check existing styles first** - Run `google-docs get-styles <doc_id>` before applying any formatting. Match the document's existing heading colors, fonts, and sizes. Never invent new styles - follow the user's established patterns.
 
 ## Error Handling
 

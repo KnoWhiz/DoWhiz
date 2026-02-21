@@ -71,7 +71,12 @@ pub(super) fn run_codex_task(
     let azure_endpoint = normalize_azure_endpoint(CODEX_BASE_URL);
     let model_name = CODEX_MODEL_NAME.to_string();
     let sandbox_mode = codex_sandbox_mode();
-    let bypass_sandbox = codex_bypass_sandbox();
+    // Bypass sandbox for GoogleDocs tasks to allow network access for Google APIs
+    let channel_lower = request.channel.to_lowercase();
+    let is_google_docs = channel_lower == "google_docs" || channel_lower == "googledocs";
+    // Also bypass sandbox if workspace has .google_access_token (indicates Google Docs artifacts)
+    let has_google_token = request.workspace_dir.join(".google_access_token").exists();
+    let bypass_sandbox = codex_bypass_sandbox() || use_docker || is_google_docs || has_google_token;
     let add_dirs = codex_add_dirs(request.workspace_dir, use_docker)?;
     if use_docker {
         let codex_home = host_workspace_dir
