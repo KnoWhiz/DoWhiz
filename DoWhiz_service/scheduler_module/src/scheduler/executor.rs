@@ -107,7 +107,7 @@ impl TaskExecutor for ModuleExecutor {
                     Channel::Discord => {
                         execute_discord_send(task)?;
                     }
-                    Channel::GoogleDocs => {
+                    Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
                         execute_google_docs_send(task)?;
                     }
                     Channel::Sms => {
