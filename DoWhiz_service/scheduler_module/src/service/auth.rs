@@ -1,8 +1,9 @@
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Redirect};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::task;
@@ -18,6 +19,12 @@ pub struct AuthState {
     pub account_store: Arc<AccountStore>,
     pub blob_store: Option<Arc<BlobStore>>,
     pub supabase_url: String,
+    // Discord OAuth config
+    pub discord_client_id: Option<String>,
+    pub discord_client_secret: Option<String>,
+    pub discord_redirect_uri: Option<String>,
+    // Frontend URL for redirects after OAuth
+    pub frontend_url: String,
 }
 
 /// Response from Supabase /auth/v1/user endpoint
@@ -1046,6 +1053,251 @@ pub async fn update_memo(
 }
 
 // ============================================================================
+// Discord OAuth
+// ============================================================================
+
+/// Query params for Discord OAuth callback
+#[derive(Debug, Deserialize)]
+pub struct DiscordCallbackQuery {
+    pub code: String,
+    pub state: String,
+}
+
+/// Discord token response
+#[derive(Debug, Deserialize)]
+struct DiscordTokenResponse {
+    access_token: String,
+    token_type: String,
+}
+
+/// Discord user response
+#[derive(Debug, Deserialize)]
+struct DiscordUser {
+    id: String,
+    username: String,
+}
+
+/// GET /auth/discord
+/// Initiates Discord OAuth flow - redirects to Discord's authorization page.
+pub async fn discord_oauth_start(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    // Check if Discord OAuth is configured
+    let (client_id, redirect_uri) = match (&state.discord_client_id, &state.discord_redirect_uri) {
+        (Some(id), Some(uri)) => (id.clone(), uri.clone()),
+        _ => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Discord OAuth not configured"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Extract and validate Supabase token
+    let token = match extract_bearer_token(&headers) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Validate the token to ensure user is authenticated
+    if let Err((status, msg)) = validate_supabase_token(&state.supabase_url, &token).await {
+        return (status, Json(serde_json::json!({ "error": msg }))).into_response();
+    }
+
+    // Encode the Supabase token in state so we can identify the user on callback
+    let encoded_state = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(token.as_bytes());
+
+    // Build Discord OAuth URL
+    let discord_auth_url = format!(
+        "https://discord.com/api/oauth2/authorize?client_id={}&redirect_uri={}&response_type=code&scope=identify&state={}",
+        client_id,
+        urlencoding::encode(&redirect_uri),
+        encoded_state
+    );
+
+    // Return the URL for the frontend to redirect to
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "redirect_url": discord_auth_url
+        })),
+    )
+        .into_response()
+}
+
+/// GET /auth/discord/callback
+/// Handles Discord OAuth callback - exchanges code for token, gets user info, links account.
+pub async fn discord_oauth_callback(
+    State(state): State<AuthState>,
+    Query(params): Query<DiscordCallbackQuery>,
+) -> impl IntoResponse {
+    // Helper to build redirect URLs to the frontend
+    let frontend_url = state.frontend_url.clone();
+    let redirect_to = |path: &str| -> axum::response::Response {
+        Redirect::to(&format!("{}{}", frontend_url, path)).into_response()
+    };
+
+    // Check if Discord OAuth is configured
+    let (client_id, client_secret, redirect_uri) = match (
+        &state.discord_client_id,
+        &state.discord_client_secret,
+        &state.discord_redirect_uri,
+    ) {
+        (Some(id), Some(secret), Some(uri)) => (id.clone(), secret.clone(), uri.clone()),
+        _ => {
+            return redirect_to("/auth/index.html?discord=error&reason=not_configured");
+        }
+    };
+
+    // Decode state to get the Supabase token
+    let token = match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&params.state) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(t) => t,
+            Err(_) => {
+                return redirect_to("/auth/index.html?discord=error&reason=invalid_state");
+            }
+        },
+        Err(_) => {
+            return redirect_to("/auth/index.html?discord=error&reason=invalid_state");
+        }
+    };
+
+    // Validate Supabase token and get user
+    let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(id) => id,
+        Err(_) => {
+            return redirect_to("/auth/index.html?discord=error&reason=invalid_token");
+        }
+    };
+
+    // Exchange code for Discord access token
+    let client = reqwest::Client::new();
+    let token_res = client
+        .post("https://discord.com/api/oauth2/token")
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("code", params.code.as_str()),
+            ("grant_type", "authorization_code"),
+            ("redirect_uri", redirect_uri.as_str()),
+        ])
+        .send()
+        .await;
+
+    let discord_token = match token_res {
+        Ok(res) if res.status().is_success() => match res.json::<DiscordTokenResponse>().await {
+            Ok(t) => t,
+            Err(e) => {
+                error!("Failed to parse Discord token response: {}", e);
+                return redirect_to("/auth/index.html?discord=error&reason=token_parse_error");
+            }
+        },
+        Ok(res) => {
+            error!("Discord token exchange failed: {}", res.status());
+            return redirect_to("/auth/index.html?discord=error&reason=token_exchange_failed");
+        }
+        Err(e) => {
+            error!("Discord token request failed: {}", e);
+            return redirect_to("/auth/index.html?discord=error&reason=token_request_failed");
+        }
+    };
+
+    // Get Discord user info
+    let user_res = client
+        .get("https://discord.com/api/users/@me")
+        .header(
+            "Authorization",
+            format!("{} {}", discord_token.token_type, discord_token.access_token),
+        )
+        .send()
+        .await;
+
+    let discord_user = match user_res {
+        Ok(res) if res.status().is_success() => match res.json::<DiscordUser>().await {
+            Ok(u) => u,
+            Err(e) => {
+                error!("Failed to parse Discord user response: {}", e);
+                return redirect_to("/auth/index.html?discord=error&reason=user_parse_error");
+            }
+        },
+        Ok(res) => {
+            error!("Discord user request failed: {}", res.status());
+            return redirect_to("/auth/index.html?discord=error&reason=user_request_failed");
+        }
+        Err(e) => {
+            error!("Discord user request failed: {}", e);
+            return redirect_to("/auth/index.html?discord=error&reason=user_request_failed");
+        }
+    };
+
+    info!(
+        "Discord OAuth successful for user {} (Discord: {} / {})",
+        auth_user_id, discord_user.id, discord_user.username
+    );
+
+    // Get user's account
+    let store = state.account_store.clone();
+    let account_result =
+        task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id)).await;
+
+    let account = match account_result {
+        Ok(Ok(Some(acc))) => acc,
+        Ok(Ok(None)) => {
+            return redirect_to("/auth/index.html?discord=error&reason=account_not_found");
+        }
+        Ok(Err(e)) => {
+            error!("Failed to get account: {}", e);
+            return redirect_to("/auth/index.html?discord=error&reason=db_error");
+        }
+        Err(e) => {
+            error!("spawn_blocking panicked: {}", e);
+            return redirect_to("/auth/index.html?discord=error&reason=internal_error");
+        }
+    };
+
+    // Link Discord ID to account
+    let store = state.account_store.clone();
+    let discord_id = discord_user.id.clone();
+    let link_result = task::spawn_blocking(move || {
+        store.create_identifier(account.id, "discord", &discord_id)
+    })
+    .await;
+
+    match link_result {
+        Ok(Ok(_identifier)) => {
+            info!(
+                "Linked Discord {} to account {}",
+                discord_user.id, account.id
+            );
+            redirect_to("/auth/index.html?discord=success")
+        }
+        Ok(Err(AccountStoreError::IdentifierTaken)) => {
+            redirect_to("/auth/index.html?discord=error&reason=already_linked")
+        }
+        Ok(Err(e)) => {
+            error!("Failed to link Discord: {}", e);
+            redirect_to("/auth/index.html?discord=error&reason=link_failed")
+        }
+        Err(e) => {
+            error!("spawn_blocking panicked: {}", e);
+            redirect_to("/auth/index.html?discord=error&reason=internal_error")
+        }
+    }
+}
+
+// ============================================================================
 // Router
 // ============================================================================
 
@@ -1057,5 +1309,7 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/auth/verify", post(verify_identifier))
         .route("/auth/unlink", delete(unlink_identifier))
         .route("/auth/memo", get(get_memo).post(update_memo))
+        .route("/auth/discord", get(discord_oauth_start))
+        .route("/auth/discord/callback", get(discord_oauth_callback))
         .with_state(state)
 }
