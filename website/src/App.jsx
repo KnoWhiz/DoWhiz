@@ -400,7 +400,7 @@ function App() {
     {
       tag: '02',
       title: 'Specialized agent playbooks',
-      desc: 'Each employee is trained for a role (Writer, TPM, Coder, CEO, and more) so outputs are tailored, not generic.'
+      desc: 'Each employee is trained for a role (Generalist, TPM, Coder, CEO, and more) so outputs are tailored, not generic.'
     },
     {
       tag: '03',
@@ -512,12 +512,12 @@ function App() {
       email: 'oliver@dowhiz.com',
       pronoun: 'He/Him',
       nickname: 'Little-Bear',
-      title: 'Writer',
-      desc: '全能的工作助手',
+      title: 'Generalist',
+      desc: 'All-around work assistant for daily office tasks across Notion, Google Docs, Google Slides, and Google Sheets.',
       example: 'Draft a project update in Notion and summarize it for stakeholders.',
       status: 'Active',
       img: oliverImg,
-      imgAlt: 'Illustration of Oliver the Little-Bear, DoWhiz writer digital employee.',
+      imgAlt: 'Illustration of Oliver the Little-Bear, DoWhiz generalist digital employee.',
       subject: 'Office Task Request',
       body: 'Draft a project update in Notion and summarize it for stakeholders.',
       profilePath: '/agents/oliver/'
@@ -725,7 +725,7 @@ function App() {
               <span className="text-gradient">with A Digital Employee Team</span>
             </h1>
             <p className="hero-subtitle">
-              Seamlessly collaborate with <a href="#roles" className="role-link">Oliver 🧸</a> (Writer), <a href="#roles" className="role-link">Maggie 🐭</a> (TPM), <a href="#roles" className="role-link">Devin 🐙</a> (Coder), <a href="#roles" className="role-link">Lumio 🐉</a> (CEO), <a href="#roles" className="role-link">Claw 🦞</a> (OpenClaw assistant), <a href="#roles" className="role-link">Jeffery 🐦</a> (DeepTutor), <a href="#roles" className="role-link">Anna 🐘</a> (role in progress), and <a href="#roles" className="role-link">Rachel 👾</a> (GTM Specialist)—directly from your email inbox. Soon you will also reach them by phone, Slack, Discord, WhatsApp, and more.
+              Seamlessly collaborate with <a href="#roles" className="role-link">Oliver 🧸</a> (Generalist), <a href="#roles" className="role-link">Maggie 🐭</a> (TPM), <a href="#roles" className="role-link">Devin 🐙</a> (Coder), <a href="#roles" className="role-link">Lumio 🐉</a> (CEO), <a href="#roles" className="role-link">Claw 🦞</a> (OpenClaw assistant), <a href="#roles" className="role-link">Jeffery 🐦</a> (DeepTutor), <a href="#roles" className="role-link">Anna 🐘</a> (role in progress), and <a href="#roles" className="role-link">Rachel 👾</a> (GTM Specialist)—directly from your email inbox. Soon you will also reach them by phone, Slack, Discord, WhatsApp, and more.
             </p>
             <div className="hero-cta">
               <a className="btn btn-primary" href={WAITLIST_FORM_URL} target="_blank" rel="noopener noreferrer">

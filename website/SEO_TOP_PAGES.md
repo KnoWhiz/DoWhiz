@@ -29,7 +29,7 @@ H2: Numbered guide sections (1–6)
 
 6. https://dowhiz.com/agents/oliver/
 H1 count: 1
-H1: Oliver - Writer
+H1: Oliver - Generalist
 H2: Best for, How work flows, Example requests, Output preview
 
 7. https://dowhiz.com/agents/maggie/
