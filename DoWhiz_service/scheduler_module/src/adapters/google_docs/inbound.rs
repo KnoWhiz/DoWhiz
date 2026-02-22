@@ -126,7 +126,13 @@ impl GoogleDocsInboundAdapter {
             // Check the parent comment (if not already processed)
             let comment_tracking_id = format!("comment:{}", comment.id);
             if !processed_ids.contains(&comment_tracking_id) {
-                // Skip comments from our own employee accounts
+                // Skip comments from our own accounts.
+                // Check both the `me` field (authenticated user) and email address.
+                let is_from_self = comment
+                    .author
+                    .as_ref()
+                    .map(|a| a.me)
+                    .unwrap_or(false);
                 let is_from_employee = comment
                     .author
                     .as_ref()
@@ -134,7 +140,7 @@ impl GoogleDocsInboundAdapter {
                     .map(|e| self.employee_emails.contains(e))
                     .unwrap_or(false);
 
-                if !is_from_employee && contains_employee_mention(&comment.content) {
+                if !is_from_self && !is_from_employee && contains_employee_mention(&comment.content) {
                     let comment_preview = comment.content.chars().take(50).collect::<String>();
                     info!("Found actionable comment: '{}'", comment_preview);
                     actionable.push(ActionableComment::from_comment(comment.clone()));
@@ -152,7 +158,13 @@ impl GoogleDocsInboundAdapter {
                         continue;
                     }
 
-                    // Skip replies from our own accounts
+                    // Skip replies from our own accounts.
+                    // Check both the `me` field (authenticated user) and email address.
+                    let is_from_self = reply
+                        .author
+                        .as_ref()
+                        .map(|a| a.me)
+                        .unwrap_or(false);
                     let is_from_employee = reply
                         .author
                         .as_ref()
@@ -160,7 +172,7 @@ impl GoogleDocsInboundAdapter {
                         .map(|e| self.employee_emails.contains(e))
                         .unwrap_or(false);
 
-                    if is_from_employee {
+                    if is_from_self || is_from_employee {
                         continue;
                     }
 

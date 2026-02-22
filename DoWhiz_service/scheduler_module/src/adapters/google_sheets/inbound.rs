@@ -157,14 +157,15 @@ impl GoogleSheetsInboundAdapter {
 
         let client = reqwest::blocking::Client::new();
 
-        let url = format!(
+        // Use raw URL - the ! character is valid in URL paths
+        let base_url = format!(
             "https://sheets.googleapis.com/v4/spreadsheets/{}/values/{}",
             spreadsheet_id,
-            urlencoding::encode(range)
+            range
         );
 
         let response = client
-            .get(&url)
+            .get(&base_url)
             .header("Authorization", format!("Bearer {}", access_token))
             .send()
             .map_err(|e| AdapterError::SendError(e.to_string()))?;
