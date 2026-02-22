@@ -151,11 +151,16 @@ fn prepare_claude_env(
         });
     let extended_path = format!("{}:{}", dowhiz_bin_dir, current_path);
 
+    // Set CLAUDE_HOME to use DoWhiz-specific config directory
+    let claude_home = dowhiz_claude_home()?;
+
     Ok(vec![
         (
             "AZURE_OPENAI_API_KEY_BACKUP".to_string(),
             api_key.to_string(),
         ),
+        // Use DoWhiz-specific Claude home to avoid affecting user's ~/.claude config
+        ("CLAUDE_HOME".to_string(), claude_home.to_string_lossy().into_owned()),
         ("CLAUDE_CODE_USE_FOUNDRY".to_string(), "1".to_string()),
         ("ANTHROPIC_FOUNDRY_RESOURCE".to_string(), foundry_resource),
         ("ANTHROPIC_FOUNDRY_API_KEY".to_string(), api_key.to_string()),
@@ -166,6 +171,15 @@ fn prepare_claude_env(
     ])
 }
 
+/// Returns the path to the DoWhiz-specific Claude home directory.
+/// This isolates DoWhiz's Claude config from the user's personal ~/.claude config.
+fn dowhiz_claude_home() -> Result<std::path::PathBuf, RunTaskError> {
+    let home = env::var("HOME").map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
+    // Use ~/.dowhiz/claude instead of ~/.claude to avoid overwriting user's config
+    let claude_home = std::path::PathBuf::from(home).join(".dowhiz").join("claude");
+    Ok(claude_home)
+}
+
 fn ensure_claude_settings(
     model_name: &str,
     api_key: &str,
@@ -174,8 +188,8 @@ fn ensure_claude_settings(
     default_sonnet: &str,
     default_haiku: &str,
 ) -> Result<(), RunTaskError> {
-    let home = env::var("HOME").map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
-    let settings_dir = std::path::PathBuf::from(home).join(".claude");
+    // Use DoWhiz-specific Claude home to avoid overwriting user's ~/.claude/settings.json
+    let settings_dir = dowhiz_claude_home()?;
     fs::create_dir_all(&settings_dir)?;
     let settings_path = settings_dir.join("settings.json");
     let payload = serde_json::json!({
@@ -237,12 +251,11 @@ fn build_claude_command(
     cmd.arg("-p")
         .arg("--output-format")
         .arg("stream-json")
-        .arg("--include-partial-messages")
         .arg("--verbose")
         .arg("--model")
         .arg(model_name)
         .arg("--allowedTools")
-        .arg("Read,Glob,Grep,Bash")
+        .arg("Read,Glob,Grep,Bash,Write,Edit")
         .arg("--max-turns")
         .arg(max_turns.to_string())
         .arg("--dangerously-skip-permissions")
@@ -309,9 +322,11 @@ fn extract_claude_text(raw: &str) -> (String, Vec<String>) {
             .get("type")
             .and_then(|value| value.as_str())
             .unwrap_or("");
+        // Handle both old and new Claude stream-json formats
         if matches!(
             event_type,
             "text_delta" | "message_delta" | "content_block_delta" | "message_stop" | "result"
+            | "assistant" | "text" | "message"
         ) {
             if let Some(fragment) = extract_claude_fragment(&event) {
                 text.push_str(&fragment);
@@ -322,9 +337,11 @@ fn extract_claude_text(raw: &str) -> (String, Vec<String>) {
 }
 
 fn extract_claude_fragment(event: &serde_json::Value) -> Option<String> {
+    // Direct text field
     if let Some(text) = event.get("text").and_then(|value| value.as_str()) {
         return Some(text.to_string());
     }
+    // Delta format: {"delta": {"text": "..."}}
     if let Some(text) = event
         .get("delta")
         .and_then(|value| value.get("text"))
@@ -332,6 +349,25 @@ fn extract_claude_fragment(event: &serde_json::Value) -> Option<String> {
     {
         return Some(text.to_string());
     }
+    // New Claude format: {"message": {"content": [{"type": "text", "text": "..."}]}}
+    if let Some(content) = event
+        .get("message")
+        .and_then(|value| value.get("content"))
+        .and_then(|value| value.as_array())
+    {
+        let mut combined = String::new();
+        for item in content {
+            if item.get("type").and_then(|v| v.as_str()) == Some("text") {
+                if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                    combined.push_str(text);
+                }
+            }
+        }
+        if !combined.is_empty() {
+            return Some(combined);
+        }
+    }
+    // Old message format: {"message": {"text": "..."}}
     if let Some(text) = event
         .get("message")
         .and_then(|value| value.get("text"))
