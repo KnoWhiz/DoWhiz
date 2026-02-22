@@ -4,6 +4,8 @@ mod config;
 mod discord;
 #[path = "inbound_gateway/google_docs.rs"]
 mod google_docs;
+#[path = "inbound_gateway/google_workspace.rs"]
+mod google_workspace;
 #[path = "inbound_gateway/handlers.rs"]
 mod handlers;
 #[path = "inbound_gateway/routes.rs"]
@@ -32,6 +34,7 @@ use config::{
 };
 use discord::spawn_discord_gateway;
 use google_docs::spawn_google_docs_poller;
+use google_workspace::spawn_google_workspace_poller;
 use handlers::{
     health, ingest_bluebubbles, ingest_postmark, ingest_slack, ingest_sms, ingest_telegram,
     ingest_whatsapp, verify_whatsapp_webhook,
@@ -101,6 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     spawn_discord_gateway(state.clone()).await;
     spawn_google_docs_poller(state.clone());
+    spawn_google_workspace_poller(state.clone());
 
     let max_body_bytes = env::var("GATEWAY_MAX_BODY_BYTES")
         .ok()

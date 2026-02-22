@@ -1,6 +1,7 @@
 mod bluebubbles;
 mod discord;
 mod google_docs;
+mod google_workspace;
 mod quick_responses;
 mod slack;
 mod sms;
@@ -10,6 +11,7 @@ mod whatsapp;
 pub(super) use bluebubbles::process_bluebubbles_event;
 pub(super) use discord::process_discord_inbound_message;
 pub(super) use google_docs::process_google_docs_message;
+pub(super) use google_workspace::process_google_workspace_message;
 pub(super) use quick_responses::{
     try_quick_response_bluebubbles, try_quick_response_discord, try_quick_response_slack,
     try_quick_response_telegram, try_quick_response_whatsapp,

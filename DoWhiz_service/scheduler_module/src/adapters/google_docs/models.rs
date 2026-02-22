@@ -37,6 +37,9 @@ pub struct CommentAuthor {
     pub email_address: Option<String>,
     #[serde(rename = "photoLink")]
     pub photo_link: Option<String>,
+    /// Whether this author is the authenticated user (i.e., our bot).
+    #[serde(default)]
+    pub me: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
