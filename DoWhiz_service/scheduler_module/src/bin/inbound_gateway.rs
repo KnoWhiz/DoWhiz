@@ -21,10 +21,13 @@ use std::sync::Arc;
 use tokio::task;
 use tracing::info;
 
+use scheduler_module::account_store::AccountStore;
+use scheduler_module::blob_store::get_blob_store;
 use scheduler_module::employee_config::load_employee_directory;
 use scheduler_module::ingestion_queue::{
     build_servicebus_queue_from_env, resolve_ingestion_queue_backend, IngestionQueue,
 };
+use scheduler_module::service::auth::{auth_router, AuthState};
 
 use config::{
     load_gateway_config, resolve_employee_config_path, resolve_gateway_config_path,
@@ -108,6 +111,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .filter(|value| *value > 0)
         .unwrap_or(25 * 1024 * 1024);
 
+    // Create auth state for OAuth routes
+    let account_store = Arc::new(
+        task::spawn_blocking(AccountStore::from_env)
+            .await
+            .map_err(|err| -> Box<dyn std::error::Error + Send + Sync> { err.into() })??,
+    );
+    let supabase_url = env::var("SUPABASE_PROJECT_URL")
+        .unwrap_or_else(|_| "https://resmseutzmwumflevfqw.supabase.co".to_string());
+    let blob_store = get_blob_store();
+
+    // Discord OAuth config (optional)
+    let discord_client_id = env::var("DISCORD_CLIENT_ID").ok();
+    let discord_client_secret = env::var("DISCORD_CLIENT_SECRET").ok();
+    let discord_redirect_uri = env::var("DISCORD_REDIRECT_URI").ok();
+
+    // Slack OAuth config (optional)
+    let slack_client_id = env::var("SLACK_CLIENT_ID").ok();
+    let slack_client_secret = env::var("SLACK_CLIENT_SECRET").ok();
+    let slack_redirect_uri = env::var("SLACK_AUTH_REDIRECT_URI").ok();
+
+    // Frontend URL for OAuth redirects
+    let frontend_url = env::var("FRONTEND_URL")
+        .unwrap_or_else(|_| "http://localhost:5173".to_string());
+
+    let auth_state = AuthState {
+        account_store,
+        blob_store,
+        supabase_url,
+        discord_client_id,
+        discord_client_secret,
+        discord_redirect_uri,
+        slack_client_id,
+        slack_client_secret,
+        slack_redirect_uri,
+        frontend_url,
+    };
+    // Instantiate router in inbound_gateway to solve two ports, one tunnel issue
     let app = Router::new()
         .route("/health", get(health))
         .route("/postmark/inbound", post(ingest_postmark))
@@ -118,6 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/whatsapp/webhook", get(verify_whatsapp_webhook))
         .route("/whatsapp/webhook", post(ingest_whatsapp))
         .with_state(state)
+        .merge(auth_router(auth_state))
         .layer(DefaultBodyLimit::max(max_body_bytes));
 
     let addr: std::net::SocketAddr = format!("{}:{}", host, port).parse()?;

@@ -23,6 +23,10 @@ pub struct AuthState {
     pub discord_client_id: Option<String>,
     pub discord_client_secret: Option<String>,
     pub discord_redirect_uri: Option<String>,
+    // Slack OAuth config
+    pub slack_client_id: Option<String>,
+    pub slack_client_secret: Option<String>,
+    pub slack_redirect_uri: Option<String>,
     // Frontend URL for redirects after OAuth
     pub frontend_url: String,
 }
@@ -1298,6 +1302,234 @@ pub async fn discord_oauth_callback(
 }
 
 // ============================================================================
+// Slack OAuth
+// ============================================================================
+
+/// Query params for Slack OAuth callback
+#[derive(Debug, Deserialize)]
+pub struct SlackCallbackQuery {
+    pub code: String,
+    pub state: String,
+}
+
+/// Slack OAuth token response
+#[derive(Debug, Deserialize)]
+struct SlackTokenResponse {
+    ok: bool,
+    error: Option<String>,
+    authed_user: Option<SlackAuthedUser>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlackAuthedUser {
+    id: String,
+    access_token: Option<String>,
+}
+
+/// GET /auth/slack
+/// Initiates Slack OAuth flow - redirects to Slack's authorization page.
+pub async fn slack_oauth_start(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    // Check if Slack OAuth is configured
+    let (client_id, redirect_uri) = match (&state.slack_client_id, &state.slack_redirect_uri) {
+        (Some(id), Some(uri)) => (id.clone(), uri.clone()),
+        _ => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Slack OAuth not configured"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Extract and validate Supabase token
+    let token = match extract_bearer_token(&headers) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Validate the token to ensure user is authenticated
+    if let Err((status, msg)) = validate_supabase_token(&state.supabase_url, &token).await {
+        return (status, Json(serde_json::json!({ "error": msg }))).into_response();
+    }
+
+    // Encode the Supabase token in state so we can identify the user on callback
+    let encoded_state = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(token.as_bytes());
+
+    // Build Slack OAuth URL - using user_scope for user identity
+    let slack_auth_url = format!(
+        "https://slack.com/oauth/v2/authorize?client_id={}&user_scope=identity.basic&redirect_uri={}&state={}",
+        client_id,
+        urlencoding::encode(&redirect_uri),
+        encoded_state
+    );
+
+    // Return the URL for the frontend to redirect to
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "redirect_url": slack_auth_url
+        })),
+    )
+        .into_response()
+}
+
+/// GET /auth/slack/callback
+/// Handles Slack OAuth callback - exchanges code for token, gets user info, links account.
+pub async fn slack_oauth_callback(
+    State(state): State<AuthState>,
+    Query(params): Query<SlackCallbackQuery>,
+) -> impl IntoResponse {
+    // Helper to build redirect URLs to the frontend
+    let frontend_url = state.frontend_url.clone();
+    let redirect_to = |path: &str| -> axum::response::Response {
+        Redirect::to(&format!("{}{}", frontend_url, path)).into_response()
+    };
+
+    // Check if Slack OAuth is configured
+    let (client_id, client_secret, redirect_uri) = match (
+        &state.slack_client_id,
+        &state.slack_client_secret,
+        &state.slack_redirect_uri,
+    ) {
+        (Some(id), Some(secret), Some(uri)) => (id.clone(), secret.clone(), uri.clone()),
+        _ => {
+            return redirect_to("/auth/index.html?slack=error&reason=not_configured");
+        }
+    };
+
+    // Decode state to get the Supabase token
+    let token = match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&params.state) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(t) => t,
+            Err(_) => {
+                return redirect_to("/auth/index.html?slack=error&reason=invalid_state");
+            }
+        },
+        Err(_) => {
+            return redirect_to("/auth/index.html?slack=error&reason=invalid_state");
+        }
+    };
+
+    // Validate Supabase token and get user
+    let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(id) => id,
+        Err(_) => {
+            return redirect_to("/auth/index.html?slack=error&reason=invalid_token");
+        }
+    };
+
+    // Exchange code for Slack access token
+    let client = reqwest::Client::new();
+    let token_res = client
+        .post("https://slack.com/api/oauth.v2.access")
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("code", params.code.as_str()),
+            ("redirect_uri", redirect_uri.as_str()),
+        ])
+        .send()
+        .await;
+
+    let slack_response = match token_res {
+        Ok(res) => match res.json::<SlackTokenResponse>().await {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Failed to parse Slack token response: {}", e);
+                return redirect_to("/auth/index.html?slack=error&reason=token_parse_error");
+            }
+        },
+        Err(e) => {
+            error!("Slack token request failed: {}", e);
+            return redirect_to("/auth/index.html?slack=error&reason=token_request_failed");
+        }
+    };
+
+    // Check if Slack returned an error
+    if !slack_response.ok {
+        let error_msg = slack_response.error.unwrap_or_else(|| "unknown".to_string());
+        error!("Slack OAuth error: {}", error_msg);
+        return redirect_to(&format!(
+            "/auth/index.html?slack=error&reason={}",
+            urlencoding::encode(&error_msg)
+        ));
+    }
+
+    // Get the user ID from the response
+    let slack_user = match slack_response.authed_user {
+        Some(user) => user,
+        None => {
+            error!("Slack response missing authed_user");
+            return redirect_to("/auth/index.html?slack=error&reason=missing_user");
+        }
+    };
+
+    info!(
+        "Slack OAuth successful for user {} (Slack ID: {})",
+        auth_user_id, slack_user.id
+    );
+
+    // Get user's account
+    let store = state.account_store.clone();
+    let account_result =
+        task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id)).await;
+
+    let account = match account_result {
+        Ok(Ok(Some(acc))) => acc,
+        Ok(Ok(None)) => {
+            return redirect_to("/auth/index.html?slack=error&reason=account_not_found");
+        }
+        Ok(Err(e)) => {
+            error!("Failed to get account: {}", e);
+            return redirect_to("/auth/index.html?slack=error&reason=db_error");
+        }
+        Err(e) => {
+            error!("spawn_blocking panicked: {}", e);
+            return redirect_to("/auth/index.html?slack=error&reason=internal_error");
+        }
+    };
+
+    // Link Slack ID to account
+    let store = state.account_store.clone();
+    let slack_id = slack_user.id.clone();
+    let link_result = task::spawn_blocking(move || {
+        store.create_identifier(account.id, "slack", &slack_id)
+    })
+    .await;
+
+    match link_result {
+        Ok(Ok(_identifier)) => {
+            info!("Linked Slack {} to account {}", slack_user.id, account.id);
+            redirect_to("/auth/index.html?slack=success")
+        }
+        Ok(Err(AccountStoreError::IdentifierTaken)) => {
+            redirect_to("/auth/index.html?slack=error&reason=already_linked")
+        }
+        Ok(Err(e)) => {
+            error!("Failed to link Slack: {}", e);
+            redirect_to("/auth/index.html?slack=error&reason=link_failed")
+        }
+        Err(e) => {
+            error!("spawn_blocking panicked: {}", e);
+            redirect_to("/auth/index.html?slack=error&reason=internal_error")
+        }
+    }
+}
+
+// ============================================================================
 // Router
 // ============================================================================
 
@@ -1311,5 +1543,7 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/auth/memo", get(get_memo).post(update_memo))
         .route("/auth/discord", get(discord_oauth_start))
         .route("/auth/discord/callback", get(discord_oauth_callback))
+        .route("/auth/slack", get(slack_oauth_start))
+        .route("/auth/slack/callback", get(slack_oauth_callback))
         .with_state(state)
 }
