@@ -513,7 +513,7 @@ function App() {
       pronoun: 'He/Him',
       nickname: 'Little-Bear',
       title: 'Generalist',
-      desc: 'All-around work assistant for daily office tasks across Notion, Overleaf, Google Docs, Google Slides, and Google Sheets.',
+      desc: 'All-around work assistant for daily office tasks across Notion, Google Docs, Google Slides, and Google Sheets.',
       example: 'Draft a project update in Notion and summarize it for stakeholders.',
       status: 'Active',
       img: oliverImg,
