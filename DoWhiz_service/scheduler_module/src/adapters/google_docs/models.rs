@@ -143,3 +143,32 @@ pub struct FilesListResponse {
     #[serde(rename = "nextPageToken")]
     pub next_page_token: Option<String>,
 }
+
+/// Text style information for document formatting
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TextStyleInfo {
+    pub foreground_color: Option<String>,
+    pub font_family: Option<String>,
+    pub font_size: Option<f64>,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub alignment: Option<String>,
+}
+
+/// Document styles summary
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct DocumentStyles {
+    pub title: Option<TextStyleInfo>,
+    pub subtitle: Option<TextStyleInfo>,
+    pub heading_1: Option<TextStyleInfo>,
+    pub heading_2: Option<TextStyleInfo>,
+    pub heading_3: Option<TextStyleInfo>,
+    pub heading_4: Option<TextStyleInfo>,
+    pub heading_5: Option<TextStyleInfo>,
+    pub heading_6: Option<TextStyleInfo>,
+    pub normal_text: Option<TextStyleInfo>,
+    // Samples of actual styled text found in the document
+    pub heading_1_sample: Option<(String, TextStyleInfo)>,
+    pub heading_2_sample: Option<(String, TextStyleInfo)>,
+    pub heading_3_sample: Option<(String, TextStyleInfo)>,
+}

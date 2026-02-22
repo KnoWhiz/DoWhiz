@@ -13,5 +13,5 @@ mod outbound;
 pub use formatting::format_edit_proposal;
 pub use inbound::GoogleDocsInboundAdapter;
 pub use mentions::{contains_employee_mention, extract_employee_name};
-pub use models::{ActionableComment, GoogleDocsComment};
+pub use models::{ActionableComment, DocumentStyles, GoogleDocsComment, TextStyleInfo};
 pub use outbound::GoogleDocsOutboundAdapter;

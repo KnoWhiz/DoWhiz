@@ -8,7 +8,7 @@ id = "little_bear"
 display_name = "Oliver"
 runner = "codex"
 model = "gpt-5.2-codex"
-addresses = ["oliver@dowhiz.com", "little-bear@dowhiz.com", "agent@dowhiz.com", "c9051c2176b203ca4b6da98e0a790e15@inbound.postmarkapp.com"]
+addresses = ["oliver@dowhiz.com", "little-bear@dowhiz.com", "agent@dowhiz.com"]
 agents_path = "employees/little_bear/AGENTS.md"
 claude_path = "employees/little_bear/CLAUDE.md"
 soul_path = "employees/little_bear/SOUL.md"
@@ -42,7 +42,9 @@ id = "boiled_egg"
 display_name = "Boiled-Egg"
 runner = "codex"
 model = "gpt-5.2-codex"
-addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com"]
+# First address is used as FROM for replies (must be verified in Postmark)
+# Inbound address is kept for routing but code uses first address for reply_from
+addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com", "c9051c2176b203ca4b6da98e0a790e15@inbound.postmarkapp.com"]
 runtime_root = ".workspace/boiled_egg"
 agents_path = "employees/boiled_egg/AGENTS.md"
 claude_path = "employees/boiled_egg/CLAUDE.md"

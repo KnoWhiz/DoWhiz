@@ -98,6 +98,11 @@ pub async fn run_server(
     let discord_client_secret = std::env::var("DISCORD_CLIENT_SECRET").ok();
     let discord_redirect_uri = std::env::var("DISCORD_REDIRECT_URI").ok();
 
+    // Slack OAuth config (optional) - reuses SLACK_CLIENT_ID/SECRET from bot config
+    let slack_client_id = std::env::var("SLACK_CLIENT_ID").ok();
+    let slack_client_secret = std::env::var("SLACK_CLIENT_SECRET").ok();
+    let slack_redirect_uri = std::env::var("SLACK_AUTH_REDIRECT_URI").ok();
+
     // Frontend URL for OAuth redirects
     let frontend_url = std::env::var("FRONTEND_URL")
         .unwrap_or_else(|_| "http://localhost:5173".to_string());
@@ -109,6 +114,9 @@ pub async fn run_server(
         discord_client_id,
         discord_client_secret,
         discord_redirect_uri,
+        slack_client_id,
+        slack_client_secret,
+        slack_redirect_uri,
         frontend_url,
     };
 

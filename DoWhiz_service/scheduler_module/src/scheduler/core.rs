@@ -374,6 +374,7 @@ fn notify_run_task_failure(
                 bcc: vec![],
                 in_reply_to: None,
                 references: None,
+                reply_to: None,
             };
             send_emails_module::send_email(&params)
                 .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -408,6 +409,7 @@ fn notify_run_task_failure(
             bcc: vec![],
             in_reply_to: None,
             references: None,
+            reply_to: None,
         };
         send_emails_module::send_email(&params)
             .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;

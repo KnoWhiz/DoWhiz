@@ -388,8 +388,15 @@
                   </svg>
                   Connect Discord
                 </button>
+                <button id="slack-oauth-btn" class="auth-btn auth-btn-oauth" style="display: flex; align-items: center; gap: 0.5rem;">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
+                  </svg>
+                  Connect Slack
+                </button>
               </div>
               <span id="discord-oauth-status" style="display: block; margin-top: 0.5rem; font-size: 0.9rem;"></span>
+              <span id="slack-oauth-status" style="display: block; margin-top: 0.25rem; font-size: 0.9rem;"></span>
             </section>
 
             <section class="legal-card dashboard-section">
@@ -741,6 +748,56 @@
           const reason = urlParams.get('reason') || 'unknown error';
           discordStatus.textContent = `Failed to connect Discord: ${reason}`;
           discordStatus.style.color = '#ef4444';
+        }
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      // Slack OAuth button
+      document.getElementById('slack-oauth-btn').addEventListener('click', async () => {
+        const slackStatus = document.getElementById('slack-oauth-status');
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (!session) {
+          slackStatus.textContent = 'Please sign in first';
+          slackStatus.style.color = '#ef4444';
+          return;
+        }
+
+        slackStatus.textContent = 'Redirecting to Slack...';
+        slackStatus.style.color = 'var(--text-muted, #888)';
+
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/auth/slack`, {
+            headers: { 'Authorization': `Bearer ${session.access_token}` }
+          });
+
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to start Slack OAuth');
+          }
+
+          const data = await res.json();
+          // Redirect to Slack OAuth page
+          window.location.href = data.redirect_url;
+        } catch (err) {
+          console.error('Slack OAuth error:', err);
+          slackStatus.textContent = `Error: ${err.message}`;
+          slackStatus.style.color = '#ef4444';
+        }
+      });
+
+      // Check for Slack OAuth callback result
+      const slackResult = urlParams.get('slack');
+      if (slackResult) {
+        const slackStatus = document.getElementById('slack-oauth-status');
+        if (slackResult === 'success') {
+          slackStatus.textContent = 'Slack connected successfully!';
+          slackStatus.style.color = '#22c55e';
+        } else if (slackResult === 'error') {
+          const reason = urlParams.get('reason') || 'unknown error';
+          slackStatus.textContent = `Failed to connect Slack: ${reason}`;
+          slackStatus.style.color = '#ef4444';
         }
         // Clean up URL
         window.history.replaceState({}, document.title, window.location.pathname);
