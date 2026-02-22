@@ -37,8 +37,8 @@ impl GoogleDocsInboundAdapter {
         let client = reqwest::blocking::Client::new();
 
         // Query for documents where user has access (shared with them)
-        // Filter for Google Docs and Google Sheets
-        let query = "mimeType='application/vnd.google-apps.document' or mimeType='application/vnd.google-apps.spreadsheet' or mimeType='application/vnd.google-apps.presentation'";
+        // Only query for Google Docs - Sheets and Slides have their own adapters
+        let query = "mimeType='application/vnd.google-apps.document'";
 
         let url = format!(
             "https://www.googleapis.com/drive/v3/files?q={}&fields=files(id,name,mimeType,owners)",
