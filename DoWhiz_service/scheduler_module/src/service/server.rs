@@ -92,10 +92,24 @@ pub async fn run_server(
     let supabase_url = std::env::var("SUPABASE_PROJECT_URL")
         .unwrap_or_else(|_| "https://resmseutzmwumflevfqw.supabase.co".to_string());
     let blob_store = get_blob_store();
+
+    // Discord OAuth config (optional)
+    let discord_client_id = std::env::var("DISCORD_CLIENT_ID").ok();
+    let discord_client_secret = std::env::var("DISCORD_CLIENT_SECRET").ok();
+    let discord_redirect_uri = std::env::var("DISCORD_REDIRECT_URI").ok();
+
+    // Frontend URL for OAuth redirects
+    let frontend_url = std::env::var("FRONTEND_URL")
+        .unwrap_or_else(|_| "http://localhost:5173".to_string());
+
     let auth_state = AuthState {
         account_store,
         blob_store,
         supabase_url,
+        discord_client_id,
+        discord_client_secret,
+        discord_redirect_uri,
+        frontend_url,
     };
 
     let host: IpAddr = config
