@@ -356,5 +356,6 @@ pub fn build_params(workspace: &Path) -> RunTaskParams {
         codex_disabled: false,
         channel: "email".to_string(),
         google_access_token: std::env::var("GOOGLE_ACCESS_TOKEN").ok(),
+        has_unified_account: true, // Default to true for tests
     }
 }

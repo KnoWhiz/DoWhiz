@@ -203,6 +203,7 @@ impl TaskExecutor for ModuleExecutor {
                     codex_disabled: task.codex_disabled,
                     channel: task.channel.to_string(),
                     google_access_token: load_google_access_token_from_service_env(),
+                    has_unified_account: account_id.is_some(),
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
