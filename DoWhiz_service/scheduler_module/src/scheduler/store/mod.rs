@@ -122,8 +122,8 @@ impl SqliteSchedulerStore {
                             self.load_send_slack_task(&conn, &id_raw, channel.clone())?
                         }
                         Channel::Discord => self.load_send_discord_task(&conn, &id_raw)?,
-                        Channel::GoogleDocs => {
-                            // Google Docs uses a similar format to email for now
+                        Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
+                            // Google Workspace uses a similar format to email for now
                             self.load_send_email_task(&conn, &id_raw, channel.clone())?
                         }
                         Channel::Sms => self.load_send_sms_task(&conn, &id_raw)?,
@@ -189,8 +189,8 @@ impl SqliteSchedulerStore {
                     Channel::Discord => {
                         self.insert_send_discord_task(&tx, &task.id.to_string(), send)?;
                     }
-                    Channel::GoogleDocs => {
-                        // Google Docs uses the email table format for now
+                    Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
+                        // Google Workspace uses the email table format for now
                         self.insert_send_email_task(&tx, &task.id.to_string(), send)?;
                     }
                     Channel::Sms => {
