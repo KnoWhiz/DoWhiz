@@ -116,6 +116,12 @@ Inbound message -> Ingress (Rust gateway or Azure Function) -> Raw payload stora
 | `DoWhiz_service/employees/` | Employee persona configs |
 | `external/openclaw/` | Reference implementation for multi-agent patterns |
 
+## DoWhiz Account [WIP]
+- Currently, DoWhiz Account Integration is only supported on local testing. We are working hard to polish and push this feature.
+- DoWhiz Accounts use AWS Cognito Authorization, and auth information is stored in Supabase.
+- Having a DoWhiz Account allow you to integrate agent memory across supported apps, such as Slack and Discord.
+- DoWhiz accounts also have the ability to view and edit agent memory directly, allowing more control and optimization of a user's employees.
+
 ## Documentation
 
 - **[DoWhiz Service - Full Documentation](DoWhiz_service/README.md)** - Detailed setup, configuration, environment variables, Docker, E2E testing
