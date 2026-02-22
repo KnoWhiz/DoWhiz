@@ -4,6 +4,17 @@ use std::path::{Path, PathBuf};
 use super::errors::RunTaskError;
 use super::workspace::resolve_rel_dir;
 
+/// Check if we've already prompted user to register in this thread.
+/// Returns true if a marker file exists, indicating we've already prompted.
+fn has_prompted_registration(workspace_dir: &Path) -> bool {
+    workspace_dir.join(".registration_prompted").exists()
+}
+
+/// Mark that we've prompted the user to register in this thread.
+fn mark_registration_prompted(workspace_dir: &Path) {
+    let _ = fs::write(workspace_dir.join(".registration_prompted"), "1");
+}
+
 pub(super) fn build_prompt(
     input_email_dir: &Path,
     input_attachments_dir: &Path,
@@ -14,6 +25,7 @@ pub(super) fn build_prompt(
     memory_context: &str,
     reply_required: bool,
     channel: &str,
+    has_unified_account: bool,
 ) -> String {
     let memory_section = if memory_context.trim().is_empty() {
         "Memory context (from memory/*.md):\n- (no memory files found)\n\n".to_string()
@@ -54,6 +66,23 @@ pub(super) fn build_prompt(
         }
     };
     let guidance_section = build_guidance_section(workspace_dir, runner);
+
+    // Build registration prompt section if user doesn't have a unified account
+    // and we haven't prompted them yet in this thread
+    let registration_section = if !has_unified_account && !has_prompted_registration(workspace_dir) {
+        // Mark that we've prompted so we don't repeat
+        mark_registration_prompted(workspace_dir);
+        r#"
+Account Registration Notice:
+- This user does not have a DoWhiz unified account linked.
+- At the END of your reply (after completing the task), add a brief note like:
+  "💡 Tip: Link your DoWhiz account to sync your preferences and project info across all channels (email, Google Docs, Slack, etc.). Visit https://dowhiz.com/link to get started."
+- Only mention this once - do not repeat in subsequent messages.
+"#
+    } else {
+        ""
+    };
+
     format!(
         r#"You are a DoWhiz digital employee. Follow the employee guidance provided below. Your task is to read incoming emails, understand the user's intent, finish the task, and draft appropriate email replies. You can also use memory and reference materials for context (already saved under current workspace). Always be cute, patient, friendly and helpful in your replies.
 
@@ -95,7 +124,7 @@ Rules:
   Prefer creating a work/ directory for clones, patches, and build artifacts.
 - If attachments include version suffixes like _v1, _v2, the highest version should be the latest version.
 - Avoid interactive commands; use non-interactive flags for git/gh (for example, `gh pr create --title ... --body ...`).
-"#,
+{registration_section}"#,
         input_email = input_email_dir.display(),
         input_attachments = input_attachments_dir.display(),
         memory = memory_dir.display(),
@@ -103,6 +132,7 @@ Rules:
         memory_section = memory_section,
         guidance_section = guidance_section,
         reply_instruction = reply_instruction,
+        registration_section = registration_section,
     )
 }
 
@@ -213,6 +243,7 @@ mod tests {
             "--- memory/memo.md ---\nHello",
             true,
             "email",
+            true, // has_unified_account
         );
 
         assert!(prompt.contains("Memory context"));
@@ -234,9 +265,48 @@ mod tests {
             "",
             false,
             "email",
+            true, // has_unified_account
         );
 
         assert!(prompt.contains("non-replyable"));
         assert!(!prompt.contains("write a proper HTML email draft"));
+    }
+
+    #[test]
+    fn build_prompt_includes_registration_notice_for_unregistered_user() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            workspace,
+            "codex",
+            "",
+            true,
+            "email",
+            false, // has_unified_account = false
+        );
+
+        assert!(prompt.contains("Account Registration Notice"));
+        assert!(prompt.contains("dowhiz.com/link"));
+
+        // Second call should NOT include the notice (already prompted)
+        let prompt2 = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            workspace,
+            "codex",
+            "",
+            true,
+            "email",
+            false,
+        );
+
+        assert!(!prompt2.contains("Account Registration Notice"));
     }
 }
