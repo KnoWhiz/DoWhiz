@@ -513,7 +513,7 @@ function App() {
       pronoun: 'He/Him',
       nickname: 'Little-Bear',
       title: 'Writer',
-      desc: 'Writer for daily office work across Notion, Overleaf, Google Docs, Google Slides, and Google Sheets.',
+      desc: '全能的工作助手',
       example: 'Draft a project update in Notion and summarize it for stakeholders.',
       status: 'Active',
       img: oliverImg,
