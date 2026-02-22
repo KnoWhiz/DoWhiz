@@ -24,6 +24,10 @@ pub enum Channel {
     WhatsApp,
     /// Google Docs collaboration via comments
     GoogleDocs,
+    /// Google Sheets collaboration via comments
+    GoogleSheets,
+    /// Google Slides collaboration via comments
+    GoogleSlides,
     /// iMessage via BlueBubbles bridge
     BlueBubbles,
 }
@@ -44,6 +48,8 @@ impl std::fmt::Display for Channel {
             Channel::Telegram => write!(f, "telegram"),
             Channel::WhatsApp => write!(f, "whatsapp"),
             Channel::GoogleDocs => write!(f, "google_docs"),
+            Channel::GoogleSheets => write!(f, "google_sheets"),
+            Channel::GoogleSlides => write!(f, "google_slides"),
             Channel::BlueBubbles => write!(f, "bluebubbles"),
         }
     }
@@ -61,6 +67,8 @@ impl std::str::FromStr for Channel {
             "telegram" => Ok(Channel::Telegram),
             "whatsapp" => Ok(Channel::WhatsApp),
             "google_docs" | "googledocs" => Ok(Channel::GoogleDocs),
+            "google_sheets" | "googlesheets" => Ok(Channel::GoogleSheets),
+            "google_slides" | "googleslides" => Ok(Channel::GoogleSlides),
             "bluebubbles" | "imessage" => Ok(Channel::BlueBubbles),
             _ => Err(format!("unknown channel: {}", s)),
         }
@@ -143,6 +151,22 @@ pub struct ChannelMetadata {
     pub google_docs_comment_id: Option<String>,
     /// Google Docs-specific: Document name/title
     pub google_docs_document_name: Option<String>,
+    /// Google Sheets-specific: Spreadsheet ID
+    pub google_sheets_spreadsheet_id: Option<String>,
+    /// Google Sheets-specific: Comment ID to reply to
+    pub google_sheets_comment_id: Option<String>,
+    /// Google Sheets-specific: Spreadsheet name/title
+    pub google_sheets_spreadsheet_name: Option<String>,
+    /// Google Sheets-specific: Sheet name (tab) where comment is located
+    pub google_sheets_sheet_name: Option<String>,
+    /// Google Slides-specific: Presentation ID
+    pub google_slides_presentation_id: Option<String>,
+    /// Google Slides-specific: Comment ID to reply to
+    pub google_slides_comment_id: Option<String>,
+    /// Google Slides-specific: Presentation name/title
+    pub google_slides_presentation_name: Option<String>,
+    /// Google Slides-specific: Slide number where comment is located
+    pub google_slides_slide_number: Option<i32>,
     /// BlueBubbles-specific: Chat GUID (e.g., "iMessage;-;+1234567890")
     pub bluebubbles_chat_guid: Option<String>,
 

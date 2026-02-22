@@ -100,6 +100,7 @@ pub(super) fn run_codex_task(
         &memory_context,
         !request.reply_to.is_empty(),
         request.channel,
+        request.has_unified_account,
     );
 
     let timeout = run_task_timeout();

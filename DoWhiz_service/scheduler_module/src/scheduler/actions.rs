@@ -84,8 +84,23 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         return Ok(false);
     }
 
+    // For Google Workspace channels (Docs, Sheets, Slides), the Claude agent
+    // already replies to comments via CLI during task execution, so we skip
+    // the auto_reply to avoid duplicate replies.
+    if matches!(
+        task.channel,
+        Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides
+    ) {
+        info!(
+            "skip auto reply for Google Workspace channel {:?} in {} (Claude replies via CLI)",
+            task.channel,
+            task.workspace_dir.display()
+        );
+        return Ok(false);
+    }
+
     // Non-email channels use plain text reply_message.txt
-    // Email and GoogleDocs use HTML reply_email_draft.html
+    // Email and Google Workspace use HTML reply_email_draft.html
     let (reply_filename, attachments_dirname) = match task.channel {
         Channel::Slack
         | Channel::Discord
@@ -93,7 +108,7 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         | Channel::Telegram
         | Channel::WhatsApp
         | Channel::Sms => ("reply_message.txt", "reply_attachments"),
-        Channel::Email | Channel::GoogleDocs => {
+        Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
             ("reply_email_draft.html", "reply_email_attachments")
         }
     };
