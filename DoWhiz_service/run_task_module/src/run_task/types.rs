@@ -16,6 +16,8 @@ pub struct RunTaskParams {
     pub channel: String,
     /// Pre-generated Google access token (for sandbox environments without network access)
     pub google_access_token: Option<String>,
+    /// Whether the user has a unified DoWhiz account (for cross-channel memo sync)
+    pub has_unified_account: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +31,7 @@ pub(super) struct RunTaskRequest<'a> {
     pub(super) reply_to: &'a [String],
     pub(super) channel: &'a str,
     pub(super) google_access_token: Option<&'a str>,
+    pub(super) has_unified_account: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
