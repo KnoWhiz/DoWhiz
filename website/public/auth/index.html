@@ -351,24 +351,30 @@
 
             <section class="legal-card dashboard-section">
               <h2>Your Memo</h2>
-              <p>This is your unified memo synced across all channels.</p>
+              <p>This is your unified memo synced across all channels. If you want to make changes, please edit below and save.</p>
               <div id="memo-container" style="margin-top: 1rem;">
-                <pre id="memo-content" style="
+                <textarea id="memo-content" style="
                   background: var(--surface, #1a1a1a);
                   border: 1px solid var(--border, #333);
                   border-radius: 8px;
                   padding: 1rem;
-                  white-space: pre-wrap;
-                  word-wrap: break-word;
+                  width: 100%;
+                  min-height: 300px;
+                  resize: vertical;
                   font-family: monospace;
                   font-size: 0.9rem;
-                  max-height: 400px;
-                  overflow-y: auto;
                   color: var(--text, #fff);
-                ">Loading memo...</pre>
-                <button id="refresh-memo-btn" class="auth-btn auth-btn-oauth" style="margin-top: 0.5rem;">
-                  Refresh Memo
-                </button>
+                  box-sizing: border-box;
+                ">Loading memo...</textarea>
+                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; align-items: center;">
+                  <button id="save-memo-btn" class="auth-btn auth-btn-primary">
+                    Save Changes
+                  </button>
+                  <button id="refresh-memo-btn" class="auth-btn auth-btn-oauth">
+                    Refresh
+                  </button>
+                  <span id="memo-status" style="margin-left: 0.5rem; font-size: 0.9rem;"></span>
+                </div>
               </div>
             </section>
 
@@ -616,18 +622,60 @@
           }
 
           const data = await res.json();
-          memoContent.textContent = data.content;
+          memoContent.value = data.content;
         } catch (err) {
           console.error('Failed to load memo:', err);
-          memoContent.textContent = `Error loading memo: ${err.message}`;
+          memoContent.value = `Error loading memo: ${err.message}`;
         }
       }
+
+      // Save memo
+      async function saveMemo(accessToken) {
+        const memoContent = document.getElementById('memo-content');
+        const memoStatus = document.getElementById('memo-status');
+        const content = memoContent.value;
+
+        memoStatus.textContent = 'Saving...';
+        memoStatus.style.color = 'var(--text-muted, #888)';
+
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/auth/memo`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ content })
+          });
+
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to save memo');
+          }
+
+          memoStatus.textContent = 'Saved!';
+          memoStatus.style.color = '#22c55e';
+          setTimeout(() => { memoStatus.textContent = ''; }, 3000);
+        } catch (err) {
+          console.error('Failed to save memo:', err);
+          memoStatus.textContent = `Error: ${err.message}`;
+          memoStatus.style.color = '#ef4444';
+        }
+      }
+
+      // Save memo button
+      document.getElementById('save-memo-btn').addEventListener('click', async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          await saveMemo(session.access_token);
+        }
+      });
 
       // Refresh memo button
       document.getElementById('refresh-memo-btn').addEventListener('click', async () => {
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
-          document.getElementById('memo-content').textContent = 'Loading...';
+          document.getElementById('memo-content').value = 'Loading...';
           await loadMemo(session.access_token);
         }
       });
