@@ -426,6 +426,13 @@ function App() {
 
   const blogPosts = [
     {
+      tag: 'Week Summary',
+      title: 'Weekly summary: Google Workspace expansion + integrations',
+      date: 'February 23, 2026',
+      excerpt: 'Sheets and Slides comments support, Discord OAuth linking, unified memo edits, and full light/dark mode coverage.',
+      link: '/blog/#week-summary-2026-02-23'
+    },
+    {
       tag: 'Launch Notes',
       title: 'Inbox-native delegation',
       date: 'February 2026',
