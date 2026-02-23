@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::channel::Channel;
 use crate::index_store::IndexStore;
@@ -56,6 +56,10 @@ pub(super) fn spawn_ingestion_consumer(
         }
         match queue.claim_next(&employee_id) {
             Ok(Some(item)) => {
+                info!(
+                    "ingestion claimed envelope for employee={} channel={:?}",
+                    employee_id, item.envelope.channel
+                );
                 match process_ingestion_envelope(
                     &config,
                     &user_store,
@@ -66,11 +70,13 @@ pub(super) fn spawn_ingestion_consumer(
                     &item.envelope,
                 ) {
                     Ok(_) => {
+                        info!("ingestion processed successfully for employee={}", employee_id);
                         if let Err(err) = queue.mark_done(&item.id) {
                             warn!("failed to mark envelope done: {}", err);
                         }
                     }
                     Err(err) => {
+                        warn!("ingestion processing failed for employee={}: {}", employee_id, err);
                         if let Err(mark_err) = queue.mark_failed(&item.id, &err.to_string()) {
                             warn!("failed to mark envelope failed: {}", mark_err);
                         }
@@ -115,6 +121,7 @@ fn process_ingestion_envelope(
             process_inbound_payload(config, user_store, index_store, &payload, &raw_payload)
         }
         Channel::Slack => {
+            info!("processing slack envelope, trying quick response first");
             let message = envelope.to_inbound_message();
             if try_quick_response_slack(
                 config,
@@ -124,8 +131,10 @@ fn process_ingestion_envelope(
                 runtime,
                 &message,
             )? {
+                info!("slack quick response succeeded");
                 return Ok(());
             }
+            info!("slack quick response returned false, proceeding to full pipeline");
             let raw_payload = envelope.raw_payload_bytes();
             if raw_payload.is_empty() {
                 return Err("missing slack raw payload".into());

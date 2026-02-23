@@ -64,6 +64,7 @@ fn base_send_task(channel: Channel, html_path: PathBuf, attachments_dir: PathBuf
         archive_root: None,
         thread_epoch: None,
         thread_state_path: None,
+        employee_id: None,
     }
 }
 

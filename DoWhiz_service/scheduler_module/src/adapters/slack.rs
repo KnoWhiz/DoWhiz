@@ -69,8 +69,8 @@ impl InboundAdapter for SlackInboundAdapter {
 
         let event = wrapper.event.ok_or(AdapterError::MissingField("event"))?;
 
-        // Only handle message events (not subtypes like message_changed, etc.)
-        if event.event_type != "message" {
+        // Only handle message and app_mention events (not subtypes like message_changed, etc.)
+        if event.event_type != "message" && event.event_type != "app_mention" {
             return Err(AdapterError::ParseError(format!(
                 "unsupported event.type: {}",
                 event.event_type
@@ -576,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_event_type_errors() {
+    fn app_mention_event_parses() {
         let payload = r#"{
             "type": "event_callback",
             "event": {
@@ -590,8 +590,10 @@ mod tests {
 
         let adapter = SlackInboundAdapter::default();
         let result = adapter.parse(payload.as_bytes());
-        // app_mention is not "message" type, should error
-        assert!(result.is_err());
+        // app_mention should now be supported
+        assert!(result.is_ok());
+        let message = result.unwrap();
+        assert_eq!(message.text_body, Some("Hey bot!".to_string()));
     }
 
     #[test]

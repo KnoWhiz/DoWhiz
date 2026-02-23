@@ -350,6 +350,7 @@ fn notify_run_task_failure(
                 archive_root: None,
                 thread_epoch: None,
                 thread_state_path: None,
+                employee_id: task.employee_id.clone(),
             };
             execute_slack_send(&send_task)?;
         } else {

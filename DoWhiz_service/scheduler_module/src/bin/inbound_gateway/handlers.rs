@@ -115,11 +115,13 @@ pub(super) async fn ingest_slack(
         Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"}))),
     };
 
-    let team_id = wrapper
-        .get("team_id")
+    // Extract api_app_id for routing (each Slack app has unique app_id)
+    let api_app_id = wrapper
+        .get("api_app_id")
         .and_then(|value| value.as_str())
         .unwrap_or("");
-    if team_id.is_empty() {
+    if api_app_id.is_empty() {
+        info!("gateway no api_app_id in slack payload");
         return (StatusCode::OK, Json(json!({"status": "no_route"})));
     }
 
@@ -128,10 +130,15 @@ pub(super) async fn ingest_slack(
         .and_then(|value| value.as_str())
         .map(|value| value.to_string());
 
-    let Some(route) = resolve_route(Channel::Slack, team_id, &state) else {
-        info!("gateway no route for slack team_id={}", team_id);
+    let Some(route) = resolve_route(Channel::Slack, api_app_id, &state) else {
+        info!("gateway no route for slack api_app_id={}", api_app_id);
         return (StatusCode::OK, Json(json!({"status": "no_route"})));
     };
+
+    info!(
+        "gateway slack routing: api_app_id={} -> employee_id={}",
+        api_app_id, route.employee_id
+    );
 
     let adapter = SlackInboundAdapter::new(HashSet::new());
     let message = match adapter.parse(&body) {
