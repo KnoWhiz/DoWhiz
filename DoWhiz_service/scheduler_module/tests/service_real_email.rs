@@ -33,19 +33,34 @@ impl TaskExecutor for NoopExecutor {
 }
 
 fn resolve_employee_config_path() -> PathBuf {
-    env::var("EMPLOYEE_CONFIG_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            let local = manifest_dir.join("employee.toml");
-            if local.exists() {
-                return local;
+    if let Ok(raw_path) = env::var("EMPLOYEE_CONFIG_PATH") {
+        let path = PathBuf::from(raw_path);
+        if path.is_absolute() {
+            return path;
+        }
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let local = manifest_dir.join(&path);
+        if local.exists() {
+            return local;
+        }
+        if let Some(parent) = manifest_dir.parent() {
+            let parent_path = parent.join(&path);
+            if parent_path.exists() {
+                return parent_path;
             }
-            manifest_dir
-                .parent()
-                .unwrap_or(&manifest_dir)
-                .join("employee.toml")
-        })
+        }
+        return path;
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let local = manifest_dir.join("employee.toml");
+    if local.exists() {
+        return local;
+    }
+    manifest_dir
+        .parent()
+        .unwrap_or(&manifest_dir)
+        .join("employee.toml")
 }
 
 fn load_employee_for_address(

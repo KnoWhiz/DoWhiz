@@ -92,12 +92,12 @@ For a full single-VM deployment (no Docker) that runs the inbound gateway + an O
 
 ## Azure Deployment (Production)
 
-For Azure-managed ingress, queues, and storage, follow `DoWhiz_service/README.md` under **Azure Deployment (Functions + Service Bus + Blob + Workers)**. This flow uses Azure Functions for Postmark email ingress, Azure Service Bus for ingestion queues, Azure Blob for raw payloads, and worker services running on Azure VMs or containers.
+For Azure-managed ingress, queues, and storage, follow `DoWhiz_service/README.md` under **Azure Deployment (Rust Gateway + Service Bus + Blob + Workers)**. This flow uses the Rust inbound gateway for **all** ingress (including email), Azure Service Bus for ingestion queues, Azure Blob for raw payloads, and worker services running on Azure VMs or containers.
 
 ## Architecture
 
 ```
-Inbound message -> Ingress (Rust gateway or Azure Function) -> Raw payload storage (Azure Blob; Supabase legacy) -> Ingestion Queue (Service Bus for gateway; Postgres optional) -> Scheduler -> Task runner -> Tools -> Outbound message
+Inbound message -> Ingress (Rust gateway) -> Raw payload storage (Azure Blob; Supabase legacy) -> Ingestion Queue (Service Bus for gateway; Postgres optional) -> Scheduler -> Task runner -> Tools -> Outbound message
 ```
 
 **Core capabilities:**
