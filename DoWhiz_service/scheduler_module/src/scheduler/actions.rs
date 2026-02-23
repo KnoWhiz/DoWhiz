@@ -140,6 +140,7 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         archive_root: task.archive_root.clone(),
         thread_epoch: task.thread_epoch,
         thread_state_path: task.thread_state_path.clone(),
+        employee_id: task.employee_id.clone(),
     };
 
     let task_id =
@@ -238,6 +239,7 @@ pub(crate) fn schedule_send_email<E: TaskExecutor>(
         archive_root: task.archive_root.clone(),
         thread_epoch: task.thread_epoch,
         thread_state_path: task.thread_state_path.clone(),
+        employee_id: task.employee_id.clone(),
     };
 
     if let Some(run_at_raw) = request.run_at.as_deref() {

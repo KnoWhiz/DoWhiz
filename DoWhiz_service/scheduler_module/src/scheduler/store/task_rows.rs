@@ -246,6 +246,7 @@ impl SqliteSchedulerStore {
             archive_root: normalize_optional_path(archive_root),
             thread_epoch: thread_epoch_raw.map(|value| value as u64),
             thread_state_path: normalize_optional_path(thread_state_path),
+            employee_id: None, // Not persisted in DB yet
         })
     }
 
@@ -289,6 +290,7 @@ impl SqliteSchedulerStore {
             archive_root: workspace_dir.map(PathBuf::from),
             thread_epoch: None,
             thread_state_path: None,
+            employee_id: None, // Not persisted in DB yet
         })
     }
 
@@ -334,6 +336,7 @@ impl SqliteSchedulerStore {
             archive_root: workspace_dir.map(PathBuf::from),
             thread_epoch: None,
             thread_state_path: None,
+            employee_id: None, // Not persisted in DB yet
         })
     }
 
@@ -379,6 +382,7 @@ impl SqliteSchedulerStore {
             archive_root: None,
             thread_epoch: thread_epoch_raw.map(|value| value as u64),
             thread_state_path: normalize_optional_path(thread_state_path),
+            employee_id: None, // Not persisted in DB yet
         })
     }
 
@@ -424,6 +428,7 @@ impl SqliteSchedulerStore {
             archive_root: None,
             thread_epoch: thread_epoch_raw.map(|value| value as u64),
             thread_state_path: normalize_optional_path(thread_state_path),
+            employee_id: None, // Not persisted in DB yet
         })
     }
 
@@ -469,6 +474,7 @@ impl SqliteSchedulerStore {
             archive_root: None,
             thread_epoch: thread_epoch_raw.map(|value| value as u64),
             thread_state_path: normalize_optional_path(thread_state_path),
+            employee_id: None, // Not persisted in DB yet
         })
     }
 
@@ -539,6 +545,7 @@ impl SqliteSchedulerStore {
             archive_root: None,
             thread_epoch: thread_epoch_raw.map(|value| value as u64),
             thread_state_path: normalize_optional_path(thread_state_path),
+            employee_id: None, // Not persisted in DB yet
         })
     }
 

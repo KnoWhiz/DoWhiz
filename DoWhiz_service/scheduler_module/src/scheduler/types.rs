@@ -44,6 +44,9 @@ pub struct SendReplyTask {
     pub thread_epoch: Option<u64>,
     #[serde(default)]
     pub thread_state_path: Option<PathBuf>,
+    /// Employee ID for per-employee credentials (optional)
+    #[serde(default)]
+    pub employee_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

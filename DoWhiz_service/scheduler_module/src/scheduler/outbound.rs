@@ -54,14 +54,32 @@ pub(crate) fn execute_email_send(task: &SendReplyTask) -> Result<(), SchedulerEr
     Ok(())
 }
 
+/// Resolve the Slack bot token for a specific employee.
+///
+/// Looks for `{EMPLOYEE}_SLACK_BOT_TOKEN` env var first (e.g., `OLIVER_SLACK_BOT_TOKEN`),
+/// then falls back to the global `SLACK_BOT_TOKEN`.
+fn resolve_slack_bot_token_for_employee(employee_id: Option<&str>) -> Result<String, SchedulerError> {
+    if let Some(emp_id) = employee_id {
+        let emp_upper = emp_id.to_uppercase().replace('-', "_");
+        let emp_token_key = format!("{}_SLACK_BOT_TOKEN", emp_upper);
+        if let Ok(token) = std::env::var(&emp_token_key) {
+            if !token.trim().is_empty() {
+                info!("using {} for employee {}", emp_token_key, emp_id);
+                return Ok(token);
+            }
+        }
+    }
+    std::env::var("SLACK_BOT_TOKEN")
+        .map_err(|_| SchedulerError::TaskFailed("SLACK_BOT_TOKEN not set".to_string()))
+}
+
 /// Execute a SendReplyTask via Slack.
 pub(crate) fn execute_slack_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
     use crate::adapters::slack::SlackOutboundAdapter;
     use crate::channel::{ChannelMetadata, OutboundAdapter, OutboundMessage};
 
     dotenvy::dotenv().ok();
-    let bot_token = std::env::var("SLACK_BOT_TOKEN")
-        .map_err(|_| SchedulerError::TaskFailed("SLACK_BOT_TOKEN not set".to_string()))?;
+    let bot_token = resolve_slack_bot_token_for_employee(task.employee_id.as_deref())?;
 
     let adapter = SlackOutboundAdapter::new(bot_token);
 

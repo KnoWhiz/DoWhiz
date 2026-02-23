@@ -152,6 +152,17 @@ fn resolve_slack_bot_token(
     slack_store: &SlackStore,
     team_id: Option<&str>,
 ) -> Option<String> {
+    // First, try per-employee token (e.g., LITTLE_BEAR_SLACK_BOT_TOKEN)
+    let emp_upper = config.employee_profile.id.to_uppercase().replace('-', "_");
+    let emp_token_key = format!("{}_SLACK_BOT_TOKEN", emp_upper);
+    if let Ok(token) = std::env::var(&emp_token_key) {
+        if !token.trim().is_empty() {
+            info!("quick response using {} for employee {}", emp_token_key, config.employee_profile.id);
+            return Some(token);
+        }
+    }
+
+    // Then try slack_store by team_id
     if let Some(team_id) = team_id {
         if let Ok(installation) = slack_store.get_installation_or_env(team_id) {
             if !installation.bot_token.trim().is_empty() {
@@ -159,6 +170,8 @@ fn resolve_slack_bot_token(
             }
         }
     }
+
+    // Fall back to global SLACK_BOT_TOKEN
     config.slack_bot_token.clone()
 }
 
