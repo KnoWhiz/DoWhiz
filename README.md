@@ -121,6 +121,7 @@ Inbound message -> Ingress (Rust gateway or Azure Function) -> Raw payload stora
 - DoWhiz Accounts use AWS Cognito Authorization, and auth information is stored in Supabase.
 - DoWhiz accounts also have the ability to view and edit agent memory directly, allowing more control and optimization of a user's employees.
 - Support for Slack and Discord OAuth for DoWhiz accounts in Integration panel
+- Simultaenous Slack support for `boiled_egg` (Proto) and `little_bear` (Oliver)
 
 ## Documentation
 
