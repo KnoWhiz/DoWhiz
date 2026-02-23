@@ -1,14 +1,16 @@
 .blog-hero {
   margin-bottom: 3rem;
-  max-width: 860px;
+  max-width: 960px;
 }
 
 .blog-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2.5rem;
+  gap: clamp(1.75rem, 3vw, 2.75rem);
   align-items: start;
   margin-bottom: 3.5rem;
+  max-width: 960px;
+  width: 100%;
 }
 
 .blog-card {
@@ -24,8 +26,8 @@
 
 .blog-card.featured {
   grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-  column-gap: 2.5rem;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+  column-gap: clamp(1.5rem, 3vw, 2.5rem);
 }
 
 .blog-card h2 {
@@ -90,11 +92,14 @@
   grid-column: 2;
   grid-row: 1 / span 3;
   align-self: start;
+  max-width: 34ch;
 }
 
 .blog-cta {
   display: grid;
   gap: 1rem;
+  max-width: 960px;
+  width: 100%;
 }
 
 .blog-actions {
