@@ -426,6 +426,14 @@ function App() {
 
   const blogPosts = [
     {
+      tag: 'Weekly Update',
+      title: 'Weekly update: Feb 16–22, 2026',
+      date: 'Feb 16–22, 2026',
+      excerpt:
+        'Slack, Discord OAuth, Telegram, WhatsApp routing, unified account/memo work, infra upgrades, CI fixes, and docs shipped last week.',
+      link: '/blog/#weekly-update-2026-02-22'
+    },
+    {
       tag: 'Launch Notes',
       title: 'Inbox-native delegation',
       date: 'February 2026',
