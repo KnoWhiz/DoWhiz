@@ -55,6 +55,7 @@ impl TaskExecutor for RecordingExecutor {
                     channel: run.channel.to_string(),
                     google_access_token:
                         scheduler_module::load_google_access_token_from_service_env(),
+                    has_unified_account: false,
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
