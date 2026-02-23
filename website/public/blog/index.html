@@ -34,10 +34,44 @@
           <p class="lead">
             Short updates on how we build digital employees, ship new workflows, and keep work moving.
           </p>
-          <div class="updated">Last updated: February 20, 2026</div>
+          <div class="updated">Last updated: February 23, 2026</div>
         </section>
 
         <section class="blog-grid">
+          <article class="blog-card" id="weekly-update-2026-02-22">
+            <div class="blog-meta">
+              <span class="blog-tag">Weekly Update</span>
+              <span class="blog-date">Feb 16–22, 2026</span>
+            </div>
+            <h2>Weekly update: Feb 16–22, 2026</h2>
+            <p>Highlights from what we shipped and merged across DoWhiz last week.</p>
+            <ul>
+              <li>
+                Integrations & channels: Slack integration, Discord OAuth linking in the integrations panel,
+                Telegram support, WhatsApp routing to upstream gpt-5, and ongoing BlueBubbles/iMessage work
+                (including normalization).
+              </li>
+              <li>
+                Unified account & memory: registration prompt for users without a unified account, DoWhiz
+                account README updates, shared memo backend plus editable memo.md, blob storage logic, and
+                new account/auth endpoints (including delete).
+              </li>
+              <li>
+                Infra & reliability: first iteration of Azure Service Bus, Postgres-backed message queue
+                upgrades, task watchdog plus task timeouts, connection pool/timeout tuning, and fixes for
+                ingestion queue claims.
+              </li>
+              <li>
+                Testing & CI/CD: more unit/e2e coverage (including service_real_email),
+                scheduler_module test fixes, and CI/CD adjustments for binary upload and test gating.
+              </li>
+              <li>
+                Docs & website: integration docs updates, deployment notes, gateway workflow diagrams,
+                new blog section, and FAQ plus schema markup.
+              </li>
+            </ul>
+          </article>
+
           <article class="blog-card" id="inbox-native">
             <div class="blog-meta">
               <span class="blog-tag">Launch Notes</span>
