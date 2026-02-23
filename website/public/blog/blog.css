@@ -1,27 +1,31 @@
 .blog-hero {
   margin-bottom: 3rem;
+  max-width: 860px;
 }
 
 .blog-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2rem;
+  gap: 2.5rem;
   align-items: start;
-  margin-bottom: 3rem;
+  margin-bottom: 3.5rem;
 }
 
 .blog-card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 1.5rem;
-  padding: 2.25rem;
+  padding: 2.5rem;
   display: grid;
-  gap: 1.1rem;
+  gap: 1.25rem;
+  align-content: start;
   backdrop-filter: blur(12px);
 }
 
 .blog-card.featured {
   grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  column-gap: 2.5rem;
 }
 
 .blog-card h2 {
@@ -56,18 +60,36 @@
 
 .blog-card p {
   color: var(--muted);
+  max-width: 60ch;
 }
 
 .blog-card ul {
   padding-left: 1.2rem;
   color: var(--muted);
   display: grid;
-  gap: 0.45rem;
+  gap: 0.55rem;
   margin: 0;
+  line-height: 1.6;
 }
 
 .blog-card li {
   margin-bottom: 0;
+}
+
+.blog-card.featured .blog-meta,
+.blog-card.featured h2,
+.blog-card.featured p {
+  grid-column: 1;
+}
+
+.blog-card.featured p {
+  max-width: 45ch;
+}
+
+.blog-card.featured ul {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: start;
 }
 
 .blog-cta {
@@ -84,6 +106,17 @@
 .blog-actions .back-link.secondary {
   border-color: rgba(255, 255, 255, 0.2);
   background: transparent;
+}
+
+@media (max-width: 980px) {
+  .blog-card.featured {
+    grid-template-columns: 1fr;
+  }
+
+  .blog-card.featured ul {
+    grid-column: auto;
+    grid-row: auto;
+  }
 }
 
 @media (max-width: 768px) {
