@@ -689,7 +689,15 @@ function App() {
                     </div>
                     {showUserMenu && (
                       <div className="user-dropdown">
-                        <a href="/auth/index.html" className="dropdown-item">
+                        <a
+                          href="/auth/index.html?loggedIn=true"
+                          className="dropdown-item"
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            const { data: { session } } = await supabase.auth.getSession();
+                            window.location.href = session ? '/auth/index.html?loggedIn=true' : '/auth/index.html';
+                          }}
+                        >
                           <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" strokeWidth="2" fill="none">
                             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
                           </svg>

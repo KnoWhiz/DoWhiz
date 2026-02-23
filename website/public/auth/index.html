@@ -295,8 +295,13 @@
           <!-- Message display -->
           <div id="auth-message" class="auth-message hidden"></div>
 
+          <!-- Loading state (shown when loggedIn=true) -->
+          <div id="loading-container" class="hidden" style="text-align: center; padding: 2rem;">
+            <p style="color: var(--text-muted, #888);">Loading your dashboard...</p>
+          </div>
+
           <!-- Sign In Form -->
-          <div id="signin-form-container">
+          <div id="signin-form-container" class="hidden">
             <form id="signin-form" class="auth-form">
               <input type="email" id="signin-email" class="auth-input" placeholder="Email" required />
               <input type="password" id="signin-password" class="auth-input" placeholder="Password" required />
@@ -449,9 +454,18 @@
       const signinFormContainer = document.getElementById('signin-form-container');
       const signupFormContainer = document.getElementById('signup-form-container');
       const dashboardContainer = document.getElementById('dashboard-container');
+      const loadingContainer = document.getElementById('loading-container');
       const authMessage = document.getElementById('auth-message');
       const pageTitle = document.getElementById('page-title');
       const pageSubtitle = document.getElementById('page-subtitle');
+
+      // Check if user came from logged-in state (expecting dashboard)
+      const expectingDashboard = new URLSearchParams(window.location.search).get('loggedIn') === 'true';
+      // If expecting dashboard, keep everything hidden until ready
+      // If not, show sign-in form immediately
+      if (!expectingDashboard) {
+        signinFormContainer.classList.remove('hidden');
+      }
 
       // Show message
       function showMessage(message, type = 'error') {
@@ -543,12 +557,15 @@
           const accountData = await signupRes.json();
           showDashboard(session, accountData);
         } catch (err) {
+          // On error, show sign-in form with error message
+          signinFormContainer.classList.remove('hidden');
           showMessage(err.message);
         }
       }
 
       // Show dashboard
       async function showDashboard(session, accountData) {
+        loadingContainer.classList.add('hidden');
         signinFormContainer.classList.add('hidden');
         signupFormContainer.classList.add('hidden');
         dashboardContainer.classList.remove('hidden');
@@ -924,12 +941,18 @@
         // Check for existing session (user came directly to this page)
         const { data: { session } } = await supabase.auth.getSession();
 
+        // Clean up loggedIn parameter from URL
+        if (expectingDashboard) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
         if (session) {
-          console.log('Existing session found, showing dashboard...');
           // User is already logged in - show the dashboard
           await handleAuthSuccess(session);
+        } else {
+          // No session - show sign-in form
+          signinFormContainer.classList.remove('hidden');
         }
-        // Otherwise, show sign-in form (default state)
       }
 
       initPage();
