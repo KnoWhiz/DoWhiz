@@ -95,10 +95,26 @@ pub(super) fn ensure_send_discord_tasks_table(conn: &Connection) -> Result<(), S
             discord_channel_id TEXT NOT NULL,
             thread_id TEXT,
             text_path TEXT NOT NULL,
-            workspace_dir TEXT
+            workspace_dir TEXT,
+            employee_id TEXT
         )",
         [],
     )?;
+
+    // Add employee_id column for existing tables
+    let mut stmt = conn.prepare("PRAGMA table_info(send_discord_tasks)")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let mut columns = HashSet::new();
+    for row in rows {
+        columns.insert(row?);
+    }
+    if !columns.contains("employee_id") {
+        conn.execute(
+            "ALTER TABLE send_discord_tasks ADD COLUMN employee_id TEXT",
+            [],
+        )?;
+    }
+
     Ok(())
 }
 

@@ -83,14 +83,15 @@ impl SqliteSchedulerStore {
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned());
         tx.execute(
-            "INSERT INTO send_discord_tasks (task_id, discord_channel_id, thread_id, text_path, workspace_dir)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO send_discord_tasks (task_id, discord_channel_id, thread_id, text_path, workspace_dir, employee_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 task_id,
                 discord_channel_id,
                 thread_id,
                 send.html_path.to_string_lossy().into_owned(),
                 workspace_dir,
+                send.employee_id.as_deref(),
             ],
         )?;
         Ok(())
@@ -301,7 +302,7 @@ impl SqliteSchedulerStore {
     ) -> Result<SendReplyTask, SchedulerError> {
         let row = conn
             .query_row(
-                "SELECT discord_channel_id, thread_id, text_path, workspace_dir
+                "SELECT discord_channel_id, thread_id, text_path, workspace_dir, employee_id
                  FROM send_discord_tasks
                  WHERE task_id = ?1",
                 params![task_id],
@@ -311,16 +312,18 @@ impl SqliteSchedulerStore {
                         row.get::<_, Option<String>>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
                     ))
                 },
             )
             .optional()?;
-        let (discord_channel_id, thread_id, text_path, workspace_dir) = row.ok_or_else(|| {
-            SchedulerError::Storage(format!(
-                "missing send_discord_tasks row for task {}",
-                task_id
-            ))
-        })?;
+        let (discord_channel_id, thread_id, text_path, workspace_dir, employee_id) =
+            row.ok_or_else(|| {
+                SchedulerError::Storage(format!(
+                    "missing send_discord_tasks row for task {}",
+                    task_id
+                ))
+            })?;
 
         Ok(SendReplyTask {
             channel: Channel::Discord,
@@ -336,7 +339,7 @@ impl SqliteSchedulerStore {
             archive_root: workspace_dir.map(PathBuf::from),
             thread_epoch: None,
             thread_state_path: None,
-            employee_id: None, // Not persisted in DB yet
+            employee_id,
         })
     }
 
