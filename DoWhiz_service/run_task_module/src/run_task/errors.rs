@@ -31,6 +31,15 @@ pub enum RunTaskError {
         status: Option<i32>,
         output: String,
     },
+    E2bRunnerNotFound {
+        command: &'static str,
+    },
+    E2bRunnerInstallFailed {
+        output: String,
+    },
+    E2bRunnerFailed {
+        output: String,
+    },
     CommandTimeout {
         command: &'static str,
         timeout_secs: u64,
@@ -87,6 +96,15 @@ impl fmt::Display for RunTaskError {
                 "Docker run failed (status: {:?}). Output tail:\n{}",
                 status, output
             ),
+            RunTaskError::E2bRunnerNotFound { command } => {
+                write!(f, "E2B runner command not found on PATH: {}", command)
+            }
+            RunTaskError::E2bRunnerInstallFailed { output } => {
+                write!(f, "Failed to install E2B runner deps. Output tail:\n{}", output)
+            }
+            RunTaskError::E2bRunnerFailed { output } => {
+                write!(f, "E2B runner failed. Output tail:\n{}", output)
+            }
             RunTaskError::CommandTimeout {
                 command,
                 timeout_secs,

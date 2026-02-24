@@ -10,10 +10,18 @@ struct EnvGuard {
 
 impl EnvGuard {
     fn set(vars: &[(&str, &str)]) -> Self {
-        let mut saved = Vec::with_capacity(vars.len());
+        let mut saved = Vec::with_capacity(vars.len() + 1);
+        let mut has_e2b_override = false;
         for (key, value) in vars {
             saved.push((key.to_string(), env::var(key).ok()));
             env::set_var(key, value);
+            if *key == "RUN_TASK_USE_E2B" {
+                has_e2b_override = true;
+            }
+        }
+        if !has_e2b_override {
+            saved.push(("RUN_TASK_USE_E2B".to_string(), env::var("RUN_TASK_USE_E2B").ok()));
+            env::set_var("RUN_TASK_USE_E2B", "0");
         }
         Self { saved }
     }
@@ -106,6 +114,7 @@ fn memory_sync_roundtrip_via_run_task() -> Result<(), Box<dyn std::error::Error>
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.com"),
         ("CODEX_MODEL", "test-model"),
+        ("MEMORY_QUEUE_USE_BLOB", "0"),
     ]);
 
     let user_root = temp.path().join("users").join("user_1");

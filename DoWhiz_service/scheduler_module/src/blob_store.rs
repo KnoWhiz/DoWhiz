@@ -2,6 +2,7 @@ use azure_storage::StorageCredentials;
 use azure_storage_blobs::prelude::*;
 use futures::StreamExt;
 use std::env;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -81,20 +82,27 @@ impl BlobStore {
         })
     }
 
-    /// Get the blob path for an account's memo.md
+    /// Get the blob path for an account's memo.md (new layout)
     fn memo_blob_path(account_id: Uuid) -> String {
+        format!("accounts/{}/memo/memo.md", account_id)
+    }
+
+    /// Legacy memo path (pre-unified layout)
+    fn legacy_memo_blob_path(account_id: Uuid) -> String {
         format!("{}/memo.md", account_id)
     }
 
+    /// Memo path for a legacy user (non-unified account)
+    fn user_memo_blob_path(user_id: &str) -> String {
+        format!("users/{}/memo/memo.md", user_id)
+    }
+
+
     /// Read memo.md for an account, returns default content if not found
     pub async fn read_memo(&self, account_id: Uuid) -> Result<String, BlobStoreError> {
-        let blob_path = Self::memo_blob_path(account_id);
-        let blob_client = self.container_client.blob_client(&blob_path);
-
-        match blob_client.get_content().await {
-            Ok(data) => {
-                let content = String::from_utf8(data)
-                    .map_err(|e| BlobStoreError::Azure(format!("invalid UTF-8: {}", e)))?;
+        let primary = Self::memo_blob_path(account_id);
+        match self.read_text_blob(&primary).await {
+            Ok(content) => {
                 info!(
                     "Read memo.md for account {} ({} bytes)",
                     account_id,
@@ -102,19 +110,34 @@ impl BlobStore {
                 );
                 Ok(content)
             }
-            Err(e) => {
-                // Check if it's a 404 (blob not found)
-                let error_str = e.to_string();
-                if error_str.contains("BlobNotFound") || error_str.contains("404") {
-                    info!(
-                        "Memo not found for account {}, returning default",
-                        account_id
-                    );
-                    Ok(DEFAULT_MEMO_CONTENT.to_string())
-                } else {
-                    error!("Failed to read memo for account {}: {}", account_id, e);
-                    Err(BlobStoreError::Azure(e.to_string()))
+            Err(BlobStoreError::Azure(err)) if is_not_found(&err) => {
+                // Try legacy path
+                let legacy = Self::legacy_memo_blob_path(account_id);
+                match self.read_text_blob(&legacy).await {
+                    Ok(content) => {
+                        info!(
+                            "Read legacy memo for account {} ({} bytes)",
+                            account_id,
+                            content.len()
+                        );
+                        Ok(content)
+                    }
+                    Err(BlobStoreError::Azure(err)) if is_not_found(&err) => {
+                        info!(
+                            "Memo not found for account {}, returning default",
+                            account_id
+                        );
+                        Ok(DEFAULT_MEMO_CONTENT.to_string())
+                    }
+                    Err(err) => {
+                        error!("Failed to read memo for account {}: {}", account_id, err);
+                        Err(err)
+                    }
                 }
+            }
+            Err(err) => {
+                error!("Failed to read memo for account {}: {}", account_id, err);
+                Err(err)
             }
         }
     }
@@ -122,15 +145,11 @@ impl BlobStore {
     /// Write memo.md for an account
     pub async fn write_memo(&self, account_id: Uuid, content: &str) -> Result<(), BlobStoreError> {
         let blob_path = Self::memo_blob_path(account_id);
-        let blob_client = self.container_client.blob_client(&blob_path);
-
-        blob_client
-            .put_block_blob(content.as_bytes().to_vec())
-            .content_type("text/markdown")
+        self.write_blob_bytes(&blob_path, content.as_bytes())
             .await
             .map_err(|e| {
                 error!("Failed to write memo for account {}: {}", account_id, e);
-                BlobStoreError::Azure(e.to_string())
+                e
             })?;
 
         info!(
@@ -138,6 +157,99 @@ impl BlobStore {
             account_id,
             content.len()
         );
+        Ok(())
+    }
+
+    /// Read memo.md for a legacy user (non-unified account)
+    pub async fn read_user_memo(&self, user_id: &str) -> Result<String, BlobStoreError> {
+        let blob_path = Self::user_memo_blob_path(user_id);
+        match self.read_text_blob(&blob_path).await {
+            Ok(content) => {
+                info!(
+                    "Read memo.md for user {} ({} bytes)",
+                    user_id,
+                    content.len()
+                );
+                Ok(content)
+            }
+            Err(BlobStoreError::Azure(err)) if is_not_found(&err) => {
+                info!("Memo not found for user {}, returning default", user_id);
+                Ok(DEFAULT_MEMO_CONTENT.to_string())
+            }
+            Err(err) => {
+                error!("Failed to read memo for user {}: {}", user_id, err);
+                Err(err)
+            }
+        }
+    }
+
+    /// Write memo.md for a legacy user (non-unified account)
+    pub async fn write_user_memo(&self, user_id: &str, content: &str) -> Result<(), BlobStoreError> {
+        let blob_path = Self::user_memo_blob_path(user_id);
+        self.write_blob_bytes(&blob_path, content.as_bytes())
+            .await
+            .map_err(|e| {
+                error!("Failed to write memo for user {}: {}", user_id, e);
+                e
+            })?;
+        info!(
+            "Wrote memo.md for user {} ({} bytes)",
+            user_id,
+            content.len()
+        );
+        Ok(())
+    }
+
+    /// Write raw bytes to a blob path
+    pub async fn write_blob_bytes(
+        &self,
+        blob_path: &str,
+        bytes: &[u8],
+    ) -> Result<(), BlobStoreError> {
+        let blob_client = self.container_client.blob_client(blob_path);
+        blob_client
+            .put_block_blob(bytes.to_vec())
+            .await
+            .map_err(|e| BlobStoreError::Azure(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Upload a local file to Azure Blob Storage
+    pub async fn upload_file(
+        &self,
+        local_path: &Path,
+        blob_path: &str,
+    ) -> Result<(), BlobStoreError> {
+        let bytes = std::fs::read(local_path)
+            .map_err(|e| BlobStoreError::Azure(e.to_string()))?;
+        self.write_blob_bytes(blob_path, &bytes)
+            .await
+    }
+
+    /// Upload a directory recursively to Azure Blob Storage
+    pub async fn upload_dir(
+        &self,
+        local_root: &Path,
+        blob_prefix: &str,
+    ) -> Result<(), BlobStoreError> {
+        if !local_root.exists() {
+            return Ok(());
+        }
+
+        let mut files = Vec::new();
+        collect_files(local_root, &mut files)
+            .map_err(|e| BlobStoreError::Azure(e.to_string()))?;
+
+        for file_path in files {
+            let relative = file_path
+                .strip_prefix(local_root)
+                .map_err(|e| BlobStoreError::Azure(e.to_string()))?;
+            let relative_str = relative
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            let blob_path = format!("{}/{}", blob_prefix.trim_end_matches('/'), relative_str);
+            self.upload_file(&file_path, &blob_path).await?;
+        }
         Ok(())
     }
 
@@ -191,8 +303,15 @@ impl BlobStore {
         while let Some(result) = stream.next().await {
             let response = result.map_err(|e| BlobStoreError::Azure(e.to_string()))?;
             for blob in response.blobs.blobs() {
-                // Parse account_id from path like "uuid/memo.md"
-                if let Some(account_str) = blob.name.strip_suffix("/memo.md") {
+                // Parse account_id from path like "accounts/{uuid}/memo/memo.md"
+                if let Some(stripped) = blob.name.strip_prefix("accounts/") {
+                    if let Some(account_str) = stripped.split('/').next() {
+                        if let Ok(account_id) = Uuid::parse_str(account_str) {
+                            account_ids.push(account_id);
+                        }
+                    }
+                } else if let Some(account_str) = blob.name.strip_suffix("/memo.md") {
+                    // Legacy path support
                     if let Ok(account_id) = Uuid::parse_str(account_str) {
                         account_ids.push(account_id);
                     }
@@ -201,6 +320,34 @@ impl BlobStore {
         }
 
         Ok(account_ids)
+    }
+}
+
+fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            collect_files(&path, files)?;
+        } else if entry.file_type()?.is_file() {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn is_not_found(error: &str) -> bool {
+    error.contains("BlobNotFound") || error.contains("404")
+}
+
+impl BlobStore {
+    async fn read_text_blob(&self, blob_path: &str) -> Result<String, BlobStoreError> {
+        let blob_client = self.container_client.blob_client(blob_path);
+        match blob_client.get_content().await {
+            Ok(data) => String::from_utf8(data)
+                .map_err(|e| BlobStoreError::Azure(format!("invalid UTF-8: {}", e))),
+            Err(e) => Err(BlobStoreError::Azure(e.to_string())),
+        }
     }
 }
 

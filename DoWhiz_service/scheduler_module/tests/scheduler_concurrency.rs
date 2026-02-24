@@ -68,6 +68,7 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
     env::set_var("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.com");
     env::set_var("CODEX_TEST_SLEEP_SECS", format!("{TASK_SLEEP_SECS}"));
     env::set_var("GH_AUTH_DISABLED", "1");
+    env::set_var("RUN_TASK_USE_E2B", "0");
     env::set_var("RUN_TASK_DOCKER_IMAGE", "");
     env::set_var("RUN_TASK_USE_DOCKER", "0");
     env::set_var("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS", "1");

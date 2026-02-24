@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `scheduler_module/`: inbound gateway (Service Bus ingestion + Azure Blob raw payloads), scheduling, and service binaries. Postgres ingestion remains available for legacy/worker-only setups.
+- `scheduler_module/`: inbound gateway (Service Bus ingestion + Azure Blob raw payloads), scheduling, service binaries, and Google Workspace comment pollers (Docs/Sheets/Slides). Postgres ingestion remains available for legacy/worker-only setups.
 - `send_emails_module/`: Postmark integration and email sending.
 - `run_task_module/`: task execution and workspace orchestration (`src/run_task/`).
 - `scripts/`: local run helpers (gateway, employees, E2E).
