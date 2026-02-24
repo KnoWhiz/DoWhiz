@@ -1,8 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use tracing::error;
+use chrono::Utc;
+use tracing::{error, warn};
+use uuid::Uuid;
 
 use crate::employee_config::EmployeeProfile;
+use crate::{blob_store::get_blob_store, channel::Channel};
 
 use super::html::{strip_html_tags, truncate_preview};
 use super::BoxError;
@@ -215,6 +218,107 @@ pub(super) fn write_thread_history(
 
     std::fs::write(incoming_email.join("thread_history.md"), output)?;
     Ok(())
+}
+
+pub(crate) fn persist_inbound_payloads(
+    workspace: &Path,
+    channel: &Channel,
+    account_id: Option<Uuid>,
+    user_id: &str,
+    thread_key: Option<&str>,
+) -> Result<(), BoxError> {
+    let Some(blob_store) = get_blob_store() else {
+        return Ok(());
+    };
+
+    let workspace_name = workspace
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(sanitize_path_component)
+        .unwrap_or_else(|| "workspace".to_string());
+    let channel_name = channel.to_string().to_ascii_lowercase();
+    let scope_prefix = if let Some(account_id) = account_id {
+        format!(
+            "accounts/{}/channels/{}/workspaces/{}",
+            account_id, channel_name, workspace_name
+        )
+    } else {
+        format!(
+            "users/{}/channels/{}/workspaces/{}",
+            sanitize_path_component(user_id),
+            channel_name,
+            workspace_name
+        )
+    };
+
+    let incoming_email = workspace.join("incoming_email");
+    let incoming_attachments = workspace.join("incoming_attachments");
+    let thread_state = workspace.join("thread_state.json");
+
+    let metadata = serde_json::json!({
+        "channel": channel.to_string(),
+        "account_id": account_id.map(|id| id.to_string()),
+        "user_id": user_id,
+        "thread_key": thread_key,
+        "workspace": workspace_name,
+        "updated_at": Utc::now().to_rfc3339(),
+    });
+
+    let rt = tokio::runtime::Runtime::new().map_err(|e| {
+        Box::<dyn std::error::Error + Send + Sync>::from(e.to_string())
+    })?;
+
+    let meta_path = format!("{}/metadata.json", scope_prefix);
+    if let Err(e) = rt.block_on(blob_store.write_blob_bytes(
+        &meta_path,
+        metadata.to_string().as_bytes(),
+    )) {
+        warn!("Failed to persist inbound metadata to blob: {}", e);
+    }
+
+    if let Err(e) = rt.block_on(blob_store.upload_dir(
+        &incoming_email,
+        &format!("{}/incoming_email", scope_prefix),
+    )) {
+        warn!("Failed to persist inbound email payloads to blob: {}", e);
+    }
+
+    if let Err(e) = rt.block_on(blob_store.upload_dir(
+        &incoming_attachments,
+        &format!("{}/incoming_attachments", scope_prefix),
+    )) {
+        warn!("Failed to persist inbound attachments to blob: {}", e);
+    }
+
+    if thread_state.exists() {
+        let thread_state_path = format!("{}/thread_state.json", scope_prefix);
+        if let Err(e) = rt.block_on(blob_store.upload_file(&thread_state, &thread_state_path)) {
+            warn!("Failed to persist thread_state.json to blob: {}", e);
+        }
+    }
+
+    Ok(())
+}
+
+fn sanitize_path_component(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return "unknown".to_string();
+    }
+    let mut out = String::new();
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    let cleaned = out.trim_matches(&['.', '_', '-'][..]);
+    if cleaned.is_empty() {
+        "unknown".to_string()
+    } else {
+        cleaned.to_string()
+    }
 }
 
 #[derive(Default)]

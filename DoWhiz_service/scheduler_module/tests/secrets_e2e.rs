@@ -1,7 +1,6 @@
 mod test_support;
 
 use mockito::{Matcher, Server};
-use scheduler_module::collaboration_store::CollaborationStore;
 use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
 use scheduler_module::service::{
@@ -26,10 +25,18 @@ struct EnvGuard {
 
 impl EnvGuard {
     fn set(vars: &[(&str, &str)]) -> Self {
-        let mut saved = Vec::with_capacity(vars.len());
+        let mut saved = Vec::with_capacity(vars.len() + 1);
+        let mut has_e2b_override = false;
         for (key, value) in vars {
             saved.push((key.to_string(), env::var(key).ok()));
             env::set_var(key, value);
+            if *key == "RUN_TASK_USE_E2B" {
+                has_e2b_override = true;
+            }
+        }
+        if !has_e2b_override {
+            saved.push(("RUN_TASK_USE_E2B".to_string(), env::var("RUN_TASK_USE_E2B").ok()));
+            env::set_var("RUN_TASK_USE_E2B", "0");
         }
         Self { saved }
     }
@@ -355,7 +362,6 @@ fn secrets_persist_across_workspaces_and_load(
 
     let user_store = UserStore::new(&config.users_db_path)?;
     let index_store = IndexStore::new(&config.task_index_path)?;
-    let collaboration_store = CollaborationStore::new(state_root.join("collaboration.db"))?;
 
     let inbound_raw = format!(
         r#"{{
@@ -371,7 +377,6 @@ fn secrets_persist_across_workspaces_and_load(
         &config,
         &user_store,
         &index_store,
-        &collaboration_store,
         &payload,
         inbound_raw.as_bytes(),
     )?;
@@ -403,7 +408,6 @@ fn secrets_persist_across_workspaces_and_load(
         &config,
         &user_store,
         &index_store,
-        &collaboration_store,
         &follow_up,
         follow_up_raw.as_bytes(),
     )?;

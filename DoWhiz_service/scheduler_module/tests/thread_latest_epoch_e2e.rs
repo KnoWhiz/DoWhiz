@@ -1,7 +1,6 @@
 mod test_support;
 
 use run_task_module::RunTaskParams;
-use scheduler_module::collaboration_store::CollaborationStore;
 use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
 use scheduler_module::service::{
@@ -109,6 +108,7 @@ impl TaskExecutor for RecordingExecutor {
                     channel: run.channel.to_string(),
                     google_access_token:
                         scheduler_module::load_google_access_token_from_service_env(),
+                    has_unified_account: false,
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -206,6 +206,7 @@ fn thread_latest_epoch_end_to_end() {
     let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");
     let _docker_guard = EnvGuard::set("RUN_TASK_DOCKER_IMAGE", "");
     let _home_guard = EnvGuard::set("HOME", &home_root);
+    let _e2b_guard = EnvGuard::set("RUN_TASK_USE_E2B", "0");
 
     let Some(ingestion_db_url) =
         test_support::require_supabase_db_url("thread_latest_epoch_end_to_end")
@@ -254,9 +255,6 @@ fn thread_latest_epoch_end_to_end() {
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
-    let collaboration_store =
-        CollaborationStore::new(state_root.join("collaboration.db")).expect("collaboration store");
-
     let inbound_raw_1 = r#"{
   "From": "Alice <alice@example.com>",
   "To": "Service <service@example.com>",
@@ -269,7 +267,6 @@ fn thread_latest_epoch_end_to_end() {
         &config,
         &user_store,
         &index_store,
-        &collaboration_store,
         &payload_1,
         inbound_raw_1.as_bytes(),
     )
@@ -307,7 +304,6 @@ fn thread_latest_epoch_end_to_end() {
         &config,
         &user_store,
         &index_store,
-        &collaboration_store,
         &payload_2,
         inbound_raw_2.as_bytes(),
     )

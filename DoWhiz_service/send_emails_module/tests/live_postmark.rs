@@ -196,6 +196,7 @@ fn send_email_with_attachments_and_delivery() {
         bcc: Vec::new(),
         in_reply_to: None,
         references: None,
+        reply_to: None,
     };
 
     let response = send_email(&params).expect("postmark send failed");
@@ -251,6 +252,7 @@ fn send_multiple_emails_batch() {
             bcc: Vec::new(),
             in_reply_to: None,
             references: None,
+            reply_to: None,
         };
 
         let response = send_email(&params).expect("postmark send failed");

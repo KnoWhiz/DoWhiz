@@ -8,6 +8,9 @@ DoWhiz_service/gateway.toml
 # Local IDE settings
 .vscode/
 
+# Node artifacts
+node_modules/
+
 # Python artifacts (existing)
 *.pyc
 

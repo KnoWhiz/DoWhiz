@@ -1,7 +1,4 @@
 mod test_support;
-
-
-use scheduler_module::collaboration_store::CollaborationStore;
 use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
 use scheduler_module::service::{
@@ -138,7 +135,6 @@ fn inbound_email_html_is_sanitized() -> Result<(), Box<dyn std::error::Error + S
 
     let user_store = UserStore::new(&config.users_db_path)?;
     let index_store = IndexStore::new(&config.task_index_path)?;
-    let collaboration_store = CollaborationStore::new(state_root.join("collaboration.db"))?;
 
     let html_body = r#"
 <html>
@@ -173,7 +169,6 @@ fn inbound_email_html_is_sanitized() -> Result<(), Box<dyn std::error::Error + S
         &config,
         &user_store,
         &index_store,
-        &collaboration_store,
         &payload,
         inbound_raw.as_bytes(),
     )?;

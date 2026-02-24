@@ -7,9 +7,9 @@ use base64::Engine;
 use chrono::Utc;
 use tracing::{error, info, warn};
 
+use crate::account_store::lookup_account_by_channel;
 use crate::artifact_extractor::extract_artifacts_from_email;
-use crate::channel::{Channel, ExtractedArtifactRef};
-use crate::collaboration_store::CollaborationStore;
+use crate::channel::Channel;
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
 use crate::index_store::IndexStore;
 use crate::mailbox;
@@ -23,7 +23,9 @@ use super::html::render_email_html;
 use super::postmark::{collect_service_address_candidates, normalize_message_id};
 use super::recipients::replyable_recipients;
 use super::scheduler::cancel_pending_thread_tasks;
-use super::workspace::{create_unique_dir, ensure_thread_workspace, write_thread_history};
+use super::workspace::{
+    create_unique_dir, ensure_thread_workspace, persist_inbound_payloads, write_thread_history,
+};
 use super::BoxError;
 
 pub use super::postmark::PostmarkInbound;
@@ -119,6 +121,16 @@ pub fn process_inbound_payload(
         raw_payload,
         thread_state.last_email_seq,
     )?;
+    let account_id = lookup_account_by_channel(&Channel::Email, &user_email);
+    if let Err(err) = persist_inbound_payloads(
+        &workspace,
+        &Channel::Email,
+        account_id,
+        &user.user_id,
+        Some(&thread_key),
+    ) {
+        warn!("failed to persist inbound payloads to blob: {}", err);
+    }
     if let Err(err) = archive_inbound(&user_paths, payload, raw_payload) {
         error!("failed to archive inbound email: {}", err);
     }

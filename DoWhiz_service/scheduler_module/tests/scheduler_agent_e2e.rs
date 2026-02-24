@@ -55,6 +55,7 @@ impl TaskExecutor for RecordingExecutor {
                     channel: run.channel.to_string(),
                     google_access_token:
                         scheduler_module::load_google_access_token_from_service_env(),
+                    has_unified_account: false,
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -142,6 +143,7 @@ fn scheduler_actions_end_to_end() {
     let _docker_guard = EnvGuard::set("RUN_TASK_DOCKER_IMAGE", "");
     let _api_guard = EnvGuard::set("AZURE_OPENAI_API_KEY_BACKUP", "test-key");
     let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");
+    let _e2b_guard = EnvGuard::set("RUN_TASK_USE_E2B", "0");
 
     let now = Utc::now();
     let reschedule_run_at = (now + chrono::Duration::seconds(30)).to_rfc3339();

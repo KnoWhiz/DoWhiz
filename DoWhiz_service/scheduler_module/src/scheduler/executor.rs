@@ -18,7 +18,11 @@ use uuid::Uuid;
 
 /// Sync memo from Azure Blob to workspace directory.
 /// Returns the memo content if successful, None otherwise.
-fn sync_blob_memo_to_workspace(account_id: Uuid, workspace_memory_dir: &Path) -> Option<String> {
+fn sync_blob_memo_to_workspace(
+    account_id: Option<Uuid>,
+    user_id: &str,
+    workspace_memory_dir: &Path,
+) -> Option<String> {
     let blob_store = get_blob_store()?;
 
     // Create a runtime for the async blob read
@@ -31,12 +35,24 @@ fn sync_blob_memo_to_workspace(account_id: Uuid, workspace_memory_dir: &Path) ->
     };
 
     // Read memo from blob
-    let memo_content = match rt.block_on(blob_store.read_memo(account_id)) {
-        Ok(content) => content,
-        Err(e) => {
-            warn!("Failed to read memo from blob for account {}: {}", account_id, e);
-            return None;
-        }
+    let memo_content = match account_id {
+        Some(account_id) => match rt.block_on(blob_store.read_memo(account_id)) {
+            Ok(content) => content,
+            Err(e) => {
+                warn!(
+                    "Failed to read memo from blob for account {}: {}",
+                    account_id, e
+                );
+                return None;
+            }
+        },
+        None => match rt.block_on(blob_store.read_user_memo(user_id)) {
+            Ok(content) => content,
+            Err(e) => {
+                warn!("Failed to read memo from blob for user {}: {}", user_id, e);
+                return None;
+            }
+        },
     };
 
     // Ensure workspace memory directory exists
@@ -53,7 +69,8 @@ fn sync_blob_memo_to_workspace(account_id: Uuid, workspace_memory_dir: &Path) ->
     }
 
     info!(
-        "Synced memo from Azure Blob (account {}) to workspace ({} bytes)",
+        "Synced memo from Azure Blob (user {}, account {:?}) to workspace ({} bytes)",
+        user_id,
         account_id,
         memo_content.len()
     );
@@ -139,47 +156,37 @@ impl TaskExecutor for ModuleExecutor {
                     .first()
                     .and_then(|identifier| lookup_account_by_channel(&task.channel, identifier));
 
-                // Sync memo to workspace: prefer Azure Blob if account exists, else local storage
-                let original_memo_snapshot = if let Some(account_id) = account_id {
-                    // User has a unified account - try to sync from Azure Blob
-                    info!("Found unified account {} for channel {:?}, syncing from Azure Blob", account_id, task.channel);
-                    match sync_blob_memo_to_workspace(account_id, &workspace_memory_dir) {
-                        Some(content) => {
-                            // Successfully synced from blob - use blob content as snapshot
-                            Some(content)
-                        }
+                let user_id = user_memory_dir
+                    .as_ref()
+                    .and_then(|dir| dir.parent())
+                    .and_then(|p| p.file_name())
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                // Sync memo to workspace: prefer Azure Blob if configured, else local storage
+                let original_memo_snapshot =
+                    match sync_blob_memo_to_workspace(account_id, &user_id, &workspace_memory_dir)
+                    {
+                        Some(content) => Some(content),
                         None => {
-                            // Blob sync failed - fall back to local storage
-                            warn!("Blob sync failed for account {}, falling back to local storage", account_id);
                             if let Some(user_memory_dir) = user_memory_dir.as_ref() {
                                 let snapshot = snapshot_memo_content(user_memory_dir);
-                                if let Err(e) = sync_user_memory_to_workspace(user_memory_dir, &workspace_memory_dir) {
-                                    warn!("Local memory sync also failed: {}", e);
+                                if let Err(e) =
+                                    sync_user_memory_to_workspace(user_memory_dir, &workspace_memory_dir)
+                                {
+                                    warn!("Local memory sync failed: {}", e);
                                 }
                                 snapshot
                             } else {
+                                warn!(
+                                    "unable to resolve user memory dir for workspace {}",
+                                    task.workspace_dir.display()
+                                );
                                 None
                             }
                         }
-                    }
-                } else {
-                    // No unified account - use local storage (original behavior)
-                    let snapshot = user_memory_dir
-                        .as_ref()
-                        .and_then(|dir| snapshot_memo_content(dir));
-
-                    if let Some(user_memory_dir) = user_memory_dir.as_ref() {
-                        sync_user_memory_to_workspace(user_memory_dir, &workspace_memory_dir).map_err(
-                            |err| SchedulerError::TaskFailed(format!("memory sync failed: {}", err)),
-                        )?;
-                    } else {
-                        warn!(
-                            "unable to resolve user memory dir for workspace {}",
-                            task.workspace_dir.display()
-                        );
-                    }
-                    snapshot
-                };
+                    };
                 if let Some(user_secrets_path) = user_secrets_path.as_ref() {
                     sync_user_secrets_to_workspace(user_secrets_path, &task.workspace_dir)
                         .map_err(|err| {
@@ -215,14 +222,6 @@ impl TaskExecutor for ModuleExecutor {
                         if let Some(modified_content) = read_memo_content(&workspace_memory_dir) {
                             let diff = compute_memory_diff(&original_content, &modified_content);
                             if !diff.is_empty() {
-                                // Extract user_id from path: users/{user_id}/memory
-                                let user_id = user_memory_dir
-                                    .parent()
-                                    .and_then(|p| p.file_name())
-                                    .and_then(|n| n.to_str())
-                                    .unwrap_or("unknown")
-                                    .to_string();
-
                                 // Try to look up unified account by channel identifier
                                 let account_id = task.reply_to.first().and_then(|identifier| {
                                     lookup_account_by_channel(&task.channel, identifier)

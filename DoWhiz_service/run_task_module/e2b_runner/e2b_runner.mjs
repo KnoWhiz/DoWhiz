@@ -56,15 +56,17 @@ async function run() {
   const remoteTarPath = config.remoteTarPath || '/tmp/workspace.tar';
   const remoteOutputTar = config.remoteOutputTar || '/tmp/workspace_out.tar';
   const sandboxUser = config.user || 'root';
+  const bootstrapUser = config.bootstrapUser || sandboxUser;
+  const commandUser = config.commandUser || sandboxUser;
 
   try {
-    await sandbox.commands.run(`mkdir -p ${remoteWorkspace} /tmp`, { user: sandboxUser });
+    await sandbox.commands.run(`mkdir -p ${remoteWorkspace} /tmp`, { user: bootstrapUser });
 
     if (config.workspaceTar) {
       const tarBytes = fs.readFileSync(config.workspaceTar);
       await sandbox.files.write(remoteTarPath, tarBytes);
       await sandbox.commands.run(`tar -xf ${remoteTarPath} -C ${remoteWorkspace}`, {
-        user: sandboxUser,
+        user: bootstrapUser,
       });
     }
 
@@ -72,7 +74,7 @@ async function run() {
       for (const cmd of config.bootstrap) {
         if (!cmd) continue;
         await sandbox.commands.run(cmd, {
-          user: sandboxUser,
+          user: bootstrapUser,
           envs: config.env || {},
           timeoutMs: config.bootstrapTimeoutMs,
         });
@@ -82,7 +84,7 @@ async function run() {
     let result;
     try {
       result = await sandbox.commands.run(config.command, {
-        user: sandboxUser,
+        user: commandUser,
         cwd: remoteWorkspace,
         envs: config.env || {},
         timeoutMs: config.commandTimeoutMs,
@@ -92,7 +94,7 @@ async function run() {
     }
 
     await sandbox.commands.run(`tar -cf ${remoteOutputTar} -C ${remoteWorkspace} .`, {
-      user: sandboxUser,
+      user: bootstrapUser,
       timeoutMs: config.bootstrapTimeoutMs,
     });
 
