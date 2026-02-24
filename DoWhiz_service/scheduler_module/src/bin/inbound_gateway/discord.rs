@@ -7,41 +7,106 @@ use scheduler_module::channel::Channel;
 use tracing::{error, info, warn};
 
 use super::handlers::build_envelope;
-use super::routes::resolve_route;
-use super::state::GatewayState;
+use super::state::{GatewayState, RouteDecision};
 
-pub(super) async fn spawn_discord_gateway(state: Arc<GatewayState>) {
-    let token = match env::var("DISCORD_BOT_TOKEN") {
-        Ok(value) if !value.trim().is_empty() => value,
-        _ => return,
-    };
+/// Configuration for a single employee's Discord bot.
+struct EmployeeDiscordConfig {
+    employee_id: String,
+    token: String,
+    bot_user_id: Option<u64>,
+}
 
-    let bot_user_id = env::var("DISCORD_BOT_USER_ID")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok());
+/// Known employee Discord configurations.
+/// Each entry: (employee_id, token_env_key, user_id_env_key)
+const EMPLOYEE_DISCORD_CONFIGS: &[(&str, &str, &str)] = &[
+    ("boiled_egg", "BOILED_EGG_DISCORD_BOT_TOKEN", "BOILED_EGG_DISCORD_BOT_USER_ID"),
+    ("little_bear", "LITTLE_BEAR_DISCORD_BOT_TOKEN", "LITTLE_BEAR_DISCORD_BOT_USER_ID"),
+];
 
-    let mut bot_user_ids = HashSet::new();
-    if let Some(id) = bot_user_id {
-        bot_user_ids.insert(id);
+/// Collect all valid employee Discord configurations from environment.
+fn collect_employee_discord_configs() -> Vec<EmployeeDiscordConfig> {
+    let mut configs = Vec::new();
+
+    for (employee_id, token_key, user_id_key) in EMPLOYEE_DISCORD_CONFIGS {
+        if let Ok(token) = env::var(token_key) {
+            if !token.trim().is_empty() {
+                let bot_user_id = env::var(user_id_key)
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok());
+                configs.push(EmployeeDiscordConfig {
+                    employee_id: employee_id.to_string(),
+                    token,
+                    bot_user_id,
+                });
+                info!("discord gateway: found config for employee {} (bot_user_id={:?})", employee_id, bot_user_id);
+            }
+        }
     }
 
-    let handler_state = DiscordIngressState {
-        state: state.clone(),
-        adapter: DiscordInboundAdapter::new(bot_user_ids.clone()),
-        bot_user_ids,
-    };
-
-    tokio::spawn(async move {
-        if let Err(err) = run_discord_gateway(token, handler_state).await {
-            error!("discord gateway error: {}", err);
+    // Fallback to legacy single-bot config if no employee configs found
+    if configs.is_empty() {
+        if let Ok(token) = env::var("DISCORD_BOT_TOKEN") {
+            if !token.trim().is_empty() {
+                let bot_user_id = env::var("DISCORD_BOT_USER_ID")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok());
+                let default_employee = env::var("EMPLOYEE_ID").unwrap_or_else(|_| "boiled_egg".to_string());
+                configs.push(EmployeeDiscordConfig {
+                    employee_id: default_employee.clone(),
+                    token,
+                    bot_user_id,
+                });
+                info!("discord gateway: using legacy config for employee {}", default_employee);
+            }
         }
-    });
+    }
+
+    configs
+}
+
+pub(super) async fn spawn_discord_gateway(state: Arc<GatewayState>) {
+    let configs = collect_employee_discord_configs();
+
+    if configs.is_empty() {
+        info!("discord gateway: no Discord bot tokens configured, skipping");
+        return;
+    }
+
+    let default_tenant_id = state.config.defaults.tenant_id.clone().unwrap_or_else(|| "default".to_string());
+
+    for config in configs {
+        let employee_id = config.employee_id.clone();
+        let token = config.token.clone();
+        let tenant_id = default_tenant_id.clone();
+
+        let mut bot_user_ids = HashSet::new();
+        if let Some(id) = config.bot_user_id {
+            bot_user_ids.insert(id);
+        }
+
+        let handler_state = DiscordIngressState {
+            state: state.clone(),
+            adapter: DiscordInboundAdapter::new(bot_user_ids.clone()),
+            bot_user_ids,
+            employee_id: employee_id.clone(),
+            tenant_id,
+        };
+
+        tokio::spawn(async move {
+            info!("discord gateway: starting client for employee {}", employee_id);
+            if let Err(err) = run_discord_gateway(token, handler_state).await {
+                error!("discord gateway error for employee {}: {}", employee_id, err);
+            }
+        });
+    }
 }
 
 struct DiscordIngressState {
     state: Arc<GatewayState>,
     adapter: DiscordInboundAdapter,
     bot_user_ids: HashSet<u64>,
+    employee_id: String,
+    tenant_id: String,
 }
 
 struct DiscordIngressHandler {
@@ -79,17 +144,16 @@ impl serenity::all::EventHandler for DiscordIngressHandler {
             return;
         }
 
-        let guild_id = inbound
-            .metadata
-            .discord_guild_id
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "dm".to_string());
-
-        let route_key = guild_id.clone();
-        let Some(route) = resolve_route(Channel::Discord, &route_key, &self.inner.state) else {
-            info!("gateway no route for discord guild_id={}", route_key);
-            return;
+        // Use the employee_id from this handler's state (each bot client knows its employee)
+        let route = RouteDecision {
+            tenant_id: self.inner.tenant_id.clone(),
+            employee_id: self.inner.employee_id.clone(),
         };
+
+        info!(
+            "discord gateway routing message to employee={} (bot was mentioned/replied)",
+            self.inner.employee_id
+        );
 
         let external_message_id = inbound.message_id.clone();
         let envelope = match build_envelope(

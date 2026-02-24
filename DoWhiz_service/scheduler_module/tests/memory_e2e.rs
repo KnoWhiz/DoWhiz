@@ -114,6 +114,7 @@ fn memory_sync_roundtrip_via_run_task() -> Result<(), Box<dyn std::error::Error>
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
         ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.com"),
         ("CODEX_MODEL", "test-model"),
+        ("MEMORY_QUEUE_USE_BLOB", "0"),
     ]);
 
     let user_root = temp.path().join("users").join("user_1");

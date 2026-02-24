@@ -2,7 +2,6 @@
 flowchart TD
   A[Input: external message] --> B{Ingress runtime}
   B -->|Rust inbound gateway| C{Ingress type}
-  B -->|Azure Function (email only)| AZ1[HTTP /api/postmark/inbound]
 
   C -->|Email/Postmark| C1[HTTP /postmark/inbound]
   C -->|Slack Events| C2[HTTP /slack/events]
@@ -14,7 +13,6 @@ flowchart TD
   C -->|WhatsApp| C8[HTTP /whatsapp/webhook]
 
   C1 --> D1{Verify token?}
-  AZ1 --> D1
   C2 --> D2{URL verification?}
   C3 --> D3{Verify token?}
   C4 --> D4{Verify Twilio signature?}

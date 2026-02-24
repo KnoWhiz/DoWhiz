@@ -311,6 +311,7 @@ fn email_flow_injects_github_env() {
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
+
     let inbound_raw = r#"{
   "From": "Alice <alice@example.com>",
   "To": "Service <service@example.com>",

@@ -181,6 +181,21 @@ fn resolve_slack_bot_token(
     config.slack_bot_token.clone()
 }
 
+fn resolve_discord_bot_token(config: &ServiceConfig) -> Option<String> {
+    // First, try per-employee token (e.g., LITTLE_BEAR_DISCORD_BOT_TOKEN)
+    let emp_upper = config.employee_profile.id.to_uppercase().replace('-', "_");
+    let emp_token_key = format!("{}_DISCORD_BOT_TOKEN", emp_upper);
+    if let Ok(token) = std::env::var(&emp_token_key) {
+        if !token.trim().is_empty() {
+            info!("quick response using {} for employee {}", emp_token_key, config.employee_profile.id);
+            return Some(token);
+        }
+    }
+
+    // Fall back to global DISCORD_BOT_TOKEN or config
+    config.discord_bot_token.clone()
+}
+
 pub(crate) fn try_quick_response_bluebubbles(
     config: &ServiceConfig,
     user_store: &UserStore,
@@ -256,9 +271,8 @@ pub(crate) fn try_quick_response_discord(
         None => return Ok(false),
     };
     let message_id = message.message_id.as_deref();
-    let token = match config.discord_bot_token.as_deref() {
-        Some(token) => token,
-        None => return Ok(false),
+    let Some(token) = resolve_discord_bot_token(config) else {
+        return Ok(false);
     };
 
     // Look up unified account first, fall back to legacy user_store
@@ -284,7 +298,7 @@ pub(crate) fn try_quick_response_discord(
                 }
             }
 
-            if send_quick_discord_response_simple(token, channel_id, message_id, &response).is_ok()
+            if send_quick_discord_response_simple(&token, channel_id, message_id, &response).is_ok()
             {
                 return Ok(true);
             }

@@ -35,12 +35,22 @@ struct InternalRequest {
 pub struct MemoryWriteQueue {
     /// Per-user/account channels for submitting diffs
     user_channels: Mutex<HashMap<String, Sender<InternalRequest>>>,
+    use_blob: bool,
 }
 
 impl MemoryWriteQueue {
     pub fn new() -> Self {
         Self {
             user_channels: Mutex::new(HashMap::new()),
+            use_blob: memory_queue_use_blob(),
+        }
+    }
+
+    #[cfg(test)]
+    fn new_with_use_blob(use_blob: bool) -> Self {
+        Self {
+            user_channels: Mutex::new(HashMap::new()),
+            use_blob,
         }
     }
 
@@ -73,6 +83,7 @@ impl MemoryWriteQueue {
             } else {
                 // Create a new channel and worker for this user/account
                 let (sender, receiver) = bounded::<InternalRequest>(100);
+                let use_blob_config = self.use_blob;
 
                 // Spawn worker thread for this user/account
                 let worker_key = queue_key.clone();
@@ -86,7 +97,7 @@ impl MemoryWriteQueue {
                         .expect("Failed to create tokio runtime for memory queue worker");
 
                     for req in receiver {
-                        let use_blob = memory_queue_use_blob() && get_blob_store().is_some();
+                        let use_blob = use_blob_config && get_blob_store().is_some();
                         let result = if use_blob {
                             // Use Azure Blob storage when available
                             rt.block_on(apply_diff_to_blob(&req.request))
@@ -223,7 +234,7 @@ pub fn global_memory_queue() -> Arc<MemoryWriteQueue> {
         .clone()
 }
 
-fn memory_queue_use_blob() -> bool {
+pub(crate) fn memory_queue_use_blob() -> bool {
     match env::var("MEMORY_QUEUE_USE_BLOB") {
         Ok(value) => {
             let normalized = value.trim().to_ascii_lowercase();
@@ -316,7 +327,7 @@ mod tests {
 "#;
         fs::write(memory_dir.join("memo.md"), initial).expect("write initial");
 
-        let queue = MemoryWriteQueue::new();
+        let queue = MemoryWriteQueue::new_with_use_blob(false);
 
         // Submit two diffs sequentially (both go through the queue)
         let diff1 = MemoryDiff {
@@ -374,7 +385,7 @@ mod tests {
 "#;
         fs::write(memory_dir.join("memo.md"), initial).expect("write initial");
 
-        let queue = Arc::new(MemoryWriteQueue::new());
+        let queue = Arc::new(MemoryWriteQueue::new_with_use_blob(false));
         let memory_dir = Arc::new(memory_dir);
 
         // Spawn multiple threads submitting diffs concurrently

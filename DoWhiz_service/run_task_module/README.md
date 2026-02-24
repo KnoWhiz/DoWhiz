@@ -65,4 +65,4 @@ println!("Reply saved at: {}", result.reply_html_path.display());
 
 ## Production Deployment
 
-For Azure deployment (Functions + Service Bus + Blob + workers) or VM-based setups, follow the workflows in `DoWhiz_service/README.md` under “Azure Deployment (Functions + Service Bus + Blob + Workers)” and “VM Deployment (Gateway + ngrok)”.
+For Azure deployment (Rust Gateway + Service Bus + Blob + workers) or VM-based setups, follow the workflows in `DoWhiz_service/README.md` under “Azure Deployment (Rust Gateway + Service Bus + Blob + Workers)” and “VM Deployment (Gateway + ngrok)”.

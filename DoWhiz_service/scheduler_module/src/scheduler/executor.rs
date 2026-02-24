@@ -5,7 +5,7 @@ use crate::account_store::lookup_account_by_channel;
 use crate::blob_store::get_blob_store;
 use crate::channel::Channel;
 use crate::memory_diff::compute_memory_diff;
-use crate::memory_queue::{global_memory_queue, MemoryWriteRequest};
+use crate::memory_queue::{global_memory_queue, memory_queue_use_blob, MemoryWriteRequest};
 use crate::memory_store::{
     read_memo_content, resolve_user_memory_dir, snapshot_memo_content,
     sync_user_memory_to_workspace,
@@ -23,6 +23,9 @@ fn sync_blob_memo_to_workspace(
     user_id: &str,
     workspace_memory_dir: &Path,
 ) -> Option<String> {
+    if !memory_queue_use_blob() {
+        return None;
+    }
     let blob_store = get_blob_store()?;
 
     // Create a runtime for the async blob read
