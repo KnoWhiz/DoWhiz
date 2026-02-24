@@ -178,10 +178,11 @@ impl EventHandler for DiscordEventHandler {
                 }
             };
 
+            let employee_name = self.state.config.employee_profile.display_name.as_deref();
             match self
                 .state
                 .message_router
-                .classify(text, memory.as_deref())
+                .classify(text, memory.as_deref(), employee_name)
                 .await
             {
                 RouterDecision::Simple {

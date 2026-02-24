@@ -32,8 +32,11 @@ const FORWARD_MARKER: &str = "FORWARD_TO_AGENT";
 /// Messages longer than this are automatically forwarded to the full pipeline.
 const MAX_SIMPLE_MESSAGE_LENGTH: usize = 300;
 
-/// System prompt for the classifier/responder
-const SYSTEM_PROMPT: &str = r#"You are Boiled-Egg, a friendly and helpful assistant.
+/// Build system prompt for the classifier/responder with employee identity
+fn build_system_prompt(employee_name: Option<&str>) -> String {
+    let name = employee_name.unwrap_or("Boiled-Egg");
+    format!(
+        r#"You are {name}, a friendly and helpful assistant.
 
 Your job is to classify messages:
 1. RESPOND DIRECTLY to questions you can answer quickly (greetings, casual chat, simple questions, thank you messages)
@@ -62,7 +65,10 @@ Great! I'll remember that.
 
 Valid sections: Profile, Preferences, Projects, Contacts, Decisions, Processes
 
-Keep responses brief and friendly."#;
+Keep responses brief and friendly."#,
+        name = name
+    )
+}
 
 /// Result of routing a message
 #[derive(Debug, Clone)]
@@ -145,12 +151,13 @@ impl MessageRouter {
     /// Arguments:
     /// - `message`: The user's message
     /// - `memory`: Optional memory context (contents of memo.md)
+    /// - `employee_name`: Optional employee display name for personalized responses
     ///
     /// Returns:
     /// - `Simple { response, memory_update }` if the local LLM handled the query
     /// - `Complex` if the query should go to the full pipeline
     /// - `Passthrough` if routing is disabled or failed
-    pub async fn classify(&self, message: &str, memory: Option<&str>) -> RouterDecision {
+    pub async fn classify(&self, message: &str, memory: Option<&str>, employee_name: Option<&str>) -> RouterDecision {
         if !self.config.enabled {
             debug!("Router disabled, passing through");
             return RouterDecision::Passthrough;
@@ -175,7 +182,7 @@ impl MessageRouter {
             return RouterDecision::Complex;
         }
 
-        let result = self.call_openai(message, memory).await;
+        let result = self.call_openai(message, memory, employee_name).await;
 
         match result {
             Ok(response) => {
@@ -228,7 +235,7 @@ impl MessageRouter {
     }
 
     /// Make a request to the OpenAI API (async)
-    async fn call_openai(&self, message: &str, memory: Option<&str>) -> Result<String, String> {
+    async fn call_openai(&self, message: &str, memory: Option<&str>, employee_name: Option<&str>) -> Result<String, String> {
         let api_key = self
             .config
             .openai_api_key
@@ -252,12 +259,13 @@ impl MessageRouter {
             message.to_string()
         };
 
+        let system_prompt = build_system_prompt(employee_name);
         let request = OpenAIChatRequest {
             model: self.config.model.clone(),
             messages: vec![
                 OpenAIChatMessage {
                     role: "system".to_string(),
-                    content: SYSTEM_PROMPT.to_string(),
+                    content: system_prompt,
                 },
                 OpenAIChatMessage {
                     role: "user".to_string(),
@@ -382,5 +390,51 @@ mod tests {
         let (reply, memory) = MessageRouter::parse_response(response);
         assert_eq!(reply, response);
         assert!(memory.is_none());
+    }
+
+    #[test]
+    fn build_system_prompt_defaults_to_boiled_egg() {
+        let prompt = build_system_prompt(None);
+        assert!(prompt.contains("You are Boiled-Egg"));
+        assert!(!prompt.contains("You are Oliver"));
+    }
+
+    #[test]
+    fn build_system_prompt_uses_oliver_for_discord() {
+        // Simulates Discord/little_bear employee
+        let prompt = build_system_prompt(Some("Oliver"));
+        assert!(prompt.contains("You are Oliver"));
+        assert!(!prompt.contains("Boiled-Egg"));
+    }
+
+    #[test]
+    fn build_system_prompt_uses_boiled_egg_for_slack() {
+        // Simulates Slack/boiled_egg employee
+        let prompt = build_system_prompt(Some("Boiled-Egg"));
+        assert!(prompt.contains("You are Boiled-Egg"));
+    }
+
+    #[test]
+    fn build_system_prompt_uses_custom_name_for_telegram() {
+        // Simulates a custom Telegram employee
+        let prompt = build_system_prompt(Some("TeleBot"));
+        assert!(prompt.contains("You are TeleBot"));
+        assert!(!prompt.contains("Boiled-Egg"));
+    }
+
+    #[test]
+    fn build_system_prompt_uses_custom_name_for_whatsapp() {
+        // Simulates a custom WhatsApp employee
+        let prompt = build_system_prompt(Some("WhatsHelper"));
+        assert!(prompt.contains("You are WhatsHelper"));
+        assert!(!prompt.contains("Boiled-Egg"));
+    }
+
+    #[test]
+    fn build_system_prompt_uses_custom_name_for_bluebubbles() {
+        // Simulates a custom BlueBubbles/iMessage employee
+        let prompt = build_system_prompt(Some("iAssistant"));
+        assert!(prompt.contains("You are iAssistant"));
+        assert!(!prompt.contains("Boiled-Egg"));
     }
 }

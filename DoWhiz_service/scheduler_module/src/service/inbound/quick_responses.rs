@@ -108,7 +108,8 @@ pub(crate) fn try_quick_response_slack(
         .collect::<Vec<_>>()
         .join(" ");
 
-    let decision = runtime.block_on(message_router.classify(&cleaned_text, memory.as_deref()));
+    let employee_name = config.employee_profile.display_name.as_deref();
+    let decision = runtime.block_on(message_router.classify(&cleaned_text, memory.as_deref(), employee_name));
     match decision {
         RouterDecision::Simple {
             response,
@@ -219,7 +220,8 @@ pub(crate) fn try_quick_response_bluebubbles(
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 
-    let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
+    let employee_name = config.employee_profile.display_name.as_deref();
+    let decision = runtime.block_on(message_router.classify(text, memory.as_deref(), employee_name));
     match decision {
         RouterDecision::Simple {
             response,
@@ -275,7 +277,8 @@ pub(crate) fn try_quick_response_discord(
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 
-    let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
+    let employee_name = config.employee_profile.display_name.as_deref();
+    let decision = runtime.block_on(message_router.classify(text, memory.as_deref(), employee_name));
     match decision {
         RouterDecision::Simple {
             response,
@@ -325,7 +328,8 @@ pub(crate) fn try_quick_response_telegram(
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 
-    let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
+    let employee_name = config.employee_profile.display_name.as_deref();
+    let decision = runtime.block_on(message_router.classify(text, memory.as_deref(), employee_name));
     match decision {
         RouterDecision::Simple {
             response,
@@ -475,7 +479,8 @@ pub(crate) fn try_quick_response_whatsapp(
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 
-    let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
+    let employee_name = config.employee_profile.display_name.as_deref();
+    let decision = runtime.block_on(message_router.classify(text, memory.as_deref(), employee_name));
     match decision {
         RouterDecision::Simple {
             response,
