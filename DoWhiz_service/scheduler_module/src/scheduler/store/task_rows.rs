@@ -560,7 +560,7 @@ impl SqliteSchedulerStore {
     ) -> Result<RunTaskTask, SchedulerError> {
         let row = conn
             .query_row(
-                "SELECT workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, runner, codex_disabled, reply_to, reply_from, archive_root, thread_id, thread_epoch, thread_state_path
+                "SELECT workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, runner, codex_disabled, reply_to, reply_from, archive_root, thread_id, thread_epoch, thread_state_path, employee_id
                  FROM run_task_tasks
                  WHERE task_id = ?1",
                 params![task_id],
@@ -580,6 +580,7 @@ impl SqliteSchedulerStore {
                         row.get::<_, Option<String>>(11)?,
                         row.get::<_, Option<i64>>(12)?,
                         row.get::<_, Option<String>>(13)?,
+                        row.get::<_, Option<String>>(14)?,
                     ))
                 },
             )
@@ -599,6 +600,7 @@ impl SqliteSchedulerStore {
             thread_id,
             thread_epoch_raw,
             thread_state_path,
+            employee_id,
         ) = row.ok_or_else(|| {
             SchedulerError::Storage(format!("missing run_task_tasks row for task {}", task_id))
         })?;
@@ -625,7 +627,7 @@ impl SqliteSchedulerStore {
             thread_state_path: normalize_optional_path(thread_state_path),
             channel,
             slack_team_id: None,
-            employee_id: None,
+            employee_id,
         })
     }
 }
