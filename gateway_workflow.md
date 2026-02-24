@@ -10,8 +10,6 @@ flowchart TD
   C -->|Discord WS| C5[Discord Gateway]
   C -->|Telegram| C6[HTTP /telegram/webhook]
   C -->|Google Docs| C7[Docs Poller]
-  C -->|Google Sheets| C9[Sheets Poller]
-  C -->|Google Slides| C10[Slides Poller]
   C -->|WhatsApp| C8[HTTP /whatsapp/webhook]
 
   C1 --> D1{Verify token?}
@@ -20,8 +18,6 @@ flowchart TD
   C4 --> D4{Verify Twilio signature?}
   C5 --> D5{Mention or reply to bot?}
   C7 --> D7[Fetch comments -> filter actionable items]
-  C9 --> D9[Fetch comments -> filter actionable items]
-  C10 --> D10[Fetch comments -> filter actionable items]
   C8 --> D8{Webhook verify?}
 
   D1 -->|fail| X1[401/400]
@@ -42,8 +38,6 @@ flowchart TD
   E5[Parse Discord message] --> F5[Extract guild_id/channel_id]
   E6[Parse Telegram payload] --> F6[Extract chat_id]
   E7[Build GoogleDocs InboundMessage] --> F7[doc_id]
-  E9[Build GoogleSheets InboundMessage] --> F9[spreadsheet_id]
-  E10[Build GoogleSlides InboundMessage] --> F10[presentation_id]
   E8[Parse WhatsApp payload] --> F8[Extract phone_number]
 
   C2 --> E2
@@ -52,8 +46,6 @@ flowchart TD
   C5 --> E5
   C6 --> E6
   C7 --> E7
-  C9 --> E9
-  C10 --> E10
   C8 --> E8
 
   F1 --> G{Route match}
@@ -63,8 +55,6 @@ flowchart TD
   F5 --> G
   F6 --> G
   F7 --> G
-  F9 --> G
-  F10 --> G
   F8 --> G
 
   G -->|hit| H[RouteDecision tenant_id + employee_id]
@@ -86,8 +76,6 @@ flowchart TD
   P -->|Email| R1[process_inbound_payload]
   P -->|SMS| R2[process_sms_message]
   P -->|GoogleDocs| R3[process_google_docs_message]
-  P -->|GoogleSheets| R3
-  P -->|GoogleSlides| R3
 
   Q1 -->|Simple| S1[Send quick Slack reply]
   Q1 -->|Complex/Pass| R1S[process_slack_event]

@@ -1,6 +1,6 @@
 # scheduler_module
 
-Cron-based scheduler (6-field format with seconds) that persists tasks to disk and runs them in UTC. Supports two task types for now: send reply (multi-channel; serialized as `send_email` for backward compatibility) and run task.
+Cron-based scheduler (6-field format with seconds) that persists tasks to disk and runs them in UTC. Supports two task types for now: send email and run task.
 
 ## Usage
 
@@ -21,7 +21,7 @@ let executor = ModuleExecutor::default();
 let mut scheduler = Scheduler::load(storage_path, executor)?;
 
 let task = SendReplyTask {
-    channel: Channel::Email,  // or Channel::Slack, Channel::Telegram, Channel::WhatsApp, Channel::GoogleDocs/GoogleSheets/GoogleSlides
+    channel: Channel::Email,  // or Channel::Slack, Channel::Telegram, Channel::WhatsApp
     subject: "Hello".to_string(),
     html_path: PathBuf::from("/path/to/reply_email_draft.html"),
     attachments_dir: PathBuf::from("/path/to/reply_email_attachments"),
