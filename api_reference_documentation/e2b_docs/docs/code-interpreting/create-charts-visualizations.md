@@ -1,9 +1,0 @@
-> ## Documentation Index
-> Fetch the complete documentation index at: https://e2b.mintlify.app/llms.txt
-> Use this file to discover all available pages before exploring further.
-
-# Create charts & visualizations
-
-E2B Sandbox allows you to create charts and visualizations by executing Python code inside the sandbox with `runCode()` method in JavaScript and `run_code()` method in Python.
-
-These charts and visualizations can be [static](/docs/code-interpreting/create-charts-visualizations/static-charts) or [interactive](/docs/code-interpreting/create-charts-visualizations/interactive-charts) plots.
