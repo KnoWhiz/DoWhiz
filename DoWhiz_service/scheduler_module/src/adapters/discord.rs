@@ -100,7 +100,8 @@ impl DiscordInboundAdapter {
             thread_id,
             message_id: Some(message.id.get().to_string()),
             attachments,
-            reply_to: vec![channel_id.to_string()],
+            // reply_to[0] = user_id (for account lookup), reply_to[1] = channel_id (currently unused)
+            reply_to: vec![author_id.to_string(), channel_id.to_string()],
             raw_payload,
             metadata: ChannelMetadata {
                 discord_guild_id: guild_id,
