@@ -55,39 +55,3 @@ pub(super) fn run_command_with_timeout(
         thread::sleep(Duration::from_millis(200));
     }
 }
-
-pub(super) fn run_command_with_input_and_timeout(
-    mut cmd: Command,
-    input: &[u8],
-    timeout: Duration,
-    label: &'static str,
-) -> Result<Output, RunTaskError> {
-    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = cmd.spawn().map_err(RunTaskError::Io)?;
-    if let Some(mut stdin) = child.stdin.take() {
-        use std::io::Write;
-        stdin.write_all(input).map_err(RunTaskError::Io)?;
-    }
-
-    let start = Instant::now();
-    loop {
-        if let Some(_) = child.try_wait().map_err(RunTaskError::Io)? {
-            return child.wait_with_output().map_err(RunTaskError::Io);
-        }
-
-        if start.elapsed() >= timeout {
-            let _ = child.kill();
-            let output = child.wait_with_output().map_err(RunTaskError::Io)?;
-            let mut combined = String::new();
-            combined.push_str(&String::from_utf8_lossy(&output.stdout));
-            combined.push_str(&String::from_utf8_lossy(&output.stderr));
-            return Err(RunTaskError::CommandTimeout {
-                command: label,
-                timeout_secs: timeout.as_secs(),
-                output: tail_string(&combined, 2000),
-            });
-        }
-
-        thread::sleep(Duration::from_millis(200));
-    }
-}

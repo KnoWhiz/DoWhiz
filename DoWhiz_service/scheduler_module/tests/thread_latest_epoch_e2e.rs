@@ -206,7 +206,6 @@ fn thread_latest_epoch_end_to_end() {
     let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");
     let _docker_guard = EnvGuard::set("RUN_TASK_DOCKER_IMAGE", "");
     let _home_guard = EnvGuard::set("HOME", &home_root);
-    let _e2b_guard = EnvGuard::set("RUN_TASK_USE_E2B", "0");
 
     let Some(ingestion_db_url) =
         test_support::require_supabase_db_url("thread_latest_epoch_end_to_end")
@@ -255,6 +254,7 @@ fn thread_latest_epoch_end_to_end() {
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
+
     let inbound_raw_1 = r#"{
   "From": "Alice <alice@example.com>",
   "To": "Service <service@example.com>",

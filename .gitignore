@@ -8,9 +8,6 @@
 # Local IDE settings
 .vscode/
 
-# Node artifacts
-node_modules/
-
 # Python artifacts (existing)
 *.pyc
 

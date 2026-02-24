@@ -3,7 +3,6 @@ mod codex;
 mod constants;
 mod core;
 mod docker;
-mod e2b;
 mod env;
 mod errors;
 mod github_auth;

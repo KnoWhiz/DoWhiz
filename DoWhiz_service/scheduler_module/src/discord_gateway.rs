@@ -23,7 +23,6 @@ use crate::memory_diff::{MemoryDiff, SectionChange};
 use crate::memory_queue::{global_memory_queue, MemoryWriteRequest};
 use crate::message_router::{MessageRouter, RouterDecision};
 use crate::service::ServiceConfig;
-use crate::service::workspace::persist_inbound_payloads;
 use crate::user_store::UserStore;
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
 
@@ -161,26 +160,12 @@ impl EventHandler for DiscordEventHandler {
                             match blob_store.read_memo(aid).await {
                                 Ok(content) => Some(content),
                                 Err(e) => {
-                                    warn!(
-                                        "Failed to read memo from blob for account {}: {}",
-                                        aid, e
-                                    );
+                                    warn!("Failed to read memo from blob for account {}: {}", aid, e);
                                     fs::read_to_string(paths.memory_dir.join("memo.md")).ok()
                                 }
                             }
                         } else {
                             fs::read_to_string(paths.memory_dir.join("memo.md")).ok()
-                        }
-                    } else if let Some(blob_store) = get_blob_store() {
-                        match blob_store.read_user_memo(&user.user_id).await {
-                            Ok(content) => Some(content),
-                            Err(e) => {
-                                warn!(
-                                    "Failed to read memo from blob for user {}: {}",
-                                    user.user_id, e
-                                );
-                                fs::read_to_string(paths.memory_dir.join("memo.md")).ok()
-                            }
                         }
                     } else {
                         fs::read_to_string(paths.memory_dir.join("memo.md")).ok()
@@ -306,17 +291,6 @@ fn process_discord_message(
 
     // Save the incoming Discord message to workspace
     append_discord_message(&workspace, message, raw_msg, thread_state.last_email_seq)?;
-    let account_id = lookup_account_by_channel(&Channel::Discord, &message.sender);
-    let synthetic_user_id = DiscordGuildPaths::user_id(&guild_id);
-    if let Err(err) = persist_inbound_payloads(
-        &workspace,
-        &Channel::Discord,
-        account_id,
-        &synthetic_user_id,
-        Some(&thread_key),
-    ) {
-        warn!("failed to persist inbound payloads to blob: {}", err);
-    }
 
     // Determine model and runner
     let model_name = match config.employee_profile.model.clone() {

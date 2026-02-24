@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DoWhiz Service is a Rust microservice handling inbound channels (Postmark email, Slack, Discord, Google Docs/Sheets/Slides, BlueBubbles/iMessage, Twilio SMS, Telegram, WhatsApp), AI-powered task execution (Codex/Claude CLI), and outbound message delivery. It supports multiple "employee" profiles (Oliver, Maggie, Devin, Boiled-Egg) with isolated workspaces and configurable AI runners.
+DoWhiz Service is a Rust microservice handling inbound channels (Postmark email, Slack, Discord, Google Docs, BlueBubbles/iMessage, Twilio SMS, Telegram, WhatsApp), AI-powered task execution (Codex/Claude CLI), and outbound message delivery. It supports multiple "employee" profiles (Oliver, Maggie, Devin, Boiled-Egg) with isolated workspaces and configurable AI runners.
 
 ## Build & Test Commands
 
@@ -42,7 +42,7 @@ RUST_SERVICE_LIVE_TEST=1 cargo test -p scheduler_module --test service_real_emai
 
 ### Message Flow
 ```
-External Events (Postmark/Slack/Discord/GoogleDocs/Sheets/Slides/BlueBubbles/Twilio SMS/Telegram/WhatsApp)
+External Events (Postmark/Slack/Discord/GoogleDocs/BlueBubbles/Twilio SMS/Telegram/WhatsApp)
     ↓
 Inbound Gateway (port 9100) - deduplicates, stores raw payloads in Azure Blob, routes to single employee
     ↓
@@ -63,12 +63,10 @@ Outbound Delivery - send via channel adapter, archive to user mail
 
 - **scheduler_module/src/lib.rs**: Core types (`TaskKind`, `Schedule`, `Scheduler<E>`)
 - **scheduler_module/src/service/server.rs**: Axum HTTP server setup (worker)
-- **scheduler_module/src/channel.rs**: `Channel` enum abstracting Email/Slack/Discord/SMS/Telegram/WhatsApp/GoogleDocs/GoogleSheets/GoogleSlides/BlueBubbles
+- **scheduler_module/src/channel.rs**: `Channel` enum abstracting Email/Slack/Discord/SMS/Telegram/WhatsApp/GoogleDocs/BlueBubbles
 - **scheduler_module/src/ingestion.rs**: `InboundMessage` envelope structure
 - **scheduler_module/src/message_router.rs**: quick-response classifier (OpenAI)
-- **scheduler_module/src/google_docs_poller.rs**: Google Docs comment poller
-- **scheduler_module/src/google_workspace_poller.rs**: Google Sheets/Slides comment poller
-- **scheduler_module/src/adapters/**: Channel-specific implementations (postmark.rs, slack.rs, discord.rs, google_docs/, google_sheets/, google_slides/, bluebubbles.rs)
+- **scheduler_module/src/adapters/**: Channel-specific implementations (postmark.rs, slack.rs, discord.rs, google_docs.rs, bluebubbles.rs)
 - **scheduler_module/src/adapters/whatsapp.rs**: WhatsApp inbound/outbound adapter
 - **scheduler_module/src/bin/rust_service.rs**: Main entry point
 - **scheduler_module/src/bin/inbound_gateway.rs**: Message router/deduplicator
@@ -134,12 +132,6 @@ After completing code changes, you must design targeted, detailed unit tests and
 - `AZURE_STORAGE_CONNECTION_STRING` / `AZURE_STORAGE_CONTAINER`: Azure Blob memo storage config
 - `SUPABASE_DB_URL`: Postgres ingestion queue (legacy)
 - `OPENAI_API_KEY`: Enable message router quick replies
-- `GOOGLE_DOCS_ENABLED`: Enable Google Docs poller
-- `GOOGLE_SHEETS_ENABLED` / `GOOGLE_SLIDES_ENABLED`: Enable Google Sheets/Slides pollers
-- `GOOGLE_DOCS_POLL_INTERVAL_SECS` / `GOOGLE_WORKSPACE_POLL_INTERVAL_SECS`: Poll intervals
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN[_<EMPLOYEE>]`: Google OAuth credentials
-- `GOOGLE_SERVICE_ACCOUNT_JSON` / `GOOGLE_ACCESS_TOKEN`: Alternate Google auth inputs (service account or pre-issued token)
-- `GOOGLE_EMPLOYEE_EMAILS`: Comma-separated list of employee emails to ignore in pollers
 - `TELEGRAM_BOT_TOKEN`: Telegram bot token (or per-employee `DO_WHIZ_<EMPLOYEE>_BOT`)
 - `TWILIO_ACCOUNT_SID`: Twilio account SID (SMS outbound)
 - `TWILIO_AUTH_TOKEN`: Twilio auth token (SMS outbound + webhook verification)
@@ -152,12 +144,6 @@ After completing code changes, you must design targeted, detailed unit tests and
 - `SLACK_CLIENT_ID`: Slack OAuth client id
 - `SLACK_CLIENT_SECRET`: Slack OAuth client secret
 - `SLACK_REDIRECT_URI`: Slack OAuth redirect URI
-- `SLACK_AUTH_REDIRECT_URI`: Slack account-linking redirect URI (`/auth/slack/callback`)
-- `DISCORD_CLIENT_ID`: Discord OAuth client id (account linking)
-- `DISCORD_CLIENT_SECRET`: Discord OAuth client secret (account linking)
-- `DISCORD_REDIRECT_URI`: Discord OAuth redirect URI (account linking)
-- `SUPABASE_ANON_KEY`: Supabase anon key for auth token validation
-- `FRONTEND_URL`: Frontend base URL for OAuth redirects
 - `DISCORD_BOT_TOKEN`: Discord bot token
 - `DISCORD_BOT_USER_ID`: Discord bot user id (filter bot messages)
 

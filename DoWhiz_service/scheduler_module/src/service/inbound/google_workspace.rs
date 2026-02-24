@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use tracing::{info, warn};
 
-use crate::account_store::lookup_account_by_channel;
 use crate::adapters::google_common::ActionableComment;
 use crate::channel::Channel;
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
@@ -17,7 +16,7 @@ use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
 use super::super::bump_thread_state;
 use super::super::config::ServiceConfig;
 use super::super::default_thread_state_path;
-use super::super::workspace::{ensure_thread_workspace, persist_inbound_payloads};
+use super::super::workspace::ensure_thread_workspace;
 use super::super::BoxError;
 
 /// Process an incoming Google Workspace comment (Docs, Sheets, or Slides).
@@ -170,17 +169,6 @@ pub(crate) fn process_google_workspace_message(
                 warn!("Failed to fetch content for {}: {}", file_id, e);
             }
         }
-    }
-
-    let account_id = lookup_account_by_channel(&channel, &user_email);
-    if let Err(err) = persist_inbound_payloads(
-        &workspace,
-        &channel,
-        account_id,
-        &user.user_id,
-        Some(&thread_key),
-    ) {
-        warn!("failed to persist inbound payloads to blob: {}", err);
     }
 
     let model_name = match config.employee_profile.model.clone() {

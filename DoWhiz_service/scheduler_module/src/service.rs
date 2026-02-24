@@ -9,7 +9,7 @@ mod recipients;
 mod scheduler;
 mod server;
 mod state;
-pub(crate) mod workspace;
+mod workspace;
 
 pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io;
@@ -11,7 +10,6 @@ use super::constants::{
 };
 use super::docker::{docker_cli_available, ensure_docker_image_available};
 use super::env::{env_enabled, read_env_list, read_env_trimmed};
-use super::e2b::{default_bootstrap_commands, prepare_runner_files, run_e2b_task, E2bTaskConfig};
 use super::errors::RunTaskError;
 use super::github_auth::{ensure_github_cli_auth, resolve_github_auth};
 use super::prompt::{build_prompt, load_memory_context};
@@ -21,19 +19,6 @@ use super::utils::{run_command_with_timeout, run_task_timeout, tail_string};
 use super::workspace::{canonicalize_dir, workspace_path_in_container};
 
 pub(super) fn run_codex_task(
-    request: RunTaskRequest<'_>,
-    runner: &str,
-    reply_html_path: PathBuf,
-    reply_attachments_dir: PathBuf,
-) -> Result<RunTaskOutput, RunTaskError> {
-    if super::e2b::use_e2b() {
-        run_codex_task_e2b(request, runner, reply_html_path, reply_attachments_dir)
-    } else {
-        run_codex_task_local(request, runner, reply_html_path, reply_attachments_dir)
-    }
-}
-
-fn run_codex_task_local(
     request: RunTaskRequest<'_>,
     runner: &str,
     reply_html_path: PathBuf,
@@ -335,179 +320,6 @@ fn run_codex_task_local(
     })
 }
 
-fn run_codex_task_e2b(
-    request: RunTaskRequest<'_>,
-    runner: &str,
-    reply_html_path: PathBuf,
-    reply_attachments_dir: PathBuf,
-) -> Result<RunTaskOutput, RunTaskError> {
-    super::env::load_env_sources(request.workspace_dir)?;
-
-    let api_key =
-        env::var("AZURE_OPENAI_API_KEY_BACKUP").map_err(|_| RunTaskError::MissingEnv {
-            key: "AZURE_OPENAI_API_KEY_BACKUP",
-        })?;
-    if api_key.trim().is_empty() {
-        return Err(RunTaskError::MissingEnv {
-            key: "AZURE_OPENAI_API_KEY_BACKUP",
-        });
-    }
-
-    let azure_endpoint = normalize_azure_endpoint(CODEX_BASE_URL);
-    let model_name = CODEX_MODEL_NAME.to_string();
-    let sandbox_mode = codex_sandbox_mode();
-    let channel_lower = request.channel.to_lowercase();
-    let is_google_docs = channel_lower == "google_docs" || channel_lower == "googledocs";
-    let has_google_token = request.workspace_dir.join(".google_access_token").exists();
-    let bypass_sandbox =
-        codex_bypass_sandbox() || codex_bypass_sandbox_e2b() || is_google_docs || has_google_token;
-
-    let add_dirs = codex_add_dirs_e2b(request.workspace_dir)?;
-    let github_auth = resolve_github_auth(None)?;
-
-    let codex_home = request.workspace_dir.join(".codex");
-    ensure_codex_config_at(&codex_home, Path::new("/workspace"))?;
-
-    let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
-    let prompt = build_prompt(
-        request.input_email_dir,
-        request.input_attachments_dir,
-        request.memory_dir,
-        request.reference_dir,
-        request.workspace_dir,
-        runner,
-        &memory_context,
-        !request.reply_to.is_empty(),
-        request.channel,
-        request.has_unified_account,
-    );
-
-    if let Some(ref token) = request.google_access_token {
-        let token_file = request.workspace_dir.join(".google_access_token");
-        if let Err(e) = fs::write(&token_file, token) {
-            eprintln!(
-                "[run_task] Warning: Failed to write Google access token file: {}",
-                e
-            );
-        }
-    }
-
-    let _runner_files = prepare_runner_files(request.workspace_dir, &prompt)?;
-
-    let mut args = vec!["exec".to_string()];
-    if bypass_sandbox {
-        args.push("--yolo".to_string());
-    }
-    for add_dir in &add_dirs {
-        args.push("--add-dir".to_string());
-        args.push(add_dir.clone());
-    }
-    args.extend([
-        "--skip-git-repo-check".to_string(),
-        "-m".to_string(),
-        model_name.clone(),
-        "-c".to_string(),
-        "web_search=\"live\"".to_string(),
-        "-c".to_string(),
-        "ask_for_approval=\"never\"".to_string(),
-        "-c".to_string(),
-        format!("sandbox=\"{}\"", sandbox_mode),
-        "-c".to_string(),
-        "model_providers.azure.env_key=\"AZURE_OPENAI_API_KEY_BACKUP\"".to_string(),
-        "--cd".to_string(),
-        "/workspace".to_string(),
-    ]);
-
-    let mut env_overrides: HashMap<String, String> = HashMap::new();
-    env_overrides.insert("HOME".to_string(), "/workspace".to_string());
-    env_overrides.insert("CODEX_HOME".to_string(), "/workspace/.codex".to_string());
-    env_overrides.insert("AZURE_OPENAI_API_KEY_BACKUP".to_string(), api_key.clone());
-    env_overrides.insert(
-        "AZURE_OPENAI_ENDPOINT_BACKUP".to_string(),
-        azure_endpoint.clone(),
-    );
-    env_overrides.insert(
-        "DOWHIZ_PROMPT_PATH".to_string(),
-        "/workspace/.dowhiz/prompt.txt".to_string(),
-    );
-    env_overrides.insert("DOWHIZ_RUN_CMD".to_string(), "codex".to_string());
-    env_overrides.insert(
-        "DOWHIZ_RUN_ARGS".to_string(),
-        serde_json::to_string(&args)
-            .map_err(|err| RunTaskError::Io(io::Error::new(io::ErrorKind::Other, err)))?,
-    );
-    env_overrides.insert(
-        "DOWHIZ_WORKDIR".to_string(),
-        "/workspace".to_string(),
-    );
-    env_overrides.insert(
-        "GIT_ASKPASS".to_string(),
-        "/workspace/.dowhiz/git-askpass.sh".to_string(),
-    );
-    env_overrides.insert("GIT_TERMINAL_PROMPT".to_string(), "0".to_string());
-    if let Some(ref token) = request.google_access_token {
-        env_overrides.insert("GOOGLE_ACCESS_TOKEN".to_string(), token.to_string());
-    }
-
-    for (key, value) in github_auth.env_overrides {
-        env_overrides.insert(key, value);
-    }
-
-    let mut metadata = HashMap::new();
-    metadata.insert("runner".to_string(), "codex".to_string());
-    metadata.insert("channel".to_string(), request.channel.to_string());
-
-    let timeout = run_task_timeout();
-    let output = run_e2b_task(E2bTaskConfig {
-        workspace_dir: request.workspace_dir.to_path_buf(),
-        command: "node /workspace/.dowhiz/e2b_runner.mjs".to_string(),
-        env: env_overrides.clone(),
-        sandbox_env: env_overrides,
-        bootstrap: default_bootstrap_commands(),
-        metadata,
-        timeout,
-        bootstrap_user: None,
-        command_user: None,
-    })?;
-
-    let mut combined_output = String::new();
-    combined_output.push_str(&output.stdout);
-    combined_output.push_str(&output.stderr);
-    let (scheduled_tasks, scheduled_tasks_error) = extract_scheduled_tasks(&combined_output);
-    let (scheduler_actions, scheduler_actions_error) = extract_scheduler_actions(&combined_output);
-    let mut output_tail = tail_string(&combined_output, 2000);
-    if let Some(err) = output.error {
-        if !output_tail.is_empty() {
-            output_tail.push('\n');
-        }
-        output_tail.push_str(&format!("E2B error: {err}"));
-    }
-
-    if !output.ok {
-        return Err(RunTaskError::CodexFailed {
-            status: Some(output.exit_code),
-            output: output_tail,
-        });
-    }
-
-    if !request.reply_to.is_empty() && !reply_html_path.exists() {
-        return Err(RunTaskError::OutputMissing {
-            path: reply_html_path,
-            output: output_tail,
-        });
-    }
-
-    Ok(RunTaskOutput {
-        reply_html_path,
-        reply_attachments_dir,
-        codex_output: output_tail,
-        scheduled_tasks,
-        scheduled_tasks_error,
-        scheduler_actions,
-        scheduler_actions_error,
-    })
-}
-
 fn ensure_codex_config(workspace_dir: &Path) -> Result<(), RunTaskError> {
     let home = env::var("HOME").map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
     let config_dir = PathBuf::from(home).join(".codex");
@@ -566,10 +378,6 @@ fn codex_bypass_sandbox() -> bool {
     matches!(env::var("CODEX_BYPASS_SANDBOX"), Ok(value) if value.trim() == "1")
 }
 
-fn codex_bypass_sandbox_e2b() -> bool {
-    super::env::env_enabled_default("CODEX_E2B_BYPASS_SANDBOX", true)
-}
-
 fn codex_add_dirs(workspace_dir: &Path, use_docker: bool) -> Result<Vec<String>, RunTaskError> {
     let mut add_dirs = Vec::new();
     if use_docker {
@@ -582,14 +390,6 @@ fn codex_add_dirs(workspace_dir: &Path, use_docker: bool) -> Result<Vec<String>,
         fs::create_dir_all(&gh_config_dir)?;
         add_dirs.push(gh_config_dir.to_string_lossy().into_owned());
     }
-    Ok(add_dirs)
-}
-
-fn codex_add_dirs_e2b(workspace_dir: &Path) -> Result<Vec<String>, RunTaskError> {
-    let mut add_dirs = Vec::new();
-    let gh_config_dir = workspace_dir.join(".config").join("gh");
-    fs::create_dir_all(&gh_config_dir)?;
-    add_dirs.push("/workspace/.config/gh".to_string());
     Ok(add_dirs)
 }
 
