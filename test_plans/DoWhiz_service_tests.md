@@ -211,6 +211,9 @@ Note: ingestion-queue tests use Postgres by default; set `SUPABASE_DB_URL` (or `
 | GAP-12 | P1 | WhatsApp inbound media/interactive coverage | adapters/whatsapp.rs::WhatsAppInboundAdapter::parse | Media/interactive payloads not covered | PLANNED | Add unit tests for media + interactive payloads |
 | GAP-13 | P1 | WhatsApp outbound adapter send/error mapping | adapters/whatsapp.rs::WhatsAppOutboundAdapter::send | No outbound/mock coverage | PLANNED | Mock Graph API or inject base URL |
 | GAP-14 | P1 | Raw payload storage upload/download | raw_payload_store::{upload_raw_payload, download_raw_payload} | No Supabase storage tests | PLANNED | Run against a test bucket or mock HTTP |
+| GAP-15 | P1 | Google Sheets/Slides CLI E2E | scheduler_module/src/bin/google_sheets_cli.rs + google_slides_cli.rs | No live CLI tests for Sheets/Slides | PLANNED | Run CLI commands against real Sheets/Slides with creds |
+| GAP-16 | P1 | Google Workspace poller (Sheets/Slides) | google_workspace_poller + inbound gateway | Poller -> ingestion -> run_task path not covered | PLANNED | Enable poller and verify tasks enqueue + replies |
+| GAP-17 | P2 | Account linking OAuth (Slack/Discord) | service/auth.rs::/auth routes | No automated coverage for account linking flows | MANUAL | Run OAuth flows and verify account linkage in Supabase |
 
 ## Test Report Template
 | Test ID | Status (PASS/FAIL/SKIP) | Evidence (log/summary) | Notes/Reason |

@@ -1,6 +1,6 @@
 # DoWhiz Service
 
-Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, Telegram, WhatsApp, Google Docs, BlueBubbles/iMessage), task scheduling, AI agent execution (Codex/Claude), and outbound replies.
+Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, Telegram, WhatsApp, Google Docs/Sheets/Slides, BlueBubbles/iMessage), task scheduling, AI agent execution (Codex/Claude), and outbound replies.
 
 ## Table of Contents
 
@@ -233,7 +233,7 @@ Outputs appear under:
 
 ### Inbound Gateway (Recommended)
 
-The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/WhatsApp/Google Docs inbound traffic, deduplicates it, and enqueues messages into Azure Service Bus while storing raw payloads in Azure Blob Storage. The gateway requires `INGESTION_QUEUE_BACKEND=servicebus` and `RAW_PAYLOAD_STORAGE_BACKEND=azure`. Workers poll the shared queue and filter by `employee_id`; workers no longer expose `/postmark/inbound`.
+The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/WhatsApp inbound traffic plus Google Docs/Sheets/Slides comment polling, deduplicates it, and enqueues messages into Azure Service Bus while storing raw payloads in Azure Blob Storage. The gateway requires `INGESTION_QUEUE_BACKEND=servicebus` and `RAW_PAYLOAD_STORAGE_BACKEND=azure`. Workers poll the shared queue and filter by `employee_id`; workers no longer expose `/postmark/inbound`.
 
 HTTP endpoints:
 - `/postmark/inbound` (email)
@@ -243,7 +243,7 @@ HTTP endpoints:
 - `/sms/twilio`
 - `/whatsapp/webhook`
 
-Discord is handled via the bot gateway (requires `DISCORD_BOT_TOKEN`), and Google Docs uses a poller when `GOOGLE_DOCS_ENABLED=true`.
+Discord is handled via the bot gateway (requires `DISCORD_BOT_TOKEN`), and Google Docs/Sheets/Slides use pollers when `GOOGLE_DOCS_ENABLED=true`, `GOOGLE_SHEETS_ENABLED=true`, or `GOOGLE_SLIDES_ENABLED=true`.
 
 Optional webhook verification:
 - `POSTMARK_INBOUND_TOKEN` (validates `X-Postmark-Token`)
@@ -844,7 +844,7 @@ cargo test -p scheduler_module --test service_real_email -- --nocapture
 
 ### Slack Local Testing
 
-Slack events are handled by the inbound gateway (`/slack/events`); OAuth callbacks are handled by the worker (`/slack/oauth/callback`). You need two public URLs (or a reverse proxy that splits paths).
+Slack events are handled by the inbound gateway (`/slack/events`); bot-install OAuth callbacks are handled by the worker (`/slack/oauth/callback`). You need two public URLs (or a reverse proxy that splits paths).
 
 1. Start a worker (typically `boiled_egg`) and the inbound gateway with a shared ingestion queue.
 2. Start two ngrok tunnels:
@@ -859,12 +859,16 @@ Set `SLACK_REDIRECT_URI` in `.env` to the OAuth Redirect URL.
 4. Visit `https://<worker-ngrok>.ngrok.app/slack/install` to authorize.
 5. Invite the bot to a channel (`/invite @DoWhiz`).
 
+Account linking for DoWhiz Accounts uses `/auth/slack` + `/auth/slack/callback` (can run on the gateway port). Configure `SLACK_AUTH_REDIRECT_URI` and `FRONTEND_URL` for those routes.
+
 ### Discord Local Testing
 
 1. Set `DISCORD_BOT_TOKEN` and `DISCORD_BOT_USER_ID` in `.env`.
 2. Start a worker and the inbound gateway with a shared ingestion queue.
 3. Add the bot to your server:
 `https://discord.com/oauth2/authorize?client_id=1472013251553525983&permissions=0&integration_type=0&scope=bot`
+
+Account linking for DoWhiz Accounts uses `/auth/discord` + `/auth/discord/callback` with `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`, and `FRONTEND_URL`.
 
 ### Telegram Local Testing
 
@@ -888,17 +892,17 @@ Set `SLACK_REDIRECT_URI` in `.env` to the OAuth Redirect URL.
 2. Start a worker and the inbound gateway with a shared ingestion queue.
 3. In BlueBubbles → API & WebHooks, create a webhook at `http://127.0.0.1:9100/bluebubbles/webhook` (gateway). If BlueBubbles runs remotely, expose the gateway with ngrok and use that URL.
 
-### Google Docs Integration
+### Google Workspace Integration (Docs/Sheets/Slides)
 
-Digital employees can collaborate on Google Docs with color-coded revision marks (suggesting mode).
+Digital employees can collaborate on Google Docs/Sheets/Slides comments. Docs support color-coded revision marks (suggesting mode), while Sheets/Slides focus on comment replies and edits.
 
 ### Features
-- **@Mention Detection**: Employees detect when mentioned in document comments
-- **Suggesting Mode**: Edits appear as color-coded revisions:
+- **@Mention Detection**: Employees detect when mentioned in Docs/Sheets/Slides comments
+- **Suggesting Mode (Docs)**: Edits appear as color-coded revisions:
   - 🔴 **Red strikethrough** = Deletions
   - 🔵 **Blue text** = Insertions
-- **Apply/Discard**: Users can accept or reject all suggestions in batch
-- **Comment Replies**: Employees can respond to document comments
+- **Apply/Discard (Docs)**: Users can accept or reject all suggestions in batch
+- **Comment Replies**: Employees can respond to Docs/Sheets/Slides comments
 
 #### Quick Setup
 
@@ -909,6 +913,8 @@ Digital employees can collaborate on Google Docs with color-coded revision marks
 3. Enable APIs:
    - Google Docs API
    - Google Drive API
+   - Google Sheets API (if using Sheets)
+   - Google Slides API (if using Slides)
 4. Create OAuth 2.0 credentials:
    - Go to **APIs & Services → Credentials**
    - Click **Create Credentials → OAuth client ID**
@@ -949,9 +955,14 @@ GOOGLE_CLIENT_SECRET=your-client-secret
 GOOGLE_REFRESH_TOKEN_BOILED_EGG=your-refresh-token-here
 GOOGLE_REFRESH_TOKEN_LITTLE_BEAR=your-refresh-token-here
 
-# Enable Google Docs polling
+# Enable Google Workspace polling
 GOOGLE_DOCS_ENABLED=true
 GOOGLE_DOCS_POLL_INTERVAL_SECS=30
+GOOGLE_SHEETS_ENABLED=true
+GOOGLE_SLIDES_ENABLED=true
+GOOGLE_WORKSPACE_POLL_INTERVAL_SECS=30
+# Optional: additional employee emails to ignore in pollers
+GOOGLE_EMPLOYEE_EMAILS=proto@dowhiz.com,oliver@dowhiz.com
 ```
 
 #### Testing
@@ -960,29 +971,36 @@ GOOGLE_DOCS_POLL_INTERVAL_SECS=30
 ```bash
 cd DoWhiz_service
 
-# Build the CLI
-cargo build --release --bin google-docs
+# Build the CLIs
+cargo build --release --bin google-docs --bin google-sheets --bin google-slides
 
-# List accessible documents
+# Google Docs
 ./target/release/google-docs list-documents
 
-# Read a document
 ./target/release/google-docs read-document <doc_id>
 
-# Test suggesting mode (find and replace with revision marks)
 ./target/release/google-docs suggest-replace <doc_id> --find="old text" --replace="new text"
 
-# Apply all suggestions (removes red, normalizes blue)
 ./target/release/google-docs apply-suggestions <doc_id>
 
-# Discard all suggestions (removes blue, restores red)
 ./target/release/google-docs discard-suggestions <doc_id>
+
+# Google Sheets
+./target/release/google-sheets list-spreadsheets
+./target/release/google-sheets read-values <sheet_id> "Sheet1!A1:C10"
+./target/release/google-sheets reply-comment <sheet_id> <comment_id> "Thanks!"
+
+# Google Slides
+./target/release/google-slides list-presentations
+./target/release/google-slides read-presentation <presentation_id>
+./target/release/google-slides reply-comment <presentation_id> <comment_id> "On it!"
 ```
 
 ##### E2E Tests
 ```bash
 cargo test --package scheduler_module --test google_docs_cli_e2e
 ```
+Sheets/Slides CLI tests are not implemented yet; track in `test_plans/DoWhiz_service_tests.md`.
 
 #### Multi-Employee Setup
 
@@ -999,7 +1017,7 @@ Run `get_google_refresh_token.sh` once per employee, logging into the appropriat
 
 | Issue | Solution |
 |-------|----------|
-| `DNS lookup failed` | Ensure sandbox bypass is enabled for GoogleDocs tasks |
+| `DNS lookup failed` | Ensure sandbox bypass is enabled for Google Workspace tasks |
 | `Token refresh failed` | Re-run `get_google_refresh_token.sh` to get a new token |
 | `\n` appearing literally | Upgrade to latest CLI with escape sequence support |
 | `Permission denied` | Share the document with the employee's Google account |
@@ -1142,15 +1160,27 @@ This reduces API costs and latency for simple interactions while preserving full
 | `SLACK_CLIENT_ID` | - | Slack OAuth client id |
 | `SLACK_CLIENT_SECRET` | - | Slack OAuth client secret |
 | `SLACK_REDIRECT_URI` | - | Slack OAuth redirect URI |
+| `SLACK_AUTH_REDIRECT_URI` | - | Redirect URI for account linking (`/auth/slack/callback`) |
 | `SLACK_STORE_PATH` | `<runtime_root>/state/slack.db` | Slack installation store |
 | `SLACK_API_BASE_URL` | `https://slack.com/api` | Override Slack API base URL |
 
 ### Discord
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `DISCORD_CLIENT_ID` | - | Discord OAuth client id (account linking) |
+| `DISCORD_CLIENT_SECRET` | - | Discord OAuth client secret (account linking) |
+| `DISCORD_REDIRECT_URI` | - | Discord OAuth redirect URI (account linking) |
 | `DISCORD_BOT_TOKEN` | - | Discord bot token |
 | `DISCORD_BOT_USER_ID` | - | Bot user id (filter self messages) |
 | `DISCORD_API_BASE_URL` | `https://discord.com/api/v10` | Override Discord API base URL |
+
+### Accounts/Auth (Slack/Discord Linking)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SUPABASE_PROJECT_URL` | - | Supabase project URL for auth token validation |
+| `SUPABASE_ANON_KEY` | - | Supabase anon key for auth token validation |
+| `SUPABASE_DB_URL` | - | Supabase Postgres URL for account store (also used by legacy ingestion) |
+| `FRONTEND_URL` | `http://localhost:5173` | Frontend base URL for OAuth redirects |
 
 ### BlueBubbles (iMessage)
 | Variable | Default | Description |
@@ -1172,6 +1202,21 @@ This reduces API costs and latency for simple interactions while preserving full
 |----------|---------|-------------|
 | `TELEGRAM_BOT_TOKEN` | - | Global Telegram bot token |
 | `DO_WHIZ_<EMPLOYEE>_BOT` | - | Per-employee bot token override (e.g., `DO_WHIZ_OLIVER_BOT`) |
+
+### Google Workspace (Docs/Sheets/Slides)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOOGLE_CLIENT_ID` | - | Google OAuth client id |
+| `GOOGLE_CLIENT_SECRET` | - | Google OAuth client secret |
+| `GOOGLE_REFRESH_TOKEN` | - | Refresh token (or `GOOGLE_REFRESH_TOKEN_<EMPLOYEE>`) |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | - | Service account JSON payload (alternate auth) |
+| `GOOGLE_ACCESS_TOKEN` | - | Pre-generated access token (sandbox) |
+| `GOOGLE_DOCS_ENABLED` | `false` | Enable Docs poller |
+| `GOOGLE_SHEETS_ENABLED` | `false` | Enable Sheets poller |
+| `GOOGLE_SLIDES_ENABLED` | `false` | Enable Slides poller |
+| `GOOGLE_DOCS_POLL_INTERVAL_SECS` | `30` | Docs poll interval |
+| `GOOGLE_WORKSPACE_POLL_INTERVAL_SECS` | `30` | Sheets/Slides poll interval |
+| `GOOGLE_EMPLOYEE_EMAILS` | - | Comma-separated employee emails to ignore in pollers |
 
 ### WhatsApp (Meta Cloud API)
 | Variable | Default | Description |
