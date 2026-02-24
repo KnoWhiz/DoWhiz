@@ -43,11 +43,17 @@ fn read_user_memo_blob(
 fn read_user_memo(
     runtime: &tokio::runtime::Handle,
     account_id: Option<Uuid>,
+    user_id: &str,
     memory_dir: &Path,
 ) -> Option<String> {
     if let Some(account_id) = account_id {
         if let Some(content) = read_user_memo_blob(runtime, account_id) {
             return Some(content);
+        }
+    } else if let Some(blob_store) = get_blob_store() {
+        match runtime.block_on(blob_store.read_user_memo(user_id)) {
+            Ok(content) => return Some(content),
+            Err(e) => warn!("Failed to read memo from blob for user {}: {}", user_id, e),
         }
     }
     read_user_memo_local(memory_dir)
@@ -100,7 +106,7 @@ pub(crate) fn try_quick_response_slack(
     let account_id = lookup_account_by_channel(&Channel::Slack, &message.sender);
     let user = user_store.get_or_create_user("slack", &message.sender)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
-    let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
+    let memory = read_user_memo(runtime, account_id, &user.user_id, &user_paths.memory_dir);
 
     let cleaned_text = text
         .split_whitespace()
@@ -217,7 +223,7 @@ pub(crate) fn try_quick_response_bluebubbles(
     let account_id = lookup_account_by_channel(&Channel::BlueBubbles, normalized_phone);
     let user = user_store.get_or_create_user("phone", normalized_phone)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
-    let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
+    let memory = read_user_memo(runtime, account_id, &user.user_id, &user_paths.memory_dir);
 
     let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
     match decision {
@@ -273,7 +279,7 @@ pub(crate) fn try_quick_response_discord(
     let account_id = lookup_account_by_channel(&Channel::Discord, &message.sender);
     let user = user_store.get_or_create_user("discord", &message.sender)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
-    let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
+    let memory = read_user_memo(runtime, account_id, &user.user_id, &user_paths.memory_dir);
 
     let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
     match decision {
@@ -323,7 +329,7 @@ pub(crate) fn try_quick_response_telegram(
     let account_id = lookup_account_by_channel(&Channel::Telegram, &message.sender);
     let user = user_store.get_or_create_user("telegram", &message.sender)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
-    let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
+    let memory = read_user_memo(runtime, account_id, &user.user_id, &user_paths.memory_dir);
 
     let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
     match decision {
@@ -473,7 +479,7 @@ pub(crate) fn try_quick_response_whatsapp(
     let account_id = lookup_account_by_channel(&Channel::WhatsApp, normalized_phone);
     let user = user_store.get_or_create_user("whatsapp", normalized_phone)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
-    let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
+    let memory = read_user_memo(runtime, account_id, &user.user_id, &user_paths.memory_dir);
 
     let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
     match decision {

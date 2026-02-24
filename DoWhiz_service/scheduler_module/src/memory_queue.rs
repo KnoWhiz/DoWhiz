@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -34,12 +35,22 @@ struct InternalRequest {
 pub struct MemoryWriteQueue {
     /// Per-user/account channels for submitting diffs
     user_channels: Mutex<HashMap<String, Sender<InternalRequest>>>,
+    use_blob: bool,
 }
 
 impl MemoryWriteQueue {
     pub fn new() -> Self {
         Self {
             user_channels: Mutex::new(HashMap::new()),
+            use_blob: memory_queue_use_blob(),
+        }
+    }
+
+    #[cfg(test)]
+    fn new_with_use_blob(use_blob: bool) -> Self {
+        Self {
+            user_channels: Mutex::new(HashMap::new()),
+            use_blob,
         }
     }
 
@@ -72,6 +83,7 @@ impl MemoryWriteQueue {
             } else {
                 // Create a new channel and worker for this user/account
                 let (sender, receiver) = bounded::<InternalRequest>(100);
+                let use_blob_config = self.use_blob;
 
                 // Spawn worker thread for this user/account
                 let worker_key = queue_key.clone();
@@ -85,8 +97,9 @@ impl MemoryWriteQueue {
                         .expect("Failed to create tokio runtime for memory queue worker");
 
                     for req in receiver {
-                        let result = if req.request.account_id.is_some() {
-                            // Use Azure Blob storage
+                        let use_blob = use_blob_config && get_blob_store().is_some();
+                        let result = if use_blob {
+                            // Use Azure Blob storage when available
                             rt.block_on(apply_diff_to_blob(&req.request))
                         } else {
                             // Use local file storage
@@ -153,31 +166,40 @@ fn apply_diff_to_file(request: &MemoryWriteRequest) -> Result<(), MemoryQueueErr
 
 /// Apply a diff to Azure Blob storage (unified account storage)
 async fn apply_diff_to_blob(request: &MemoryWriteRequest) -> Result<(), MemoryQueueError> {
-    let account_id = request.account_id.ok_or_else(|| {
-        MemoryQueueError::BlobStore("account_id required for blob storage".to_string())
-    })?;
-
     let blob_store = get_blob_store()
         .ok_or_else(|| MemoryQueueError::BlobStore("BlobStore not configured".to_string()))?;
 
-    // Read current content from blob
-    let current_content = blob_store
-        .read_memo(account_id)
-        .await
-        .map_err(|e| MemoryQueueError::BlobStore(e.to_string()))?;
+    let (current_content, target_label) = if let Some(account_id) = request.account_id {
+        let content = blob_store
+            .read_memo(account_id)
+            .await
+            .map_err(|e| MemoryQueueError::BlobStore(e.to_string()))?;
+        (content, format!("account {}", account_id))
+    } else {
+        let content = blob_store
+            .read_user_memo(&request.user_id)
+            .await
+            .map_err(|e| MemoryQueueError::BlobStore(e.to_string()))?;
+        (content, format!("user {}", request.user_id))
+    };
 
-    // Apply diff
     let merged_content = apply_memory_diff(&current_content, &request.diff);
 
-    // Write back to blob
-    blob_store
-        .write_memo(account_id, &merged_content)
-        .await
-        .map_err(|e| MemoryQueueError::BlobStore(e.to_string()))?;
+    if let Some(account_id) = request.account_id {
+        blob_store
+            .write_memo(account_id, &merged_content)
+            .await
+            .map_err(|e| MemoryQueueError::BlobStore(e.to_string()))?;
+    } else {
+        blob_store
+            .write_user_memo(&request.user_id, &merged_content)
+            .await
+            .map_err(|e| MemoryQueueError::BlobStore(e.to_string()))?;
+    }
 
     info!(
-        "Applied memory diff for account {} ({} sections changed)",
-        account_id,
+        "Applied memory diff for {} ({} sections changed)",
+        target_label,
         request.diff.changed_sections.len()
     );
 
@@ -212,6 +234,16 @@ pub fn global_memory_queue() -> Arc<MemoryWriteQueue> {
         .clone()
 }
 
+pub(crate) fn memory_queue_use_blob() -> bool {
+    match env::var("MEMORY_QUEUE_USE_BLOB") {
+        Ok(value) => {
+            let normalized = value.trim().to_ascii_lowercase();
+            !(normalized.is_empty() || normalized == "0" || normalized == "false")
+        }
+        Err(_) => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,8 +251,31 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
 
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     #[test]
     fn test_apply_diff_to_file() {
+        let _blob_guard = EnvGuard::set("MEMORY_QUEUE_USE_BLOB", "0");
         let temp = TempDir::new().expect("tempdir");
         let memory_dir = temp.path().join("memory");
         fs::create_dir_all(&memory_dir).expect("create dir");
@@ -259,6 +314,7 @@ mod tests {
 
     #[test]
     fn test_queue_sequential_writes() {
+        let _blob_guard = EnvGuard::set("MEMORY_QUEUE_USE_BLOB", "0");
         let temp = TempDir::new().expect("tempdir");
         let memory_dir = temp.path().join("memory");
         fs::create_dir_all(&memory_dir).expect("create dir");
@@ -271,7 +327,7 @@ mod tests {
 "#;
         fs::write(memory_dir.join("memo.md"), initial).expect("write initial");
 
-        let queue = MemoryWriteQueue::new();
+        let queue = MemoryWriteQueue::new_with_use_blob(false);
 
         // Submit two diffs sequentially (both go through the queue)
         let diff1 = MemoryDiff {
@@ -313,6 +369,7 @@ mod tests {
 
     #[test]
     fn test_concurrent_submits_serialized() {
+        let _blob_guard = EnvGuard::set("MEMORY_QUEUE_USE_BLOB", "0");
         use std::sync::Arc;
         use std::thread;
 
@@ -328,7 +385,7 @@ mod tests {
 "#;
         fs::write(memory_dir.join("memo.md"), initial).expect("write initial");
 
-        let queue = Arc::new(MemoryWriteQueue::new());
+        let queue = Arc::new(MemoryWriteQueue::new_with_use_blob(false));
         let memory_dir = Arc::new(memory_dir);
 
         // Spawn multiple threads submitting diffs concurrently

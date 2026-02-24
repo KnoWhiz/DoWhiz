@@ -250,6 +250,8 @@ fn email_flow_injects_github_env() {
     let _api_guard = EnvGuard::set("AZURE_OPENAI_API_KEY_BACKUP", "test-key");
     let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");
     let _home_guard = EnvGuard::set("HOME", &home_root);
+    let _e2b_guard = EnvGuard::set("RUN_TASK_USE_E2B", "0");
+    let _e2b_guard = EnvGuard::set("RUN_TASK_USE_E2B", "0");
 
     let _docker_guard = EnvUnsetGuard::remove(&[
         "RUN_TASK_DOCKER_IMAGE",
@@ -445,7 +447,6 @@ fn email_flow_injects_employee_github_env() {
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
-
     let inbound_raw = r#"{
   "From": "Alice <alice@example.com>",
   "To": "Service <service@example.com>",

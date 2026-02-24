@@ -13,10 +13,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
+use crate::account_store::lookup_account_by_channel;
 use crate::adapters::google_docs::{ActionableComment, GoogleDocsInboundAdapter};
 use crate::channel::Channel;
 use crate::collaboration_store::CollaborationStore;
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
+use crate::service::workspace::persist_inbound_payloads;
 use crate::{RunTaskTask, Scheduler, SchedulerError, TaskExecutor, TaskKind};
 
 /// Configuration for Google Docs polling.
@@ -380,6 +382,17 @@ impl GoogleDocsPoller {
                     }
                 }
 
+                let account_id = lookup_account_by_channel(&Channel::GoogleDocs, &message.sender);
+                if let Err(err) = persist_inbound_payloads(
+                    &workspace_dir,
+                    &Channel::GoogleDocs,
+                    account_id,
+                    &message.sender,
+                    Some(&message.thread_id),
+                ) {
+                    warn!("failed to persist inbound payloads to blob: {}", err);
+                }
+
                 // Create RunTask
                 let run_task = RunTaskTask {
                     workspace_dir: workspace_dir.clone(),
@@ -574,6 +587,17 @@ impl GoogleDocsPoller {
                             doc.id, e
                         );
                     }
+                }
+
+                let account_id = lookup_account_by_channel(&Channel::GoogleDocs, &message.sender);
+                if let Err(err) = persist_inbound_payloads(
+                    &workspace_dir,
+                    &Channel::GoogleDocs,
+                    account_id,
+                    &message.sender,
+                    Some(&message.thread_id),
+                ) {
+                    warn!("failed to persist inbound payloads to blob: {}", err);
                 }
 
                 // Create RunTask
