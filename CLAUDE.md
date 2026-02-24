@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DoWhiz is a multi-tenant, email-first digital employee platform. Users send tasks to digital employees via email (and other channels like Slack, Discord, SMS via Twilio, Telegram, WhatsApp, Google Docs comments, iMessage via BlueBubbles), and AI agents (Codex CLI or Claude Code) process and respond. The system emphasizes per-user isolation, role-based agents, and tool-backed execution.
+DoWhiz is a multi-tenant, email-first digital employee platform. Users send tasks to digital employees via email (and other channels like Slack, Discord, SMS via Twilio, Telegram, WhatsApp, Google Docs/Sheets/Slides comments, iMessage via BlueBubbles), and AI agents (Codex CLI or Claude Code) process and respond. The system emphasizes per-user isolation, role-based agents, and tool-backed execution.
 
 ## Build and Development Commands
 
@@ -65,7 +65,7 @@ docker run --rm -p 9001:9001 \
 
 ### Data Flow
 ```
-Inbound (Email/Slack/Discord/SMS/Telegram/WhatsApp/Google Docs/iMessage)
+Inbound (Email/Slack/Discord/SMS/Telegram/WhatsApp/Google Docs/Sheets/Slides/iMessage)
     → Ingestion Gateway (dedupe + raw payload storage in Azure Blob)
     → Ingestion Queue (Service Bus for gateway; Postgres optional/legacy)
     → Worker Service (per-employee)
@@ -81,6 +81,8 @@ Inbound (Email/Slack/Discord/SMS/Telegram/WhatsApp/Google Docs/iMessage)
 | `scheduler_module/src/user_store/mod.rs` | Per-user data management |
 | `send_emails_module/src/lib.rs` | Postmark API wrapper |
 | `run_task_module/src/lib.rs` | Codex/Claude CLI invocation |
+| `scheduler_module/src/google_docs_poller.rs` | Google Docs comment poller |
+| `scheduler_module/src/google_workspace_poller.rs` | Google Sheets/Slides comment poller |
 | `scheduler_module/src/adapters/whatsapp.rs` | WhatsApp inbound/outbound adapter |
 | `DoWhiz_service/employee.toml` | Employee registry (addresses, runners, models) |
 
@@ -110,7 +112,7 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 ## Key Concepts
 
 ### Task Kinds
-- **SendEmail**: Send HTML email with attachments
+- **SendReply**: Send outbound replies across channels (serialized as `send_email` for backward compatibility)
 - **RunTask**: Invoke Codex/Claude CLI to generate reply
 - **Noop**: Testing placeholder
 
@@ -143,6 +145,11 @@ Optional:
 - `OPENAI_API_KEY` - Enable message router quick replies
 - `INGESTION_QUEUE_BACKEND=servicebus` + `SERVICE_BUS_CONNECTION_STRING` + `SERVICE_BUS_QUEUE_NAME` - Required when running the inbound gateway
 - `AZURE_STORAGE_ACCOUNT`/`AZURE_STORAGE_CONTAINER`/`AZURE_STORAGE_SAS_TOKEN` - Required for gateway raw payload storage (Azure Blob)
+- `GOOGLE_DOCS_ENABLED`, `GOOGLE_SHEETS_ENABLED`, `GOOGLE_SLIDES_ENABLED` - Enable Google Workspace pollers
+- `GOOGLE_DOCS_POLL_INTERVAL_SECS`, `GOOGLE_WORKSPACE_POLL_INTERVAL_SECS` - Polling intervals for Docs and Sheets/Slides
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN[_<EMPLOYEE>]`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_ACCESS_TOKEN` - Google Workspace OAuth credentials
+- `GOOGLE_EMPLOYEE_EMAILS` - Comma-separated employee emails to ignore during polling
+- `SLACK_AUTH_REDIRECT_URI`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`, `SUPABASE_ANON_KEY`, `SUPABASE_DB_URL`, `FRONTEND_URL` - Account linking OAuth (Slack/Discord)
 
 ## Testing Expectations
 
