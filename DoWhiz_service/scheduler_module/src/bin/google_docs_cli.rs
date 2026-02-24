@@ -20,6 +20,7 @@ Commands:
   read-document <doc_id>             Read document content as plain text
   list-comments <doc_id>             List comments on a document
   read-comment <doc_id> <comment_id> Read a specific comment
+  reply-comment <doc_id> <comment_id> <message>  Reply to a comment
 
 Direct Edit Operations:
   apply-edit <doc_id> --find="text" --replace="new text"
@@ -166,6 +167,14 @@ fn main() {
                 exit(1);
             }
             cmd_list_comments(&args[2])
+        }
+        "reply-comment" => {
+            if args.len() < 5 {
+                eprintln!("Error: document ID, comment ID, and message required");
+                print_usage();
+                exit(1);
+            }
+            cmd_reply_comment(&args[2], &args[3], &args[4])
         }
         "apply-edit" => {
             if args.len() < 3 {
@@ -393,6 +402,17 @@ fn cmd_list_comments(doc_id: &str) -> Result<String, String> {
         }
     }
     Ok(output)
+}
+
+fn cmd_reply_comment(doc_id: &str, comment_id: &str, message: &str) -> Result<String, String> {
+    let auth = get_auth()?;
+    let adapter = GoogleDocsOutboundAdapter::new(auth);
+
+    let reply = adapter
+        .reply_to_comment(doc_id, comment_id, message)
+        .map_err(|e| format!("Failed to reply: {}", e))?;
+
+    Ok(format!("Successfully posted reply (id={})", reply.id))
 }
 
 fn cmd_apply_edit(doc_id: &str, find: &str, replace: &str) -> Result<String, String> {
