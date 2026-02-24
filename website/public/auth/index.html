@@ -441,7 +441,9 @@
       // Configuration
       const SUPABASE_URL = 'https://resmseutzmwumflevfqw.supabase.co';
       const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlc21zZXV0em13dW1mbGV2ZnF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAxNTQ1MjIsImV4cCI6MjA4NTczMDUyMn0.-QMndwi4m8nBtjMeS5WbDmrHZSe2l1UFY-UQJCl0Frc';
-      const DOWHIZ_API_URL = 'http://localhost:9001'; // TODO: Update for production
+      const DOWHIZ_API_URL = window.location.hostname === 'localhost'
+        ? 'http://localhost:9001'
+        : 'https://api.production1.dowhiz.com/service';
 
       const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
