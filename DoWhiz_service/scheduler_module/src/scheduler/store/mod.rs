@@ -212,8 +212,8 @@ impl SqliteSchedulerStore {
             }
             TaskKind::RunTask(run) => {
                 tx.execute(
-                    "INSERT INTO run_task_tasks (task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, runner, codex_disabled, reply_to, reply_from, archive_root, thread_id, thread_epoch, thread_state_path)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                    "INSERT INTO run_task_tasks (task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, runner, codex_disabled, reply_to, reply_from, archive_root, thread_id, thread_epoch, thread_state_path, employee_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                     params![
                         task.id.to_string(),
                         run.workspace_dir.to_string_lossy().into_owned(),
@@ -234,6 +234,7 @@ impl SqliteSchedulerStore {
                         run.thread_state_path
                             .as_ref()
                             .map(|value| value.to_string_lossy().into_owned()),
+                        run.employee_id.as_deref(),
                     ],
                 )?;
             }

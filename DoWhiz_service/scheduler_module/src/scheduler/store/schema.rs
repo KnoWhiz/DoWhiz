@@ -84,7 +84,8 @@ CREATE TABLE IF NOT EXISTS run_task_tasks (
     archive_root TEXT,
     thread_id TEXT,
     thread_epoch INTEGER,
-    thread_state_path TEXT
+    thread_state_path TEXT,
+    employee_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS task_executions (
