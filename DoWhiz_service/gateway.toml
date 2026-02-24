@@ -2,17 +2,17 @@
 tenant_id = "default"
 employee_id = "little_bear"
 
-# Channel defaults (route all Slack/Discord to proto for now)
+# Route Slack and Discord to Oliver (little_bear)
 [[routes]]
 channel = "slack"
 key = "*"
-employee_id = "boiled_egg"
+employee_id = "little_bear"
 tenant_id = "default"
 
 [[routes]]
 channel = "discord"
 key = "*"
-employee_id = "boiled_egg"
+employee_id = "little_bear"
 tenant_id = "default"
 
 # Email routing by service address

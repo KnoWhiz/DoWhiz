@@ -15,7 +15,7 @@
 [[routes]]
 channel = "slack"
 key = "*"
-employee_id = "boiled_egg"
+employee_id = "little_bear"
 tenant_id = "default"
 
 # Email routing by service address
@@ -25,37 +25,79 @@ key = "oliver@dowhiz.com"
 employee_id = "little_bear"
 tenant_id = "default"
 
-# Slack routing by team_id
-[[routes]]
-channel = "slack"
-key = "T12345678"
-employee_id = "boiled_egg"
-tenant_id = "acme"
+# Slack routing by team_id (specific team example)
+# [[routes]]
+# channel = "slack"
+# key = "T12345678"
+# employee_id = "boiled_egg"
+# tenant_id = "acme"
 
 # Discord routing by guild_id (use "dm" for direct messages)
+# Specific guild example:
+# [[routes]]
+# channel = "discord"
+# key = "123456789012345678"
+# employee_id = "boiled_egg"
+# tenant_id = "acme"
+
+# Discord wildcard - routes all guilds/DMs to one employee
 [[routes]]
 channel = "discord"
-key = "123456789012345678"
-employee_id = "boiled_egg"
-tenant_id = "acme"
+key = "*"
+employee_id = "little_bear"
+tenant_id = "default"
 
 # SMS routing by inbound phone number (To)
 [[routes]]
 channel = "sms"
-key = "+15551234567"
+key = "*"
 employee_id = "little_bear"
 tenant_id = "default"
 
 # BlueBubbles routing by chat_guid
 [[routes]]
 channel = "bluebubbles"
-key = "iMessage;-;+15551234567"
-employee_id = "boiled_egg"
+key = "*"
+employee_id = "little_bear"
 tenant_id = "default"
 
-# Google Docs routing by document_id
+# Google Docs routing by document_id (specific document)
+# [[routes]]
+# channel = "google_docs"
+# key = "1AbCdEfGhIjKlMnOpQrStUvWxYz"
+# employee_id = "little_bear"
+# tenant_id = "default"
+
+# Telegram routing by chat_id
+[[routes]]
+channel = "telegram"
+key = "*"
+employee_id = "little_bear"
+tenant_id = "default"
+
+# WhatsApp routing by phone_number
+[[routes]]
+channel = "whatsapp"
+key = "*"
+employee_id = "little_bear"
+tenant_id = "default"
+
+# Google Workspace wildcard routes - routes ALL documents to employee
+# Use key = "*" for wildcard matching on any document/file ID
 [[routes]]
 channel = "google_docs"
-key = "1AbCdEfGhIjKlMnOpQrStUvWxYz"
+key = "*"
+employee_id = "little_bear"
+tenant_id = "default"
+
+[[routes]]
+channel = "google_sheets"
+key = "*"
+employee_id = "little_bear"
+tenant_id = "default"
+
+[[routes]]
+channel = "google_slides"
+key = "*"
 employee_id = "little_bear"
 tenant_id = "default"
