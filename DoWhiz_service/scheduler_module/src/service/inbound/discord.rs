@@ -79,7 +79,8 @@ pub(crate) fn process_discord_inbound_message(
         model_name,
         runner: config.employee_profile.runner.clone(),
         codex_disabled: config.codex_disabled,
-        reply_to: vec![channel_id.to_string()],
+        // reply_to[0] = user_id (for account lookup), reply_to[1] = channel_id
+        reply_to: vec![message.sender.clone(), channel_id.to_string()],
         reply_from: None,
         archive_root: None,
         thread_id: Some(thread_key.clone()),

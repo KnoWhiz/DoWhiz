@@ -75,8 +75,9 @@ impl SqliteSchedulerStore {
         task_id: &str,
         send: &SendReplyTask,
     ) -> Result<(), SchedulerError> {
-        // For Discord, we use to[0] as channel_id and html_path as text_path
-        let discord_channel_id = send.to.first().cloned().unwrap_or_default();
+        // For Discord, reply_to is [user_id, channel_id] - use to[1] for channel_id
+        // Fall back to to[0] for backwards compatibility with old tasks
+        let discord_channel_id = send.to.get(1).or(send.to.first()).cloned().unwrap_or_default();
         let thread_id = send.in_reply_to.clone();
         let workspace_dir = send
             .archive_root
