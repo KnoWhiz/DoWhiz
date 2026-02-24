@@ -1,0 +1,36 @@
+[defaults]
+tenant_id = "default"
+employee_id = "little_bear"
+
+# Channel defaults (route all Slack/Discord to proto for now)
+[[routes]]
+channel = "slack"
+key = "*"
+employee_id = "boiled_egg"
+tenant_id = "default"
+
+[[routes]]
+channel = "discord"
+key = "*"
+employee_id = "boiled_egg"
+tenant_id = "default"
+
+# Email routing by service address
+[[routes]]
+channel = "email"
+key = "oliver@dowhiz.com"
+employee_id = "little_bear"
+tenant_id = "default"
+
+[[routes]]
+channel = "email"
+key = "proto@dowhiz.com"
+employee_id = "boiled_egg"
+tenant_id = "default"
+
+# Google Docs routing - route all docs to Oliver (little_bear)
+[[routes]]
+channel = "google_docs"
+key = "*"
+employee_id = "little_bear"
+tenant_id = "default"
