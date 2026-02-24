@@ -495,18 +495,13 @@ fn run_task_real_codex_e2e_when_enabled() {
     }
 
     require_env("AZURE_OPENAI_API_KEY_BACKUP");
-    require_env("E2B_API_KEY");
-    require_env("E2B_TEMPLATE_ID");
 
     let temp = TempDir::new("codex_task_real_e2e").unwrap();
     let workspace = create_workspace(&temp.path).unwrap();
 
     let home_dir = temp.path.join("home");
     fs::create_dir_all(&home_dir).unwrap();
-    let _env = EnvGuard::set(&[
-        ("HOME", home_dir.to_str().unwrap()),
-        ("RUN_TASK_USE_E2B", "1"),
-    ]);
+    let _env = EnvGuard::set(&[("HOME", home_dir.to_str().unwrap())]);
 
     let params = build_params(&workspace);
 

@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use tracing::{info, warn};
 
-use crate::account_store::lookup_account_by_channel;
 use crate::adapters::slack::SlackEventWrapper;
 use crate::channel::{Channel, InboundAdapter};
 use crate::index_store::IndexStore;
@@ -16,7 +15,7 @@ use super::super::bump_thread_state;
 use super::super::config::ServiceConfig;
 use super::super::default_thread_state_path;
 use super::super::scheduler::cancel_pending_thread_tasks;
-use super::super::workspace::{ensure_thread_workspace, persist_inbound_payloads};
+use super::super::workspace::ensure_thread_workspace;
 use super::super::BoxError;
 
 pub(crate) fn process_slack_event(
@@ -96,16 +95,6 @@ pub(crate) fn process_slack_event(
         raw_payload,
         thread_state.last_email_seq,
     )?;
-    let account_id = lookup_account_by_channel(&Channel::Slack, &message.sender);
-    if let Err(err) = persist_inbound_payloads(
-        &workspace,
-        &Channel::Slack,
-        account_id,
-        &user.user_id,
-        Some(&thread_key),
-    ) {
-        warn!("failed to persist inbound payloads to blob: {}", err);
-    }
 
     // Determine model and runner
     let model_name = match config.employee_profile.model.clone() {

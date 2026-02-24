@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use tracing::{info, warn};
 
-use crate::account_store::lookup_account_by_channel;
 use crate::channel::Channel;
 use crate::discord_gateway::DiscordGuildPaths;
 use crate::index_store::IndexStore;
@@ -13,9 +12,7 @@ use super::super::bump_thread_state;
 use super::super::config::ServiceConfig;
 use super::super::default_thread_state_path;
 use super::super::scheduler::cancel_pending_thread_tasks;
-use super::super::workspace::{
-    copy_skills_directory, ensure_workspace_employee_files, persist_inbound_payloads,
-};
+use super::super::workspace::{copy_skills_directory, ensure_workspace_employee_files};
 use super::super::BoxError;
 
 pub(crate) fn process_discord_inbound_message(
@@ -57,17 +54,6 @@ pub(crate) fn process_discord_inbound_message(
         raw_payload,
         thread_state.last_email_seq,
     )?;
-    let account_id = lookup_account_by_channel(&Channel::Discord, &message.sender);
-    let synthetic_user_id = DiscordGuildPaths::user_id(&guild_id);
-    if let Err(err) = persist_inbound_payloads(
-        &workspace,
-        &Channel::Discord,
-        account_id,
-        &synthetic_user_id,
-        Some(&thread_key),
-    ) {
-        warn!("failed to persist inbound payloads to blob: {}", err);
-    }
 
     let model_name = match config.employee_profile.model.clone() {
         Some(model) => model,

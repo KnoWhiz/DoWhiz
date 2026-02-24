@@ -25,18 +25,10 @@ struct EnvGuard {
 
 impl EnvGuard {
     fn set(vars: &[(&str, &str)]) -> Self {
-        let mut saved = Vec::with_capacity(vars.len() + 1);
-        let mut has_e2b_override = false;
+        let mut saved = Vec::with_capacity(vars.len());
         for (key, value) in vars {
             saved.push((key.to_string(), env::var(key).ok()));
             env::set_var(key, value);
-            if *key == "RUN_TASK_USE_E2B" {
-                has_e2b_override = true;
-            }
-        }
-        if !has_e2b_override {
-            saved.push(("RUN_TASK_USE_E2B".to_string(), env::var("RUN_TASK_USE_E2B").ok()));
-            env::set_var("RUN_TASK_USE_E2B", "0");
         }
         Self { saved }
     }

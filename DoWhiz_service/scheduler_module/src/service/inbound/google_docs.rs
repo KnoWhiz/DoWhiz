@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use tracing::{info, warn};
 
-use crate::account_store::lookup_account_by_channel;
 use crate::adapters::google_docs::ActionableComment;
 use crate::channel::Channel;
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
@@ -15,7 +14,7 @@ use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
 use super::super::bump_thread_state;
 use super::super::config::ServiceConfig;
 use super::super::default_thread_state_path;
-use super::super::workspace::{ensure_thread_workspace, persist_inbound_payloads};
+use super::super::workspace::ensure_thread_workspace;
 use super::super::BoxError;
 
 pub(crate) fn process_google_docs_message(
@@ -64,17 +63,6 @@ pub(crate) fn process_google_docs_message(
         &actionable,
         thread_state.last_email_seq,
     )?;
-
-    let account_id = lookup_account_by_channel(&Channel::GoogleDocs, &user_email);
-    if let Err(err) = persist_inbound_payloads(
-        &workspace,
-        &Channel::GoogleDocs,
-        account_id,
-        &user.user_id,
-        Some(&thread_key),
-    ) {
-        warn!("failed to persist inbound payloads to blob: {}", err);
-    }
 
     // Use employee-specific OAuth credentials (same pattern as email processing)
     let auth_config = GoogleAuthConfig::from_env_for_employee(Some(&config.employee_profile.id));

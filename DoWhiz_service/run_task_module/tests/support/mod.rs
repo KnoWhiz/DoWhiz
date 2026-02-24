@@ -43,7 +43,6 @@ impl EnvGuard {
         let mut has_docker_override = false;
         let mut has_docker_use_override = false;
         let mut has_codex_e2e_override = false;
-        let mut has_e2b_override = false;
         for (key, value) in vars {
             saved.push((key.to_string(), env::var_os(key)));
             env::set_var(key, value);
@@ -55,9 +54,6 @@ impl EnvGuard {
             }
             if *key == "RUN_CODEX_E2E" {
                 has_codex_e2e_override = true;
-            }
-            if *key == "RUN_TASK_USE_E2B" {
-                has_e2b_override = true;
             }
         }
         if !has_docker_override {
@@ -77,10 +73,6 @@ impl EnvGuard {
         if !has_codex_e2e_override {
             saved.push(("RUN_CODEX_E2E".to_string(), env::var_os("RUN_CODEX_E2E")));
             env::set_var("RUN_CODEX_E2E", "0");
-        }
-        if !has_e2b_override {
-            saved.push(("RUN_TASK_USE_E2B".to_string(), env::var_os("RUN_TASK_USE_E2B")));
-            env::set_var("RUN_TASK_USE_E2B", "0");
         }
         Self { saved }
     }

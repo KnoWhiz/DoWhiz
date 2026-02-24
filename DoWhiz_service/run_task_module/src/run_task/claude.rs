@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io;
@@ -7,7 +6,6 @@ use std::process::Command;
 
 use super::constants::{CLAUDE_FOUNDRY_RESOURCE_DEFAULT, DEFAULT_CLAUDE_MODEL};
 use super::env::load_env_sources;
-use super::e2b::{default_bootstrap_commands, prepare_runner_files, run_e2b_task, E2bTaskConfig};
 use super::errors::RunTaskError;
 use super::github_auth::{ensure_github_cli_auth, resolve_github_auth};
 use super::prompt::{build_prompt, load_memory_context};
@@ -16,19 +14,6 @@ use super::types::{RunTaskOutput, RunTaskRequest};
 use super::utils::{run_command_with_timeout, run_task_timeout, tail_string};
 
 pub(super) fn run_claude_task(
-    request: RunTaskRequest<'_>,
-    runner: &str,
-    reply_html_path: std::path::PathBuf,
-    reply_attachments_dir: std::path::PathBuf,
-) -> Result<RunTaskOutput, RunTaskError> {
-    if super::e2b::use_e2b() {
-        run_claude_task_e2b(request, runner, reply_html_path, reply_attachments_dir)
-    } else {
-        run_claude_task_local(request, runner, reply_html_path, reply_attachments_dir)
-    }
-}
-
-fn run_claude_task_local(
     request: RunTaskRequest<'_>,
     runner: &str,
     reply_html_path: std::path::PathBuf,
@@ -123,157 +108,7 @@ fn run_claude_task_local(
     })
 }
 
-fn run_claude_task_e2b(
-    request: RunTaskRequest<'_>,
-    runner: &str,
-    reply_html_path: std::path::PathBuf,
-    reply_attachments_dir: std::path::PathBuf,
-) -> Result<RunTaskOutput, RunTaskError> {
-    load_env_sources(request.workspace_dir)?;
-    let github_auth = resolve_github_auth(None)?;
-
-    let api_key =
-        env::var("AZURE_OPENAI_API_KEY_BACKUP").map_err(|_| RunTaskError::MissingEnv {
-            key: "AZURE_OPENAI_API_KEY_BACKUP",
-        })?;
-    if api_key.trim().is_empty() {
-        return Err(RunTaskError::MissingEnv {
-            key: "AZURE_OPENAI_API_KEY_BACKUP",
-        });
-    }
-
-    let model_name = if request.model_name.trim().is_empty() {
-        env::var("CLAUDE_MODEL").unwrap_or_else(|_| DEFAULT_CLAUDE_MODEL.to_string())
-    } else {
-        request.model_name.to_string()
-    };
-
-    let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
-    let prompt = build_prompt(
-        request.input_email_dir,
-        request.input_attachments_dir,
-        request.memory_dir,
-        request.reference_dir,
-        request.workspace_dir,
-        runner,
-        &memory_context,
-        !request.reply_to.is_empty(),
-        request.channel,
-        request.has_unified_account,
-    );
-
-    let claude_home = request.workspace_dir.join(".dowhiz").join("claude");
-    let mut env_overrides = prepare_claude_env_in(&claude_home, &api_key, &model_name)?;
-    env_overrides.extend(github_auth.env_overrides.clone());
-
-    let _runner_files = prepare_runner_files(request.workspace_dir, &prompt)?;
-
-    let args = build_claude_args(&model_name);
-
-    let mut env_map: HashMap<String, String> = HashMap::new();
-    env_map.insert("HOME".to_string(), "/workspace".to_string());
-    env_map.insert(
-        "DOWHIZ_PROMPT_PATH".to_string(),
-        "/workspace/.dowhiz/prompt.txt".to_string(),
-    );
-    env_map.insert("DOWHIZ_RUN_CMD".to_string(), "claude".to_string());
-    env_map.insert(
-        "DOWHIZ_RUN_ARGS".to_string(),
-        serde_json::to_string(&args)
-            .map_err(|err| RunTaskError::Io(io::Error::new(io::ErrorKind::Other, err)))?,
-    );
-    env_map.insert(
-        "DOWHIZ_WORKDIR".to_string(),
-        "/workspace".to_string(),
-    );
-    env_map.insert(
-        "GIT_ASKPASS".to_string(),
-        "/workspace/.dowhiz/git-askpass.sh".to_string(),
-    );
-    env_map.insert("GIT_TERMINAL_PROMPT".to_string(), "0".to_string());
-
-    for (key, value) in env_overrides {
-        env_map.insert(key, value);
-    }
-    env_map.insert(
-        "CLAUDE_HOME".to_string(),
-        "/workspace/.dowhiz/claude".to_string(),
-    );
-
-    let mut metadata = HashMap::new();
-    metadata.insert("runner".to_string(), "claude".to_string());
-    metadata.insert("channel".to_string(), request.channel.to_string());
-
-    let timeout = run_task_timeout();
-    let output = run_e2b_task(E2bTaskConfig {
-        workspace_dir: request.workspace_dir.to_path_buf(),
-        command: "node /workspace/.dowhiz/e2b_runner.mjs".to_string(),
-        env: env_map.clone(),
-        sandbox_env: env_map,
-        bootstrap: default_bootstrap_commands(),
-        metadata,
-        timeout,
-        bootstrap_user: None,
-        command_user: Some("nobody".to_string()),
-    })?;
-
-    let mut combined_output = String::new();
-    combined_output.push_str(&output.stdout);
-    combined_output.push_str(&output.stderr);
-    let mut output_tail = tail_string(&combined_output, 2000);
-    if let Some(err) = output.error {
-        if !output_tail.is_empty() {
-            output_tail.push('\n');
-        }
-        output_tail.push_str(&format!("E2B error: {err}"));
-    }
-
-    if !output.ok {
-        return Err(RunTaskError::ClaudeFailed {
-            status: Some(output.exit_code),
-            output: output_tail,
-        });
-    }
-
-    let (assistant_text, _logs) = extract_claude_text(&output.stdout);
-    if assistant_text.trim().is_empty() {
-        return Err(RunTaskError::ClaudeFailed {
-            status: Some(output.exit_code),
-            output: output_tail,
-        });
-    }
-    let (scheduled_tasks, scheduled_tasks_error) = extract_scheduled_tasks(&assistant_text);
-    let (scheduler_actions, scheduler_actions_error) = extract_scheduler_actions(&assistant_text);
-    let assistant_tail = tail_string(&assistant_text, 2000);
-
-    if !request.reply_to.is_empty() && !reply_html_path.exists() {
-        return Err(RunTaskError::OutputMissing {
-            path: reply_html_path,
-            output: assistant_tail,
-        });
-    }
-
-    Ok(RunTaskOutput {
-        reply_html_path,
-        reply_attachments_dir,
-        codex_output: assistant_tail,
-        scheduled_tasks,
-        scheduled_tasks_error,
-        scheduler_actions,
-        scheduler_actions_error,
-    })
-}
-
 fn prepare_claude_env(
-    api_key: &str,
-    model_name: &str,
-) -> Result<Vec<(String, String)>, RunTaskError> {
-    let claude_home = dowhiz_claude_home()?;
-    prepare_claude_env_in(&claude_home, api_key, model_name)
-}
-
-fn prepare_claude_env_in(
-    claude_home: &Path,
     api_key: &str,
     model_name: &str,
 ) -> Result<Vec<(String, String)>, RunTaskError> {
@@ -301,7 +136,6 @@ fn prepare_claude_env_in(
         &default_opus,
         &default_sonnet,
         &default_haiku,
-        claude_home,
     )?;
 
     // Get current PATH and prepend our custom bin directory for tools like google-docs
@@ -318,16 +152,16 @@ fn prepare_claude_env_in(
         });
     let extended_path = format!("{}:{}", dowhiz_bin_dir, current_path);
 
+    // Set CLAUDE_HOME to use DoWhiz-specific config directory
+    let claude_home = dowhiz_claude_home()?;
+
     Ok(vec![
         (
             "AZURE_OPENAI_API_KEY_BACKUP".to_string(),
             api_key.to_string(),
         ),
         // Use DoWhiz-specific Claude home to avoid affecting user's ~/.claude config
-        (
-            "CLAUDE_HOME".to_string(),
-            claude_home.to_string_lossy().into_owned(),
-        ),
+        ("CLAUDE_HOME".to_string(), claude_home.to_string_lossy().into_owned()),
         ("CLAUDE_CODE_USE_FOUNDRY".to_string(), "1".to_string()),
         ("ANTHROPIC_FOUNDRY_RESOURCE".to_string(), foundry_resource),
         ("ANTHROPIC_FOUNDRY_API_KEY".to_string(), api_key.to_string()),
@@ -354,11 +188,11 @@ fn ensure_claude_settings(
     default_opus: &str,
     default_sonnet: &str,
     default_haiku: &str,
-    claude_home: &Path,
 ) -> Result<(), RunTaskError> {
     // Use DoWhiz-specific Claude home to avoid overwriting user's ~/.claude/settings.json
-    fs::create_dir_all(claude_home)?;
-    let settings_path = claude_home.join("settings.json");
+    let settings_dir = dowhiz_claude_home()?;
+    fs::create_dir_all(&settings_dir)?;
+    let settings_path = settings_dir.join("settings.json");
     let payload = serde_json::json!({
         "env": {
             "CLAUDE_CODE_USE_FOUNDRY": "1",
@@ -405,23 +239,6 @@ fn run_claude_command(
         }
         Err(err) => Err(err),
     }
-}
-
-fn build_claude_args(model_name: &str) -> Vec<String> {
-    let max_turns = claude_max_turns();
-    vec![
-        "-p".to_string(),
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-        "--model".to_string(),
-        model_name.to_string(),
-        "--allowedTools".to_string(),
-        "Read,Glob,Grep,Bash,Write,Edit".to_string(),
-        "--max-turns".to_string(),
-        max_turns.to_string(),
-        "--dangerously-skip-permissions".to_string(),
-    ]
 }
 
 fn build_claude_command(
