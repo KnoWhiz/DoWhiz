@@ -385,6 +385,72 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const contentLayer = document.querySelector('.content-layer');
+    const sections = Array.from(
+      document.querySelectorAll('.content-layer > .hero-section, .content-layer > .section')
+    );
+
+    if (!contentLayer || !sections.length) {
+      return undefined;
+    }
+
+    const getActiveSection = () => {
+      const layerRect = contentLayer.getBoundingClientRect();
+      const probeY = layerRect.top + contentLayer.clientHeight * 0.35;
+
+      return (
+        sections.find((section) => {
+          const rect = section.getBoundingClientRect();
+          return rect.top <= probeY && rect.bottom >= probeY;
+        }) || sections[0]
+      );
+    };
+
+    const updateSnapMode = () => {
+      const activeSection = getActiveSection();
+      const shouldRelaxSnap = activeSection?.classList.contains('snap-free');
+      contentLayer.classList.toggle('snap-relaxed', Boolean(shouldRelaxSnap));
+    };
+
+    const updateSnapTargets = () => {
+      const viewportHeight = window.innerHeight;
+
+      sections.forEach((section) => {
+        if (section.classList.contains('hero-section')) {
+          section.classList.remove('snap-free');
+          return;
+        }
+
+        const requiresFreeScroll = section.scrollHeight > viewportHeight * 1.02;
+        section.classList.toggle('snap-free', requiresFreeScroll);
+      });
+
+      updateSnapMode();
+    };
+
+    updateSnapTargets();
+    const timeoutId = window.setTimeout(updateSnapTargets, 250);
+    window.addEventListener('resize', updateSnapTargets);
+    window.addEventListener('load', updateSnapTargets);
+    contentLayer.addEventListener('scroll', updateSnapMode, { passive: true });
+
+    const observer = new ResizeObserver(() => {
+      updateSnapTargets();
+    });
+
+    sections.forEach((section) => observer.observe(section));
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener('resize', updateSnapTargets);
+      window.removeEventListener('load', updateSnapTargets);
+      contentLayer.removeEventListener('scroll', updateSnapMode);
+      contentLayer.classList.remove('snap-relaxed');
+      observer.disconnect();
+    };
+  }, []);
+
   const buildMailtoLink = (email, subject, body) => {
     const encodedSubject = encodeURIComponent(subject);
     const encodedBody = encodeURIComponent(body);
@@ -394,33 +460,157 @@ function App() {
   const features = [
     {
       tag: '01',
-      title: 'Multi-channel requests',
-      desc: 'Email-first today, with Slack, phone, Discord, WhatsApp, and more coming soon, all routed to the right employee.'
+      title: 'Trigger from every surface',
+      desc: 'Start work from email, Slack/Discord messages, GitHub issues, or @mentions in shared Google Docs and Notion comments.'
     },
     {
       tag: '02',
-      title: 'Tool-native delivery',
-      desc: 'Employees work directly in Google Docs, Sheets, Slides, Notion, and other tools so outputs are ready to use.'
+      title: 'Tool-native execution',
+      desc: 'Agents work directly in your docs, project boards, repos, and chat spaces so outputs land where your team already works.'
     },
     {
       tag: '03',
-      title: 'Shared memory',
-      desc: 'Key context carries across tasks so follow-ups are faster and consistent, with control to update or reset.'
+      title: 'Shared memory across channels',
+      desc: 'Per-user context carries over across email, chat, issues, and comments so follow-ups do not restart from zero.'
     },
     {
       tag: '04',
-      title: 'Specialized employee playbooks',
-      desc: 'Each employee is trained for a role (Generalist, TPM, Coder, CEO, and more) so outputs are tailored, not generic.'
+      title: 'Agent-owned identities',
+      desc: 'Each digital employee has their own account identity. You do not hand over personal credentials to get work done.'
     },
     {
       tag: '05',
-      title: 'Visible delivery loop',
-      desc: 'Expect a clear flow: brief intake, execution, and a tidy handoff with next steps for your team.'
+      title: 'Permissioned workspace access',
+      desc: 'Agents only access workspaces and integrations when you explicitly grant access and can be revoked at any time.'
     },
     {
       tag: '06',
-      title: 'Privacy-first foundation',
-      desc: 'Clear data boundaries with a focus on practical, secure workflows for real business tasks.'
+      title: 'Cross-agent collaboration',
+      desc: 'Agents can hand off tasks to each other while keeping a shared context trail so delivery stays coherent end to end.'
+    }
+  ];
+
+  const howItWorksSteps = [
+    {
+      tag: '01',
+      title: 'Trigger from anywhere',
+      desc: 'Start from the channel your team already uses. DoWhiz normalizes the request into one clear execution brief.',
+      points: [
+        'Email with attachments, links, and constraints',
+        'Slack/Discord message or @mention in a thread',
+        'GitHub issue assignment or shared doc comment mention'
+      ],
+      outcome: 'A structured brief with requester context, expected output, and delivery target.'
+    },
+    {
+      tag: '02',
+      title: 'Execute in the right tools',
+      desc: 'The assigned agent works directly in approved tools with scoped permissions and agent-owned identities.',
+      points: [
+        'No personal credential handoff required',
+        'Workspace permissions are explicit and revocable',
+        'Cross-agent coordination for multi-step tasks'
+      ],
+      outcome: 'Work artifacts are created where your team already collaborates.'
+    },
+    {
+      tag: '03',
+      title: 'Deliver where you work',
+      desc: 'Results return to the originating channel, and shared memory keeps continuity across future requests.',
+      points: [
+        'PRs, docs, action items, and updates delivered in-thread',
+        'Per-user context persists across channels',
+        'Follow-ups start with history, not from scratch'
+      ],
+      outcome: 'Faster iteration with consistent quality across every surface.'
+    }
+  ];
+
+  const safetyItems = [
+    {
+      tag: 'A1',
+      title: 'Isolated execution environment',
+      desc: 'Every request runs in an isolated runtime boundary so tasks stay contained, reviewable, and predictable.',
+      points: [
+        'Separate sandbox/VM boundaries per task',
+        'Scoped network and file access controls',
+        'Execution logs available for auditing'
+      ]
+    },
+    {
+      tag: 'A2',
+      title: 'No user credential handoff',
+      desc: 'You do not share personal passwords or account credentials with DoWhiz agents to get work done.',
+      points: [
+        'Agents operate with agent-owned identities',
+        'No direct login into your personal accounts',
+        'Credential exposure risk is minimized by design'
+      ]
+    },
+    {
+      tag: 'A3',
+      title: 'Explicit access grants',
+      desc: 'Agents can only work in workspaces and integrations that you explicitly authorize and can revoke.',
+      points: [
+        'Granular workspace-level permission model',
+        'Access can be revoked at any time',
+        'Only authorized resources are in scope'
+      ]
+    }
+  ];
+
+  const accessFlowSteps = [
+    {
+      title: 'Grant',
+      desc: 'Invite or authorize the agent account in the tool you want to use.'
+    },
+    {
+      title: 'Scope',
+      desc: 'Define what project, doc, repo, or channel the agent can access.'
+    },
+    {
+      title: 'Operate',
+      desc: 'The agent executes work only inside that approved scope and reports results.'
+    },
+    {
+      title: 'Revoke',
+      desc: 'Remove workspace permissions at any time when the task is complete.'
+    }
+  ];
+
+  const workflowExamples = [
+    {
+      tag: 'Workflow 1',
+      title: 'Engineering delivery from GitHub',
+      trigger: 'Create a GitHub issue, assign Devin, and include acceptance criteria.',
+      execution: [
+        'Devin breaks work into implementation checkpoints.',
+        'Implements the change and opens a pull request.',
+        'Runs tests and posts pass/fail notes with review context.'
+      ],
+      result: 'You get a PR, test status, and a concise summary in the same issue thread.'
+    },
+    {
+      tag: 'Workflow 2',
+      title: 'Meeting follow-through from shared docs',
+      trigger: '@mention Maggie in a Google Doc or Notion comment after a planning discussion.',
+      execution: [
+        'Maggie extracts decisions, actions, dependencies, and owners.',
+        'Builds due-date follow-ups and milestone checkpoints.',
+        'Prepares a status-ready update for your team channel.'
+      ],
+      result: 'You get an owner-tracked execution plan with clear follow-up cadence.'
+    },
+    {
+      tag: 'Workflow 3',
+      title: 'Launch coordination from chat',
+      trigger: 'Message Rachel in Slack or Discord with launch assets and target date.',
+      execution: [
+        'Rachel creates a channel-by-channel launch timeline.',
+        'Drafts per-channel copy and handoff tasks.',
+        'Coordinates supporting agents for docs, tracking, and updates.'
+      ],
+      result: 'You get a complete launch plan with timeline, copy, and ownership.'
     }
   ];
 
@@ -435,10 +625,10 @@ function App() {
     },
     {
       tag: 'Launch Notes',
-      title: 'Inbox-native delegation',
+      title: 'Multi-channel delegation',
       date: 'February 2026',
-      excerpt: 'Why we started with email-first workflows and how that choice keeps every request simple, trackable, and fast.',
-      link: '/blog/#inbox-native'
+      excerpt: 'How DoWhiz handles the same task across email, chat, issues, and comments while keeping one shared context.',
+      link: '/blog/#multi-channel-delegation'
     },
     {
       tag: 'Workflow',
@@ -463,11 +653,15 @@ function App() {
     },
     {
       question: 'How do I get started?',
-      answer: 'Join the waitlist, then email a DoWhiz employee with your request. We will follow up with clarifying questions and deliver completed work.'
+      answer: 'Choose an agent and trigger work from your preferred surface: email, Slack/Discord, GitHub issue assignment, or shared doc comments.'
     },
     {
       question: 'Do the employees remember context?',
       answer: 'Yes. Shared memory keeps key preferences and project context so follow-ups are faster and more consistent. You can always update or reset it.'
+    },
+    {
+      question: 'Do I need to share my credentials?',
+      answer: 'No. DoWhiz agents use agent-owned identities. They only access workspaces and integrations you explicitly authorize.'
     },
     {
       question: 'What kinds of tasks can the employees handle?',
@@ -475,7 +669,7 @@ function App() {
     },
     {
       question: 'Where can I reach the team?',
-      answer: 'Email works today. Slack, phone, Discord, WhatsApp, and more are coming as multi-channel access expands.'
+      answer: 'Across email, Slack, Discord, GitHub issues, and shared workspace comments. See the Integrations page for the latest trigger surfaces.'
     }
   ];
 
@@ -538,7 +732,7 @@ function App() {
       title: 'TPM',
       desc: 'TPM who turns meeting notes into action items, follows up with people and agents at milestones, updates the board, and sends daily reports.',
       example: "Summarize today's meeting, update action items, and send a daily report.",
-      status: 'Coming',
+      status: 'Coming Soon',
       img: miniMouseImg,
       imgAlt: 'Illustration of Maggie the Mini-Mouse, DoWhiz TPM digital employee.',
       subject: 'TPM Request',
@@ -553,7 +747,7 @@ function App() {
       title: 'Coder',
       desc: 'Coder handling daily development tasks and feature delivery.',
       example: 'Implement the requested feature and open a PR.',
-      status: 'Coming',
+      status: 'Coming Soon',
       img: stickyOctopusImg,
       imgAlt: 'Illustration of Devin the Sticky-Octopus, DoWhiz coder digital employee.',
       subject: 'Coding Task',
@@ -568,7 +762,7 @@ function App() {
       title: 'CEO',
       desc: 'CEO focused on strategy, leadership, and decision-making.',
       example: 'Draft a one-page strategy for Q2 goals.',
-      status: 'Coming',
+      status: 'Coming Soon',
       img: skyDragonImg,
       imgAlt: 'Illustration of Lumio the Sky-Dragon, DoWhiz CEO digital employee.',
       subject: 'Strategy Request',
@@ -580,14 +774,14 @@ function App() {
       email: 'claw@dowhiz.com',
       pronoun: 'She/Her',
       nickname: 'Cozy-Lobster',
-      title: 'OpenClaw',
-      desc: 'OpenClaw: your personal AI assistant on any OS or platform. The lobster way.',
-      example: 'Set up a cross-platform workflow for these tasks.',
-      status: 'Coming',
+      title: 'Workflow Specialist',
+      desc: 'Workflow specialist focused on safe and accessible orchestration across chat, docs, and engineering tools.',
+      example: 'Route Slack triage into GitHub tasks and send weekly execution digests.',
+      status: 'Coming Soon',
       img: cozyLobsterImg,
-      imgAlt: 'Illustration of Claw the Cozy-Lobster, DoWhiz OpenClaw assistant.',
+      imgAlt: 'Illustration of Claw the Cozy-Lobster, DoWhiz workflow specialist.',
       subject: 'Assistant Request',
-      body: 'Set up a cross-platform workflow for these tasks.',
+      body: 'Design a safe, tool-native workflow for this cross-channel request.',
       profilePath: '/agents/claw/'
     },
     {
@@ -598,7 +792,7 @@ function App() {
       title: 'DeepTutor',
       desc: 'DeepTutor helps you understand and manage documents and papers.',
       example: 'Summarize this paper and extract key takeaways.',
-      status: 'Coming',
+      status: 'Coming Soon',
       img: struttonPigeonImg,
       imgAlt: 'Illustration of Jeffery the Strutton-Pigeon, DoWhiz DeepTutor document helper.',
       subject: 'Document Help',
@@ -613,7 +807,7 @@ function App() {
       title: 'TBD',
       desc: 'Role definition in progress.',
       example: 'TBD.',
-      status: 'Coming',
+      status: 'Coming Soon',
       img: fluffyElephantImg,
       imgAlt: 'Illustration of Anna the Fluffy-Elephant, DoWhiz role in progress.',
       subject: 'Role Request',
@@ -628,7 +822,7 @@ function App() {
       title: 'GTM Specialist',
       desc: 'GTM specialist tracking team status and product progress, publishing posts to LinkedIn, Xiaohongshu, Reddit, YouTube, X, Medium, Product Hunt, Hacker News, and WeChat groups.',
       example: "Prepare and schedule this week's multi-platform launch posts.",
-      status: 'Coming',
+      status: 'Coming Soon',
       img: plushAxolotlImg,
       imgAlt: 'Illustration of Rachel the Plush-Axolotl, DoWhiz GTM specialist.',
       subject: 'GTM Request',
@@ -651,10 +845,12 @@ function App() {
             <a href="#" className="logo">Do<span className="text-gradient">Whiz</span></a>
             <div className="nav-links">
               <a href="#roles" className="nav-btn">Team</a>
+              <a href="#how-it-works" className="nav-btn">How it works</a>
+              <a href="#workflows" className="nav-btn">Workflows</a>
+              <a href="#safety" className="nav-btn">Safety</a>
               <a href="#features" className="nav-btn">Features</a>
               <a href="#faq" className="nav-btn">FAQ</a>
-              <a href="/blog/" className="nav-btn">Blog</a>
-              <a href="/user-guide/" className="nav-btn">User Guide</a>
+              <a href="#blog" className="nav-btn">Blog</a>
             </div>
             <div className="nav-actions">
               <div className="social-links">
@@ -737,11 +933,11 @@ function App() {
           <div className="halo-effect"></div>
           <div className="container hero-content">
             <h1 className="hero-title">
-              Empower Everyone<br />
+              Run Work Across Your Tools<br />
               <span className="text-gradient">with Multi-Channel Digital Employees</span>
             </h1>
             <p className="hero-subtitle">
-              Start with <a href="#roles" className="role-link">Oliver 🧸</a> (Generalist) today. <a href="#roles" className="role-link">Maggie 🐭</a>, <a href="#roles" className="role-link">Devin 🐙</a>, <a href="#roles" className="role-link">Lumio 🐉</a>, <a href="#roles" className="role-link">Claw 🦞</a>, <a href="#roles" className="role-link">Jeffery 🐦</a>, <a href="#roles" className="role-link">Anna 🐘</a>, and <a href="#roles" className="role-link">Rachel 👾</a> are coming soon. Slack, phone, Discord, WhatsApp, and more are on the way.
+              Collaborate with <a href="#roles" className="role-link">Oliver 🧸</a> (Generalist), <a href="#roles" className="role-link">Maggie 🐭</a> (TPM), <a href="#roles" className="role-link">Devin 🐙</a> (Coder), <a href="#roles" className="role-link">Lumio 🐉</a> (CEO), <a href="#roles" className="role-link">Claw 🦞</a> (Workflow Specialist), <a href="#roles" className="role-link">Jeffery 🐦</a> (DeepTutor), <a href="#roles" className="role-link">Anna 🐘</a> (Role Design), and <a href="#roles" className="role-link">Rachel 👾</a> (GTM Specialist), each focused on different functions and connected by shared memory.
             </p>
             <div className="hero-cta">
               <a className="btn btn-primary" href={WAITLIST_FORM_URL} target="_blank" rel="noopener noreferrer">
@@ -764,7 +960,7 @@ function App() {
                   <div
                     key={member.name}
                     className={cardClasses}
-                    title={isActive ? `Email ${member.name} at ${member.email}` : `${member.name} is coming soon`}
+                    title={`${member.name}: view channels and trigger examples`}
                   >
                     <div className="role-header">
                       <div className="role-profile">
@@ -817,12 +1013,120 @@ function App() {
                         View profile
                       </a>
                       <span className="email-hint">
-                        {isActive ? 'Click email to send' : 'Coming soon'}
+                        {isActive ? 'Channels + triggers' : 'Coming soon'}
                       </span>
                     </div>
                   </div>
                 );
               })}
+            </div>
+          </div>
+        </section>
+
+        <section id="how-it-works" className="section workflow-section">
+          <div className="container">
+            <h2 className="section-title">How it works</h2>
+            <p className="section-intro">
+              One operating model across channels: trigger, execute, and return with persistent shared memory.
+            </p>
+            <div className="how-flow-grid">
+              {howItWorksSteps.map((step) => (
+                <article key={step.tag} className="how-step-card">
+                  <div className="how-step-header">
+                    <span className="how-step-tag">{step.tag}</span>
+                    <h3>{step.title}</h3>
+                  </div>
+                  <p className="how-step-desc">{step.desc}</p>
+                  <ul className="how-step-points">
+                    {step.points.map((point) => (
+                      <li key={point}>{point}</li>
+                    ))}
+                  </ul>
+                  <div className="how-step-outcome">
+                    <span>Outcome</span>
+                    <p>{step.outcome}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="workflows" className="section">
+          <div className="container">
+            <h2 className="section-title">Example workflows</h2>
+            <p className="section-intro">
+              Concrete, trigger-to-outcome examples across engineering, planning, and GTM.
+            </p>
+            <div className="workflow-showcase-grid">
+              {workflowExamples.map((workflow) => (
+                <article key={workflow.tag} className="workflow-showcase-card">
+                  <span className="workflow-badge">{workflow.tag}</span>
+                  <h3>{workflow.title}</h3>
+                  <div className="workflow-showcase-row">
+                    <span>Trigger</span>
+                    <p>{workflow.trigger}</p>
+                  </div>
+                  <div className="workflow-showcase-row">
+                    <span>Execution</span>
+                    <ul className="workflow-execution-list">
+                      {workflow.execution.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="workflow-showcase-row">
+                    <span>Result</span>
+                    <p>{workflow.result}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="safety" className="section">
+          <div className="container">
+            <h2 className="section-title">Safety &amp; Access</h2>
+            <p className="section-intro">
+              Built for practical operations with explicit permissions and controlled execution.
+            </p>
+            <div className="safety-access-layout">
+              <div className="safety-card-grid">
+                {safetyItems.map((item) => (
+                  <article key={item.tag} className="safety-card">
+                    <span className="safety-tag">{item.tag}</span>
+                    <h3>{item.title}</h3>
+                    <p>{item.desc}</p>
+                    <ul className="safety-point-list">
+                      {item.points.map((point) => (
+                        <li key={point}>{point}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ))}
+              </div>
+
+              <aside className="access-playbook">
+                <h3>How access works</h3>
+                <p>
+                  You stay in control of where each agent can operate. Access is granted, scoped, and revocable per workspace.
+                </p>
+                <div className="access-playbook-steps">
+                  {accessFlowSteps.map((step, index) => (
+                    <div key={step.title} className="access-step-item">
+                      <span className="access-step-index">{index + 1}</span>
+                      <div>
+                        <h4>{step.title}</h4>
+                        <p>{step.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <a href="/trust-safety/" className="access-playbook-link">
+                  Explore Trust &amp; Safety
+                </a>
+              </aside>
             </div>
           </div>
         </section>
@@ -870,9 +1174,9 @@ function App() {
             <div className="blog-header">
               <div>
                 <span className="blog-eyebrow">From the blog</span>
-                <h2 className="blog-title">Stories from the inbox</h2>
+                <h2 className="blog-title">Stories from the workflow graph</h2>
                 <p className="blog-intro">
-                  Notes on building digital employees, shipping new workflows, and making inbox work feel effortless.
+                  Notes on building multi-channel digital employees, shipping integrations, and improving handoffs.
                 </p>
               </div>
               <a className="btn btn-primary blog-header-btn" href="/blog/">View all posts</a>
@@ -903,13 +1207,15 @@ function App() {
               <p className="footer-tagline">
                 Tool-native digital employees that turn messages into finished work with shared memory.
               </p>
-              <div className="footer-pill">Email-first today. Shared memory built-in. Multi-channel soon.</div>
+              <div className="footer-pill">Multi-channel triggers. Agent-owned identities. Shared memory built-in.</div>
             </div>
             <div className="footer-links">
               <span className="footer-title">Essentials</span>
               <div className="footer-link-grid">
                 <a href="/privacy/" className="footer-link">Privacy</a>
                 <a href="/terms/" className="footer-link">Terms of Service</a>
+                <a href="/trust-safety/" className="footer-link">Trust &amp; Safety</a>
+                <a href="/integrations/" className="footer-link">Integrations</a>
                 <a href="/user-guide/" className="footer-link">User Guide</a>
                 <a href="mailto:admin@dowhiz.com" className="footer-link">Contact</a>
               </div>

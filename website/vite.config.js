@@ -1,7 +1,10 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { resolve } from 'path'
+import { resolve, dirname } from 'path'
+import { fileURLToPath } from 'url'
 import fs from 'fs'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 // Middleware to serve static HTML pages from public folder
 function servePublicHtml() {
@@ -13,7 +16,7 @@ function servePublicHtml() {
 
         // Check if this is a path that should serve a static HTML file
         const staticPaths = [
-          '/agents/', '/blog/', '/privacy/', '/terms/', '/user-guide/', '/auth/'
+          '/agents/', '/blog/', '/privacy/', '/terms/', '/user-guide/', '/auth/', '/integrations/', '/trust-safety/'
         ]
 
         const isStaticPath = staticPaths.some(p => url.startsWith(p))
