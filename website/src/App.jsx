@@ -538,7 +538,7 @@ function App() {
       title: 'TPM',
       desc: 'TPM who turns meeting notes into action items, follows up with people and agents at milestones, updates the board, and sends daily reports.',
       example: "Summarize today's meeting, update action items, and send a daily report.",
-      status: 'Active',
+      status: 'Coming',
       img: miniMouseImg,
       imgAlt: 'Illustration of Maggie the Mini-Mouse, DoWhiz TPM digital employee.',
       subject: 'TPM Request',
@@ -741,7 +741,7 @@ function App() {
               <span className="text-gradient">with Multi-Channel Digital Employees</span>
             </h1>
             <p className="hero-subtitle">
-              Seamlessly collaborate with <a href="#roles" className="role-link">Oliver 🧸</a> (Generalist), <a href="#roles" className="role-link">Maggie 🐭</a> (TPM), <a href="#roles" className="role-link">Devin 🐙</a> (Coder), <a href="#roles" className="role-link">Lumio 🐉</a> (CEO), <a href="#roles" className="role-link">Claw 🦞</a> (OpenClaw assistant), <a href="#roles" className="role-link">Jeffery 🐦</a> (DeepTutor), <a href="#roles" className="role-link">Anna 🐘</a> (role in progress), and <a href="#roles" className="role-link">Rachel 👾</a> (GTM Specialist), a shared memory, tool-native team you can reach by email today. Slack, phone, Discord, WhatsApp, and more are coming soon.
+              Start with <a href="#roles" className="role-link">Oliver 🧸</a> (Generalist) today. <a href="#roles" className="role-link">Maggie 🐭</a>, <a href="#roles" className="role-link">Devin 🐙</a>, <a href="#roles" className="role-link">Lumio 🐉</a>, <a href="#roles" className="role-link">Claw 🦞</a>, <a href="#roles" className="role-link">Jeffery 🐦</a>, <a href="#roles" className="role-link">Anna 🐘</a>, and <a href="#roles" className="role-link">Rachel 👾</a> are coming soon. Slack, phone, Discord, WhatsApp, and more are on the way.
             </p>
             <div className="hero-cta">
               <a className="btn btn-primary" href={WAITLIST_FORM_URL} target="_blank" rel="noopener noreferrer">
