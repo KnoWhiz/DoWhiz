@@ -35,17 +35,19 @@ sudo nano /opt/dowhiz/.env
 At minimum, set:
 - `AZURE_OPENAI_API_KEY_BACKUP`
 - `AZURE_OPENAI_ENDPOINT_BACKUP`
-- `INGESTION_QUEUE_BACKEND=servicebus`
-- `SERVICE_BUS_CONNECTION_STRING=...`
-- `SERVICE_BUS_QUEUE_NAME=ingestion`
-- `RAW_PAYLOAD_STORAGE_BACKEND=azure`
-- `AZURE_STORAGE_ACCOUNT=...`
-- `AZURE_STORAGE_CONTAINER_INGEST=ingestion-raw`
-- `AZURE_STORAGE_SAS_TOKEN=...`
+- `SCALE_OLIVER_INGESTION_QUEUE_BACKEND=servicebus`
+- `SCALE_OLIVER_SERVICE_BUS_CONNECTION_STRING=...`
+- `SCALE_OLIVER_SERVICE_BUS_QUEUE_NAME=ingestion`
+- `SCALE_OLIVER_RAW_PAYLOAD_STORAGE_BACKEND=azure`
+- `SCALE_OLIVER_AZURE_STORAGE_ACCOUNT=...`
+- `SCALE_OLIVER_AZURE_STORAGE_CONTAINER_INGEST=ingestion-raw`
+- `SCALE_OLIVER_AZURE_STORAGE_SAS_TOKEN=...`
 - `AZURE_STORAGE_CONNECTION_STRING=...`
 - `AZURE_STORAGE_CONTAINER=memo`
 - `SCHEDULER_MAX_CONCURRENCY=200`
 - `SCHEDULER_USER_MAX_CONCURRENCY=5`
+
+The worker now prefers `SCALE_OLIVER_*` keys and falls back to legacy key names.
 
 ## Run the Worker Container
 ```bash
@@ -85,7 +87,7 @@ and point it at the same Azure resources.
 
 To drive a full Service Bus -> worker flow, send load-test envelopes:
 ```bash
-export SERVICE_BUS_CONNECTION_STRING="..."
-export SERVICE_BUS_QUEUE_NAME="ingestion"
+export SCALE_OLIVER_SERVICE_BUS_CONNECTION_STRING="..."
+export SCALE_OLIVER_SERVICE_BUS_QUEUE_NAME="ingestion"
 python3 DoWhiz_service/scripts/load_tests/servicebus_fanout.py --count 200 --employee-id little_bear
 ```

@@ -13,6 +13,16 @@ import urllib.parse
 import urllib.request
 
 
+def env_with_scale_oliver(name: str, default: str = "") -> str:
+    prefixed = os.getenv(f"SCALE_OLIVER_{name}")
+    if prefixed and prefixed.strip():
+        return prefixed.strip()
+    value = os.getenv(name)
+    if value and value.strip():
+        return value.strip()
+    return default
+
+
 def parse_connection_string(conn_str: str) -> dict:
     parts = {}
     for item in conn_str.split(";"):
@@ -70,8 +80,8 @@ def main() -> int:
     parser.add_argument("--count", type=int, default=200, help="Number of messages to send.")
     parser.add_argument(
         "--queue",
-        default=os.getenv("SERVICE_BUS_QUEUE_NAME", "ingestion"),
-        help="Service Bus queue name (default: env SERVICE_BUS_QUEUE_NAME or 'ingestion').",
+        default=env_with_scale_oliver("SERVICE_BUS_QUEUE_NAME", "ingestion"),
+        help="Service Bus queue name (default: SCALE_OLIVER_SERVICE_BUS_QUEUE_NAME, SERVICE_BUS_QUEUE_NAME, or 'ingestion').",
     )
     parser.add_argument(
         "--employee-id",
@@ -86,9 +96,12 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    conn_str = os.getenv("SERVICE_BUS_CONNECTION_STRING")
+    conn_str = env_with_scale_oliver("SERVICE_BUS_CONNECTION_STRING")
     if not conn_str:
-        print("Missing SERVICE_BUS_CONNECTION_STRING", file=sys.stderr)
+        print(
+            "Missing SCALE_OLIVER_SERVICE_BUS_CONNECTION_STRING/SERVICE_BUS_CONNECTION_STRING",
+            file=sys.stderr,
+        )
         return 1
 
     parts = parse_connection_string(conn_str)
