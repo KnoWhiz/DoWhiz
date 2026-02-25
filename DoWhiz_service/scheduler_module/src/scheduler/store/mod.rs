@@ -376,4 +376,64 @@ impl SqliteSchedulerStore {
         )?;
         Ok(())
     }
+
+    /// List all tasks with their latest execution status.
+    /// Returns a list of task summaries suitable for API responses.
+    /// Only returns tasks created in the past 24 hours.
+    pub fn list_tasks_with_status(&self) -> Result<Vec<TaskStatusSummary>, SchedulerError> {
+        let conn = self.open()?;
+        let mut stmt = conn.prepare(
+            "SELECT
+                t.id, t.kind, t.channel, t.enabled, t.created_at, t.last_run,
+                t.schedule_type, t.next_run, t.run_at,
+                e.status, e.error_message, e.started_at
+             FROM tasks t
+             LEFT JOIN task_executions e ON e.task_id = t.id
+                AND e.id = (SELECT MAX(e2.id) FROM task_executions e2 WHERE e2.task_id = t.id)
+             WHERE t.created_at >= datetime('now', '-1 day')
+             ORDER BY t.created_at DESC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(TaskStatusSummary {
+                id: row.get::<_, String>(0)?,
+                kind: row.get::<_, String>(1)?,
+                channel: row.get::<_, String>(2)?,
+                enabled: row.get::<_, i64>(3)? != 0,
+                created_at: row.get::<_, String>(4)?,
+                last_run: row.get::<_, Option<String>>(5)?,
+                schedule_type: row.get::<_, String>(6)?,
+                next_run: row.get::<_, Option<String>>(7)?,
+                run_at: row.get::<_, Option<String>>(8)?,
+                execution_status: row.get::<_, Option<String>>(9)?,
+                error_message: row.get::<_, Option<String>>(10)?,
+                execution_started_at: row.get::<_, Option<String>>(11)?,
+            })
+        })?;
+
+        let mut tasks = Vec::new();
+        for row in rows {
+            tasks.push(row?);
+        }
+        Ok(tasks)
+    }
+}
+
+/// Summary of a task with its latest execution status.
+/// Used for API responses.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TaskStatusSummary {
+    pub id: String,
+    pub kind: String,
+    pub channel: String,
+    pub enabled: bool,
+    pub created_at: String,
+    pub last_run: Option<String>,
+    pub schedule_type: String,
+    pub next_run: Option<String>,
+    pub run_at: Option<String>,
+    /// Status from the latest execution: "running", "success", "failed", or None if never executed
+    pub execution_status: Option<String>,
+    pub error_message: Option<String>,
+    pub execution_started_at: Option<String>,
 }

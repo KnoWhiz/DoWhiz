@@ -49,6 +49,46 @@ impl UserStore {
         Ok(store)
     }
 
+    /// Get an existing user by identifier without creating one.
+    /// Returns None if the user doesn't exist.
+    pub fn get_user_by_identifier(
+        &self,
+        identifier_type: &str,
+        identifier: &str,
+    ) -> Result<Option<UserRecord>, UserStoreError> {
+        let normalized = normalize_identifier(identifier_type, identifier)
+            .ok_or_else(|| UserStoreError::InvalidIdentifier(identifier.to_string()))?;
+        let conn = self.open()?;
+        let row = conn
+            .query_row(
+                "SELECT id, identifier_type, identifier, created_at, last_seen_at
+                 FROM users
+                 WHERE identifier_type = ?1 AND identifier = ?2",
+                params![identifier_type, normalized.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+
+        match row {
+            Some((id, id_type, id_value, created_at, last_seen_at)) => Ok(Some(UserRecord {
+                user_id: id,
+                identifier_type: id_type,
+                identifier: id_value,
+                created_at: parse_datetime(&created_at)?,
+                last_seen_at: parse_datetime(&last_seen_at)?,
+            })),
+            None => Ok(None),
+        }
+    }
+
     pub fn get_or_create_user(
         &self,
         identifier_type: &str,

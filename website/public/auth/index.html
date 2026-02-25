@@ -158,6 +158,97 @@
         border-color: #ef4444;
       }
 
+      /* Task list styles */
+      .task-item {
+        display: flex;
+        flex-direction: column;
+        padding: 1rem;
+        background: var(--surface, #1a1a1a);
+        border: 1px solid var(--border, #333);
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+        gap: 0.5rem;
+      }
+      .task-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+      }
+      .task-name {
+        font-weight: 600;
+        flex: 1;
+        min-width: 0;
+        word-break: break-word;
+      }
+      .task-badge {
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+      .task-badge.success {
+        background: rgba(34, 197, 94, 0.2);
+        color: #22c55e;
+      }
+      .task-badge.running {
+        background: rgba(59, 130, 246, 0.2);
+        color: #3b82f6;
+      }
+      .task-badge.failed {
+        background: rgba(239, 68, 68, 0.2);
+        color: #ef4444;
+      }
+      .task-badge.pending {
+        background: rgba(156, 163, 175, 0.2);
+        color: #9ca3af;
+      }
+      .task-details {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        font-size: 0.85rem;
+        color: var(--text-muted, #888);
+      }
+      .task-detail {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+      }
+      .task-detail-label {
+        opacity: 0.7;
+      }
+      .tasks-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+      }
+      .tasks-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .polling-indicator {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        font-size: 0.75rem;
+        color: var(--text-muted, #888);
+      }
+      .polling-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #22c55e;
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+      }
+
       /* Light mode overrides */
       [data-theme="light"] {
         --bg: #f8fafc;
@@ -355,6 +446,26 @@
             </section>
 
             <section class="legal-card dashboard-section">
+              <h2>Your Tasks</h2>
+              <p>Tasks scheduled by your digital employee.</p>
+              <div class="tasks-header">
+                <div class="tasks-controls">
+                  <button id="refresh-tasks-btn" class="auth-btn auth-btn-oauth" style="padding: 0.5rem 1rem; font-size: 0.85rem;">
+                    Refresh
+                  </button>
+                  <div class="polling-indicator">
+                    <span class="polling-dot"></span>
+                    <span>Auto-updating</span>
+                  </div>
+                </div>
+                <span id="tasks-status" style="font-size: 0.85rem; color: var(--text-muted, #888);"></span>
+              </div>
+              <ul id="task-list" class="identifier-list">
+                <li class="task-item" style="text-align: center; color: var(--text-muted, #888);">Loading tasks...</li>
+              </ul>
+            </section>
+
+            <section class="legal-card dashboard-section">
               <h2>Your Memo</h2>
               <p>This is your unified memo synced across all channels. If you want to make changes, please edit below and save.</p>
               <div id="memo-container" style="margin-top: 1rem;">
@@ -538,6 +649,8 @@
 
       // Sign out
       document.getElementById('signout-btn').addEventListener('click', async () => {
+        stopTaskPolling();
+        cachedIdentifiers = [];
         await supabase.auth.signOut();
         window.location.reload();
       });
@@ -577,11 +690,15 @@
         document.getElementById('account-id').textContent = accountData.account_id;
         document.getElementById('user-email').textContent = session.user.email;
 
-        // Load identifiers and memo in parallel
+        // Load identifiers, memo, and tasks in parallel
         await Promise.all([
           loadIdentifiers(session.access_token),
-          loadMemo(session.access_token)
+          loadMemo(session.access_token),
+          loadTasks(session.access_token)
         ]);
+
+        // Start polling for task updates
+        startTaskPolling(session.access_token);
       }
 
       // Load linked identifiers
@@ -595,6 +712,9 @@
 
           const data = await res.json();
           const list = document.getElementById('identifier-list');
+
+          // Update cached identifiers for task loading
+          cachedIdentifiers = data.identifiers || [];
 
           if (data.identifiers && data.identifiers.length > 0) {
             list.innerHTML = data.identifiers.map(id => `
@@ -644,6 +764,8 @@
 
           showMessage('Channel unlinked successfully!', 'success');
           await loadIdentifiers(accessToken);
+          // Refresh tasks to remove tasks from the unlinked channel
+          await loadTasks(accessToken);
         } catch (err) {
           showMessage(err.message);
         }
@@ -878,8 +1000,160 @@
           showMessage('Channel linked successfully!', 'success');
           document.getElementById('link-identifier').value = '';
           await loadIdentifiers(session.access_token);
+          // Refresh tasks to include the new channel
+          await loadTasks(session.access_token);
         } catch (err) {
           showMessage(err.message);
+        }
+      });
+
+      // Task polling state
+      let taskPollingInterval = null;
+      let cachedIdentifiers = [];
+
+      // Load tasks for all linked identifiers
+      async function loadTasks(accessToken) {
+        const taskList = document.getElementById('task-list');
+        const tasksStatus = document.getElementById('tasks-status');
+
+        // If we don't have cached identifiers, fetch them first
+        if (cachedIdentifiers.length === 0) {
+          try {
+            const res = await fetch(`${DOWHIZ_API_URL}/auth/account`, {
+              headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+            if (res.ok) {
+              const data = await res.json();
+              cachedIdentifiers = data.identifiers || [];
+            }
+          } catch (err) {
+            console.error('Failed to fetch identifiers for tasks:', err);
+          }
+        }
+
+        if (cachedIdentifiers.length === 0) {
+          taskList.innerHTML = '<li class="task-item" style="text-align: center; color: var(--text-muted, #888);">Link a channel to see your tasks.</li>';
+          return;
+        }
+
+        try {
+          // Fetch tasks for each identifier in parallel
+          const taskPromises = cachedIdentifiers.map(async (id) => {
+            const res = await fetch(
+              `${DOWHIZ_API_URL}/api/tasks?channel=${encodeURIComponent(id.identifier_type)}&identifier=${encodeURIComponent(id.identifier)}`,
+              { headers: { 'Authorization': `Bearer ${accessToken}` } }
+            );
+            if (!res.ok) return [];
+            const data = await res.json();
+            return (data.tasks || []).map(task => ({ ...task, source: id.identifier_type }));
+          });
+
+          const taskArrays = await Promise.all(taskPromises);
+          const allTasks = taskArrays.flat();
+
+          // Sort by created_at descending (newest first)
+          allTasks.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+          if (allTasks.length === 0) {
+            taskList.innerHTML = '<li class="task-item" style="text-align: center; color: var(--text-muted, #888);">No tasks scheduled yet.</li>';
+          } else {
+            taskList.innerHTML = allTasks.map(task => renderTask(task)).join('');
+          }
+
+          tasksStatus.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+        } catch (err) {
+          console.error('Failed to load tasks:', err);
+          taskList.innerHTML = `<li class="task-item" style="text-align: center; color: #ef4444;">Error loading tasks: ${err.message}</li>`;
+        }
+      }
+
+      // Render a single task item
+      function renderTask(task) {
+        const status = task.execution_status || 'pending';
+        const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+
+        // Format dates
+        const formatDate = (dateStr) => {
+          if (!dateStr) return 'N/A';
+          const date = new Date(dateStr);
+          return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        };
+
+        // Determine schedule display
+        let scheduleDisplay = task.schedule_type || 'One-time';
+        if (task.schedule_type === 'once' && task.run_at) {
+          scheduleDisplay = `Once at ${formatDate(task.run_at)}`;
+        } else if (task.schedule_type === 'cron' && task.next_run) {
+          scheduleDisplay = `Next: ${formatDate(task.next_run)}`;
+        }
+
+        return `
+          <li class="task-item">
+            <div class="task-header">
+              <span class="task-name">${escapeHtml(task.kind || 'Task')}</span>
+              <span class="task-badge ${status}">${statusLabel}</span>
+            </div>
+            <div class="task-details">
+              <span class="task-detail">
+                <span class="task-detail-label">Channel:</span>
+                <span>${escapeHtml(task.channel || task.source || 'Unknown')}</span>
+              </span>
+              <span class="task-detail">
+                <span class="task-detail-label">Schedule:</span>
+                <span>${scheduleDisplay}</span>
+              </span>
+              ${task.last_run ? `
+                <span class="task-detail">
+                  <span class="task-detail-label">Last run:</span>
+                  <span>${formatDate(task.last_run)}</span>
+                </span>
+              ` : ''}
+              ${task.error_message ? `
+                <span class="task-detail" style="color: #ef4444;">
+                  <span class="task-detail-label">Error:</span>
+                  <span>${escapeHtml(task.error_message)}</span>
+                </span>
+              ` : ''}
+            </div>
+          </li>
+        `;
+      }
+
+      // Escape HTML to prevent XSS
+      function escapeHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+      }
+
+      // Start polling for task updates
+      function startTaskPolling(accessToken) {
+        // Clear any existing interval
+        if (taskPollingInterval) {
+          clearInterval(taskPollingInterval);
+        }
+
+        // Poll every 30 seconds
+        taskPollingInterval = setInterval(() => {
+          loadTasks(accessToken);
+        }, 30000);
+      }
+
+      // Stop polling (e.g., on sign out)
+      function stopTaskPolling() {
+        if (taskPollingInterval) {
+          clearInterval(taskPollingInterval);
+          taskPollingInterval = null;
+        }
+      }
+
+      // Refresh tasks button
+      document.getElementById('refresh-tasks-btn').addEventListener('click', async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          document.getElementById('tasks-status').textContent = 'Refreshing...';
+          await loadTasks(session.access_token);
         }
       });
 

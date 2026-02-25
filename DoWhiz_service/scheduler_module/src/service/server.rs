@@ -118,6 +118,8 @@ pub async fn run_server(
         slack_client_secret,
         slack_redirect_uri,
         frontend_url,
+        user_store: Some(user_store.clone()),
+        users_root: Some(config.users_root.clone()),
     };
 
     let host: IpAddr = config
