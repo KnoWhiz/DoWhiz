@@ -164,11 +164,25 @@ fn process_ingestion_envelope(
         }
         Channel::Discord => {
             let message = envelope.to_inbound_message();
-            if try_quick_response_discord(config, user_store, message_router, runtime, &message)? {
+            let raw_payload = envelope.raw_payload_bytes();
+            if try_quick_response_discord(
+                config,
+                user_store,
+                message_router,
+                runtime,
+                &message,
+                &raw_payload,
+            )? {
                 return Ok(());
             }
-            let raw_payload = envelope.raw_payload_bytes();
-process_discord_inbound_message(config, user_store, index_store, account_store, &message, &raw_payload)
+            process_discord_inbound_message(
+                config,
+                user_store,
+                index_store,
+                account_store,
+                &message,
+                &raw_payload,
+            )
         }
         Channel::Sms => {
             let message = envelope.to_inbound_message();
