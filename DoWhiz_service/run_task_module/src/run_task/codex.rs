@@ -69,7 +69,12 @@ pub(super) fn run_codex_task(
         });
     }
     let azure_endpoint = normalize_azure_endpoint(CODEX_BASE_URL);
-    let model_name = CODEX_MODEL_NAME.to_string();
+    // Use model from request/database, fallback to env var, then constant
+    let model_name = if request.model_name.trim().is_empty() {
+        env::var("CODEX_MODEL").unwrap_or_else(|_| CODEX_MODEL_NAME.to_string())
+    } else {
+        request.model_name.to_string()
+    };
     let sandbox_mode = codex_sandbox_mode();
     // Bypass sandbox for GoogleDocs tasks to allow network access for Google APIs
     let channel_lower = request.channel.to_lowercase();

@@ -4,9 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Sign in to DoWhiz to manage your digital employee integrations." />
+    <meta name="robots" content="noindex, nofollow" />
     <link rel="icon" type="image/svg+xml" href="/do-whiz-mark.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
+    <link rel="canonical" href="https://dowhiz.com/auth/" />
     <link rel="stylesheet" href="/legal.css" />
     <title>Sign In | DoWhiz</title>
     <style>
@@ -102,6 +104,49 @@
       .auth-toggle a:hover {
         text-decoration: underline;
       }
+      .auth-helper {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 0.75rem;
+        font-size: 0.9rem;
+      }
+      .auth-helper a {
+        color: var(--accent, #38bdf8);
+        text-decoration: none;
+      }
+      .auth-helper a:hover {
+        text-decoration: underline;
+      }
+      .auth-panel {
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid var(--border, #333);
+        background: var(--surface, #1a1a1a);
+        margin-top: 1rem;
+      }
+      .auth-panel-title {
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+      }
+      .auth-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+      .auth-option-note {
+        margin-top: 0.5rem;
+        font-size: 0.85rem;
+        color: var(--text-muted, #888);
+      }
+      .auth-link {
+        color: var(--accent, #38bdf8);
+        text-decoration: none;
+      }
+      .auth-link:hover {
+        text-decoration: underline;
+      }
       .hidden {
         display: none !important;
       }
@@ -156,6 +201,173 @@
       .unlink-btn:hover {
         background: rgba(239, 68, 68, 0.1);
         border-color: #ef4444;
+      }
+
+      /* Task list styles */
+      .task-item {
+        display: flex;
+        flex-direction: column;
+        padding: 1rem;
+        background: var(--surface, #1a1a1a);
+        border: 1px solid var(--border, #333);
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+        gap: 0.5rem;
+      }
+      .task-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+      }
+      .task-name {
+        font-weight: 600;
+        flex: 1;
+        min-width: 0;
+        word-break: break-word;
+      }
+      .task-badge {
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+      .task-badge.success {
+        background: rgba(34, 197, 94, 0.2);
+        color: #22c55e;
+      }
+      .task-badge.running {
+        background: rgba(59, 130, 246, 0.2);
+        color: #3b82f6;
+      }
+      .task-badge.failed {
+        background: rgba(239, 68, 68, 0.2);
+        color: #ef4444;
+      }
+      .task-badge.pending {
+        background: rgba(156, 163, 175, 0.2);
+        color: #9ca3af;
+      }
+      .task-details {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        font-size: 0.85rem;
+        color: var(--text-muted, #888);
+      }
+      .task-detail {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+      }
+      .task-detail-label {
+        opacity: 0.7;
+      }
+      .tasks-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+      }
+      .tasks-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .tasks-status {
+        font-size: 0.85rem;
+        color: var(--text-muted, #888);
+      }
+
+      #refresh-tasks-btn {
+        padding: 0.5rem 1rem;
+        font-size: 0.85rem;
+      }
+
+      .memo-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .memo-status {
+        margin-left: 0.5rem;
+        font-size: 0.9rem;
+      }
+
+      .channel-connect-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+
+      .polling-indicator {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        font-size: 0.75rem;
+        color: var(--text-muted, #888);
+      }
+      .polling-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #22c55e;
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+      }
+
+      @media (max-width: 900px) {
+        .auth-container {
+          padding: 1rem 0;
+        }
+
+        .tasks-header {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 0.75rem;
+        }
+
+        .tasks-controls {
+          width: 100%;
+          flex-wrap: wrap;
+          justify-content: space-between;
+        }
+
+        .task-header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .identifier-item {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .identifier-actions {
+          width: 100%;
+          justify-content: space-between;
+        }
+
+        .memo-status {
+          margin-left: 0;
+          width: 100%;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .channel-connect-actions .auth-btn,
+        .memo-actions .auth-btn {
+          width: 100%;
+          justify-content: center;
+        }
       }
 
       /* Light mode overrides */
@@ -307,6 +519,10 @@
               <input type="password" id="signin-password" class="auth-input" placeholder="Password" required />
               <button type="submit" class="auth-btn auth-btn-primary">Sign In</button>
             </form>
+            <div class="auth-helper">
+              <a href="#" id="forgot-password-link">Forgot password?</a>
+              <a href="#" id="set-password-link">Set password</a>
+            </div>
 
             <div class="auth-divider">or</div>
 
@@ -333,8 +549,41 @@
               <button type="submit" class="auth-btn auth-btn-primary">Sign Up</button>
             </form>
 
+            <div id="existing-account-container" class="auth-panel hidden">
+              <div class="auth-panel-title">This email already has an account</div>
+              <div>Choose how you'd like to continue signing in.</div>
+              <div class="auth-options">
+                <button id="send-reset-email" class="auth-btn auth-btn-oauth" type="button">
+                  Send password reset email
+                </button>
+                <button id="send-otp-email" class="auth-btn auth-btn-oauth" type="button">
+                  Send email login link
+                </button>
+              </div>
+              <div class="auth-option-note">
+                We'll send it to <span id="existing-account-email"></span>.
+              </div>
+            </div>
+
             <p class="auth-toggle">
               Already have an account? <a href="#" id="show-signin">Sign in</a>
+            </p>
+          </div>
+
+          <div id="password-reset-container" class="hidden">
+            <div class="auth-panel">
+              <div class="auth-panel-title">Set a new password</div>
+              <div class="auth-option-note">
+                Resetting password for <span id="password-reset-email">your account</span>.
+              </div>
+              <form id="password-reset-form" class="auth-form" style="margin-top: 1rem;">
+                <input type="password" id="password-reset-new" class="auth-input" placeholder="New password (min 6 characters)" required minlength="6" />
+                <input type="password" id="password-reset-confirm" class="auth-input" placeholder="Confirm new password" required minlength="6" />
+                <button type="submit" class="auth-btn auth-btn-primary">Set Password</button>
+              </form>
+            </div>
+            <p class="auth-toggle">
+              Back to <a href="#" id="back-to-signin" class="auth-link">Sign in</a>
             </p>
           </div>
 
@@ -355,6 +604,26 @@
             </section>
 
             <section class="legal-card dashboard-section">
+              <h2>Your Tasks</h2>
+              <p>Tasks scheduled by your digital employee.</p>
+              <div class="tasks-header">
+                <div class="tasks-controls">
+                  <button id="refresh-tasks-btn" class="auth-btn auth-btn-oauth">
+                    Refresh
+                  </button>
+                  <div class="polling-indicator">
+                    <span class="polling-dot"></span>
+                    <span>Auto-updating</span>
+                  </div>
+                </div>
+                <span id="tasks-status" class="tasks-status"></span>
+              </div>
+              <ul id="task-list" class="identifier-list">
+                <li class="task-item" style="text-align: center; color: var(--text-muted, #888);">Loading tasks...</li>
+              </ul>
+            </section>
+
+            <section class="legal-card dashboard-section">
               <h2>Your Memo</h2>
               <p>This is your unified memo synced across all channels. If you want to make changes, please edit below and save.</p>
               <div id="memo-container" style="margin-top: 1rem;">
@@ -371,14 +640,14 @@
                   color: var(--text, #fff);
                   box-sizing: border-box;
                 ">Loading memo...</textarea>
-                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; align-items: center;">
+                <div class="memo-actions">
                   <button id="save-memo-btn" class="auth-btn auth-btn-primary">
                     Save Changes
                   </button>
                   <button id="refresh-memo-btn" class="auth-btn auth-btn-oauth">
                     Refresh
                   </button>
-                  <span id="memo-status" style="margin-left: 0.5rem; font-size: 0.9rem;"></span>
+                  <span id="memo-status" class="memo-status"></span>
                 </div>
               </div>
             </section>
@@ -386,7 +655,7 @@
             <section class="legal-card dashboard-section">
               <h2>Connect Channels</h2>
               <p style="margin-bottom: 1rem;">Connect your accounts with one click:</p>
-              <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <div class="channel-connect-actions">
                 <button id="discord-oauth-btn" class="auth-btn auth-btn-oauth" style="display: flex; align-items: center; gap: 0.5rem;">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
@@ -460,6 +729,21 @@
       const authMessage = document.getElementById('auth-message');
       const pageTitle = document.getElementById('page-title');
       const pageSubtitle = document.getElementById('page-subtitle');
+      const existingAccountContainer = document.getElementById('existing-account-container');
+      const existingAccountEmail = document.getElementById('existing-account-email');
+      const sendResetEmailBtn = document.getElementById('send-reset-email');
+      const sendOtpEmailBtn = document.getElementById('send-otp-email');
+      const passwordResetContainer = document.getElementById('password-reset-container');
+      const passwordResetEmail = document.getElementById('password-reset-email');
+      const passwordResetForm = document.getElementById('password-reset-form');
+      const backToSigninLink = document.getElementById('back-to-signin');
+      const forgotPasswordLink = document.getElementById('forgot-password-link');
+      const setPasswordLink = document.getElementById('set-password-link');
+
+      let lastSignupEmail = null;
+      let recoverySession = null;
+      let lastEmailActionAt = 0;
+      const EMAIL_ACTION_COOLDOWN_MS = 30000;
 
       // Check if user came from logged-in state (expecting dashboard)
       const expectingDashboard = new URLSearchParams(window.location.search).get('loggedIn') === 'true';
@@ -480,11 +764,113 @@
         authMessage.classList.add('hidden');
       }
 
+      function hideExistingAccountOptions() {
+        existingAccountContainer?.classList.add('hidden');
+      }
+
+      function showExistingAccountOptions(email) {
+        lastSignupEmail = email;
+        if (existingAccountEmail) {
+          existingAccountEmail.textContent = email;
+        }
+        existingAccountContainer?.classList.remove('hidden');
+      }
+
+      function showPasswordResetForm(email, session) {
+        recoverySession = session || null;
+        if (passwordResetEmail) {
+          passwordResetEmail.textContent = email || 'your account';
+        }
+        loadingContainer.classList.add('hidden');
+        signinFormContainer.classList.add('hidden');
+        signupFormContainer.classList.add('hidden');
+        dashboardContainer.classList.add('hidden');
+        passwordResetContainer.classList.remove('hidden');
+      }
+
+      function clearPasswordResetForm() {
+        if (passwordResetForm) {
+          passwordResetForm.reset();
+        }
+      }
+
+      function canSendEmailAction() {
+        const now = Date.now();
+        if (now - lastEmailActionAt < EMAIL_ACTION_COOLDOWN_MS) {
+          return false;
+        }
+        lastEmailActionAt = now;
+        return true;
+      }
+
+      function normalizeAuthError(error) {
+        if (!error) return null;
+        const message = error.message || 'Something went wrong.';
+        const lower = message.toLowerCase();
+        if (lower.includes('invalid login credentials')) {
+          return 'Invalid email or password. If you signed up with Google, use Google sign-in or set a password first.';
+        }
+        if (lower.includes('email rate limit exceeded')) {
+          return 'Email rate limit exceeded. Please wait a minute and try again.';
+        }
+        if (lower.includes('email address') && lower.includes('invalid')) {
+          return 'That email address is invalid or not allowed.';
+        }
+        if (lower.includes('password should be at least')) {
+          return 'Password must be at least 6 characters.';
+        }
+        return message;
+      }
+
+      async function sendPasswordReset(email) {
+        if (!email) {
+          showMessage('Please enter your email first.');
+          return;
+        }
+        if (!canSendEmailAction()) {
+          showMessage('Please wait a few seconds before trying again.');
+          return;
+        }
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/auth/index.html`
+        });
+        if (error) {
+          showMessage(normalizeAuthError(error) || error.message);
+        } else {
+          showMessage('Password reset email sent. Follow the link to set a password.', 'success');
+        }
+      }
+
+      async function sendMagicLink(email) {
+        if (!email) {
+          showMessage('Please enter your email first.');
+          return;
+        }
+        if (!canSendEmailAction()) {
+          showMessage('Please wait a few seconds before trying again.');
+          return;
+        }
+        const { error } = await supabase.auth.signInWithOtp({
+          email,
+          options: {
+            emailRedirectTo: `${window.location.origin}/auth/index.html`,
+            shouldCreateUser: false
+          }
+        });
+        if (error) {
+          showMessage(normalizeAuthError(error) || error.message);
+        } else {
+          showMessage('Login link sent. Check your email to continue.', 'success');
+        }
+      }
+
       // Switch between forms
       document.getElementById('show-signup').addEventListener('click', (e) => {
         e.preventDefault();
         signinFormContainer.classList.add('hidden');
         signupFormContainer.classList.remove('hidden');
+        passwordResetContainer.classList.add('hidden');
+        hideExistingAccountOptions();
         hideMessage();
       });
 
@@ -492,7 +878,52 @@
         e.preventDefault();
         signupFormContainer.classList.add('hidden');
         signinFormContainer.classList.remove('hidden');
+        passwordResetContainer.classList.add('hidden');
+        hideExistingAccountOptions();
         hideMessage();
+      });
+
+      backToSigninLink?.addEventListener('click', (e) => {
+        e.preventDefault();
+        passwordResetContainer.classList.add('hidden');
+        signinFormContainer.classList.remove('hidden');
+        hideMessage();
+      });
+
+      forgotPasswordLink?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        hideMessage();
+        const email = document.getElementById('signin-email')?.value;
+        await sendPasswordReset(email);
+      });
+
+      setPasswordLink?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        hideMessage();
+        const email = document.getElementById('signin-email')?.value;
+        await sendPasswordReset(email);
+      });
+
+      sendResetEmailBtn?.addEventListener('click', async () => {
+        hideMessage();
+        const email = lastSignupEmail || document.getElementById('signup-email')?.value;
+        sendResetEmailBtn.disabled = true;
+        try {
+          await sendPasswordReset(email);
+        } finally {
+          sendResetEmailBtn.disabled = false;
+        }
+      });
+
+      sendOtpEmailBtn?.addEventListener('click', async () => {
+        hideMessage();
+        const email = lastSignupEmail || document.getElementById('signup-email')?.value;
+        sendOtpEmailBtn.disabled = true;
+        try {
+          await sendMagicLink(email);
+        } finally {
+          sendOtpEmailBtn.disabled = false;
+        }
       });
 
       // Sign in with email/password
@@ -504,7 +935,7 @@
 
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
-          showMessage(error.message);
+          showMessage(normalizeAuthError(error) || error.message);
         } else {
           await handleAuthSuccess(data.session);
         }
@@ -514,13 +945,31 @@
       document.getElementById('signup-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         hideMessage();
+        hideExistingAccountOptions();
         const email = document.getElementById('signup-email').value;
         const password = document.getElementById('signup-password').value;
 
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: `${window.location.origin}/auth/index.html` }
+        });
         if (error) {
-          showMessage(error.message);
+          const normalizedError = (error.message || '').toLowerCase();
+          if (normalizedError.includes('already registered') || normalizedError.includes('already exists')) {
+            showExistingAccountOptions(email);
+            showMessage('That email already has an account. Choose an option below to continue.', 'success');
+            return;
+          }
+          showMessage(normalizeAuthError(error) || error.message);
         } else if (data.user && !data.session) {
+          const identities = data.user.identities || [];
+          const isExisting = identities.length === 0;
+          if (isExisting) {
+            showExistingAccountOptions(email);
+            showMessage('That email already has an account. Choose an option below to continue.', 'success');
+            return;
+          }
           showMessage('Check your email for a confirmation link!', 'success');
         } else if (data.session) {
           await handleAuthSuccess(data.session);
@@ -538,8 +987,43 @@
 
       // Sign out
       document.getElementById('signout-btn').addEventListener('click', async () => {
+        stopTaskPolling();
+        cachedIdentifiers = [];
         await supabase.auth.signOut();
         window.location.reload();
+      });
+
+      passwordResetForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideMessage();
+        const newPassword = document.getElementById('password-reset-new')?.value;
+        const confirmPassword = document.getElementById('password-reset-confirm')?.value;
+
+        if (!newPassword || newPassword.length < 6) {
+          showMessage('Password must be at least 6 characters.');
+          return;
+        }
+        if (newPassword !== confirmPassword) {
+          showMessage('Passwords do not match.');
+          return;
+        }
+
+        const { error } = await supabase.auth.updateUser({ password: newPassword });
+        if (error) {
+          showMessage(error.message);
+          return;
+        }
+
+        showMessage('Password updated. Signing you in...', 'success');
+        clearPasswordResetForm();
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          await handleAuthSuccess(session);
+        } else {
+          signinFormContainer.classList.remove('hidden');
+          passwordResetContainer.classList.add('hidden');
+        }
       });
 
       // Handle successful auth
@@ -570,6 +1054,8 @@
         loadingContainer.classList.add('hidden');
         signinFormContainer.classList.add('hidden');
         signupFormContainer.classList.add('hidden');
+        passwordResetContainer.classList.add('hidden');
+        hideExistingAccountOptions();
         dashboardContainer.classList.remove('hidden');
         pageTitle.textContent = 'Your Dashboard';
         pageSubtitle.textContent = 'Manage your linked channels and integrations.';
@@ -577,11 +1063,15 @@
         document.getElementById('account-id').textContent = accountData.account_id;
         document.getElementById('user-email').textContent = session.user.email;
 
-        // Load identifiers and memo in parallel
+        // Load identifiers, memo, and tasks in parallel
         await Promise.all([
           loadIdentifiers(session.access_token),
-          loadMemo(session.access_token)
+          loadMemo(session.access_token),
+          loadTasks(session.access_token)
         ]);
+
+        // Start polling for task updates
+        startTaskPolling(session.access_token);
       }
 
       // Load linked identifiers
@@ -595,6 +1085,9 @@
 
           const data = await res.json();
           const list = document.getElementById('identifier-list');
+
+          // Update cached identifiers for task loading
+          cachedIdentifiers = data.identifiers || [];
 
           if (data.identifiers && data.identifiers.length > 0) {
             list.innerHTML = data.identifiers.map(id => `
@@ -644,6 +1137,8 @@
 
           showMessage('Channel unlinked successfully!', 'success');
           await loadIdentifiers(accessToken);
+          // Refresh tasks to remove tasks from the unlinked channel
+          await loadTasks(accessToken);
         } catch (err) {
           showMessage(err.message);
         }
@@ -878,8 +1373,170 @@
           showMessage('Channel linked successfully!', 'success');
           document.getElementById('link-identifier').value = '';
           await loadIdentifiers(session.access_token);
+          // Refresh tasks to include the new channel
+          await loadTasks(session.access_token);
         } catch (err) {
           showMessage(err.message);
+        }
+      });
+
+      // Task polling state
+      let taskPollingInterval = null;
+      let cachedIdentifiers = [];
+
+      // Load tasks for all linked identifiers
+      async function loadTasks(accessToken) {
+        const taskList = document.getElementById('task-list');
+        const tasksStatus = document.getElementById('tasks-status');
+
+        // If we don't have cached identifiers, fetch them first
+        if (cachedIdentifiers.length === 0) {
+          try {
+            const res = await fetch(`${DOWHIZ_API_URL}/auth/account`, {
+              headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+            if (res.ok) {
+              const data = await res.json();
+              cachedIdentifiers = data.identifiers || [];
+            }
+          } catch (err) {
+            console.error('Failed to fetch identifiers for tasks:', err);
+          }
+        }
+
+        if (cachedIdentifiers.length === 0) {
+          taskList.innerHTML = '<li class="task-item" style="text-align: center; color: var(--text-muted, #888);">Link a channel to see your tasks.</li>';
+          return;
+        }
+
+        try {
+          // Fetch tasks for each identifier in parallel
+          const taskPromises = cachedIdentifiers.map(async (id) => {
+            const res = await fetch(
+              `${DOWHIZ_API_URL}/api/tasks?channel=${encodeURIComponent(id.identifier_type)}&identifier=${encodeURIComponent(id.identifier)}`,
+              { headers: { 'Authorization': `Bearer ${accessToken}` } }
+            );
+            if (!res.ok) return [];
+            const data = await res.json();
+            return (data.tasks || []).map(task => ({ ...task, source: id.identifier_type }));
+          });
+
+          const taskArrays = await Promise.all(taskPromises);
+          const allTasks = taskArrays.flat();
+
+          // Sort by created_at descending (newest first)
+          allTasks.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+          if (allTasks.length === 0) {
+            taskList.innerHTML = '<li class="task-item" style="text-align: center; color: var(--text-muted, #888);">No tasks scheduled yet.</li>';
+          } else {
+            taskList.innerHTML = allTasks.map(task => renderTask(task)).join('');
+          }
+
+          tasksStatus.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+        } catch (err) {
+          console.error('Failed to load tasks:', err);
+          taskList.innerHTML = `<li class="task-item" style="text-align: center; color: #ef4444;">Error loading tasks: ${err.message}</li>`;
+        }
+      }
+
+      // Map task kind to user-friendly display name
+      function formatTaskKind(kind) {
+        const kindMap = {
+          'send_email': 'Send Reply',
+          'run_task': 'Run Task',
+          'noop': 'No-op'
+        };
+        return kindMap[kind] || kind || 'Task';
+      }
+
+      // Render a single task item
+      function renderTask(task) {
+        const status = task.execution_status || 'pending';
+        const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+
+        // Format dates
+        const formatDate = (dateStr) => {
+          if (!dateStr) return 'N/A';
+          const date = new Date(dateStr);
+          return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        };
+
+        // Determine schedule display
+        let scheduleDisplay = task.schedule_type || 'One-time';
+        if (task.schedule_type === 'once' && task.run_at) {
+          scheduleDisplay = `Once at ${formatDate(task.run_at)}`;
+        } else if (task.schedule_type === 'cron' && task.next_run) {
+          scheduleDisplay = `Next: ${formatDate(task.next_run)}`;
+        }
+
+        return `
+          <li class="task-item">
+            <div class="task-header">
+              <span class="task-name">${escapeHtml(formatTaskKind(task.kind))}</span>
+              <span class="task-badge ${status}">${statusLabel}</span>
+            </div>
+            <div class="task-details">
+              <span class="task-detail">
+                <span class="task-detail-label">Channel:</span>
+                <span>${escapeHtml(task.channel || task.source || 'Unknown')}</span>
+              </span>
+              <span class="task-detail">
+                <span class="task-detail-label">Schedule:</span>
+                <span>${scheduleDisplay}</span>
+              </span>
+              ${task.last_run ? `
+                <span class="task-detail">
+                  <span class="task-detail-label">Last run:</span>
+                  <span>${formatDate(task.last_run)}</span>
+                </span>
+              ` : ''}
+              ${task.error_message ? `
+                <span class="task-detail" style="color: #ef4444;">
+                  <span class="task-detail-label">Error:</span>
+                  <span>${escapeHtml(task.error_message)}</span>
+                </span>
+              ` : ''}
+            </div>
+          </li>
+        `;
+      }
+
+      // Escape HTML to prevent XSS
+      function escapeHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+      }
+
+      // Start polling for task updates
+      function startTaskPolling(accessToken) {
+        // Clear any existing interval
+        if (taskPollingInterval) {
+          clearInterval(taskPollingInterval);
+        }
+
+        // Poll every 30 seconds
+        taskPollingInterval = setInterval(() => {
+          loadTasks(accessToken);
+        }, 30000);
+      }
+
+      // Stop polling (e.g., on sign out)
+      function stopTaskPolling() {
+        if (taskPollingInterval) {
+          clearInterval(taskPollingInterval);
+          taskPollingInterval = null;
+        }
+      }
+
+      // Refresh tasks button
+      document.getElementById('refresh-tasks-btn').addEventListener('click', async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          document.getElementById('tasks-status').textContent = 'Refreshing...';
+          await loadTasks(session.access_token);
         }
       });
 
@@ -888,49 +1545,76 @@
         const hash = window.location.hash;
         console.log('Checking for OAuth tokens in hash...');
 
-        if (hash && hash.includes('access_token')) {
-          console.log('Found tokens in URL hash, parsing...');
-
-          // Parse the hash parameters
-          const params = new URLSearchParams(hash.substring(1));
-          const access_token = params.get('access_token');
-          const refresh_token = params.get('refresh_token');
-
-          if (access_token && refresh_token) {
-            console.log('Setting session with tokens...');
-
-            // Manually set the session
-            const { data, error } = await supabase.auth.setSession({
-              access_token,
-              refresh_token
-            });
-
-            console.log('setSession result:', data);
-            if (error) console.error('setSession error:', error);
-
-            if (data.session) {
-              console.log('Session established! User:', data.session.user.email);
-
-              // Create DoWhiz account if needed
-              try {
-                const res = await fetch(`${DOWHIZ_API_URL}/auth/signup`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${data.session.access_token}` }
-                });
-                console.log('DoWhiz signup response:', res.status);
-              } catch (err) {
-                console.error('Failed to create DoWhiz account:', err);
-              }
-
-              // Redirect to home page after OAuth
-              window.location.href = '/';
-            } else {
-              showMessage('Failed to establish session. Please try again.');
-            }
-          }
-          return true; // OAuth callback was handled
+        if (!hash) {
+          return false;
         }
-        return false; // No OAuth callback
+
+        // Parse the hash parameters (handles both token and error callbacks)
+        const params = new URLSearchParams(hash.substring(1));
+        const access_token = params.get('access_token');
+        const refresh_token = params.get('refresh_token');
+        const flowType = params.get('type');
+        const errorDescription = params.get('error_description') || params.get('error');
+
+        if (errorDescription) {
+          showMessage(decodeURIComponent(errorDescription));
+          return true;
+        }
+
+        if (!access_token) {
+          return false;
+        }
+
+        console.log('Found tokens in URL hash, parsing...');
+
+        if (access_token && refresh_token) {
+          console.log('Setting session with tokens...');
+
+          // Manually set the session
+          const { data, error } = await supabase.auth.setSession({
+            access_token,
+            refresh_token
+          });
+
+          console.log('setSession result:', data);
+          if (error) console.error('setSession error:', error);
+
+          if (!data.session) {
+            showMessage('We could not establish a session. Please open the latest email link and try again.');
+            return true;
+          }
+
+          console.log('Session established! User:', data.session.user.email);
+
+          if (flowType === 'recovery') {
+            showPasswordResetForm(data.session.user?.email, data.session);
+            window.history.replaceState({}, document.title, window.location.pathname);
+            return true;
+          }
+
+          if (flowType === 'magiclink' || flowType === 'signup') {
+            await handleAuthSuccess(data.session);
+            window.history.replaceState({}, document.title, window.location.pathname);
+            return true;
+          }
+
+          // Assume OAuth flow if no explicit type is provided
+          try {
+            const res = await fetch(`${DOWHIZ_API_URL}/auth/signup`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${data.session.access_token}` }
+            });
+            console.log('DoWhiz signup response:', res.status);
+          } catch (err) {
+            console.error('Failed to create DoWhiz account:', err);
+          }
+
+          // Redirect to home page after OAuth
+          window.location.href = '/';
+          return true;
+        }
+
+        return true;
       }
 
       // Initialize page - check for OAuth callback or existing session

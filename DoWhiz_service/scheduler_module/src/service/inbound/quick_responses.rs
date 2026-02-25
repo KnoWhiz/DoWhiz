@@ -15,6 +15,8 @@ use crate::slack_store::SlackStore;
 use crate::user_store::UserStore;
 use uuid::Uuid;
 
+use super::discord_context::build_discord_router_context;
+use super::persist_discord_ingest_context;
 use super::super::config::ServiceConfig;
 use super::super::BoxError;
 
@@ -108,7 +110,13 @@ pub(crate) fn try_quick_response_slack(
         .collect::<Vec<_>>()
         .join(" ");
 
-    let decision = runtime.block_on(message_router.classify(&cleaned_text, memory.as_deref()));
+    let employee_name = config.employee_profile.display_name.as_deref();
+    let decision = runtime.block_on(message_router.classify(
+        &cleaned_text,
+        memory.as_deref(),
+        employee_name,
+        None,
+    ));
     match decision {
         RouterDecision::Simple {
             response,
@@ -219,7 +227,9 @@ pub(crate) fn try_quick_response_bluebubbles(
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 
-    let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
+    let employee_name = config.employee_profile.display_name.as_deref();
+    let decision =
+        runtime.block_on(message_router.classify(text, memory.as_deref(), employee_name, None));
     match decision {
         RouterDecision::Simple {
             response,
@@ -256,6 +266,7 @@ pub(crate) fn try_quick_response_discord(
     message_router: &MessageRouter,
     runtime: &tokio::runtime::Handle,
     message: &crate::channel::InboundMessage,
+    raw_payload: &[u8],
 ) -> Result<bool, BoxError> {
     let Some(text) = message.text_body.as_deref() else {
         return Ok(false);
@@ -275,7 +286,28 @@ pub(crate) fn try_quick_response_discord(
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 
-    let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
+    let router_context = match build_discord_router_context(config, message, raw_payload) {
+        Ok(context) => Some(context),
+        Err(err) => {
+            warn!("Failed to build Discord router context: {}", err);
+            None
+        }
+    };
+    let router_message = router_context
+        .as_ref()
+        .map(|context| context.message.as_str())
+        .unwrap_or(text);
+    let extra_context = router_context
+        .as_ref()
+        .map(|context| context.context.as_str());
+
+    let employee_name = config.employee_profile.display_name.as_deref();
+    let decision = runtime.block_on(message_router.classify(
+        router_message,
+        memory.as_deref(),
+        employee_name,
+        extra_context,
+    ));
     match decision {
         RouterDecision::Simple {
             response,
@@ -292,8 +324,19 @@ pub(crate) fn try_quick_response_discord(
                 }
             }
 
-            if send_quick_discord_response_simple(&token, channel_id, message_id, &response).is_ok()
-            {
+            let sent =
+                send_quick_discord_response_simple(&token, channel_id, message_id, &response)
+                    .is_ok();
+            if sent {
+                if let Err(err) = persist_discord_ingest_context(
+                    config,
+                    user_store,
+                    message,
+                    raw_payload,
+                    router_context.as_ref().map(|context| &context.snapshot),
+                ) {
+                    warn!("Failed to persist Discord context after quick reply: {}", err);
+                }
                 return Ok(true);
             }
             Ok(false)
@@ -325,7 +368,9 @@ pub(crate) fn try_quick_response_telegram(
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 
-    let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
+    let employee_name = config.employee_profile.display_name.as_deref();
+    let decision =
+        runtime.block_on(message_router.classify(text, memory.as_deref(), employee_name, None));
     match decision {
         RouterDecision::Simple {
             response,
@@ -475,7 +520,9 @@ pub(crate) fn try_quick_response_whatsapp(
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
 
-    let decision = runtime.block_on(message_router.classify(text, memory.as_deref()));
+    let employee_name = config.employee_profile.display_name.as_deref();
+    let decision =
+        runtime.block_on(message_router.classify(text, memory.as_deref(), employee_name, None));
     match decision {
         RouterDecision::Simple {
             response,

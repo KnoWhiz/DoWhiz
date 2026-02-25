@@ -150,6 +150,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         slack_client_secret,
         slack_redirect_uri,
         frontend_url,
+        user_store: None, // Task lookups not available in inbound gateway
+        users_root: None,
     };
     // Instantiate router in inbound_gateway to solve two ports, one tunnel issue
     let app = Router::new()

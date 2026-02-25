@@ -6,7 +6,8 @@
 //!
 //! Configuration:
 //! - `OPENAI_API_KEY`: OpenAI API key (required)
-//! - `ROUTER_MODEL`: Model to use (default: `gpt-5`)
+//! - `ROUTER_MODEL`: Model to use (default: `gpt-5.2`)
+//! - `AZURE_OPENAI_API_KEY_BACKUP` + `AZURE_OPENAI_ENDPOINT_BACKUP`: use Azure OpenAI
 //! - `ROUTER_ENABLED`: Set to "false" to disable routing (default: enabled)
 
 use std::env;
@@ -20,7 +21,7 @@ use tracing::{debug, info, warn};
 const DEFAULT_OPENAI_URL: &str = "https://api.openai.com/v1";
 
 /// Default model for OpenAI
-const DEFAULT_MODEL: &str = "gpt-5";
+const DEFAULT_MODEL: &str = "gpt-5.2";
 
 /// Timeout for LLM requests
 const LLM_TIMEOUT: Duration = Duration::from_secs(15);
@@ -32,8 +33,11 @@ const FORWARD_MARKER: &str = "FORWARD_TO_AGENT";
 /// Messages longer than this are automatically forwarded to the full pipeline.
 const MAX_SIMPLE_MESSAGE_LENGTH: usize = 300;
 
-/// System prompt for the classifier/responder
-const SYSTEM_PROMPT: &str = r#"You are Boiled-Egg, a friendly and helpful assistant.
+/// Build system prompt for the classifier/responder with employee identity
+fn build_system_prompt(employee_name: Option<&str>) -> String {
+    let name = employee_name.unwrap_or("Boiled-Egg");
+    format!(
+        r#"You are {name}, a friendly and helpful assistant.
 
 Your job is to classify messages:
 1. RESPOND DIRECTLY to questions you can answer quickly (greetings, casual chat, simple questions, thank you messages)
@@ -62,7 +66,10 @@ Great! I'll remember that.
 
 Valid sections: Profile, Preferences, Projects, Contacts, Decisions, Processes
 
-Keep responses brief and friendly."#;
+Keep responses brief and friendly."#,
+        name = name
+    )
+}
 
 /// Result of routing a message
 #[derive(Debug, Clone)]
@@ -89,20 +96,42 @@ pub struct RouterConfig {
     pub model: String,
     /// Whether routing is enabled
     pub enabled: bool,
+    /// Whether to use Azure OpenAI auth header
+    pub use_azure_auth: bool,
 }
 
 impl Default for RouterConfig {
     fn default() -> Self {
-        let openai_api_key = env::var("OPENAI_API_KEY").ok();
+        let azure_api_key = env::var("AZURE_OPENAI_API_KEY_BACKUP")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let azure_endpoint = env::var("AZURE_OPENAI_ENDPOINT_BACKUP")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+
+        let (openai_api_key, openai_url, use_azure_auth) =
+            if let (Some(api_key), Some(endpoint)) = (azure_api_key, azure_endpoint) {
+                (Some(api_key), normalize_azure_endpoint(&endpoint), true)
+            } else {
+                let openai_api_key = env::var("OPENAI_API_KEY")
+                    .ok()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty());
+                let openai_url = env::var("OPENAI_API_URL")
+                    .unwrap_or_else(|_| DEFAULT_OPENAI_URL.to_string());
+                (openai_api_key, openai_url, false)
+            };
 
         Self {
             openai_api_key,
-            openai_url: env::var("OPENAI_API_URL")
-                .unwrap_or_else(|_| DEFAULT_OPENAI_URL.to_string()),
+            openai_url,
             model: env::var("ROUTER_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string()),
             enabled: env::var("ROUTER_ENABLED")
                 .map(|v| v.to_lowercase() != "false")
                 .unwrap_or(true),
+            use_azure_auth,
         }
     }
 }
@@ -145,12 +174,20 @@ impl MessageRouter {
     /// Arguments:
     /// - `message`: The user's message
     /// - `memory`: Optional memory context (contents of memo.md)
+    /// - `employee_name`: Optional employee display name for personalized responses
+    /// - `extra_context`: Optional channel/thread context to help with quick replies
     ///
     /// Returns:
     /// - `Simple { response, memory_update }` if the local LLM handled the query
     /// - `Complex` if the query should go to the full pipeline
     /// - `Passthrough` if routing is disabled or failed
-    pub async fn classify(&self, message: &str, memory: Option<&str>) -> RouterDecision {
+    pub async fn classify(
+        &self,
+        message: &str,
+        memory: Option<&str>,
+        employee_name: Option<&str>,
+        extra_context: Option<&str>,
+    ) -> RouterDecision {
         if !self.config.enabled {
             debug!("Router disabled, passing through");
             return RouterDecision::Passthrough;
@@ -175,7 +212,9 @@ impl MessageRouter {
             return RouterDecision::Complex;
         }
 
-        let result = self.call_openai(message, memory).await;
+        let result = self
+            .call_openai(message, memory, employee_name, extra_context)
+            .await;
 
         match result {
             Ok(response) => {
@@ -228,7 +267,13 @@ impl MessageRouter {
     }
 
     /// Make a request to the OpenAI API (async)
-    async fn call_openai(&self, message: &str, memory: Option<&str>) -> Result<String, String> {
+    async fn call_openai(
+        &self,
+        message: &str,
+        memory: Option<&str>,
+        employee_name: Option<&str>,
+        extra_context: Option<&str>,
+    ) -> Result<String, String> {
         let api_key = self
             .config
             .openai_api_key
@@ -237,27 +282,31 @@ impl MessageRouter {
 
         let url = format!("{}/chat/completions", self.config.openai_url);
 
-        // Build user message with optional memory context
-        let user_content = if let Some(mem) = memory {
-            if mem.trim().is_empty() {
-                message.to_string()
-            } else {
-                format!(
-                    "User memory:\n```\n{}\n```\n\nMessage: {}",
-                    mem.trim(),
-                    message
-                )
+        // Build user message with optional memory + channel context
+        let mut sections = Vec::new();
+        if let Some(mem) = memory {
+            if !mem.trim().is_empty() {
+                sections.push(format!("User memory:\n```\n{}\n```", mem.trim()));
             }
-        } else {
-            message.to_string()
-        };
+        }
+        if let Some(context) = extra_context {
+            if !context.trim().is_empty() {
+                sections.push(format!(
+                    "Conversation context:\n```\n{}\n```",
+                    context.trim()
+                ));
+            }
+        }
+        sections.push(format!("Message: {}", message));
+        let user_content = sections.join("\n\n");
 
+        let system_prompt = build_system_prompt(employee_name);
         let request = OpenAIChatRequest {
             model: self.config.model.clone(),
             messages: vec![
                 OpenAIChatMessage {
                     role: "system".to_string(),
-                    content: SYSTEM_PROMPT.to_string(),
+                    content: system_prompt,
                 },
                 OpenAIChatMessage {
                     role: "user".to_string(),
@@ -269,11 +318,17 @@ impl MessageRouter {
 
         debug!("Calling OpenAI: {} with model {}", url, self.config.model);
 
-        let response = self
+        let mut request_builder = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "application/json");
+        if self.config.use_azure_auth {
+            request_builder = request_builder.header("api-key", api_key);
+        } else {
+            request_builder = request_builder.header("Authorization", format!("Bearer {}", api_key));
+        }
+
+        let response = request_builder
             .json(&request)
             .send()
             .await
@@ -311,6 +366,15 @@ impl Default for MessageRouter {
 // ============================================================================
 // OpenAI API types
 // ============================================================================
+
+fn normalize_azure_endpoint(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.ends_with("/openai/v1") {
+        trimmed.to_string()
+    } else {
+        format!("{}/openai/v1", trimmed)
+    }
+}
 
 /// Request body for OpenAI chat completions endpoint
 #[derive(Debug, Clone, Serialize)]
@@ -350,11 +414,14 @@ mod tests {
         env::remove_var("OPENAI_API_URL");
         env::remove_var("ROUTER_MODEL");
         env::remove_var("ROUTER_ENABLED");
+        env::remove_var("AZURE_OPENAI_API_KEY_BACKUP");
+        env::remove_var("AZURE_OPENAI_ENDPOINT_BACKUP");
 
         let config = RouterConfig::default();
         assert_eq!(config.openai_url, DEFAULT_OPENAI_URL);
         assert_eq!(config.model, DEFAULT_MODEL);
         assert!(config.enabled);
+        assert!(!config.use_azure_auth);
     }
 
     #[test]
@@ -382,5 +449,86 @@ mod tests {
         let (reply, memory) = MessageRouter::parse_response(response);
         assert_eq!(reply, response);
         assert!(memory.is_none());
+    }
+
+    #[test]
+    fn build_system_prompt_defaults_to_boiled_egg() {
+        let prompt = build_system_prompt(None);
+        assert!(prompt.contains("You are Boiled-Egg"));
+        assert!(!prompt.contains("You are Oliver"));
+    }
+
+    #[test]
+    fn build_system_prompt_uses_oliver_for_discord() {
+        // Simulates Discord/little_bear employee
+        let prompt = build_system_prompt(Some("Oliver"));
+        assert!(prompt.contains("You are Oliver"));
+        assert!(!prompt.contains("Boiled-Egg"));
+    }
+
+    #[test]
+    fn build_system_prompt_uses_boiled_egg_for_slack() {
+        // Simulates Slack/boiled_egg employee
+        let prompt = build_system_prompt(Some("Boiled-Egg"));
+        assert!(prompt.contains("You are Boiled-Egg"));
+    }
+
+    #[test]
+    fn build_system_prompt_uses_custom_name_for_telegram() {
+        // Simulates a custom Telegram employee
+        let prompt = build_system_prompt(Some("TeleBot"));
+        assert!(prompt.contains("You are TeleBot"));
+        assert!(!prompt.contains("Boiled-Egg"));
+    }
+
+    #[test]
+    fn build_system_prompt_uses_custom_name_for_whatsapp() {
+        // Simulates a custom WhatsApp employee
+        let prompt = build_system_prompt(Some("WhatsHelper"));
+        assert!(prompt.contains("You are WhatsHelper"));
+        assert!(!prompt.contains("Boiled-Egg"));
+    }
+
+    #[test]
+    fn build_system_prompt_uses_custom_name_for_bluebubbles() {
+        // Simulates a custom BlueBubbles/iMessage employee
+        let prompt = build_system_prompt(Some("iAssistant"));
+        assert!(prompt.contains("You are iAssistant"));
+        assert!(!prompt.contains("Boiled-Egg"));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn router_live_smoke_gpt_52() {
+        dotenvy::dotenv().ok();
+
+        let api_key = env::var("AZURE_OPENAI_API_KEY_BACKUP")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let endpoint = env::var("AZURE_OPENAI_ENDPOINT_BACKUP")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        if api_key.is_none() || endpoint.is_none() {
+            eprintln!("AZURE_OPENAI_API_KEY_BACKUP/AZURE_OPENAI_ENDPOINT_BACKUP not set; skipping live router smoke test");
+            return;
+        }
+
+        env::remove_var("ROUTER_MODEL");
+        env::remove_var("OPENAI_API_URL");
+        env::remove_var("ROUTER_ENABLED");
+
+        let router = MessageRouter::new();
+        let decision = router
+            .classify("Hello! Quick reply test.", None, Some("Boiled-Egg"), None)
+            .await;
+
+        match decision {
+            RouterDecision::Simple { response, .. } => {
+                assert!(!response.trim().is_empty());
+            }
+            other => panic!("expected Simple response, got {:?}", other),
+        }
     }
 }

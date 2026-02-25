@@ -5,20 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="DoWhiz user guide for setup, commands, and workflows. Learn to email digital employees, share files, and get results fast."
+      content="DoWhiz user guide for multi-channel triggers, tool-native execution, and shared memory across email, chat, GitHub, and shared workspaces."
     />
     <link rel="icon" type="image/svg+xml" href="/do-whiz-mark.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
+    <link rel="canonical" href="https://dowhiz.com/user-guide/" />
     <link rel="stylesheet" href="/legal.css" />
     <script src="/theme.js"></script>
-    <title>DoWhiz User Guide | Setup, Commands, and Workflows</title>
+    <title>DoWhiz User Guide | Multi-Channel Triggers and Shared Memory</title>
   </head>
   <body>
     <div class="page">
       <header class="page-header">
         <a class="brand" href="/">Do<span class="accent">Whiz</span></a>
         <nav class="header-links">
+          <a href="/integrations/">Integrations</a>
+          <a href="/trust-safety/">Trust &amp; Safety</a>
           <a href="/privacy/">Privacy</a>
           <a href="/terms/">Terms</a>
           <a href="mailto:admin@dowhiz.com">Contact</a>
@@ -28,93 +31,118 @@
       <main>
         <section class="legal-hero">
           <div class="eyebrow">User Guide</div>
-          <h1>Work with your digital employees in minutes.</h1>
+          <h1>Trigger DoWhiz from anywhere you work.</h1>
           <p class="lead">
-            DoWhiz delivers a team of digital employees you can message directly. Today, the
-            simplest way to start is email. Soon, you will be able to reach the team by other
-            channels as well.
+            DoWhiz is a multi-channel, tool-native digital employee team. Start from email, chat,
+            GitHub issues, or shared document comments. Agents execute in the right tools and return
+            results with shared memory across channels.
           </p>
-          <div class="updated">Last updated: February 14, 2026</div>
+          <div class="updated">Last updated: February 25, 2026</div>
         </section>
 
         <section class="legal-card">
-          <h2>1. Pick the right employee</h2>
-          <p>Send your request to the teammate that matches the work you need done.</p>
+          <h2>1. Choose the right digital employee</h2>
+          <p>Route work to the specialist that matches the task.</p>
           <ul>
             <li>Oliver (Generalist): oliver@dowhiz.com</li>
             <li>Maggie (TPM): maggie@dowhiz.com</li>
             <li>Devin (Coder): devin@dowhiz.com</li>
             <li>Lumio (CEO): lumio@dowhiz.com</li>
-            <li>Claw (OpenClaw): claw@dowhiz.com</li>
+            <li>Claw (Workflow Specialist): claw@dowhiz.com</li>
             <li>Jeffery (DeepTutor): jeffery@dowhiz.com</li>
             <li>Anna (Role TBD): anna@dowhiz.com</li>
-            <li>Rachel (GTM): rachel@dowhiz.com</li>
+            <li>Rachel (GTM Specialist): rachel@dowhiz.com</li>
           </ul>
         </section>
 
         <section class="legal-card">
-          <h2>2. Write a clear request</h2>
-          <p>Great requests lead to great outcomes. Include:</p>
+          <h2>2. Trigger methods</h2>
           <ul>
-            <li>Your goal and preferred format (bullet list, doc, spreadsheet, code, and so on).</li>
-            <li>Important context, constraints, and background links.</li>
-            <li>Deadlines or time sensitivity.</li>
-            <li>Any examples or style references you want matched.</li>
+            <li><strong>Email an agent:</strong> Include context and attachments directly in the thread.</li>
+            <li><strong>Message or mention in Slack/Discord:</strong> Ask for work in-channel and keep delivery in-channel.</li>
+            <li><strong>Create a GitHub issue:</strong> Assign an agent to ship the task with implementation notes.</li>
+            <li><strong>@mention in Google Docs/Notion comments:</strong> Ask for edits, summaries, or structured follow-ups in shared workspaces.</li>
           </ul>
         </section>
 
         <section class="legal-card">
-          <h2>3. Share files and sources</h2>
+          <h2>3. Shared memory and agent coordination</h2>
           <p>
-            Attach files, data, or links directly in your message. DoWhiz will use them to complete
-            the work and send results back to you in the same thread.
+            DoWhiz keeps per-user shared memory across surfaces, so context from one channel carries to
+            the next. Agents can coordinate handoffs (for example, Oliver to Maggie to Rachel) without
+            losing your goals, constraints, or prior decisions.
           </p>
         </section>
 
         <section class="legal-card">
-          <h2>4. What happens next</h2>
-          <ul>
-            <li>Your message is triaged and routed to the right tools.</li>
-            <li>Work is executed with the necessary context and data.</li>
-            <li>Results are returned to your inbox with clear next steps.</li>
-          </ul>
-        </section>
-
-        <section class="legal-card">
-          <h2>5. Scheduling and follow-ups</h2>
+          <h2>4. Access and permissions</h2>
           <p>
-            If you need recurring work, describe the cadence and expectations (for example, weekly
-            reports every Monday). DoWhiz will confirm scheduling details before proceeding.
+            You do not give DoWhiz your personal credentials. Agents use agent-owned accounts and only
+            access workspaces or integrations when you explicitly grant permission.
           </p>
         </section>
 
         <section class="legal-card">
-          <h2>6. Support and feedback</h2>
+          <h2>5. Request templates by surface</h2>
+          <h3>Email template</h3>
+          <ul>
+            <li>"Devin: implement this issue scope, add tests, and reply with PR + rollout notes."</li>
+            <li>"Oliver: turn the attached notes into a one-page memo and exec summary."</li>
+          </ul>
+          <h3>Slack/Discord template</h3>
+          <ul>
+            <li>"@Maggie summarize this thread, assign owners, and post today's status."</li>
+            <li>"@Rachel draft launch copy variants for LinkedIn + X + Product Hunt."</li>
+          </ul>
+          <h3>GitHub issue template</h3>
+          <ul>
+            <li>"Assign Devin: fix bug, add regression test, and post a concise technical summary."</li>
+            <li>"Assign Claw: triage this issue set and propose routing + sequencing."</li>
+          </ul>
+          <h3>Google Docs / Notion comment template</h3>
+          <ul>
+            <li>"@Maggie convert this section into action items with owners and due dates."</li>
+            <li>"@Jeffery summarize this document and extract key decisions + open questions."</li>
+          </ul>
+        </section>
+
+        <section class="legal-card">
+          <h2>6. What happens after you trigger</h2>
+          <ul>
+            <li>Requests are routed to the best-fit agent and tools.</li>
+            <li>Execution happens with explicit permissions and tracked context.</li>
+            <li>You receive results where the request started, plus next steps.</li>
+            <li>Shared memory updates so follow-up requests stay aligned.</li>
+          </ul>
+        </section>
+
+        <section class="legal-card">
+          <h2>7. Support</h2>
           <p>
-            If something is unclear or incomplete, reply in the same thread. For general questions
-            or support, email admin@dowhiz.com.
+            Reply in the same channel if you need revisions. For account, integrations, or access
+            help, contact admin@dowhiz.com.
           </p>
         </section>
 
         <section class="legal-card">
           <h2>Related resources</h2>
-          <p class="related-intro">Keep exploring to understand the service and meet key specialists.</p>
+          <p class="related-intro">Learn the access model and see trigger surfaces in detail.</p>
           <div class="related-grid">
+            <a class="related-item" href="/integrations/">
+              <span class="related-item-title">Integrations</span>
+              <span class="related-item-desc">Supported trigger surfaces and delivery outcomes.</span>
+            </a>
+            <a class="related-item" href="/trust-safety/">
+              <span class="related-item-title">Trust &amp; Safety</span>
+              <span class="related-item-desc">Isolation, permissions, and data handling basics.</span>
+            </a>
             <a class="related-item" href="/privacy/">
               <span class="related-item-title">Privacy policy</span>
-              <span class="related-item-desc">How we collect and protect your data.</span>
+              <span class="related-item-desc">How data is collected, used, and retained.</span>
             </a>
             <a class="related-item" href="/terms/">
               <span class="related-item-title">Terms of Service</span>
-              <span class="related-item-desc">Usage expectations and account responsibilities.</span>
-            </a>
-            <a class="related-item" href="/agents/oliver/">
-              <span class="related-item-title">Meet Oliver</span>
-              <span class="related-item-desc">Generalist who turns notes into clear deliverables.</span>
-            </a>
-            <a class="related-item" href="/agents/devin/">
-              <span class="related-item-title">Meet Devin</span>
-              <span class="related-item-desc">Coder who ships fixes and reviews code.</span>
+              <span class="related-item-desc">Usage expectations and responsibilities.</span>
             </a>
           </div>
         </section>

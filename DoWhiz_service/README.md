@@ -632,7 +632,7 @@ docker run --rm --entrypoint bash --user 10001:10001 \
 { \"browser\": { \"browserName\": \"chromium\", \"userDataDir\": \"/workspace/tmp/playwright-user-data\", \"launchOptions\": { \"channel\": \"chrome\", \"chromiumSandbox\": false } } }
 EOF
     codex exec --skip-git-repo-check \
-      -m gpt-5.2-codex \
+      -m gpt-5.3-codex \
       -c model_provider=\"azure\" \
       -c web_search=\"live\" \
       -c ask_for_approval=\"never\" \
@@ -1015,9 +1015,11 @@ The service includes a lightweight message router that can answer simple queries
 ### Configuration
 
 Environment variables:
-- `OPENAI_API_KEY`: Required to enable routing
+- `AZURE_OPENAI_API_KEY_BACKUP`: Azure OpenAI key (preferred when paired with endpoint)
+- `AZURE_OPENAI_ENDPOINT_BACKUP`: Azure OpenAI endpoint (base URL; `/openai/v1` auto-appended if missing)
+- `OPENAI_API_KEY`: Required to enable routing when Azure vars are not set
 - `OPENAI_API_URL`: Override OpenAI base URL (default: `https://api.openai.com/v1`)
-- `ROUTER_MODEL`: Model name (default: `gpt-5`)
+- `ROUTER_MODEL`: Model name (default: `gpt-5.2`)
 - `ROUTER_ENABLED`: Set to `"false"` to disable routing (default: enabled)
 
 ### How it works
@@ -1078,7 +1080,7 @@ This reduces API costs and latency for simple interactions while preserving full
 ### Codex (OpenAI)
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CODEX_MODEL` | `gpt-5.2-codex` (fixed) | Model name (overrides ignored) |
+| `CODEX_MODEL` | `gpt-5.3-codex` (fixed) | Model name (overrides ignored) |
 | `CODEX_DISABLED` | `0` | Set to `1` to bypass Codex CLI |
 | `CODEX_SANDBOX` | `workspace-write` (fixed) | Sandbox mode (overrides ignored) |
 | `CODEX_BYPASS_SANDBOX` | `0` | Set to `1` to pass `--yolo` (bypass approvals/sandbox) |
@@ -1195,7 +1197,9 @@ This reduces API costs and latency for simple interactions while preserving full
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ROUTER_ENABLED` | `true` | Set to `false` to disable |
-| `ROUTER_MODEL` | `gpt-5` | Model name |
+| `ROUTER_MODEL` | `gpt-5.2` | Model name |
+| `AZURE_OPENAI_API_KEY_BACKUP` | - | Azure OpenAI key (preferred) |
+| `AZURE_OPENAI_ENDPOINT_BACKUP` | - | Azure OpenAI base URL |
 | `OPENAI_API_KEY` | - | Required to enable routing |
 | `OPENAI_API_URL` | `https://api.openai.com/v1` | OpenAI base URL |
 

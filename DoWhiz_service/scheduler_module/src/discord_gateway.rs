@@ -22,7 +22,10 @@ use crate::index_store::IndexStore;
 use crate::memory_diff::{MemoryDiff, SectionChange};
 use crate::memory_queue::{global_memory_queue, MemoryWriteRequest};
 use crate::message_router::{MessageRouter, RouterDecision};
-use crate::service::ServiceConfig;
+use crate::service::{
+    build_discord_message_text_with_quote, build_discord_router_context,
+    hydrate_discord_context_files, persist_discord_ingest_context, ServiceConfig,
+};
 use crate::user_store::UserStore;
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
 
@@ -178,10 +181,26 @@ impl EventHandler for DiscordEventHandler {
                 }
             };
 
+            let employee_name = self.state.config.employee_profile.display_name.as_deref();
+            let router_context =
+                match build_discord_router_context(&self.state.config, &inbound, &inbound.raw_payload) {
+                    Ok(context) => Some(context),
+                    Err(err) => {
+                        warn!("Failed to build Discord router context: {}", err);
+                        None
+                    }
+                };
+            let router_message = router_context
+                .as_ref()
+                .map(|context| context.message.as_str())
+                .unwrap_or(text);
+            let extra_context = router_context
+                .as_ref()
+                .map(|context| context.context.as_str());
             match self
                 .state
                 .message_router
-                .classify(text, memory.as_deref())
+                .classify(router_message, memory.as_deref(), employee_name, extra_context)
                 .await
             {
                 RouterDecision::Simple {
@@ -226,6 +245,16 @@ impl EventHandler for DiscordEventHandler {
                     {
                         error!("failed to send quick Discord response: {}", e);
                     }
+
+                    if let Err(err) = persist_discord_ingest_context(
+                        &self.state.config,
+                        &self.state.user_store,
+                        &inbound,
+                        &inbound.raw_payload,
+                        router_context.as_ref().map(|context| &context.snapshot),
+                    ) {
+                        warn!("Failed to persist Discord context after quick reply: {}", err);
+                    }
                     return;
                 }
                 RouterDecision::Complex => {
@@ -250,7 +279,7 @@ fn process_discord_message(
     message: &crate::channel::InboundMessage,
     raw_msg: &Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use crate::service::{bump_thread_state, default_thread_state_path};
+    use crate::service::{bump_thread_state, default_thread_state_path, ensure_thread_workspace};
 
     let config = &state.config;
     let index_store = &state.index_store;
@@ -268,18 +297,20 @@ fn process_discord_message(
         .map(|id| id.to_string())
         .unwrap_or_else(|| "dm".to_string());
 
-    // Set up guild-based paths
-    let guild_paths = DiscordGuildPaths::new(&config.workspace_root, &guild_id);
-    guild_paths.ensure_dirs()?;
-
     // Thread key for conversation grouping
     let thread_key = format!("discord:{}:{}:{}", guild_id, channel_id, message.thread_id);
 
-    // Create/get workspace for this channel conversation
-    let workspace = ensure_discord_workspace(
-        &guild_paths,
-        channel_id,
-        &message.thread_id,
+    let user = state
+        .user_store
+        .get_or_create_user("discord", &message.sender)?;
+    let user_paths = state.user_store.user_paths(&config.users_root, &user.user_id);
+    state.user_store.ensure_user_dirs(&user_paths)?;
+
+    // Create/get workspace for this user thread
+    let workspace = ensure_thread_workspace(
+        &user_paths,
+        &user.user_id,
+        &thread_key,
         &config.employee_profile,
         config.skills_source_dir.as_deref(),
     )?;
@@ -291,6 +322,19 @@ fn process_discord_message(
 
     // Save the incoming Discord message to workspace
     append_discord_message(&workspace, message, raw_msg, thread_state.last_email_seq)?;
+    if let Err(err) = hydrate_discord_context_files(
+        config,
+        &workspace,
+        message,
+        &message.raw_payload,
+        thread_state.last_email_seq,
+    ) {
+        warn!(
+            "failed to hydrate discord context files for {}: {}",
+            workspace.display(),
+            err
+        );
+    }
 
     // Determine model and runner
     let model_name = match config.employee_profile.model.clone() {
@@ -326,9 +370,10 @@ fn process_discord_message(
         model_name,
         runner: config.employee_profile.runner.clone(),
         codex_disabled: config.codex_disabled,
-        reply_to: vec![channel_id.to_string()],
+        // reply_to[0] = user_id (for account lookup), reply_to[1] = channel_id
+        reply_to: vec![message.sender.clone(), channel_id.to_string()],
         reply_from: None,
-        archive_root: None, // Discord doesn't need mail archiving
+        archive_root: Some(user_paths.mail_root.clone()),
         thread_id: Some(thread_key.clone()),
         thread_epoch: Some(thread_state.epoch),
         thread_state_path: Some(thread_state_path.clone()),
@@ -337,8 +382,8 @@ fn process_discord_message(
         employee_id: Some(config.employee_id.clone()),
     };
 
-    // Schedule the task using guild-based scheduler
-    let mut scheduler = Scheduler::load(&guild_paths.tasks_db_path, ModuleExecutor::default())?;
+    // Schedule the task using user-based scheduler
+    let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
     if let Err(err) =
         crate::service::cancel_pending_thread_tasks(&mut scheduler, &workspace, thread_state.epoch)
     {
@@ -350,12 +395,12 @@ fn process_discord_message(
     }
     let task_id = scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
 
-    // Sync to index_store using synthetic user_id
-    let synthetic_user_id = DiscordGuildPaths::user_id(&guild_id);
-    index_store.sync_user_tasks(&synthetic_user_id, scheduler.tasks())?;
+    // Sync to index_store using real user_id
+    index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
 
     info!(
-        "scheduler tasks enqueued guild={} task_id={} message_id={:?} workspace={} thread_epoch={}",
+        "scheduler tasks enqueued user_id={} guild={} task_id={} message_id={:?} workspace={} thread_epoch={}",
+        user.user_id,
         guild_id,
         task_id,
         message.message_id,
@@ -419,65 +464,6 @@ async fn send_quick_discord_response(
     Ok(())
 }
 
-/// Create or get a workspace for a Discord channel conversation.
-fn ensure_discord_workspace(
-    guild_paths: &DiscordGuildPaths,
-    channel_id: u64,
-    thread_id: &str,
-    employee_profile: &crate::employee_config::EmployeeProfile,
-    skills_source_dir: Option<&Path>,
-) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
-    // Workspace path: {guild_root}/workspaces/{channel_id}/{thread_hash}/
-    let thread_hash = &md5::compute(thread_id.as_bytes())
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>()[..8];
-
-    let workspace = guild_paths
-        .workspaces_root
-        .join(channel_id.to_string())
-        .join(thread_hash);
-
-    if !workspace.exists() {
-        fs::create_dir_all(&workspace)?;
-
-        // Create standard workspace directories
-        fs::create_dir_all(workspace.join("incoming_email"))?;
-        fs::create_dir_all(workspace.join("incoming_attachments"))?;
-        fs::create_dir_all(workspace.join("memory"))?;
-        fs::create_dir_all(workspace.join("references"))?;
-
-        // Copy employee config files if available
-        if let Some(agents_path) = &employee_profile.agents_path {
-            if agents_path.exists() {
-                fs::copy(agents_path, workspace.join("AGENTS.md"))?;
-            }
-        }
-        if let Some(claude_path) = &employee_profile.claude_path {
-            if claude_path.exists() {
-                fs::copy(claude_path, workspace.join("CLAUDE.md"))?;
-            }
-        }
-        if let Some(soul_path) = &employee_profile.soul_path {
-            if soul_path.exists() {
-                fs::copy(soul_path, workspace.join("SOUL.md"))?;
-            }
-        }
-
-        // Copy skills if available
-        if let Some(skills_dir) = skills_source_dir {
-            let dest_skills = workspace.join("skills");
-            if skills_dir.exists() && !dest_skills.exists() {
-                crate::service::copy_dir_recursive(skills_dir, &dest_skills)?;
-            }
-        }
-
-        info!("created Discord workspace at {}", workspace.display());
-    }
-
-    Ok(workspace)
-}
-
 /// Save an incoming Discord message to the workspace.
 fn append_discord_message(
     workspace: &Path,
@@ -513,7 +499,7 @@ fn append_discord_message(
 
     // Save message text as a simple text file
     let text_path = incoming_dir.join(format!("{:05}_discord_message.txt", seq));
-    let text_content = message.text_body.clone().unwrap_or_default();
+    let text_content = build_discord_message_text_with_quote(message, &message.raw_payload);
     fs::write(&text_path, &text_content)?;
 
     // Create a metadata file with sender info

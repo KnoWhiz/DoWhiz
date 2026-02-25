@@ -175,7 +175,7 @@ impl ServiceConfig {
                 .to_string_lossy()
                 .into_owned()
         }))?;
-        let codex_model = env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string());
+        let codex_model = env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.3-codex".to_string());
         let codex_disabled = env_flag("CODEX_DISABLED", false);
         let scheduler_poll_interval = env::var("SCHEDULER_POLL_INTERVAL_SECS")
             .ok()

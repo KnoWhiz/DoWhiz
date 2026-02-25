@@ -7,8 +7,8 @@ use support::{
     build_params, create_workspace, write_fake_codex, EnvGuard, FakeCodexMode, TempDir, ENV_MUTEX,
 };
 
-const EXPECTED_CODEX_BLOCK: &str = r#"# IMPORTANT: Use your Azure *deployment name* here (e.g., "gpt-5.2-codex")
-model = "gpt-5.2-codex"
+const EXPECTED_CODEX_BLOCK: &str = r#"# IMPORTANT: Use your Azure *deployment name* here (e.g., "gpt-5.3-codex")
+model = "gpt-5.3-codex"
 model_provider = "azure"
 model_reasoning_effort = "xhigh"
 web_search = "live"
@@ -78,7 +78,7 @@ value = "still"
     let updated = fs::read_to_string(&config_path).unwrap();
     assert!(updated.contains("value = \"keep\""));
     assert!(updated.contains("value = \"still\""));
-    assert!(updated.contains("model = \"gpt-5.2-codex\""));
+    assert!(updated.contains("model = \"gpt-5.3-codex\""));
     assert!(!updated.contains("model = \"old-model\""));
     assert!(!updated.contains("model = \"override-model\""));
     assert!(updated.contains(

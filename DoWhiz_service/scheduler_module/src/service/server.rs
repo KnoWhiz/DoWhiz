@@ -69,6 +69,13 @@ pub async fn run_server(
         config.employee_id
     );
 
+    // Create account store (used by both auth routes and ingestion for user task sync)
+    let account_store = Arc::new(
+        task::spawn_blocking(AccountStore::from_env)
+            .await
+            .map_err(|err| -> BoxError { err.into() })??,
+    );
+
     let mut ingestion_control = spawn_ingestion_consumer(
         config.clone(),
         ingestion_queue.clone(),
@@ -76,19 +83,13 @@ pub async fn run_server(
         index_store.clone(),
         slack_store.clone(),
         message_router.clone(),
+        account_store.clone(),
     )?;
 
     let state = AppState {
         config: config.clone(),
         slack_store,
     };
-
-    // Create account store for auth routes
-    let account_store = Arc::new(
-        task::spawn_blocking(AccountStore::from_env)
-            .await
-            .map_err(|err| -> BoxError { err.into() })??,
-    );
     let supabase_url = std::env::var("SUPABASE_PROJECT_URL")
         .unwrap_or_else(|_| "https://resmseutzmwumflevfqw.supabase.co".to_string());
     let blob_store = get_blob_store();
@@ -118,6 +119,8 @@ pub async fn run_server(
         slack_client_secret,
         slack_redirect_uri,
         frontend_url,
+        user_store: Some(user_store.clone()),
+        users_root: Some(config.users_root.clone()),
     };
 
     let host: IpAddr = config

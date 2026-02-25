@@ -1,5 +1,6 @@
 mod bluebubbles;
 mod discord;
+mod discord_context;
 mod google_docs;
 mod google_workspace;
 mod quick_responses;
@@ -10,6 +11,10 @@ mod whatsapp;
 
 pub(super) use bluebubbles::process_bluebubbles_event;
 pub(super) use discord::process_discord_inbound_message;
+pub(crate) use discord::persist_discord_ingest_context;
+pub(crate) use discord_context::build_discord_router_context;
+pub(crate) use discord_context::build_discord_message_text_with_quote;
+pub(crate) use discord_context::hydrate_discord_context_files;
 pub(super) use google_docs::process_google_docs_message;
 pub(super) use google_workspace::process_google_workspace_message;
 pub(super) use quick_responses::{
