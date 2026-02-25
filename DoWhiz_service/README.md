@@ -1012,9 +1012,11 @@ The service includes a lightweight message router that can answer simple queries
 ### Configuration
 
 Environment variables:
-- `OPENAI_API_KEY`: Required to enable routing
+- `AZURE_OPENAI_API_KEY_BACKUP`: Azure OpenAI key (preferred when paired with endpoint)
+- `AZURE_OPENAI_ENDPOINT_BACKUP`: Azure OpenAI endpoint (base URL; `/openai/v1` auto-appended if missing)
+- `OPENAI_API_KEY`: Required to enable routing when Azure vars are not set
 - `OPENAI_API_URL`: Override OpenAI base URL (default: `https://api.openai.com/v1`)
-- `ROUTER_MODEL`: Model name (default: `gpt-5`)
+- `ROUTER_MODEL`: Model name (default: `gpt-5.2`)
 - `ROUTER_ENABLED`: Set to `"false"` to disable routing (default: enabled)
 
 ### How it works
@@ -1192,7 +1194,9 @@ This reduces API costs and latency for simple interactions while preserving full
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ROUTER_ENABLED` | `true` | Set to `false` to disable |
-| `ROUTER_MODEL` | `gpt-5` | Model name |
+| `ROUTER_MODEL` | `gpt-5.2` | Model name |
+| `AZURE_OPENAI_API_KEY_BACKUP` | - | Azure OpenAI key (preferred) |
+| `AZURE_OPENAI_ENDPOINT_BACKUP` | - | Azure OpenAI base URL |
 | `OPENAI_API_KEY` | - | Required to enable routing |
 | `OPENAI_API_URL` | `https://api.openai.com/v1` | OpenAI base URL |
 
