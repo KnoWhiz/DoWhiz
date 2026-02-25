@@ -11,6 +11,7 @@ use azure_messaging_servicebus::service_bus::{
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
+use crate::env_alias::var_with_scale_oliver;
 use crate::ingestion::IngestionEnvelope;
 use crate::ingestion_queue::{EnqueueResult, IngestionQueue, IngestionQueueError, QueuedEnvelope};
 
@@ -201,15 +202,15 @@ fn map_service_bus_error(err: AzureError) -> IngestionQueueError {
 }
 
 pub fn resolve_service_bus_config_from_env() -> Result<ServiceBusConfig, IngestionQueueError> {
-    if let Ok(conn_str) = env::var("SERVICE_BUS_CONNECTION_STRING") {
+    if let Some(conn_str) = var_with_scale_oliver("SERVICE_BUS_CONNECTION_STRING") {
         let parts = parse_service_bus_connection_string(&conn_str)?;
-        let queue_name = env::var("SERVICE_BUS_QUEUE_NAME")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
+        let queue_name = var_with_scale_oliver("SERVICE_BUS_QUEUE_NAME")
             .or(parts.entity_path)
             .ok_or_else(|| {
-                IngestionQueueError::Config("missing SERVICE_BUS_QUEUE_NAME".to_string())
+                IngestionQueueError::Config(
+                    "missing SCALE_OLIVER_SERVICE_BUS_QUEUE_NAME/SERVICE_BUS_QUEUE_NAME"
+                        .to_string(),
+                )
             })?;
         let timeout_secs = resolve_i64_env("SERVICE_BUS_PEEK_LOCK_TIMEOUT_SECS", 30);
         return Ok(ServiceBusConfig {
@@ -221,14 +222,26 @@ pub fn resolve_service_bus_config_from_env() -> Result<ServiceBusConfig, Ingesti
         });
     }
 
-    let namespace = env::var("SERVICE_BUS_NAMESPACE")
-        .map_err(|_| IngestionQueueError::Config("missing SERVICE_BUS_NAMESPACE".to_string()))?;
-    let policy_name = env::var("SERVICE_BUS_POLICY_NAME")
-        .map_err(|_| IngestionQueueError::Config("missing SERVICE_BUS_POLICY_NAME".to_string()))?;
-    let policy_key = env::var("SERVICE_BUS_POLICY_KEY")
-        .map_err(|_| IngestionQueueError::Config("missing SERVICE_BUS_POLICY_KEY".to_string()))?;
-    let queue_name = env::var("SERVICE_BUS_QUEUE_NAME")
-        .map_err(|_| IngestionQueueError::Config("missing SERVICE_BUS_QUEUE_NAME".to_string()))?;
+    let namespace = var_with_scale_oliver("SERVICE_BUS_NAMESPACE").ok_or_else(|| {
+        IngestionQueueError::Config(
+            "missing SCALE_OLIVER_SERVICE_BUS_NAMESPACE/SERVICE_BUS_NAMESPACE".to_string(),
+        )
+    })?;
+    let policy_name = var_with_scale_oliver("SERVICE_BUS_POLICY_NAME").ok_or_else(|| {
+        IngestionQueueError::Config(
+            "missing SCALE_OLIVER_SERVICE_BUS_POLICY_NAME/SERVICE_BUS_POLICY_NAME".to_string(),
+        )
+    })?;
+    let policy_key = var_with_scale_oliver("SERVICE_BUS_POLICY_KEY").ok_or_else(|| {
+        IngestionQueueError::Config(
+            "missing SCALE_OLIVER_SERVICE_BUS_POLICY_KEY/SERVICE_BUS_POLICY_KEY".to_string(),
+        )
+    })?;
+    let queue_name = var_with_scale_oliver("SERVICE_BUS_QUEUE_NAME").ok_or_else(|| {
+        IngestionQueueError::Config(
+            "missing SCALE_OLIVER_SERVICE_BUS_QUEUE_NAME/SERVICE_BUS_QUEUE_NAME".to_string(),
+        )
+    })?;
     let timeout_secs = resolve_i64_env("SERVICE_BUS_PEEK_LOCK_TIMEOUT_SECS", 30);
     Ok(ServiceBusConfig {
         namespace,

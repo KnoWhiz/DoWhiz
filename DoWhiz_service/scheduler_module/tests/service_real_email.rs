@@ -102,6 +102,20 @@ fn load_env_from_repo() {
     }
 }
 
+fn env_with_scale_oliver(key: &str) -> Option<String> {
+    let prefixed = format!("SCALE_OLIVER_{key}");
+    env::var(prefixed)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            env::var(key)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+}
+
 struct HookRestore {
     token: String,
     previous_hook: String,
@@ -223,8 +237,8 @@ fn spawn_gateway(
 
     let child = Command::new(gateway_bin)
         .env("GATEWAY_CONFIG_PATH", gateway_config_path)
-        .env("INGESTION_QUEUE_BACKEND", "servicebus")
-        .env("RAW_PAYLOAD_STORAGE_BACKEND", "azure")
+        .env("SCALE_OLIVER_INGESTION_QUEUE_BACKEND", "servicebus")
+        .env("SCALE_OLIVER_RAW_PAYLOAD_STORAGE_BACKEND", "azure")
         .env("EMPLOYEE_CONFIG_PATH", employee_config_path)
         .env("GATEWAY_HOST", host)
         .env("GATEWAY_PORT", port.to_string())
@@ -545,42 +559,32 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
     };
 
     dotenvy::dotenv().ok();
-    let _service_bus_connection = match env::var("SERVICE_BUS_CONNECTION_STRING") {
-        Ok(value) if !value.trim().is_empty() => value,
-        _ => {
+    let _service_bus_connection = match env_with_scale_oliver("SERVICE_BUS_CONNECTION_STRING") {
+        Some(value) => value,
+        None => {
             eprintln!(
-                "Skipping live test: SERVICE_BUS_CONNECTION_STRING required for Service Bus ingestion."
+                "Skipping live test: SCALE_OLIVER_SERVICE_BUS_CONNECTION_STRING or SERVICE_BUS_CONNECTION_STRING required for Service Bus ingestion."
             );
             return Ok(());
         }
     };
-    let azure_container = env::var("AZURE_STORAGE_CONTAINER_INGEST")
-        .ok()
-        .filter(|value| !value.trim().is_empty());
-    let azure_sas_url = env::var("AZURE_STORAGE_CONTAINER_SAS_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty());
-    let azure_sas_token = env::var("AZURE_STORAGE_SAS_TOKEN")
-        .ok()
-        .filter(|value| !value.trim().is_empty());
-    let azure_account = env::var("AZURE_STORAGE_ACCOUNT")
-        .ok()
-        .filter(|value| !value.trim().is_empty());
-    let azure_conn_str = env::var("AZURE_STORAGE_CONNECTION_STRING_INGEST")
-        .ok()
-        .filter(|value| !value.trim().is_empty());
+    let azure_container = env_with_scale_oliver("AZURE_STORAGE_CONTAINER_INGEST");
+    let azure_sas_url = env_with_scale_oliver("AZURE_STORAGE_CONTAINER_SAS_URL");
+    let azure_sas_token = env_with_scale_oliver("AZURE_STORAGE_SAS_TOKEN");
+    let azure_account = env_with_scale_oliver("AZURE_STORAGE_ACCOUNT");
+    let azure_conn_str = env_with_scale_oliver("AZURE_STORAGE_CONNECTION_STRING_INGEST");
     let has_azure_blob = azure_container.is_some()
         && (azure_sas_url.is_some()
             || (azure_sas_token.is_some()
                 && (azure_account.is_some() || azure_conn_str.is_some())));
     if !has_azure_blob {
         eprintln!(
-            "Skipping live test: Azure Blob SAS configuration is required (AZURE_STORAGE_CONTAINER_SAS_URL or AZURE_STORAGE_CONTAINER_INGEST + AZURE_STORAGE_SAS_TOKEN + AZURE_STORAGE_ACCOUNT/AZURE_STORAGE_CONNECTION_STRING_INGEST)."
+            "Skipping live test: Azure Blob SAS configuration is required (SCALE_OLIVER_AZURE_STORAGE_CONTAINER_SAS_URL or SCALE_OLIVER_AZURE_STORAGE_CONTAINER_INGEST + SCALE_OLIVER_AZURE_STORAGE_SAS_TOKEN + SCALE_OLIVER_AZURE_STORAGE_ACCOUNT/SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING_INGEST)."
         );
         return Ok(());
     }
-    env::set_var("INGESTION_QUEUE_BACKEND", "servicebus");
-    env::set_var("RAW_PAYLOAD_STORAGE_BACKEND", "azure");
+    env::set_var("SCALE_OLIVER_INGESTION_QUEUE_BACKEND", "servicebus");
+    env::set_var("SCALE_OLIVER_RAW_PAYLOAD_STORAGE_BACKEND", "azure");
     let temp = TempDir::new()?;
     let workspace_root = temp.path().join("workspaces");
     let state_dir = temp.path().join("state");

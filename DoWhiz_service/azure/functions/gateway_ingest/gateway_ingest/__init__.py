@@ -84,6 +84,16 @@ def normalize_email(value: str) -> str:
     return value.strip().lower()
 
 
+def env_with_scale_oliver(name: str) -> Optional[str]:
+    prefixed = os.getenv(f"SCALE_OLIVER_{name}")
+    if prefixed and prefixed.strip():
+        return prefixed.strip()
+    raw = os.getenv(name)
+    if raw and raw.strip():
+        return raw.strip()
+    return None
+
+
 def normalize_phone(value: str) -> str:
     return "".join(ch for ch in value if ch.isdigit() or ch == "+")
 
@@ -167,12 +177,12 @@ def find_service_address(payload: Dict[str, Any], service_addresses: set) -> Opt
 
 
 def resolve_container_sas_url() -> str:
-    sas_url = os.getenv("AZURE_STORAGE_CONTAINER_SAS_URL")
+    sas_url = env_with_scale_oliver("AZURE_STORAGE_CONTAINER_SAS_URL")
     if sas_url:
-        return sas_url.strip()
-    account = os.getenv("AZURE_STORAGE_ACCOUNT") or resolve_account_from_connection_string()
-    container = os.getenv("AZURE_STORAGE_CONTAINER_INGEST")
-    sas_token = os.getenv("AZURE_STORAGE_SAS_TOKEN")
+        return sas_url
+    account = env_with_scale_oliver("AZURE_STORAGE_ACCOUNT") or resolve_account_from_connection_string()
+    container = env_with_scale_oliver("AZURE_STORAGE_CONTAINER_INGEST")
+    sas_token = env_with_scale_oliver("AZURE_STORAGE_SAS_TOKEN")
     if not account or not container or not sas_token:
         raise RuntimeError("Missing Azure storage SAS configuration")
     sas_token = sas_token.lstrip("?")
@@ -180,7 +190,7 @@ def resolve_container_sas_url() -> str:
 
 
 def resolve_account_from_connection_string() -> Optional[str]:
-    conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING_INGEST")
+    conn_str = env_with_scale_oliver("AZURE_STORAGE_CONNECTION_STRING_INGEST")
     if not conn_str:
         return None
     for segment in conn_str.split(";"):
@@ -199,7 +209,7 @@ def build_blob_url(container_sas_url: str, path: str) -> str:
 
 
 def upload_raw_payload(raw_payload: bytes, envelope_id: str, received_at: datetime.datetime) -> str:
-    container = os.getenv("AZURE_STORAGE_CONTAINER_INGEST")
+    container = env_with_scale_oliver("AZURE_STORAGE_CONTAINER_INGEST")
     if not container:
         raise RuntimeError("AZURE_STORAGE_CONTAINER_INGEST is required")
     date_prefix = received_at.strftime("%Y/%m/%d")
@@ -222,11 +232,11 @@ def build_dedupe_key(tenant_id: str, employee_id: str, channel: str, external_id
 
 
 def resolve_queue_name() -> str:
-    return os.getenv("SERVICE_BUS_QUEUE_NAME", "ingestion")
+    return env_with_scale_oliver("SERVICE_BUS_QUEUE_NAME") or "ingestion"
 
 
 def enqueue_message(envelope: Dict[str, Any]) -> None:
-    connection_string = os.getenv("SERVICE_BUS_CONNECTION_STRING")
+    connection_string = env_with_scale_oliver("SERVICE_BUS_CONNECTION_STRING")
     if not connection_string:
         raise RuntimeError("SERVICE_BUS_CONNECTION_STRING is required")
     queue_name = resolve_queue_name()

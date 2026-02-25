@@ -4,6 +4,8 @@ use serde_json::json;
 use std::sync::OnceLock;
 use uuid::Uuid;
 
+use crate::env_alias::var_with_scale_oliver;
+
 const DEFAULT_BUCKET: &str = "ingestion-raw";
 const DEFAULT_PREFIX: &str = "ingestion_raw";
 
@@ -34,40 +36,26 @@ pub fn resolve_storage_bucket() -> String {
 }
 
 fn resolve_raw_payload_backend() -> String {
-    std::env::var("RAW_PAYLOAD_STORAGE_BACKEND")
-        .ok()
-        .map(|value| value.trim().to_ascii_lowercase())
+    var_with_scale_oliver("RAW_PAYLOAD_STORAGE_BACKEND")
+        .map(|value| value.to_ascii_lowercase())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "supabase".to_string())
 }
 
 fn resolve_azure_container() -> Result<String, RawPayloadStoreError> {
-    std::env::var("AZURE_STORAGE_CONTAINER_INGEST")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    var_with_scale_oliver("AZURE_STORAGE_CONTAINER_INGEST")
         .ok_or(RawPayloadStoreError::MissingAzureConfig)
 }
 
 fn resolve_azure_container_sas_url() -> Result<String, RawPayloadStoreError> {
-    if let Ok(url) = std::env::var("AZURE_STORAGE_CONTAINER_SAS_URL") {
-        let trimmed = url.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_string());
-        }
+    if let Some(url) = var_with_scale_oliver("AZURE_STORAGE_CONTAINER_SAS_URL") {
+        return Ok(url);
     }
-    let account = std::env::var("AZURE_STORAGE_ACCOUNT")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    let account = var_with_scale_oliver("AZURE_STORAGE_ACCOUNT")
         .or_else(resolve_account_from_connection_string);
-    let container = std::env::var("AZURE_STORAGE_CONTAINER_INGEST")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    let sas = std::env::var("AZURE_STORAGE_SAS_TOKEN")
-        .ok()
-        .map(|value| value.trim().trim_start_matches('?').to_string())
+    let container = var_with_scale_oliver("AZURE_STORAGE_CONTAINER_INGEST");
+    let sas = var_with_scale_oliver("AZURE_STORAGE_SAS_TOKEN")
+        .map(|value| value.trim_start_matches('?').to_string())
         .filter(|value| !value.is_empty());
     match (account, container, sas) {
         (Some(account), Some(container), Some(sas)) => Ok(format!(
@@ -79,7 +67,7 @@ fn resolve_azure_container_sas_url() -> Result<String, RawPayloadStoreError> {
 }
 
 fn resolve_account_from_connection_string() -> Option<String> {
-    let conn_str = std::env::var("AZURE_STORAGE_CONNECTION_STRING_INGEST").ok()?;
+    let conn_str = var_with_scale_oliver("AZURE_STORAGE_CONNECTION_STRING_INGEST")?;
     parse_connection_string_kv(&conn_str, "AccountName")
 }
 
@@ -494,8 +482,7 @@ mod tests {
     fn azure_upload_download_roundtrip() {
         let _guard = lock_env();
         dotenvy::dotenv().ok();
-        let backend =
-            std::env::var("RAW_PAYLOAD_STORAGE_BACKEND").unwrap_or_else(|_| "supabase".to_string());
+        let backend = resolve_raw_payload_backend();
         if backend.trim().to_ascii_lowercase() != "azure" {
             eprintln!("RAW_PAYLOAD_STORAGE_BACKEND is not azure; skipping.");
             return;
@@ -517,13 +504,29 @@ mod tests {
         let original_sas = env::var("AZURE_STORAGE_SAS_TOKEN").ok();
         let original_conn = env::var("AZURE_STORAGE_CONNECTION_STRING_INGEST").ok();
         let original_container_sas_url = env::var("AZURE_STORAGE_CONTAINER_SAS_URL").ok();
+        let original_prefixed_account = env::var("SCALE_OLIVER_AZURE_STORAGE_ACCOUNT").ok();
+        let original_prefixed_container =
+            env::var("SCALE_OLIVER_AZURE_STORAGE_CONTAINER_INGEST").ok();
+        let original_prefixed_sas = env::var("SCALE_OLIVER_AZURE_STORAGE_SAS_TOKEN").ok();
+        let original_prefixed_conn =
+            env::var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING_INGEST").ok();
+        let original_prefixed_container_sas_url =
+            env::var("SCALE_OLIVER_AZURE_STORAGE_CONTAINER_SAS_URL").ok();
 
         env::remove_var("AZURE_STORAGE_ACCOUNT");
+        env::remove_var("SCALE_OLIVER_AZURE_STORAGE_ACCOUNT");
         env::set_var("AZURE_STORAGE_CONTAINER_INGEST", "ingestion-raw");
+        env::set_var("SCALE_OLIVER_AZURE_STORAGE_CONTAINER_INGEST", "ingestion-raw");
         env::set_var("AZURE_STORAGE_SAS_TOKEN", "sig=test");
+        env::set_var("SCALE_OLIVER_AZURE_STORAGE_SAS_TOKEN", "sig=test");
         env::remove_var("AZURE_STORAGE_CONTAINER_SAS_URL");
+        env::remove_var("SCALE_OLIVER_AZURE_STORAGE_CONTAINER_SAS_URL");
         env::set_var(
             "AZURE_STORAGE_CONNECTION_STRING_INGEST",
+            "DefaultEndpointsProtocol=https;AccountName=testaccount;AccountKey=key;EndpointSuffix=core.windows.net",
+        );
+        env::set_var(
+            "SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING_INGEST",
             "DefaultEndpointsProtocol=https;AccountName=testaccount;AccountKey=key;EndpointSuffix=core.windows.net",
         );
 
@@ -537,21 +540,41 @@ mod tests {
             Some(value) => env::set_var("AZURE_STORAGE_ACCOUNT", value),
             None => env::remove_var("AZURE_STORAGE_ACCOUNT"),
         }
+        match original_prefixed_account {
+            Some(value) => env::set_var("SCALE_OLIVER_AZURE_STORAGE_ACCOUNT", value),
+            None => env::remove_var("SCALE_OLIVER_AZURE_STORAGE_ACCOUNT"),
+        }
         match original_container {
             Some(value) => env::set_var("AZURE_STORAGE_CONTAINER_INGEST", value),
             None => env::remove_var("AZURE_STORAGE_CONTAINER_INGEST"),
+        }
+        match original_prefixed_container {
+            Some(value) => env::set_var("SCALE_OLIVER_AZURE_STORAGE_CONTAINER_INGEST", value),
+            None => env::remove_var("SCALE_OLIVER_AZURE_STORAGE_CONTAINER_INGEST"),
         }
         match original_sas {
             Some(value) => env::set_var("AZURE_STORAGE_SAS_TOKEN", value),
             None => env::remove_var("AZURE_STORAGE_SAS_TOKEN"),
         }
+        match original_prefixed_sas {
+            Some(value) => env::set_var("SCALE_OLIVER_AZURE_STORAGE_SAS_TOKEN", value),
+            None => env::remove_var("SCALE_OLIVER_AZURE_STORAGE_SAS_TOKEN"),
+        }
         match original_conn {
             Some(value) => env::set_var("AZURE_STORAGE_CONNECTION_STRING_INGEST", value),
             None => env::remove_var("AZURE_STORAGE_CONNECTION_STRING_INGEST"),
         }
+        match original_prefixed_conn {
+            Some(value) => env::set_var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING_INGEST", value),
+            None => env::remove_var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING_INGEST"),
+        }
         match original_container_sas_url {
             Some(value) => env::set_var("AZURE_STORAGE_CONTAINER_SAS_URL", value),
             None => env::remove_var("AZURE_STORAGE_CONTAINER_SAS_URL"),
+        }
+        match original_prefixed_container_sas_url {
+            Some(value) => env::set_var("SCALE_OLIVER_AZURE_STORAGE_CONTAINER_SAS_URL", value),
+            None => env::remove_var("SCALE_OLIVER_AZURE_STORAGE_CONTAINER_SAS_URL"),
         }
     }
 }
