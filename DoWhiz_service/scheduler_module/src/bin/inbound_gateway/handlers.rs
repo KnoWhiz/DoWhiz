@@ -23,6 +23,7 @@ use scheduler_module::channel::{Channel, ChannelMetadata, InboundAdapter, Inboun
 use scheduler_module::ingestion::{IngestionEnvelope, IngestionPayload};
 use scheduler_module::ingestion_queue::IngestionQueue;
 use scheduler_module::raw_payload_store::{self, RawPayloadStoreError};
+use scheduler_module::user_store::extract_emails;
 
 use super::routes::{build_dedupe_key, normalize_email, normalize_phone_number, resolve_route};
 use super::state::{find_service_address, GatewayState, RouteDecision};
@@ -47,6 +48,14 @@ pub(super) async fn ingest_postmark(
         Ok(payload) => payload,
         Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"}))),
     };
+
+    if payload_contains_no_reply_marker(&payload) {
+        info!(
+            "gateway ignoring no-reply postmark inbound from={}",
+            payload.from.as_deref().unwrap_or("")
+        );
+        return (StatusCode::OK, Json(json!({"status": "ignored_no_reply"})));
+    }
 
     let address = find_service_address(&payload, &state.employee_directory.service_addresses);
     let Some(address) = address else {
@@ -432,6 +441,29 @@ pub(super) async fn enqueue_envelope(
     }
 }
 
+const NO_REPLY_MARKERS: [&str; 3] = ["noreply", "no-reply", "do-not-reply"];
+
+fn payload_contains_no_reply_marker(payload: &PostmarkInboundPayload) -> bool {
+    let candidates = [payload.from.as_deref(), payload.reply_to.as_deref()];
+    candidates
+        .into_iter()
+        .flatten()
+        .any(contains_no_reply_marker)
+}
+
+fn contains_no_reply_marker(value: &str) -> bool {
+    let emails = extract_emails(value);
+    if emails.is_empty() {
+        return false;
+    }
+    emails.into_iter().any(|email| {
+        let normalized = email.trim().to_ascii_lowercase();
+        NO_REPLY_MARKERS
+            .iter()
+            .any(|marker| normalized.contains(marker))
+    })
+}
+
 pub(super) async fn build_envelope(
     route: RouteDecision,
     channel: Channel,
@@ -467,6 +499,33 @@ pub(super) async fn build_envelope(
         payload: IngestionPayload::from_inbound(message),
         raw_payload_ref,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payload_contains_no_reply_marker_detects_from() {
+        let payload: PostmarkInboundPayload =
+            serde_json::from_str(r#"{"From":"noreply@example.com"}"#).expect("payload");
+        assert!(payload_contains_no_reply_marker(&payload));
+    }
+
+    #[test]
+    fn payload_contains_no_reply_marker_detects_reply_to() {
+        let payload: PostmarkInboundPayload =
+            serde_json::from_str(r#"{"From":"user@example.com","ReplyTo":"no-reply@x.com"}"#)
+                .expect("payload");
+        assert!(payload_contains_no_reply_marker(&payload));
+    }
+
+    #[test]
+    fn payload_contains_no_reply_marker_allows_normal_sender() {
+        let payload: PostmarkInboundPayload =
+            serde_json::from_str(r#"{"From":"user@example.com"}"#).expect("payload");
+        assert!(!payload_contains_no_reply_marker(&payload));
+    }
 }
 
 pub(super) fn build_envelope_blocking(
