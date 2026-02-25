@@ -1143,6 +1143,16 @@
         }
       }
 
+      // Map task kind to user-friendly display name
+      function formatTaskKind(kind) {
+        const kindMap = {
+          'send_email': 'Send Reply',
+          'run_task': 'Run Task',
+          'noop': 'No-op'
+        };
+        return kindMap[kind] || kind || 'Task';
+      }
+
       // Render a single task item
       function renderTask(task) {
         const status = task.execution_status || 'pending';
@@ -1166,7 +1176,7 @@
         return `
           <li class="task-item">
             <div class="task-header">
-              <span class="task-name">${escapeHtml(task.kind || 'Task')}</span>
+              <span class="task-name">${escapeHtml(formatTaskKind(task.kind))}</span>
               <span class="task-badge ${status}">${statusLabel}</span>
             </div>
             <div class="task-details">
