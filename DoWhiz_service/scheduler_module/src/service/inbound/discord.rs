@@ -193,6 +193,7 @@ pub(super) fn append_discord_message_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::account_store::AccountStore;
     use crate::channel::{ChannelMetadata, InboundMessage};
     use crate::employee_config::{EmployeeDirectory, EmployeeProfile};
     use crate::index_store::IndexStore;
@@ -282,6 +283,7 @@ mod tests {
 
         let user_store = UserStore::new(&config.users_db_path)?;
         let index_store = IndexStore::new(&config.task_index_path)?;
+        let account_store = AccountStore::new(state_root.join("accounts.db").to_str().unwrap())?;
 
         let sender = "12345".to_string();
         let channel_id = 67890u64;
@@ -307,7 +309,7 @@ mod tests {
             },
         };
 
-        process_discord_inbound_message(&config, &user_store, &index_store, &message, &raw_payload)?;
+        process_discord_inbound_message(&config, &user_store, &index_store, &account_store, &message, &raw_payload)?;
 
         let user = user_store.get_or_create_user("discord", &sender)?;
         let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
