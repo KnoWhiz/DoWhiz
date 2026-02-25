@@ -195,6 +195,20 @@ google-docs list-comments <document_id>
 google-docs read-comment <document_id> <comment_id>
 ```
 
+### Reply to Comments (IMPORTANT!)
+
+**ALWAYS reply to the comment after completing a task!** This is how the user gets notified that you've completed their request.
+
+```bash
+# Reply to a comment
+google-docs reply-comment <document_id> <comment_id> "Your reply message here"
+```
+
+**Example:**
+```bash
+google-docs reply-comment 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc AAAB0spY1kw "Done! I've updated the SPECIFICATIONS section to N/A as requested. The change is in suggesting mode - reply 'apply' to finalize."
+```
+
 ### Direct Edit Operations
 
 ```bash
@@ -283,6 +297,18 @@ User comment: "Proto, please improve this paragraph"
 
 ### Example 2: After User Chooses "suggest"
 
+First, apply the suggestions to the document, then reply to the comment AND write the draft:
+
+```bash
+# Apply suggestions to document
+google-docs suggest-replace 1abc123 --find="very good" --replace="excellent"
+google-docs mark-deletion 1abc123 --find="in order to"
+
+# IMPORTANT: Reply to the comment so user gets notified!
+google-docs reply-comment 1abc123 AAAB123xyz "I've added my suggestions with revision marks: replaced 'very good' with 'excellent', removed 'in order to'. Reply 'apply' to finalize."
+```
+
+Also write the backup draft:
 ```html
 <!-- reply_email_draft.html -->
 <p>I've added my suggestions to the document with revision marks:</p>
@@ -331,15 +357,16 @@ User comment: "Proto, review the entire document for grammar and clarity"
 ## Important Guidelines
 
 1. **Read document_content.txt first** - Always read `incoming_email/document_content.txt` before responding
-2. **Intelligently detect editing mode** - Check if user already specified "suggest"/"direct" preference; only ask if genuinely unclear
-3. **Check collaboration context** - If `collaboration/` directory exists, read it for prior preferences and context
-4. **Use revision marks in suggesting mode** - Red strikethrough for deletions, blue for additions
-5. **Explain changes clearly** - List what changes were made and why
-6. **Wait for "apply" in suggesting mode** - Don't finalize until user explicitly approves
-7. **Keep replies concise** - Google Docs comments have limited space
-8. **Match existing document formatting** - When applying changes, preserve the user's text formatting (font, size, etc.)
-9. **Default to suggesting mode** - When in doubt, use suggesting mode (safer, non-destructive)
-10. **For style changes, ALWAYS check existing styles first** - Run `google-docs get-styles <doc_id>` before applying any formatting. Match the document's existing heading colors, fonts, and sizes. Never invent new styles - follow the user's established patterns.
+2. **ALWAYS reply to the comment using `google-docs reply-comment`** - This is CRITICAL! The user won't know you've completed their request unless you reply to their comment. After making any changes, always call `google-docs reply-comment <doc_id> <comment_id> "your message"`. Also write `reply_email_draft.html` as a backup.
+3. **Intelligently detect editing mode** - Check if user already specified "suggest"/"direct" preference; only ask if genuinely unclear
+4. **Check collaboration context** - If `collaboration/` directory exists, read it for prior preferences and context
+5. **Use revision marks in suggesting mode** - Red strikethrough for deletions, blue for additions
+6. **Explain changes clearly** - List what changes were made and why
+7. **Wait for "apply" in suggesting mode** - Don't finalize until user explicitly approves
+8. **Keep replies concise** - Google Docs comments have limited space
+9. **Match existing document formatting** - When applying changes, preserve the user's text formatting (font, size, etc.)
+10. **Default to suggesting mode** - When in doubt, use suggesting mode (safer, non-destructive)
+11. **For style changes, ALWAYS check existing styles first** - Run `google-docs get-styles <doc_id>` before applying any formatting. Match the document's existing heading colors, fonts, and sizes. Never invent new styles - follow the user's established patterns.
 
 ## Error Handling
 
