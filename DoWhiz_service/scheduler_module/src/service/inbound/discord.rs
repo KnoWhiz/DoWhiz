@@ -4,19 +4,20 @@ use std::time::Duration;
 use tracing::{info, warn};
 
 use crate::channel::Channel;
-use crate::discord_gateway::DiscordGuildPaths;
 use crate::index_store::IndexStore;
+use crate::user_store::UserStore;
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
 
 use super::super::bump_thread_state;
 use super::super::config::ServiceConfig;
 use super::super::default_thread_state_path;
 use super::super::scheduler::cancel_pending_thread_tasks;
-use super::super::workspace::{copy_skills_directory, ensure_workspace_employee_files};
+use super::super::workspace::{ensure_thread_workspace};
 use super::super::BoxError;
 
 pub(crate) fn process_discord_inbound_message(
     config: &ServiceConfig,
+    user_store: &UserStore,
     index_store: &IndexStore,
     message: &crate::channel::InboundMessage,
     raw_payload: &[u8],
@@ -31,15 +32,16 @@ pub(crate) fn process_discord_inbound_message(
         .map(|id| id.to_string())
         .unwrap_or_else(|| "dm".to_string());
 
-    let guild_paths = DiscordGuildPaths::new(&config.workspace_root, &guild_id);
-    guild_paths.ensure_dirs()?;
+    let user = user_store.get_or_create_user("discord", &message.sender)?;
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+    user_store.ensure_user_dirs(&user_paths)?;
 
     let thread_key = format!("discord:{}:{}:{}", guild_id, channel_id, message.thread_id);
 
-    let workspace = ensure_discord_workspace(
-        &guild_paths,
-        channel_id,
-        &message.thread_id,
+    let workspace = ensure_thread_workspace(
+        &user_paths,
+        &user.user_id,
+        &thread_key,
         &config.employee_profile,
         config.skills_source_dir.as_deref(),
     )?;
@@ -82,7 +84,7 @@ pub(crate) fn process_discord_inbound_message(
         // reply_to[0] = user_id (for account lookup), reply_to[1] = channel_id
         reply_to: vec![message.sender.clone(), channel_id.to_string()],
         reply_from: None,
-        archive_root: None,
+        archive_root: Some(user_paths.mail_root.clone()),
         thread_id: Some(thread_key.clone()),
         thread_epoch: Some(thread_state.epoch),
         thread_state_path: Some(thread_state_path.clone()),
@@ -91,7 +93,7 @@ pub(crate) fn process_discord_inbound_message(
         employee_id: Some(config.employee_id.clone()),
     };
 
-    let mut scheduler = Scheduler::load(&guild_paths.tasks_db_path, ModuleExecutor::default())?;
+    let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
     if let Err(err) = cancel_pending_thread_tasks(&mut scheduler, &workspace, thread_state.epoch) {
         warn!(
             "failed to cancel pending thread tasks for {}: {}",
@@ -101,11 +103,11 @@ pub(crate) fn process_discord_inbound_message(
     }
     let task_id = scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
 
-    let synthetic_user_id = DiscordGuildPaths::user_id(&guild_id);
-    index_store.sync_user_tasks(&synthetic_user_id, scheduler.tasks())?;
+    index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
 
     info!(
-        "scheduler tasks enqueued guild={} task_id={} message_id={:?} workspace={} thread_epoch={}",
+        "scheduler tasks enqueued user_id={} guild={} task_id={} message_id={:?} workspace={} thread_epoch={}",
+        user.user_id,
         guild_id,
         task_id,
         message.message_id,
@@ -114,55 +116,6 @@ pub(crate) fn process_discord_inbound_message(
     );
 
     Ok(())
-}
-
-pub(super) fn ensure_discord_workspace(
-    guild_paths: &DiscordGuildPaths,
-    channel_id: u64,
-    thread_id: &str,
-    employee_profile: &crate::employee_config::EmployeeProfile,
-    skills_source_dir: Option<&Path>,
-) -> Result<std::path::PathBuf, BoxError> {
-    let thread_hash = &md5::compute(thread_id.as_bytes())
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>()[..8];
-
-    let workspace = guild_paths
-        .workspaces_root
-        .join(channel_id.to_string())
-        .join(thread_hash);
-
-    if !workspace.exists() {
-        std::fs::create_dir_all(&workspace)?;
-        std::fs::create_dir_all(workspace.join("incoming_email"))?;
-        std::fs::create_dir_all(workspace.join("incoming_attachments"))?;
-        std::fs::create_dir_all(workspace.join("memory"))?;
-        std::fs::create_dir_all(workspace.join("references"))?;
-
-        ensure_workspace_employee_files(&workspace, employee_profile)?;
-
-        let agents_skills_dir = workspace.join(".agents").join("skills");
-        if let Some(skills_src) = skills_source_dir {
-            if let Err(err) = copy_skills_directory(skills_src, &agents_skills_dir) {
-                warn!("failed to copy base skills to workspace: {}", err);
-            }
-        }
-        if let Some(employee_skills) = employee_profile.skills_dir.as_deref() {
-            let should_copy = skills_source_dir
-                .map(|base| base != employee_skills)
-                .unwrap_or(true);
-            if should_copy {
-                if let Err(err) = copy_skills_directory(employee_skills, &agents_skills_dir) {
-                    warn!("failed to copy employee skills to workspace: {}", err);
-                }
-            }
-        }
-
-        info!("created Discord workspace at {}", workspace.display());
-    }
-
-    Ok(workspace)
 }
 
 pub(super) fn append_discord_message_payload(
@@ -200,4 +153,165 @@ pub(super) fn append_discord_message_payload(
         incoming_dir.display()
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::channel::{ChannelMetadata, InboundMessage};
+    use crate::employee_config::{EmployeeDirectory, EmployeeProfile};
+    use crate::index_store::IndexStore;
+    use crate::user_store::UserStore;
+    use crate::{ModuleExecutor, Scheduler, TaskKind};
+    use std::collections::{HashMap, HashSet};
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn process_discord_inbound_message_creates_run_task() -> Result<(), BoxError> {
+        let temp = TempDir::new()?;
+        let root = temp.path();
+        let users_root = root.join("users");
+        let state_root = root.join("state");
+        fs::create_dir_all(&users_root)?;
+        fs::create_dir_all(&state_root)?;
+
+        let addresses = vec!["service@example.com".to_string()];
+        let address_set: HashSet<String> = addresses
+            .iter()
+            .map(|value| value.to_ascii_lowercase())
+            .collect();
+        let employee = EmployeeProfile {
+            id: "test-employee".to_string(),
+            display_name: None,
+            runner: "codex".to_string(),
+            model: None,
+            addresses,
+            address_set: address_set.clone(),
+            runtime_root: None,
+            agents_path: None,
+            claude_path: None,
+            soul_path: None,
+            skills_dir: None,
+            discord_enabled: false,
+            slack_enabled: false,
+            bluebubbles_enabled: false,
+        };
+        let mut employee_by_id = HashMap::new();
+        employee_by_id.insert(employee.id.clone(), employee.clone());
+        let employee_directory = EmployeeDirectory {
+            employees: vec![employee.clone()],
+            employee_by_id,
+            default_employee_id: Some(employee.id.clone()),
+            service_addresses: address_set,
+        };
+
+        let config = ServiceConfig {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            employee_id: employee.id.clone(),
+            employee_config_path: root.join("employee.toml"),
+            employee_profile: employee,
+            employee_directory,
+            workspace_root: root.join("workspaces"),
+            scheduler_state_path: state_root.join("tasks.db"),
+            processed_ids_path: state_root.join("processed_ids.txt"),
+            ingestion_db_url: "postgres://localhost/test".to_string(),
+            ingestion_poll_interval: Duration::from_millis(50),
+            users_root: users_root.clone(),
+            users_db_path: state_root.join("users.db"),
+            task_index_path: state_root.join("task_index.db"),
+            codex_model: "gpt-5.3-codex".to_string(),
+            codex_disabled: true,
+            scheduler_poll_interval: Duration::from_millis(50),
+            scheduler_max_concurrency: 1,
+            scheduler_user_max_concurrency: 1,
+            inbound_body_max_bytes: crate::service::DEFAULT_INBOUND_BODY_MAX_BYTES,
+            skills_source_dir: None,
+            slack_bot_token: None,
+            slack_bot_user_id: None,
+            slack_store_path: state_root.join("slack.db"),
+            slack_client_id: None,
+            slack_client_secret: None,
+            slack_redirect_uri: None,
+            discord_bot_token: None,
+            discord_bot_user_id: None,
+            google_docs_enabled: false,
+            bluebubbles_url: None,
+            bluebubbles_password: None,
+            telegram_bot_token: None,
+            whatsapp_access_token: None,
+            whatsapp_phone_number_id: None,
+            whatsapp_verify_token: None,
+        };
+
+        let user_store = UserStore::new(&config.users_db_path)?;
+        let index_store = IndexStore::new(&config.task_index_path)?;
+
+        let sender = "12345".to_string();
+        let channel_id = 67890u64;
+        let guild_id = 111u64;
+        let raw_payload = br#"{"fake":"payload"}"#.to_vec();
+        let message = InboundMessage {
+            channel: Channel::Discord,
+            sender: sender.clone(),
+            sender_name: Some("test-user".to_string()),
+            recipient: channel_id.to_string(),
+            subject: None,
+            text_body: Some("Hello".to_string()),
+            html_body: None,
+            thread_id: "thread-abc".to_string(),
+            message_id: Some("msg-1".to_string()),
+            attachments: Vec::new(),
+            reply_to: vec![sender.clone(), channel_id.to_string()],
+            raw_payload: raw_payload.clone(),
+            metadata: ChannelMetadata {
+                discord_guild_id: Some(guild_id),
+                discord_channel_id: Some(channel_id),
+                ..Default::default()
+            },
+        };
+
+        process_discord_inbound_message(&config, &user_store, &index_store, &message, &raw_payload)?;
+
+        let user = user_store.get_or_create_user("discord", &sender)?;
+        let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+        let scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+
+        let run_task = scheduler
+            .tasks()
+            .iter()
+            .find_map(|task| match &task.kind {
+                TaskKind::RunTask(run) => Some(run),
+                _ => None,
+            })
+            .expect("run task created");
+
+        assert_eq!(run_task.channel, Channel::Discord);
+        assert_eq!(
+            run_task.reply_to,
+            vec![sender.clone(), channel_id.to_string()]
+        );
+        assert_eq!(run_task.archive_root.as_ref(), Some(&user_paths.mail_root));
+        assert_eq!(
+            run_task.workspace_dir.parent(),
+            Some(user_paths.workspaces_root.as_path())
+        );
+
+        let state_path = crate::thread_state::default_thread_state_path(&run_task.workspace_dir);
+        let thread_state = crate::thread_state::load_thread_state(&state_path)
+            .expect("thread_state.json exists");
+        let seq = thread_state.last_email_seq;
+        let incoming_dir = run_task.workspace_dir.join("incoming_email");
+        assert!(incoming_dir
+            .join(format!("{:05}_discord_raw.json", seq))
+            .exists());
+        assert!(incoming_dir
+            .join(format!("{:05}_discord_message.txt", seq))
+            .exists());
+        assert!(incoming_dir
+            .join(format!("{:05}_discord_meta.json", seq))
+            .exists());
+        Ok(())
+    }
 }
