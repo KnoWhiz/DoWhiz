@@ -467,6 +467,61 @@ function App() {
     };
   }, []);
 
+  // Equalize intro and example heights per row within roles grid
+  useEffect(() => {
+    const syncRoleHeights = () => {
+      const cards = Array.from(document.querySelectorAll('.roles-grid .role-card'));
+      const descs = Array.from(document.querySelectorAll('.roles-grid .role-desc'));
+      const examples = Array.from(document.querySelectorAll('.roles-grid .role-example'));
+
+      // reset first
+      descs.forEach((el) => (el.style.minHeight = ''));
+      examples.forEach((el) => (el.style.minHeight = ''));
+
+      const rows = [];
+      cards.forEach((card) => {
+        const top = card.offsetTop;
+        let row = rows.find((r) => Math.abs(r.top - top) < 4);
+        if (!row) {
+          row = { top, cards: [] };
+          rows.push(row);
+        }
+        row.cards.push(card);
+      });
+
+      rows.forEach((row) => {
+        let maxDesc = 0;
+        let maxExample = 0;
+        row.cards.forEach((card) => {
+          const desc = card.querySelector('.role-desc');
+          const ex = card.querySelector('.role-example');
+          if (desc) {
+            maxDesc = Math.max(maxDesc, desc.offsetHeight);
+          }
+          if (ex) {
+            maxExample = Math.max(maxExample, ex.offsetHeight);
+          }
+        });
+        row.cards.forEach((card) => {
+          const desc = card.querySelector('.role-desc');
+          const ex = card.querySelector('.role-example');
+          if (desc && maxDesc) {
+            desc.style.minHeight = `${maxDesc}px`;
+          }
+          if (ex && maxExample) {
+            ex.style.minHeight = `${maxExample}px`;
+          }
+        });
+      });
+    };
+
+    syncRoleHeights();
+    window.addEventListener('resize', syncRoleHeights);
+    return () => {
+      window.removeEventListener('resize', syncRoleHeights);
+    };
+  }, []);
+
   const buildMailtoLink = (email, subject, body) => {
     const encodedSubject = encodeURIComponent(subject);
     const encodedBody = encodeURIComponent(body);
@@ -849,7 +904,6 @@ function App() {
 
   return (
     <div className="app-container">
-      {enableMouseField ? <MouseField theme={theme} /> : null}
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
@@ -946,6 +1000,7 @@ function App() {
 
         {/* Hero Section */}
         <section className="hero-section">
+          {enableMouseField ? <MouseField theme={theme} /> : null}
           <div className="halo-effect"></div>
           <div className="container hero-content">
             <h1 className="hero-title">
@@ -991,30 +1046,36 @@ function App() {
                           height="60"
                         />
                         <div>
-                          <h3>{member.name}</h3>
-                          <div className="role-title">
+                          <div className="role-row role-name-row">
+                            <h3>{member.name}</h3>
+                            <span
+                              className={`status-badge role-status-inline ${isActive ? 'status-active' : 'status-soon'}`}
+                            >
+                              {member.status}
+                            </span>
+                          </div>
+                          <div className="role-row role-title-row">
                             <span className="role-title-text">{member.title}</span>
                             <span className="pronoun-tag">{member.pronoun}</span>
+                            <span className="nickname-tag">{member.nickname}</span>
+                            {isActive ? (
+                              <a
+                                className="email-tag role-email"
+                                href={buildMailtoLink(member.email, member.subject, member.body)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={`Email ${member.name}`}
+                              >
+                                {member.email}
+                              </a>
+                            ) : (
+                              <span className="email-tag role-email" aria-disabled="true">
+                                {member.email}
+                              </span>
+                            )}
                           </div>
-                          {isActive ? (
-                            <a
-                              className="email-tag"
-                              href={buildMailtoLink(member.email, member.subject, member.body)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              aria-label={`Email ${member.name}`}
-                            >
-                              {member.email}
-                            </a>
-                          ) : (
-                            <span className="email-tag" aria-disabled="true">
-                              {member.email}
-                            </span>
-                          )}
-                          <div className="nickname-tag">{member.nickname}</div>
                         </div>
                       </div>
-                      <span className={`status-badge ${isActive ? 'status-active' : 'status-soon'}`}>{member.status}</span>
                     </div>
                     <p className="role-desc">{member.desc}</p>
                     <div className="role-example">
