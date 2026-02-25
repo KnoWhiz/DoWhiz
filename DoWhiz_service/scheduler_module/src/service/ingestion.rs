@@ -164,7 +164,7 @@ fn process_ingestion_envelope(
                 return Ok(());
             }
             let raw_payload = envelope.raw_payload_bytes();
-            process_discord_inbound_message(config, index_store, &message, &raw_payload)
+            process_discord_inbound_message(config, user_store, index_store, &message, &raw_payload)
         }
         Channel::Sms => {
             let message = envelope.to_inbound_message();
