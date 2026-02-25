@@ -137,6 +137,10 @@ pub struct ChannelMetadata {
     pub discord_guild_id: Option<u64>,
     /// Discord-specific: Channel ID
     pub discord_channel_id: Option<u64>,
+    /// Discord-specific: Current inbound message ID
+    pub discord_message_id: Option<String>,
+    /// Discord-specific: Quoted/referenced message ID (if this message is a reply)
+    pub discord_referenced_message_id: Option<String>,
     /// Telegram-specific: Chat ID
     pub telegram_chat_id: Option<i64>,
     /// WhatsApp-specific: Phone number (sender's phone)
@@ -173,7 +177,6 @@ pub struct ChannelMetadata {
     // =========================================================================
     // Multi-channel collaboration support
     // =========================================================================
-
     /// Collaboration session ID linking multiple messages across channels.
     /// When set, this message is part of a collaboration session.
     pub collaboration_session_id: Option<String>,

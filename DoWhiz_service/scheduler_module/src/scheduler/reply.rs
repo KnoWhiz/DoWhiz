@@ -52,8 +52,24 @@ impl PostmarkInboundLite {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct DiscordMetaLite {
+    channel: Option<String>,
+    message_id: Option<String>,
+}
+
 pub(crate) fn load_reply_context(workspace_dir: &Path) -> ReplyContext {
     let incoming_dir = workspace_dir.join("incoming_email");
+
+    // Discord: always reply to the current inbound message.
+    if let Some(message_id) = latest_discord_message_id(&incoming_dir) {
+        return ReplyContext {
+            subject: "Discord reply".to_string(),
+            in_reply_to: Some(message_id),
+            references: None,
+            from: None,
+        };
+    }
 
     // Try Google Docs metadata first
     let gdocs_metadata_path = incoming_dir.join("google_docs_metadata.json");
@@ -111,6 +127,35 @@ pub(crate) fn load_reply_context(workspace_dir: &Path) -> ReplyContext {
     }
 }
 
+fn latest_discord_message_id(incoming_dir: &Path) -> Option<String> {
+    let entries = fs::read_dir(incoming_dir).ok()?;
+    let mut meta_files = entries
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.ends_with("_discord_meta.json"))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    meta_files.sort();
+    let latest = meta_files.last()?;
+    let content = fs::read_to_string(latest).ok()?;
+    let meta = serde_json::from_str::<DiscordMetaLite>(&content).ok()?;
+    if meta
+        .channel
+        .as_deref()
+        .map(|channel| channel.eq_ignore_ascii_case("discord"))
+        .unwrap_or(false)
+    {
+        return meta
+            .message_id
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+    }
+    None
+}
+
 fn reply_subject(original: &str) -> String {
     let trimmed = original.trim();
     if trimmed.is_empty() {
@@ -156,4 +201,52 @@ fn references_contains(references: &str, message_id: &str) -> bool {
     references
         .split_whitespace()
         .any(|entry| entry == message_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn load_reply_context_prefers_latest_discord_message_id() {
+        let temp = TempDir::new().expect("tempdir");
+        let incoming_dir = temp.path().join("incoming_email");
+        fs::create_dir_all(&incoming_dir).expect("incoming_email");
+
+        fs::write(
+            incoming_dir.join("00001_discord_meta.json"),
+            r#"{"channel":"discord","message_id":"1001"}"#,
+        )
+        .expect("write first");
+        fs::write(
+            incoming_dir.join("00002_discord_meta.json"),
+            r#"{"channel":"discord","message_id":"1002"}"#,
+        )
+        .expect("write second");
+
+        let context = load_reply_context(temp.path());
+        assert_eq!(context.in_reply_to.as_deref(), Some("1002"));
+    }
+
+    #[test]
+    fn load_reply_context_falls_back_to_email_headers() {
+        let temp = TempDir::new().expect("tempdir");
+        let incoming_dir = temp.path().join("incoming_email");
+        fs::create_dir_all(&incoming_dir).expect("incoming_email");
+        fs::write(
+            incoming_dir.join("postmark_payload.json"),
+            r#"{
+                "Subject": "Hello",
+                "MessageID": "<msg-123>",
+                "Headers": [{"Name":"References","Value":"<msg-122>"}]
+            }"#,
+        )
+        .expect("payload");
+
+        let context = load_reply_context(temp.path());
+        assert_eq!(context.subject, "Re: Hello");
+        assert_eq!(context.in_reply_to.as_deref(), Some("<msg-123>"));
+        assert_eq!(context.references.as_deref(), Some("<msg-122> <msg-123>"));
+    }
 }
