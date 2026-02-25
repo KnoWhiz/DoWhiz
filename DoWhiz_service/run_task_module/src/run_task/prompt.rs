@@ -66,10 +66,16 @@ pub(super) fn build_prompt(
         }
     };
     let guidance_section = build_guidance_section(workspace_dir, runner);
+    let discord_context_section = if channel.eq_ignore_ascii_case("discord") {
+        build_discord_context_section(workspace_dir)
+    } else {
+        String::new()
+    };
 
     // Build registration prompt section if user doesn't have a unified account
     // and we haven't prompted them yet in this thread
-    let registration_section = if !has_unified_account && !has_prompted_registration(workspace_dir) {
+    let registration_section = if !has_unified_account && !has_prompted_registration(workspace_dir)
+    {
         // Mark that we've prompted so we don't repeat
         mark_registration_prompted(workspace_dir);
         r#"
@@ -99,6 +105,8 @@ Inputs (relative to workspace root):
 - Incoming attachments dir: {input_attachments}
 - Memory dir (memory about the current user): {memory}
 - Reference dir (contain all past emails with the current user): {reference}
+
+{discord_context_section}
 
 Memory about the current user:
 ```{memory_section}```
@@ -132,6 +140,7 @@ Rules:
         memory_section = memory_section,
         guidance_section = guidance_section,
         reply_instruction = reply_instruction,
+        discord_context_section = discord_context_section,
         registration_section = registration_section,
     )
 }
@@ -170,6 +179,28 @@ fn load_optional_text(path: &Path) -> Option<String> {
 
 fn format_guidance_block(label: &str, content: &str) -> String {
     format!("{label}:\n```\n{content}\n```\n")
+}
+
+fn build_discord_context_section(workspace_dir: &Path) -> String {
+    let path = workspace_dir
+        .join("incoming_email")
+        .join("discord_context_for_agent.md");
+    let Ok(content) = fs::read_to_string(path) else {
+        return String::new();
+    };
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let max_chars = 12_000usize;
+    let mut clipped: String = trimmed.chars().take(max_chars).collect();
+    if trimmed.chars().count() > max_chars {
+        clipped.push_str("\n\n(Truncated. Use incoming_email/discord_thread_context_full.json and incoming_email/discord_channel_last_24h.json for complete context.)");
+    }
+    format!(
+        "Discord context snapshot (auto-generated; full history is stored in local files):\n```markdown\n{}\n```\n",
+        clipped
+    )
 }
 
 pub(super) fn load_memory_context(
@@ -308,5 +339,34 @@ mod tests {
         );
 
         assert!(!prompt2.contains("Account Registration Notice"));
+    }
+
+    #[test]
+    fn build_prompt_includes_discord_context_snapshot_when_available() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+        let incoming_dir = workspace.join("incoming_email");
+        fs::create_dir_all(&incoming_dir).expect("incoming_email");
+        fs::write(
+            incoming_dir.join("discord_context_for_agent.md"),
+            "# Discord Context Snapshot\nQuoted + thread context",
+        )
+        .expect("context file");
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            workspace,
+            "codex",
+            "",
+            true,
+            "discord",
+            true,
+        );
+
+        assert!(prompt.contains("Discord context snapshot (auto-generated"));
+        assert!(prompt.contains("Quoted + thread context"));
     }
 }

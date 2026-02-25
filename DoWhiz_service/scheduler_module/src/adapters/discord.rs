@@ -57,13 +57,13 @@ impl DiscordInboundAdapter {
         let guild_id = message.guild_id.map(|id| id.get());
         let channel_id = message.channel_id.get();
         let author_id = message.author.id.get();
+        let referenced_message = message.referenced_message.as_ref();
+        let referenced_message_id = referenced_message.map(|m| m.id.get());
 
         // Thread ID: use referenced message ID if replying, otherwise message ID
         // Discord doesn't have explicit threads like Slack's thread_ts
-        let thread_id = message
-            .referenced_message
-            .as_ref()
-            .map(|m| m.id.get().to_string())
+        let thread_id = referenced_message_id
+            .map(|id| id.to_string())
             .unwrap_or_else(|| message.id.get().to_string());
 
         // Parse attachments
@@ -86,6 +86,10 @@ impl DiscordInboundAdapter {
             author_name: message.author.name.clone(),
             content: message.content.clone(),
             timestamp: message.timestamp.to_string(),
+            referenced_message_id,
+            referenced_message_author_id: referenced_message.map(|m| m.author.id.get()),
+            referenced_message_author_name: referenced_message.map(|m| m.author.name.clone()),
+            referenced_message_content: referenced_message.map(|m| m.content.clone()),
         })
         .unwrap_or_default();
 
@@ -106,6 +110,8 @@ impl DiscordInboundAdapter {
             metadata: ChannelMetadata {
                 discord_guild_id: guild_id,
                 discord_channel_id: Some(channel_id),
+                discord_message_id: Some(message.id.get().to_string()),
+                discord_referenced_message_id: referenced_message_id.map(|id| id.to_string()),
                 ..Default::default()
             },
         })
@@ -209,6 +215,14 @@ pub struct DiscordMessagePayload {
     pub author_name: String,
     pub content: String,
     pub timestamp: String,
+    #[serde(default)]
+    pub referenced_message_id: Option<u64>,
+    #[serde(default)]
+    pub referenced_message_author_id: Option<u64>,
+    #[serde(default)]
+    pub referenced_message_author_name: Option<String>,
+    #[serde(default)]
+    pub referenced_message_content: Option<String>,
 }
 
 /// Request body for creating a Discord message.
