@@ -51,7 +51,7 @@ fn run_task_success_with_fake_codex() {
 
     let config_path = home_dir.join(".codex").join("config.toml");
     let config = fs::read_to_string(config_path).unwrap();
-    assert!(config.contains("model = \"gpt-5.2-codex\""));
+    assert!(config.contains("model = \"gpt-5.3-codex\""));
     assert!(config.contains(
         "https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1"
     ));

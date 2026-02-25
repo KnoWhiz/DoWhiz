@@ -629,7 +629,7 @@ docker run --rm --entrypoint bash --user 10001:10001 \
 { \"browser\": { \"browserName\": \"chromium\", \"userDataDir\": \"/workspace/tmp/playwright-user-data\", \"launchOptions\": { \"channel\": \"chrome\", \"chromiumSandbox\": false } } }
 EOF
     codex exec --skip-git-repo-check \
-      -m gpt-5.2-codex \
+      -m gpt-5.3-codex \
       -c model_provider=\"azure\" \
       -c web_search=\"live\" \
       -c ask_for_approval=\"never\" \
@@ -1075,7 +1075,7 @@ This reduces API costs and latency for simple interactions while preserving full
 ### Codex (OpenAI)
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CODEX_MODEL` | `gpt-5.2-codex` (fixed) | Model name (overrides ignored) |
+| `CODEX_MODEL` | `gpt-5.3-codex` (fixed) | Model name (overrides ignored) |
 | `CODEX_DISABLED` | `0` | Set to `1` to bypass Codex CLI |
 | `CODEX_SANDBOX` | `workspace-write` (fixed) | Sandbox mode (overrides ignored) |
 | `CODEX_BYPASS_SANDBOX` | `0` | Set to `1` to pass `--yolo` (bypass approvals/sandbox) |
