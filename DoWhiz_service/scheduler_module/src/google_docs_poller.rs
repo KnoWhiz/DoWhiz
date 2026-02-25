@@ -49,7 +49,7 @@ impl Default for GoogleDocsPollerConfig {
             workspace_root: PathBuf::from("workspaces"),
             processed_db_path: PathBuf::from("google_docs_processed.db"),
             employee_id: "little_bear".to_string(),
-            model_name: "gpt-5.2-codex".to_string(),
+            model_name: "gpt-5.3-codex".to_string(),
             runner: "codex".to_string(),
         }
     }
@@ -92,7 +92,7 @@ impl GoogleDocsPollerConfig {
             std::env::var("EMPLOYEE_ID").unwrap_or_else(|_| "little_bear".to_string());
 
         let model_name =
-            std::env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.2-codex".to_string());
+            std::env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.3-codex".to_string());
 
         let runner = if std::env::var("CLAUDE_MODEL").is_ok() {
             "claude".to_string()
