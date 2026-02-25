@@ -76,3 +76,19 @@ H2: Best for, How it works, Trigger examples, Output preview
 H1 count: 1
 H1: Rachel - GTM Specialist
 H2: Best for, How it works, Trigger examples, Output preview
+
+## Duplicate / Parameterized URL Inventory (Canonical Mapping)
+
+- `https://dowhiz.com/?utm_*`, `https://dowhiz.com/?ref=*`, and other tracking/query variants canonicalize to `https://dowhiz.com/`.
+- `https://dowhiz.com/blog/?*` canonicalizes to `https://dowhiz.com/blog/`.
+- `https://dowhiz.com/user-guide/?*` canonicalizes to `https://dowhiz.com/user-guide/`.
+- `https://dowhiz.com/integrations/?*` canonicalizes to `https://dowhiz.com/integrations/`.
+- `https://dowhiz.com/trust-safety/?*` canonicalizes to `https://dowhiz.com/trust-safety/`.
+- `https://dowhiz.com/privacy/?*` canonicalizes to `https://dowhiz.com/privacy/`.
+- `https://dowhiz.com/terms/?*` canonicalizes to `https://dowhiz.com/terms/`.
+- `https://dowhiz.com/agents/*/?*` canonicalizes to each agent page's clean trailing-slash URL (for example: `https://dowhiz.com/agents/oliver/`).
+- `https://dowhiz.com/auth/?loggedIn=true`, `https://dowhiz.com/auth/?discord=*`, `https://dowhiz.com/auth/?slack=*`, and hash callback variants canonicalize to `https://dowhiz.com/auth/`.
+
+## Low-Value Pages Set to Noindex
+
+- `https://dowhiz.com/auth/` includes `<meta name="robots" content="noindex, nofollow">` to keep sign-in / callback state pages out of search results.
