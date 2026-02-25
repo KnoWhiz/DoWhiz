@@ -12,9 +12,12 @@ const HISTORY_WINDOW_HOURS: i64 = 24;
 const MAX_HISTORY_PAGES: usize = 20;
 const INLINE_THREAD_CHAR_LIMIT: usize = 6000;
 const INLINE_THREAD_RECENT_COUNT: usize = 8;
+const INLINE_CHANNEL_CHAR_LIMIT: usize = 4000;
+const INLINE_CHANNEL_RECENT_COUNT: usize = 12;
+const ROUTER_CONTEXT_CHAR_LIMIT: usize = 4000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct DiscordMessageEntry {
+pub(crate) struct DiscordMessageEntry {
     id: String,
     timestamp: String,
     author_id: String,
@@ -24,6 +27,28 @@ struct DiscordMessageEntry {
     reference_message_id: Option<String>,
     #[serde(default)]
     attachments: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DiscordContextSnapshot {
+    generated_at: DateTime<Utc>,
+    channel_id: u64,
+    guild_id: Option<u64>,
+    current_message_id: String,
+    channel_messages: Vec<DiscordMessageEntry>,
+    thread_messages: Vec<DiscordMessageEntry>,
+    inline_thread_messages: Vec<DiscordMessageEntry>,
+    inline_channel_messages: Vec<DiscordMessageEntry>,
+    quoted_message: Option<DiscordMessageEntry>,
+    thread_truncated: bool,
+    channel_truncated: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DiscordRouterContext {
+    pub message: String,
+    pub context: String,
+    pub snapshot: DiscordContextSnapshot,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,19 +68,106 @@ struct DiscordRawPayloadLite {
     referenced_message_content: Option<String>,
 }
 
-pub(super) fn hydrate_discord_context_files(
+pub(crate) fn hydrate_discord_context_files(
     config: &ServiceConfig,
     workspace: &Path,
     message: &crate::channel::InboundMessage,
     raw_payload: &[u8],
     seq: u64,
 ) -> Result<(), BoxError> {
+    let incoming_dir = workspace.join("incoming_email");
+    std::fs::create_dir_all(&incoming_dir)?;
+
+    let snapshot = collect_discord_context_snapshot(config, message, raw_payload)?;
+    write_discord_context_files(&incoming_dir, seq, &snapshot)?;
+
+    info!(
+        "discord context files updated for channel {} at {}",
+        snapshot.channel_id,
+        incoming_dir.display()
+    );
+
+    Ok(())
+}
+
+pub(crate) fn hydrate_discord_context_files_from_snapshot(
+    workspace: &Path,
+    seq: u64,
+    snapshot: &DiscordContextSnapshot,
+) -> Result<(), BoxError> {
+    let incoming_dir = workspace.join("incoming_email");
+    std::fs::create_dir_all(&incoming_dir)?;
+    write_discord_context_files(&incoming_dir, seq, snapshot)?;
+    info!(
+        "discord context files updated for channel {} at {}",
+        snapshot.channel_id,
+        incoming_dir.display()
+    );
+    Ok(())
+}
+
+pub(crate) fn build_discord_router_context(
+    config: &ServiceConfig,
+    message: &crate::channel::InboundMessage,
+    raw_payload: &[u8],
+) -> Result<DiscordRouterContext, BoxError> {
+    let snapshot = collect_discord_context_snapshot(config, message, raw_payload)?;
+    let user_text = message.text_body.clone().unwrap_or_default();
+    let message_text = format_message_with_quote(&user_text, snapshot.quoted_message.as_ref());
+
+    let inline_thread = render_entries(&snapshot.inline_thread_messages);
+    let inline_channel = render_entries(&snapshot.inline_channel_messages);
+    let thread_block = if inline_thread.trim().is_empty() {
+        "- (none)".to_string()
+    } else {
+        inline_thread
+    };
+    let channel_block = if inline_channel.trim().is_empty() {
+        "- (none)".to_string()
+    } else {
+        inline_channel
+    };
+
+    let mut context = format!(
+        "Thread window (recent replies in this thread):\n{thread}\n\nChannel window (recent in last {hours}h):\n{channel}",
+        thread = thread_block,
+        hours = HISTORY_WINDOW_HOURS,
+        channel = channel_block
+    );
+    if context.chars().count() > ROUTER_CONTEXT_CHAR_LIMIT {
+        context = context
+            .chars()
+            .take(ROUTER_CONTEXT_CHAR_LIMIT)
+            .collect::<String>();
+        context.push_str("\n\n(Truncated.)");
+    }
+
+    Ok(DiscordRouterContext {
+        message: message_text,
+        context,
+        snapshot,
+    })
+}
+
+pub(crate) fn build_discord_message_text_with_quote(
+    message: &crate::channel::InboundMessage,
+    raw_payload: &[u8],
+) -> String {
+    let user_text = message.text_body.clone().unwrap_or_default();
+    let quoted = build_quoted_message_from_raw(raw_payload);
+    format_message_with_quote(&user_text, quoted.as_ref())
+}
+
+fn collect_discord_context_snapshot(
+    config: &ServiceConfig,
+    message: &crate::channel::InboundMessage,
+    raw_payload: &[u8],
+) -> Result<DiscordContextSnapshot, BoxError> {
     let channel_id = message
         .metadata
         .discord_channel_id
         .ok_or("missing discord_channel_id")?;
-    let incoming_dir = workspace.join("incoming_email");
-    std::fs::create_dir_all(&incoming_dir)?;
+    let guild_id = message.metadata.discord_guild_id;
 
     let now = Utc::now();
     let cutoff = now - Duration::hours(HISTORY_WINDOW_HOURS);
@@ -127,23 +239,62 @@ pub(super) fn hydrate_discord_context_files(
             let keep = INLINE_THREAD_RECENT_COUNT.min(thread_messages.len());
             thread_messages[thread_messages.len().saturating_sub(keep)..].to_vec()
         };
-    let is_thread_truncated = inline_thread_messages.len() < thread_messages.len();
+    let thread_truncated = inline_thread_messages.len() < thread_messages.len();
 
+    let mut inline_channel_messages = if channel_messages.len() <= INLINE_CHANNEL_RECENT_COUNT {
+        channel_messages.clone()
+    } else {
+        channel_messages[channel_messages.len().saturating_sub(INLINE_CHANNEL_RECENT_COUNT)..]
+            .to_vec()
+    };
+    inline_channel_messages.sort_by_key(|entry| parse_timestamp(&entry.timestamp));
+    let mut inline_channel_text = render_entries(&inline_channel_messages);
+    while inline_channel_text.chars().count() > INLINE_CHANNEL_CHAR_LIMIT
+        && inline_channel_messages.len() > 1
+    {
+        inline_channel_messages.remove(0);
+        inline_channel_text = render_entries(&inline_channel_messages);
+    }
+    let channel_truncated = inline_channel_messages.len() < channel_messages.len();
+
+    Ok(DiscordContextSnapshot {
+        generated_at: now,
+        channel_id,
+        guild_id,
+        current_message_id,
+        channel_messages,
+        thread_messages,
+        inline_thread_messages,
+        inline_channel_messages,
+        quoted_message,
+        thread_truncated,
+        channel_truncated,
+    })
+}
+
+fn write_discord_context_files(
+    incoming_dir: &Path,
+    seq: u64,
+    snapshot: &DiscordContextSnapshot,
+) -> Result<(), BoxError> {
     let channel_history_path = incoming_dir.join("discord_channel_last_24h.json");
     let thread_full_path = incoming_dir.join("discord_thread_context_full.json");
     let thread_recent_path = incoming_dir.join("discord_thread_context_recent.txt");
+    let channel_recent_path = incoming_dir.join("discord_channel_context_recent.txt");
     let context_md_path = incoming_dir.join("discord_context_for_agent.md");
     let seq_context_md_path = incoming_dir.join(format!("{:05}_discord_context_for_agent.md", seq));
     let seq_recent_path =
         incoming_dir.join(format!("{:05}_discord_thread_context_recent.txt", seq));
+    let seq_channel_recent_path =
+        incoming_dir.join(format!("{:05}_discord_channel_context_recent.txt", seq));
 
     let channel_payload = serde_json::json!({
-        "generated_at": now.to_rfc3339(),
+        "generated_at": snapshot.generated_at.to_rfc3339(),
         "window_hours": HISTORY_WINDOW_HOURS,
-        "guild_id": message.metadata.discord_guild_id,
-        "channel_id": channel_id,
-        "message_count": channel_messages.len(),
-        "messages": channel_messages,
+        "guild_id": snapshot.guild_id,
+        "channel_id": snapshot.channel_id,
+        "message_count": snapshot.channel_messages.len(),
+        "messages": &snapshot.channel_messages,
     });
     std::fs::write(
         &channel_history_path,
@@ -151,42 +302,54 @@ pub(super) fn hydrate_discord_context_files(
     )?;
 
     let thread_payload = serde_json::json!({
-        "generated_at": now.to_rfc3339(),
-        "current_message_id": current_message_id,
-        "message_count": thread_messages.len(),
-        "messages": thread_messages,
+        "generated_at": snapshot.generated_at.to_rfc3339(),
+        "current_message_id": &snapshot.current_message_id,
+        "message_count": snapshot.thread_messages.len(),
+        "messages": &snapshot.thread_messages,
     });
     std::fs::write(
         &thread_full_path,
         serde_json::to_string_pretty(&thread_payload)?,
     )?;
 
-    if let Some(quoted) = &quoted_message {
+    if let Some(quoted) = &snapshot.quoted_message {
         let quoted_path = incoming_dir.join("discord_quoted_message.json");
         let quoted_payload = serde_json::json!({
-            "generated_at": now.to_rfc3339(),
+            "generated_at": snapshot.generated_at.to_rfc3339(),
             "message": quoted,
         });
         std::fs::write(quoted_path, serde_json::to_string_pretty(&quoted_payload)?)?;
     }
 
-    let recent_text = render_entries(&inline_thread_messages);
-    std::fs::write(&thread_recent_path, &recent_text)?;
-    std::fs::write(&seq_recent_path, &recent_text)?;
+    let thread_recent_text = render_entries(&snapshot.inline_thread_messages);
+    let channel_recent_text = render_entries(&snapshot.inline_channel_messages);
+    std::fs::write(&thread_recent_path, &thread_recent_text)?;
+    std::fs::write(&seq_recent_path, &thread_recent_text)?;
+    std::fs::write(&channel_recent_path, &channel_recent_text)?;
+    std::fs::write(&seq_channel_recent_path, &channel_recent_text)?;
 
-    let quoted_block = if let Some(quoted) = quoted_message {
+    let quoted_block = if let Some(quoted) = snapshot.quoted_message.as_ref() {
         format!(
             "## Quoted Message (Must Include)\n{}\n\n",
-            render_single_entry(&quoted)
+            render_single_entry(quoted)
         )
     } else {
         "## Quoted Message (Must Include)\n- (none)\n\n".to_string()
     };
 
-    let truncation_note = if is_thread_truncated {
+    let thread_note = if snapshot.thread_truncated {
         format!(
             "Thread context is large; inline section keeps the most recent {} messages. Older thread messages are stored in `incoming_email/discord_thread_context_full.json`.\n\n",
             INLINE_THREAD_RECENT_COUNT
+        )
+    } else {
+        String::new()
+    };
+
+    let channel_note = if snapshot.channel_truncated {
+        format!(
+            "Channel context is large; inline section keeps the most recent {} messages. Older channel messages are stored in `incoming_email/discord_channel_last_24h.json`.\n\n",
+            INLINE_CHANNEL_RECENT_COUNT
         )
     } else {
         String::new()
@@ -201,38 +364,61 @@ Guild ID: `{guild_id}`\n\n\
 {quoted_block}\
 ## Thread Context (Inline)\n\
 {inline_thread}\n\n\
-{truncation_note}\
+{thread_note}\
+## Channel Context (Inline, last 24h window)\n\
+{inline_channel}\n\n\
+{channel_note}\
 ## Local Context Files\n\
 - `incoming_email/discord_channel_last_24h.json`: full channel history from the last 24 hours.\n\
+- `incoming_email/discord_channel_context_recent.txt`: recent channel context used inline.\n\
 - `incoming_email/discord_thread_context_full.json`: full thread context.\n\
 - `incoming_email/discord_thread_context_recent.txt`: recent thread context used inline.\n\
 - `incoming_email/discord_quoted_message.json`: quoted message payload when available.\n",
-        generated_at = now.to_rfc3339(),
-        current_id = current_message_id,
-        channel_id = channel_id,
-        guild_id = message
-            .metadata
-            .discord_guild_id
+        generated_at = snapshot.generated_at.to_rfc3339(),
+        current_id = snapshot.current_message_id,
+        channel_id = snapshot.channel_id,
+        guild_id = snapshot
+            .guild_id
             .map(|id| id.to_string())
             .unwrap_or_else(|| "dm".to_string()),
         quoted_block = quoted_block,
-        inline_thread = if recent_text.trim().is_empty() {
+        inline_thread = if thread_recent_text.trim().is_empty() {
             "- (none)".to_string()
         } else {
-            recent_text
+            thread_recent_text
         },
-        truncation_note = truncation_note,
+        thread_note = thread_note,
+        inline_channel = if channel_recent_text.trim().is_empty() {
+            "- (none)".to_string()
+        } else {
+            channel_recent_text
+        },
+        channel_note = channel_note,
     );
     std::fs::write(&context_md_path, &context_markdown)?;
     std::fs::write(&seq_context_md_path, &context_markdown)?;
 
-    info!(
-        "discord context files updated for channel {} at {}",
-        channel_id,
-        incoming_dir.display()
-    );
-
     Ok(())
+}
+
+fn format_message_with_quote(user_text: &str, quoted: Option<&DiscordMessageEntry>) -> String {
+    match quoted {
+        Some(entry) => {
+            if user_text.trim().is_empty() {
+                format!(
+                    "Quoted message:\n{}\n\nUser message:\n- (empty)",
+                    render_single_entry(entry)
+                )
+            } else {
+                format!(
+                    "Quoted message:\n{}\n\nUser message:\n{}",
+                    render_single_entry(entry),
+                    user_text.trim_end()
+                )
+            }
+        }
+        None => user_text.to_string(),
+    }
 }
 
 fn resolve_discord_bot_token(config: &ServiceConfig) -> Option<String> {

@@ -175,12 +175,19 @@ impl MessageRouter {
     /// - `message`: The user's message
     /// - `memory`: Optional memory context (contents of memo.md)
     /// - `employee_name`: Optional employee display name for personalized responses
+    /// - `extra_context`: Optional channel/thread context to help with quick replies
     ///
     /// Returns:
     /// - `Simple { response, memory_update }` if the local LLM handled the query
     /// - `Complex` if the query should go to the full pipeline
     /// - `Passthrough` if routing is disabled or failed
-    pub async fn classify(&self, message: &str, memory: Option<&str>, employee_name: Option<&str>) -> RouterDecision {
+    pub async fn classify(
+        &self,
+        message: &str,
+        memory: Option<&str>,
+        employee_name: Option<&str>,
+        extra_context: Option<&str>,
+    ) -> RouterDecision {
         if !self.config.enabled {
             debug!("Router disabled, passing through");
             return RouterDecision::Passthrough;
@@ -205,7 +212,9 @@ impl MessageRouter {
             return RouterDecision::Complex;
         }
 
-        let result = self.call_openai(message, memory, employee_name).await;
+        let result = self
+            .call_openai(message, memory, employee_name, extra_context)
+            .await;
 
         match result {
             Ok(response) => {
@@ -258,7 +267,13 @@ impl MessageRouter {
     }
 
     /// Make a request to the OpenAI API (async)
-    async fn call_openai(&self, message: &str, memory: Option<&str>, employee_name: Option<&str>) -> Result<String, String> {
+    async fn call_openai(
+        &self,
+        message: &str,
+        memory: Option<&str>,
+        employee_name: Option<&str>,
+        extra_context: Option<&str>,
+    ) -> Result<String, String> {
         let api_key = self
             .config
             .openai_api_key
@@ -267,20 +282,23 @@ impl MessageRouter {
 
         let url = format!("{}/chat/completions", self.config.openai_url);
 
-        // Build user message with optional memory context
-        let user_content = if let Some(mem) = memory {
-            if mem.trim().is_empty() {
-                message.to_string()
-            } else {
-                format!(
-                    "User memory:\n```\n{}\n```\n\nMessage: {}",
-                    mem.trim(),
-                    message
-                )
+        // Build user message with optional memory + channel context
+        let mut sections = Vec::new();
+        if let Some(mem) = memory {
+            if !mem.trim().is_empty() {
+                sections.push(format!("User memory:\n```\n{}\n```", mem.trim()));
             }
-        } else {
-            message.to_string()
-        };
+        }
+        if let Some(context) = extra_context {
+            if !context.trim().is_empty() {
+                sections.push(format!(
+                    "Conversation context:\n```\n{}\n```",
+                    context.trim()
+                ));
+            }
+        }
+        sections.push(format!("Message: {}", message));
+        let user_content = sections.join("\n\n");
 
         let system_prompt = build_system_prompt(employee_name);
         let request = OpenAIChatRequest {
@@ -503,7 +521,7 @@ mod tests {
 
         let router = MessageRouter::new();
         let decision = router
-            .classify("Hello! Quick reply test.", None, Some("Boiled-Egg"))
+            .classify("Hello! Quick reply test.", None, Some("Boiled-Egg"), None)
             .await;
 
         match decision {

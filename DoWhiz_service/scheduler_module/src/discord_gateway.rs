@@ -22,7 +22,10 @@ use crate::index_store::IndexStore;
 use crate::memory_diff::{MemoryDiff, SectionChange};
 use crate::memory_queue::{global_memory_queue, MemoryWriteRequest};
 use crate::message_router::{MessageRouter, RouterDecision};
-use crate::service::ServiceConfig;
+use crate::service::{
+    build_discord_message_text_with_quote, build_discord_router_context,
+    hydrate_discord_context_files, persist_discord_ingest_context, ServiceConfig,
+};
 use crate::user_store::UserStore;
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
 
@@ -179,10 +182,25 @@ impl EventHandler for DiscordEventHandler {
             };
 
             let employee_name = self.state.config.employee_profile.display_name.as_deref();
+            let router_context =
+                match build_discord_router_context(&self.state.config, &inbound, &inbound.raw_payload) {
+                    Ok(context) => Some(context),
+                    Err(err) => {
+                        warn!("Failed to build Discord router context: {}", err);
+                        None
+                    }
+                };
+            let router_message = router_context
+                .as_ref()
+                .map(|context| context.message.as_str())
+                .unwrap_or(text);
+            let extra_context = router_context
+                .as_ref()
+                .map(|context| context.context.as_str());
             match self
                 .state
                 .message_router
-                .classify(text, memory.as_deref(), employee_name)
+                .classify(router_message, memory.as_deref(), employee_name, extra_context)
                 .await
             {
                 RouterDecision::Simple {
@@ -226,6 +244,16 @@ impl EventHandler for DiscordEventHandler {
                     .await
                     {
                         error!("failed to send quick Discord response: {}", e);
+                    }
+
+                    if let Err(err) = persist_discord_ingest_context(
+                        &self.state.config,
+                        &self.state.user_store,
+                        &inbound,
+                        &inbound.raw_payload,
+                        router_context.as_ref().map(|context| &context.snapshot),
+                    ) {
+                        warn!("Failed to persist Discord context after quick reply: {}", err);
                     }
                     return;
                 }
@@ -294,6 +322,19 @@ fn process_discord_message(
 
     // Save the incoming Discord message to workspace
     append_discord_message(&workspace, message, raw_msg, thread_state.last_email_seq)?;
+    if let Err(err) = hydrate_discord_context_files(
+        config,
+        &workspace,
+        message,
+        &message.raw_payload,
+        thread_state.last_email_seq,
+    ) {
+        warn!(
+            "failed to hydrate discord context files for {}: {}",
+            workspace.display(),
+            err
+        );
+    }
 
     // Determine model and runner
     let model_name = match config.employee_profile.model.clone() {
@@ -458,7 +499,7 @@ fn append_discord_message(
 
     // Save message text as a simple text file
     let text_path = incoming_dir.join(format!("{:05}_discord_message.txt", seq));
-    let text_content = message.text_body.clone().unwrap_or_default();
+    let text_content = build_discord_message_text_with_quote(message, &message.raw_payload);
     fs::write(&text_path, &text_content)?;
 
     // Create a metadata file with sender info
