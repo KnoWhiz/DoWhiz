@@ -102,6 +102,49 @@
       .auth-toggle a:hover {
         text-decoration: underline;
       }
+      .auth-helper {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 0.75rem;
+        font-size: 0.9rem;
+      }
+      .auth-helper a {
+        color: var(--accent, #38bdf8);
+        text-decoration: none;
+      }
+      .auth-helper a:hover {
+        text-decoration: underline;
+      }
+      .auth-panel {
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid var(--border, #333);
+        background: var(--surface, #1a1a1a);
+        margin-top: 1rem;
+      }
+      .auth-panel-title {
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+      }
+      .auth-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+      .auth-option-note {
+        margin-top: 0.5rem;
+        font-size: 0.85rem;
+        color: var(--text-muted, #888);
+      }
+      .auth-link {
+        color: var(--accent, #38bdf8);
+        text-decoration: none;
+      }
+      .auth-link:hover {
+        text-decoration: underline;
+      }
       .hidden {
         display: none !important;
       }
@@ -474,6 +517,10 @@
               <input type="password" id="signin-password" class="auth-input" placeholder="Password" required />
               <button type="submit" class="auth-btn auth-btn-primary">Sign In</button>
             </form>
+            <div class="auth-helper">
+              <a href="#" id="forgot-password-link">Forgot password?</a>
+              <a href="#" id="set-password-link">Set password</a>
+            </div>
 
             <div class="auth-divider">or</div>
 
@@ -500,8 +547,41 @@
               <button type="submit" class="auth-btn auth-btn-primary">Sign Up</button>
             </form>
 
+            <div id="existing-account-container" class="auth-panel hidden">
+              <div class="auth-panel-title">This email already has an account</div>
+              <div>Choose how you'd like to continue signing in.</div>
+              <div class="auth-options">
+                <button id="send-reset-email" class="auth-btn auth-btn-oauth" type="button">
+                  Send password reset email
+                </button>
+                <button id="send-otp-email" class="auth-btn auth-btn-oauth" type="button">
+                  Send email login link
+                </button>
+              </div>
+              <div class="auth-option-note">
+                We'll send it to <span id="existing-account-email"></span>.
+              </div>
+            </div>
+
             <p class="auth-toggle">
               Already have an account? <a href="#" id="show-signin">Sign in</a>
+            </p>
+          </div>
+
+          <div id="password-reset-container" class="hidden">
+            <div class="auth-panel">
+              <div class="auth-panel-title">Set a new password</div>
+              <div class="auth-option-note">
+                Resetting password for <span id="password-reset-email">your account</span>.
+              </div>
+              <form id="password-reset-form" class="auth-form" style="margin-top: 1rem;">
+                <input type="password" id="password-reset-new" class="auth-input" placeholder="New password (min 6 characters)" required minlength="6" />
+                <input type="password" id="password-reset-confirm" class="auth-input" placeholder="Confirm new password" required minlength="6" />
+                <button type="submit" class="auth-btn auth-btn-primary">Set Password</button>
+              </form>
+            </div>
+            <p class="auth-toggle">
+              Back to <a href="#" id="back-to-signin" class="auth-link">Sign in</a>
             </p>
           </div>
 
@@ -647,6 +727,21 @@
       const authMessage = document.getElementById('auth-message');
       const pageTitle = document.getElementById('page-title');
       const pageSubtitle = document.getElementById('page-subtitle');
+      const existingAccountContainer = document.getElementById('existing-account-container');
+      const existingAccountEmail = document.getElementById('existing-account-email');
+      const sendResetEmailBtn = document.getElementById('send-reset-email');
+      const sendOtpEmailBtn = document.getElementById('send-otp-email');
+      const passwordResetContainer = document.getElementById('password-reset-container');
+      const passwordResetEmail = document.getElementById('password-reset-email');
+      const passwordResetForm = document.getElementById('password-reset-form');
+      const backToSigninLink = document.getElementById('back-to-signin');
+      const forgotPasswordLink = document.getElementById('forgot-password-link');
+      const setPasswordLink = document.getElementById('set-password-link');
+
+      let lastSignupEmail = null;
+      let recoverySession = null;
+      let lastEmailActionAt = 0;
+      const EMAIL_ACTION_COOLDOWN_MS = 30000;
 
       // Check if user came from logged-in state (expecting dashboard)
       const expectingDashboard = new URLSearchParams(window.location.search).get('loggedIn') === 'true';
@@ -667,11 +762,113 @@
         authMessage.classList.add('hidden');
       }
 
+      function hideExistingAccountOptions() {
+        existingAccountContainer?.classList.add('hidden');
+      }
+
+      function showExistingAccountOptions(email) {
+        lastSignupEmail = email;
+        if (existingAccountEmail) {
+          existingAccountEmail.textContent = email;
+        }
+        existingAccountContainer?.classList.remove('hidden');
+      }
+
+      function showPasswordResetForm(email, session) {
+        recoverySession = session || null;
+        if (passwordResetEmail) {
+          passwordResetEmail.textContent = email || 'your account';
+        }
+        loadingContainer.classList.add('hidden');
+        signinFormContainer.classList.add('hidden');
+        signupFormContainer.classList.add('hidden');
+        dashboardContainer.classList.add('hidden');
+        passwordResetContainer.classList.remove('hidden');
+      }
+
+      function clearPasswordResetForm() {
+        if (passwordResetForm) {
+          passwordResetForm.reset();
+        }
+      }
+
+      function canSendEmailAction() {
+        const now = Date.now();
+        if (now - lastEmailActionAt < EMAIL_ACTION_COOLDOWN_MS) {
+          return false;
+        }
+        lastEmailActionAt = now;
+        return true;
+      }
+
+      function normalizeAuthError(error) {
+        if (!error) return null;
+        const message = error.message || 'Something went wrong.';
+        const lower = message.toLowerCase();
+        if (lower.includes('invalid login credentials')) {
+          return 'Invalid email or password. If you signed up with Google, use Google sign-in or set a password first.';
+        }
+        if (lower.includes('email rate limit exceeded')) {
+          return 'Email rate limit exceeded. Please wait a minute and try again.';
+        }
+        if (lower.includes('email address') && lower.includes('invalid')) {
+          return 'That email address is invalid or not allowed.';
+        }
+        if (lower.includes('password should be at least')) {
+          return 'Password must be at least 6 characters.';
+        }
+        return message;
+      }
+
+      async function sendPasswordReset(email) {
+        if (!email) {
+          showMessage('Please enter your email first.');
+          return;
+        }
+        if (!canSendEmailAction()) {
+          showMessage('Please wait a few seconds before trying again.');
+          return;
+        }
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/auth/index.html`
+        });
+        if (error) {
+          showMessage(normalizeAuthError(error) || error.message);
+        } else {
+          showMessage('Password reset email sent. Follow the link to set a password.', 'success');
+        }
+      }
+
+      async function sendMagicLink(email) {
+        if (!email) {
+          showMessage('Please enter your email first.');
+          return;
+        }
+        if (!canSendEmailAction()) {
+          showMessage('Please wait a few seconds before trying again.');
+          return;
+        }
+        const { error } = await supabase.auth.signInWithOtp({
+          email,
+          options: {
+            emailRedirectTo: `${window.location.origin}/auth/index.html`,
+            shouldCreateUser: false
+          }
+        });
+        if (error) {
+          showMessage(normalizeAuthError(error) || error.message);
+        } else {
+          showMessage('Login link sent. Check your email to continue.', 'success');
+        }
+      }
+
       // Switch between forms
       document.getElementById('show-signup').addEventListener('click', (e) => {
         e.preventDefault();
         signinFormContainer.classList.add('hidden');
         signupFormContainer.classList.remove('hidden');
+        passwordResetContainer.classList.add('hidden');
+        hideExistingAccountOptions();
         hideMessage();
       });
 
@@ -679,7 +876,52 @@
         e.preventDefault();
         signupFormContainer.classList.add('hidden');
         signinFormContainer.classList.remove('hidden');
+        passwordResetContainer.classList.add('hidden');
+        hideExistingAccountOptions();
         hideMessage();
+      });
+
+      backToSigninLink?.addEventListener('click', (e) => {
+        e.preventDefault();
+        passwordResetContainer.classList.add('hidden');
+        signinFormContainer.classList.remove('hidden');
+        hideMessage();
+      });
+
+      forgotPasswordLink?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        hideMessage();
+        const email = document.getElementById('signin-email')?.value;
+        await sendPasswordReset(email);
+      });
+
+      setPasswordLink?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        hideMessage();
+        const email = document.getElementById('signin-email')?.value;
+        await sendPasswordReset(email);
+      });
+
+      sendResetEmailBtn?.addEventListener('click', async () => {
+        hideMessage();
+        const email = lastSignupEmail || document.getElementById('signup-email')?.value;
+        sendResetEmailBtn.disabled = true;
+        try {
+          await sendPasswordReset(email);
+        } finally {
+          sendResetEmailBtn.disabled = false;
+        }
+      });
+
+      sendOtpEmailBtn?.addEventListener('click', async () => {
+        hideMessage();
+        const email = lastSignupEmail || document.getElementById('signup-email')?.value;
+        sendOtpEmailBtn.disabled = true;
+        try {
+          await sendMagicLink(email);
+        } finally {
+          sendOtpEmailBtn.disabled = false;
+        }
       });
 
       // Sign in with email/password
@@ -691,7 +933,7 @@
 
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
-          showMessage(error.message);
+          showMessage(normalizeAuthError(error) || error.message);
         } else {
           await handleAuthSuccess(data.session);
         }
@@ -701,13 +943,31 @@
       document.getElementById('signup-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         hideMessage();
+        hideExistingAccountOptions();
         const email = document.getElementById('signup-email').value;
         const password = document.getElementById('signup-password').value;
 
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: `${window.location.origin}/auth/index.html` }
+        });
         if (error) {
-          showMessage(error.message);
+          const normalizedError = (error.message || '').toLowerCase();
+          if (normalizedError.includes('already registered') || normalizedError.includes('already exists')) {
+            showExistingAccountOptions(email);
+            showMessage('That email already has an account. Choose an option below to continue.', 'success');
+            return;
+          }
+          showMessage(normalizeAuthError(error) || error.message);
         } else if (data.user && !data.session) {
+          const identities = data.user.identities || [];
+          const isExisting = identities.length === 0;
+          if (isExisting) {
+            showExistingAccountOptions(email);
+            showMessage('That email already has an account. Choose an option below to continue.', 'success');
+            return;
+          }
           showMessage('Check your email for a confirmation link!', 'success');
         } else if (data.session) {
           await handleAuthSuccess(data.session);
@@ -729,6 +989,39 @@
         cachedIdentifiers = [];
         await supabase.auth.signOut();
         window.location.reload();
+      });
+
+      passwordResetForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideMessage();
+        const newPassword = document.getElementById('password-reset-new')?.value;
+        const confirmPassword = document.getElementById('password-reset-confirm')?.value;
+
+        if (!newPassword || newPassword.length < 6) {
+          showMessage('Password must be at least 6 characters.');
+          return;
+        }
+        if (newPassword !== confirmPassword) {
+          showMessage('Passwords do not match.');
+          return;
+        }
+
+        const { error } = await supabase.auth.updateUser({ password: newPassword });
+        if (error) {
+          showMessage(error.message);
+          return;
+        }
+
+        showMessage('Password updated. Signing you in...', 'success');
+        clearPasswordResetForm();
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          await handleAuthSuccess(session);
+        } else {
+          signinFormContainer.classList.remove('hidden');
+          passwordResetContainer.classList.add('hidden');
+        }
       });
 
       // Handle successful auth
@@ -759,6 +1052,8 @@
         loadingContainer.classList.add('hidden');
         signinFormContainer.classList.add('hidden');
         signupFormContainer.classList.add('hidden');
+        passwordResetContainer.classList.add('hidden');
+        hideExistingAccountOptions();
         dashboardContainer.classList.remove('hidden');
         pageTitle.textContent = 'Your Dashboard';
         pageSubtitle.textContent = 'Manage your linked channels and integrations.';
@@ -1248,49 +1543,76 @@
         const hash = window.location.hash;
         console.log('Checking for OAuth tokens in hash...');
 
-        if (hash && hash.includes('access_token')) {
-          console.log('Found tokens in URL hash, parsing...');
-
-          // Parse the hash parameters
-          const params = new URLSearchParams(hash.substring(1));
-          const access_token = params.get('access_token');
-          const refresh_token = params.get('refresh_token');
-
-          if (access_token && refresh_token) {
-            console.log('Setting session with tokens...');
-
-            // Manually set the session
-            const { data, error } = await supabase.auth.setSession({
-              access_token,
-              refresh_token
-            });
-
-            console.log('setSession result:', data);
-            if (error) console.error('setSession error:', error);
-
-            if (data.session) {
-              console.log('Session established! User:', data.session.user.email);
-
-              // Create DoWhiz account if needed
-              try {
-                const res = await fetch(`${DOWHIZ_API_URL}/auth/signup`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${data.session.access_token}` }
-                });
-                console.log('DoWhiz signup response:', res.status);
-              } catch (err) {
-                console.error('Failed to create DoWhiz account:', err);
-              }
-
-              // Redirect to home page after OAuth
-              window.location.href = '/';
-            } else {
-              showMessage('Failed to establish session. Please try again.');
-            }
-          }
-          return true; // OAuth callback was handled
+        if (!hash) {
+          return false;
         }
-        return false; // No OAuth callback
+
+        // Parse the hash parameters (handles both token and error callbacks)
+        const params = new URLSearchParams(hash.substring(1));
+        const access_token = params.get('access_token');
+        const refresh_token = params.get('refresh_token');
+        const flowType = params.get('type');
+        const errorDescription = params.get('error_description') || params.get('error');
+
+        if (errorDescription) {
+          showMessage(decodeURIComponent(errorDescription));
+          return true;
+        }
+
+        if (!access_token) {
+          return false;
+        }
+
+        console.log('Found tokens in URL hash, parsing...');
+
+        if (access_token && refresh_token) {
+          console.log('Setting session with tokens...');
+
+          // Manually set the session
+          const { data, error } = await supabase.auth.setSession({
+            access_token,
+            refresh_token
+          });
+
+          console.log('setSession result:', data);
+          if (error) console.error('setSession error:', error);
+
+          if (!data.session) {
+            showMessage('We could not establish a session. Please open the latest email link and try again.');
+            return true;
+          }
+
+          console.log('Session established! User:', data.session.user.email);
+
+          if (flowType === 'recovery') {
+            showPasswordResetForm(data.session.user?.email, data.session);
+            window.history.replaceState({}, document.title, window.location.pathname);
+            return true;
+          }
+
+          if (flowType === 'magiclink' || flowType === 'signup') {
+            await handleAuthSuccess(data.session);
+            window.history.replaceState({}, document.title, window.location.pathname);
+            return true;
+          }
+
+          // Assume OAuth flow if no explicit type is provided
+          try {
+            const res = await fetch(`${DOWHIZ_API_URL}/auth/signup`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${data.session.access_token}` }
+            });
+            console.log('DoWhiz signup response:', res.status);
+          } catch (err) {
+            console.error('Failed to create DoWhiz account:', err);
+          }
+
+          // Redirect to home page after OAuth
+          window.location.href = '/';
+          return true;
+        }
+
+        return true;
       }
 
       // Initialize page - check for OAuth callback or existing session
