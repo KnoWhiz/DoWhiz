@@ -296,6 +296,22 @@ function App() {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef(null);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const { hash, pathname } = window.location;
+    if (!hash || pathname.startsWith('/auth')) {
+      return;
+    }
+    const params = new URLSearchParams(hash.substring(1));
+    const hasTokens = params.get('access_token') && params.get('refresh_token');
+    const hasError = params.get('error') || params.get('error_description');
+    if (hasTokens || hasError) {
+      window.location.replace(`/auth/index.html${hash}`);
+    }
+  }, []);
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
