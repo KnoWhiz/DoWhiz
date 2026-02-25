@@ -44,6 +44,14 @@ struct JwtClaims {
     exp: usize,          // Expiration time
     #[serde(default)]
     aud: Option<String>, // Audience (optional)
+    #[serde(default)]
+    email: Option<String>, // User's email from Supabase
+}
+
+/// Authenticated user info extracted from token
+struct AuthUser {
+    id: Uuid,
+    email: Option<String>,
 }
 
 /// Cached JWT secret for local verification
@@ -51,12 +59,12 @@ fn get_jwt_secret() -> Option<String> {
     std::env::var("SUPABASE_JWT_SECRET").ok()
 }
 
-/// Extract and validate Supabase JWT locally, returns the auth user ID
+/// Extract and validate Supabase JWT locally, returns the auth user ID and email
 /// This avoids an HTTP round-trip to Supabase on every request.
 async fn validate_supabase_token(
     supabase_url: &str,
     token: &str,
-) -> Result<Uuid, (StatusCode, String)> {
+) -> Result<AuthUser, (StatusCode, String)> {
     // Try local JWT verification first (fast path)
     if let Some(secret) = get_jwt_secret() {
         let key = DecodingKey::from_secret(secret.as_bytes());
@@ -65,7 +73,10 @@ async fn validate_supabase_token(
 
         match decode::<JwtClaims>(token, &key, &validation) {
             Ok(token_data) => {
-                return Ok(token_data.claims.sub);
+                return Ok(AuthUser {
+                    id: token_data.claims.sub,
+                    email: token_data.claims.email,
+                });
             }
             Err(e) => {
                 warn!("Local JWT validation failed: {}", e);
@@ -107,6 +118,7 @@ async fn validate_supabase_token(
     #[derive(Deserialize)]
     struct SupabaseUser {
         id: Uuid,
+        email: Option<String>,
     }
 
     let user: SupabaseUser = resp.json().await.map_err(|e| {
@@ -117,7 +129,10 @@ async fn validate_supabase_token(
         )
     })?;
 
-    Ok(user.id)
+    Ok(AuthUser {
+        id: user.id,
+        email: user.email,
+    })
 }
 
 /// Extract Bearer token from Authorization header
@@ -157,12 +172,14 @@ pub async fn signup(State(state): State<AuthState>, headers: HeaderMap) -> impl 
         }
     };
 
-    let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
-        Ok(id) => id,
+    let auth_user = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(user) => user,
         Err((status, msg)) => {
             return (status, Json(serde_json::json!({ "error": msg }))).into_response();
         }
     };
+    let auth_user_id = auth_user.id;
+    let auth_email = auth_user.email.clone();
 
     // Check if account already exists (run on blocking thread)
     let store = state.account_store.clone();
@@ -222,6 +239,33 @@ pub async fn signup(State(state): State<AuthState>, headers: HeaderMap) -> impl 
                 "Created account {} for auth_user_id={}",
                 account.id, auth_user_id
             );
+
+            // Auto-link the auth email as an identifier
+            if let Some(email) = auth_email {
+                let store = state.account_store.clone();
+                let account_id = account.id;
+                let email_clone = email.clone();
+                let link_result = task::spawn_blocking(move || {
+                    store.create_identifier(account_id, "email", &email_clone)
+                })
+                .await;
+
+                match link_result {
+                    Ok(Ok(_)) => {
+                        info!("Auto-linked email {} to account {}", email, account.id);
+                    }
+                    Ok(Err(AccountStoreError::IdentifierTaken)) => {
+                        warn!("Email {} already linked to another account", email);
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to auto-link email {}: {}", email, e);
+                    }
+                    Err(e) => {
+                        warn!("spawn_blocking panicked during email link: {}", e);
+                    }
+                }
+            }
+
             (
                 StatusCode::CREATED,
                 Json(SignupResponse {
@@ -281,7 +325,7 @@ pub async fn get_account(State(state): State<AuthState>, headers: HeaderMap) -> 
     };
 
     let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
-        Ok(id) => id,
+        Ok(user) => user.id,
         Err((status, msg)) => {
             return (status, Json(serde_json::json!({ "error": msg }))).into_response();
         }
@@ -409,7 +453,7 @@ pub async fn link_identifier(
     };
 
     let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
-        Ok(id) => id,
+        Ok(user) => user.id,
         Err((status, msg)) => {
             return (status, Json(serde_json::json!({ "error": msg }))).into_response();
         }
@@ -540,7 +584,7 @@ pub async fn verify_identifier(
     };
 
     let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
-        Ok(id) => id,
+        Ok(user) => user.id,
         Err((status, msg)) => {
             return (status, Json(serde_json::json!({ "error": msg }))).into_response();
         }
@@ -667,7 +711,7 @@ pub async fn unlink_identifier(
     };
 
     let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
-        Ok(id) => id,
+        Ok(user) => user.id,
         Err((status, msg)) => {
             return (status, Json(serde_json::json!({ "error": msg }))).into_response();
         }
@@ -785,7 +829,7 @@ pub async fn delete_account(
     };
 
     let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
-        Ok(id) => id,
+        Ok(user) => user.id,
         Err((status, msg)) => {
             return (status, Json(serde_json::json!({ "error": msg }))).into_response();
         }
@@ -907,7 +951,7 @@ pub async fn get_memo(State(state): State<AuthState>, headers: HeaderMap) -> imp
     };
 
     let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
-        Ok(id) => id,
+        Ok(user) => user.id,
         Err((status, msg)) => {
             return (status, Json(serde_json::json!({ "error": msg }))).into_response();
         }
@@ -1011,7 +1055,7 @@ pub async fn update_memo(
     };
 
     let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
-        Ok(id) => id,
+        Ok(user) => user.id,
         Err((status, msg)) => {
             return (status, Json(serde_json::json!({ "error": msg }))).into_response();
         }
@@ -1218,7 +1262,7 @@ pub async fn discord_oauth_callback(
 
     // Validate Supabase token and get user
     let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
-        Ok(id) => id,
+        Ok(user) => user.id,
         Err(_) => {
             return redirect_to("/auth/index.html?discord=error&reason=invalid_token");
         }
@@ -1463,7 +1507,7 @@ pub async fn slack_oauth_callback(
 
     // Validate Supabase token and get user
     let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
-        Ok(id) => id,
+        Ok(user) => user.id,
         Err(_) => {
             return redirect_to("/auth/index.html?slack=error&reason=invalid_token");
         }
