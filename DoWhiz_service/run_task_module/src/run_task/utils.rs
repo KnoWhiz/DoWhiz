@@ -21,7 +21,7 @@ pub(super) fn run_task_timeout() -> Duration {
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
         .filter(|value| *value > 0)
-        .unwrap_or(1800);
+        .unwrap_or(36000); // 10 hours
     Duration::from_secs(timeout_secs)
 }
 
