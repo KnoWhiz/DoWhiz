@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tracing::warn;
+use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::account_store::lookup_account_by_channel;
 use crate::channel::Channel;
 
 use super::actions::{apply_scheduler_actions, ingest_follow_up_tasks, schedule_auto_reply};
@@ -111,6 +112,34 @@ impl<E: TaskExecutor> Scheduler<E> {
         self.tasks.push(task);
         self.store.insert_task(self.tasks.last().unwrap())?;
         Ok(self.tasks.last().unwrap().id)
+    }
+
+    /// Add a one-shot task with a specific task ID.
+    /// Used when syncing a task to user storage with the same ID as the workspace task.
+    pub fn add_one_shot_in_with_id(
+        &mut self,
+        id: Uuid,
+        delay: Duration,
+        kind: TaskKind,
+    ) -> Result<(), SchedulerError> {
+        let local_now = Local::now();
+        let utc_now = local_now.with_timezone(&Utc);
+        let chrono_delay =
+            chrono::Duration::from_std(delay).map_err(|_| SchedulerError::DurationOutOfRange)?;
+        let run_at = utc_now + chrono_delay;
+
+        let task = ScheduledTask {
+            id,
+            kind,
+            schedule: Schedule::OneShot { run_at },
+            enabled: true,
+            created_at: utc_now,
+            last_run: None,
+        };
+
+        self.tasks.push(task);
+        self.store.insert_task(self.tasks.last().unwrap())?;
+        Ok(())
     }
 
     pub fn add_one_shot_at(
@@ -229,6 +258,8 @@ impl<E: TaskExecutor> Scheduler<E> {
                             err
                         );
                     }
+                    // Sync success status to user's account-level storage for Discord/Slack
+                    sync_task_status_to_user_storage(task_id, task, executed_at, "success", None);
                 }
             }
             Err(err) => {
@@ -239,6 +270,10 @@ impl<E: TaskExecutor> Scheduler<E> {
                     "failed",
                     Some(&message),
                 )?;
+                // Sync failure status to user's account-level storage for Discord/Slack
+                if let TaskKind::RunTask(task) = &task_kind {
+                    sync_task_status_to_user_storage(task_id, task, executed_at, "failed", Some(&message));
+                }
                 // Disable one-shot tasks on failure, but allow a few retries for RunTask.
                 if matches!(self.tasks[index].schedule, Schedule::OneShot { .. }) {
                     let mut should_disable = true;
@@ -306,6 +341,83 @@ impl<E: TaskExecutor> Scheduler<E> {
         }
         // Update in database
         self.store.disable_task_by_id(task_id)
+    }
+}
+
+/// Sync task execution status to user's account-level tasks.db for Discord/Slack channels.
+/// This allows users to see task status in their dashboard for linked accounts.
+fn sync_task_status_to_user_storage(
+    task_id: Uuid,
+    task: &RunTaskTask,
+    executed_at: DateTime<Utc>,
+    status: &str,
+    error_message: Option<&str>,
+) {
+    // Only sync for Discord and Slack channels
+    if !matches!(task.channel, Channel::Discord | Channel::Slack) {
+        return;
+    }
+
+    // Get the identifier from reply_to (Discord: reply_to[0], Slack: sender is in reply_to for lookup)
+    let identifier = match task.reply_to.first() {
+        Some(id) => id,
+        None => {
+            warn!("no reply_to identifier for task {} to sync to user storage", task_id);
+            return;
+        }
+    };
+
+    // Look up the account by channel identifier
+    let account_id = match lookup_account_by_channel(&task.channel, identifier) {
+        Some(id) => id,
+        None => {
+            // No linked account, nothing to sync
+            return;
+        }
+    };
+
+    // Get users_root from environment
+    let users_root = match std::env::var("USERS_ROOT") {
+        Ok(path) => PathBuf::from(path),
+        Err(_) => {
+            warn!("USERS_ROOT not set, cannot sync task {} to user storage", task_id);
+            return;
+        }
+    };
+
+    // Construct path to user's tasks.db
+    let user_tasks_db_path = users_root
+        .join(account_id.to_string())
+        .join("state")
+        .join("tasks.db");
+
+    // Open the user's scheduler store and update the task
+    match SqliteSchedulerStore::new(user_tasks_db_path.clone()) {
+        Ok(store) => {
+            // Record execution start and finish to update status
+            match store.record_execution_start(task_id, executed_at) {
+                Ok(execution_id) => {
+                    if let Err(err) = store.record_execution_finish(execution_id, executed_at, status, error_message) {
+                        warn!("failed to record execution finish for task {} in user storage: {}", task_id, err);
+                    } else {
+                        info!(
+                            "synced task {} status '{}' to user storage account={}",
+                            task_id, status, account_id
+                        );
+                    }
+                }
+                Err(err) => {
+                    warn!("failed to record execution start for task {} in user storage: {}", task_id, err);
+                }
+            }
+        }
+        Err(err) => {
+            warn!(
+                "failed to open user scheduler store at {}: {}",
+                user_tasks_db_path.display(),
+                err
+            );
+        }
     }
 }
 

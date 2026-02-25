@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use tracing::{info, warn};
 
+use crate::account_store::AccountStore;
 use crate::adapters::slack::SlackEventWrapper;
 use crate::channel::{Channel, InboundAdapter};
 use crate::index_store::IndexStore;
@@ -23,6 +24,7 @@ pub(crate) fn process_slack_event(
     user_store: &UserStore,
     index_store: &IndexStore,
     slack_store: &SlackStore,
+    account_store: &AccountStore,
     raw_payload: &[u8],
 ) -> Result<(), BoxError> {
     use crate::adapters::slack::SlackInboundAdapter;
@@ -141,6 +143,9 @@ pub(crate) fn process_slack_event(
         employee_id: Some(config.employee_profile.id.clone()),
     };
 
+    // Clone run_task before consuming it, in case we need to write to account-level storage
+    let run_task_for_account = run_task.clone();
+
     // Schedule the task
     let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
     if let Err(err) = cancel_pending_thread_tasks(&mut scheduler, &workspace, thread_state.epoch) {
@@ -161,6 +166,36 @@ pub(crate) fn process_slack_event(
         workspace.display(),
         thread_state.epoch
     );
+
+    // If the Slack user has linked their account, also write to account-level tasks.db
+    // message.sender contains the Slack user ID
+    if let Ok(Some(account)) = account_store.get_account_by_identifier("slack", &message.sender) {
+        let account_tasks_dir = config.users_root.join(account.id.to_string()).join("state");
+        if let Err(err) = std::fs::create_dir_all(&account_tasks_dir) {
+            warn!("failed to create account tasks dir for account {}: {}", account.id, err);
+        } else {
+            let account_tasks_db_path = account_tasks_dir.join("tasks.db");
+            match Scheduler::load(&account_tasks_db_path, ModuleExecutor::default()) {
+                Ok(mut account_scheduler) => {
+                    // Use the same task_id so we can update status at completion
+                    match account_scheduler.add_one_shot_in_with_id(task_id, Duration::from_secs(0), TaskKind::RunTask(run_task_for_account)) {
+                        Ok(()) => {
+                            info!(
+                                "also enqueued task to account-level storage account={} task_id={}",
+                                account.id, task_id
+                            );
+                        }
+                        Err(err) => {
+                            warn!("failed to add task to account scheduler for account {}: {}", account.id, err);
+                        }
+                    }
+                }
+                Err(err) => {
+                    warn!("failed to load account scheduler for account {}: {}", account.id, err);
+                }
+            }
+        }
+    }
 
     Ok(())
 }
