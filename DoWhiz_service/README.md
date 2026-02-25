@@ -257,6 +257,9 @@ Optional webhook verification:
 
 This is the recommended Azure production flow. The Rust inbound gateway handles **all ingress** (email + Slack/Discord/etc), stores raw payloads in Azure Blob, and enqueues messages into Azure Service Bus. Workers (`rust_service`) run on VMs or containers and poll Service Bus. This removes the separate Azure Function ingress and keeps routing logic in one place.
 
+For Docker-isolated RunTask execution on a VM (host Docker + per-task containers), see:
+`DoWhiz_service/docs/azure_vm_worker.md`.
+
 **Step 1: Provision Azure resources**
 ```bash
 # Example (use your own names/location)

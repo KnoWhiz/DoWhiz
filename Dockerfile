@@ -45,6 +45,7 @@ RUN if [ -f /etc/apt/sources.list ]; then \
     curl \
     git \
     gh \
+    docker.io \
     pandoc \
     libreoffice \
     poppler-utils \
@@ -97,9 +98,13 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir \
     "markitdown[pptx]"
 
 # Ensure Playwright's Chromium binary satisfies the chrome channel lookup.
-RUN chromium_path="$(ls -d /app/.cache/ms-playwright/chromium-*/chrome-linux/chrome | head -n1)" \
-  && mkdir -p /opt/google/chrome \
-  && ln -s "$chromium_path" /opt/google/chrome/chrome
+RUN chromium_path="$(find /app/.cache/ms-playwright -path '*/chrome-linux/chrome' -type f 2>/dev/null | head -n1)" \
+  && if [ -n "$chromium_path" ]; then \
+       mkdir -p /opt/google/chrome; \
+       ln -sf "$chromium_path" /opt/google/chrome/chrome; \
+     else \
+       echo "Warning: Chromium binary not found under /app/.cache/ms-playwright; skipping /opt/google/chrome symlink."; \
+     fi
 
 WORKDIR /app
 
