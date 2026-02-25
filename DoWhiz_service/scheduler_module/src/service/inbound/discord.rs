@@ -13,8 +13,9 @@ use super::super::bump_thread_state;
 use super::super::config::ServiceConfig;
 use super::super::default_thread_state_path;
 use super::super::scheduler::cancel_pending_thread_tasks;
-use super::super::workspace::{ensure_thread_workspace};
+use super::super::workspace::ensure_thread_workspace;
 use super::super::BoxError;
+use super::discord_context::hydrate_discord_context_files;
 
 pub(crate) fn process_discord_inbound_message(
     config: &ServiceConfig,
@@ -58,6 +59,19 @@ pub(crate) fn process_discord_inbound_message(
         raw_payload,
         thread_state.last_email_seq,
     )?;
+    if let Err(err) = hydrate_discord_context_files(
+        config,
+        &workspace,
+        message,
+        raw_payload,
+        thread_state.last_email_seq,
+    ) {
+        warn!(
+            "failed to hydrate discord context files for {}: {}",
+            workspace.display(),
+            err
+        );
+    }
 
     let model_name = match config.employee_profile.model.clone() {
         Some(model) => model,
@@ -95,7 +109,7 @@ pub(crate) fn process_discord_inbound_message(
         employee_id: Some(config.employee_id.clone()),
     };
 
-// Clone run_task before consuming it, in case we need to write to account-level storage
+    // Clone run_task before consuming it, in case we need to write to account-level storage
     let run_task_for_account = run_task.clone();
 
     let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
@@ -125,13 +139,20 @@ pub(crate) fn process_discord_inbound_message(
     if let Ok(Some(account)) = account_store.get_account_by_identifier("discord", &message.sender) {
         let user_tasks_dir = config.users_root.join(account.id.to_string()).join("state");
         if let Err(err) = std::fs::create_dir_all(&user_tasks_dir) {
-            warn!("failed to create user tasks dir for account {}: {}", account.id, err);
+            warn!(
+                "failed to create user tasks dir for account {}: {}",
+                account.id, err
+            );
         } else {
             let user_tasks_db_path = user_tasks_dir.join("tasks.db");
             match Scheduler::load(&user_tasks_db_path, ModuleExecutor::default()) {
                 Ok(mut user_scheduler) => {
                     // Use the same task_id so we can update status at completion
-                    match user_scheduler.add_one_shot_in_with_id(task_id, Duration::from_secs(0), TaskKind::RunTask(run_task_for_account)) {
+                    match user_scheduler.add_one_shot_in_with_id(
+                        task_id,
+                        Duration::from_secs(0),
+                        TaskKind::RunTask(run_task_for_account),
+                    ) {
                         Ok(()) => {
                             info!(
                                 "also enqueued task to account-level storage account={} task_id={}",
@@ -139,12 +160,18 @@ pub(crate) fn process_discord_inbound_message(
                             );
                         }
                         Err(err) => {
-                            warn!("failed to add task to user scheduler for account {}: {}", account.id, err);
+                            warn!(
+                                "failed to add task to user scheduler for account {}: {}",
+                                account.id, err
+                            );
                         }
                     }
                 }
                 Err(err) => {
-                    warn!("failed to load user scheduler for account {}: {}", account.id, err);
+                    warn!(
+                        "failed to load user scheduler for account {}: {}",
+                        account.id, err
+                    );
                 }
             }
         }
@@ -309,7 +336,14 @@ mod tests {
             },
         };
 
-        process_discord_inbound_message(&config, &user_store, &index_store, &account_store, &message, &raw_payload)?;
+        process_discord_inbound_message(
+            &config,
+            &user_store,
+            &index_store,
+            &account_store,
+            &message,
+            &raw_payload,
+        )?;
 
         let user = user_store.get_or_create_user("discord", &sender)?;
         let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
@@ -336,8 +370,8 @@ mod tests {
         );
 
         let state_path = crate::thread_state::default_thread_state_path(&run_task.workspace_dir);
-        let thread_state = crate::thread_state::load_thread_state(&state_path)
-            .expect("thread_state.json exists");
+        let thread_state =
+            crate::thread_state::load_thread_state(&state_path).expect("thread_state.json exists");
         let seq = thread_state.last_email_seq;
         let incoming_dir = run_task.workspace_dir.join("incoming_email");
         assert!(incoming_dir

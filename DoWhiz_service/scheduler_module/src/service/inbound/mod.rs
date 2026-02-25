@@ -1,5 +1,6 @@
 mod bluebubbles;
 mod discord;
+mod discord_context;
 mod google_docs;
 mod google_workspace;
 mod quick_responses;
