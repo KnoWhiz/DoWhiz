@@ -6,7 +6,8 @@
 //!
 //! Configuration:
 //! - `OPENAI_API_KEY`: OpenAI API key (required)
-//! - `ROUTER_MODEL`: Model to use (default: `gpt-5`)
+//! - `ROUTER_MODEL`: Model to use (default: `gpt-5.2`)
+//! - `AZURE_OPENAI_API_KEY_BACKUP` + `AZURE_OPENAI_ENDPOINT_BACKUP`: use Azure OpenAI
 //! - `ROUTER_ENABLED`: Set to "false" to disable routing (default: enabled)
 
 use std::env;
@@ -20,7 +21,7 @@ use tracing::{debug, info, warn};
 const DEFAULT_OPENAI_URL: &str = "https://api.openai.com/v1";
 
 /// Default model for OpenAI
-const DEFAULT_MODEL: &str = "gpt-5";
+const DEFAULT_MODEL: &str = "gpt-5.2";
 
 /// Timeout for LLM requests
 const LLM_TIMEOUT: Duration = Duration::from_secs(15);
@@ -95,20 +96,42 @@ pub struct RouterConfig {
     pub model: String,
     /// Whether routing is enabled
     pub enabled: bool,
+    /// Whether to use Azure OpenAI auth header
+    pub use_azure_auth: bool,
 }
 
 impl Default for RouterConfig {
     fn default() -> Self {
-        let openai_api_key = env::var("OPENAI_API_KEY").ok();
+        let azure_api_key = env::var("AZURE_OPENAI_API_KEY_BACKUP")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let azure_endpoint = env::var("AZURE_OPENAI_ENDPOINT_BACKUP")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+
+        let (openai_api_key, openai_url, use_azure_auth) =
+            if let (Some(api_key), Some(endpoint)) = (azure_api_key, azure_endpoint) {
+                (Some(api_key), normalize_azure_endpoint(&endpoint), true)
+            } else {
+                let openai_api_key = env::var("OPENAI_API_KEY")
+                    .ok()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty());
+                let openai_url = env::var("OPENAI_API_URL")
+                    .unwrap_or_else(|_| DEFAULT_OPENAI_URL.to_string());
+                (openai_api_key, openai_url, false)
+            };
 
         Self {
             openai_api_key,
-            openai_url: env::var("OPENAI_API_URL")
-                .unwrap_or_else(|_| DEFAULT_OPENAI_URL.to_string()),
+            openai_url,
             model: env::var("ROUTER_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string()),
             enabled: env::var("ROUTER_ENABLED")
                 .map(|v| v.to_lowercase() != "false")
                 .unwrap_or(true),
+            use_azure_auth,
         }
     }
 }
@@ -277,11 +300,17 @@ impl MessageRouter {
 
         debug!("Calling OpenAI: {} with model {}", url, self.config.model);
 
-        let response = self
+        let mut request_builder = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "application/json");
+        if self.config.use_azure_auth {
+            request_builder = request_builder.header("api-key", api_key);
+        } else {
+            request_builder = request_builder.header("Authorization", format!("Bearer {}", api_key));
+        }
+
+        let response = request_builder
             .json(&request)
             .send()
             .await
@@ -319,6 +348,15 @@ impl Default for MessageRouter {
 // ============================================================================
 // OpenAI API types
 // ============================================================================
+
+fn normalize_azure_endpoint(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.ends_with("/openai/v1") {
+        trimmed.to_string()
+    } else {
+        format!("{}/openai/v1", trimmed)
+    }
+}
 
 /// Request body for OpenAI chat completions endpoint
 #[derive(Debug, Clone, Serialize)]
@@ -358,11 +396,14 @@ mod tests {
         env::remove_var("OPENAI_API_URL");
         env::remove_var("ROUTER_MODEL");
         env::remove_var("ROUTER_ENABLED");
+        env::remove_var("AZURE_OPENAI_API_KEY_BACKUP");
+        env::remove_var("AZURE_OPENAI_ENDPOINT_BACKUP");
 
         let config = RouterConfig::default();
         assert_eq!(config.openai_url, DEFAULT_OPENAI_URL);
         assert_eq!(config.model, DEFAULT_MODEL);
         assert!(config.enabled);
+        assert!(!config.use_azure_auth);
     }
 
     #[test]
@@ -436,5 +477,40 @@ mod tests {
         let prompt = build_system_prompt(Some("iAssistant"));
         assert!(prompt.contains("You are iAssistant"));
         assert!(!prompt.contains("Boiled-Egg"));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn router_live_smoke_gpt_52() {
+        dotenvy::dotenv().ok();
+
+        let api_key = env::var("AZURE_OPENAI_API_KEY_BACKUP")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let endpoint = env::var("AZURE_OPENAI_ENDPOINT_BACKUP")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        if api_key.is_none() || endpoint.is_none() {
+            eprintln!("AZURE_OPENAI_API_KEY_BACKUP/AZURE_OPENAI_ENDPOINT_BACKUP not set; skipping live router smoke test");
+            return;
+        }
+
+        env::remove_var("ROUTER_MODEL");
+        env::remove_var("OPENAI_API_URL");
+        env::remove_var("ROUTER_ENABLED");
+
+        let router = MessageRouter::new();
+        let decision = router
+            .classify("Hello! Quick reply test.", None, Some("Boiled-Egg"))
+            .await;
+
+        match decision {
+            RouterDecision::Simple { response, .. } => {
+                assert!(!response.trim().is_empty());
+            }
+            other => panic!("expected Simple response, got {:?}", other),
+        }
     }
 }
