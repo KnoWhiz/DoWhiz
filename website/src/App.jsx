@@ -394,28 +394,28 @@ function App() {
   const features = [
     {
       tag: '01',
-      title: 'Inbox-native delegation',
-      desc: 'Send requests the way you already work: email a digital employee, attach files, and get finished results back in-thread.'
+      title: 'Multi-channel requests',
+      desc: 'Email-first today, with Slack, phone, Discord, WhatsApp, and more coming soon, all routed to the right employee.'
     },
     {
       tag: '02',
-      title: 'Specialized agent playbooks',
-      desc: 'Each employee is trained for a role (Generalist, TPM, Coder, CEO, and more) so outputs are tailored, not generic.'
+      title: 'Tool-native delivery',
+      desc: 'Employees work directly in Google Docs, Sheets, Slides, Notion, and other tools so outputs are ready to use.'
     },
     {
       tag: '03',
-      title: 'Visible, step-by-step delivery',
-      desc: 'Expect a clear flow: brief intake, execution, and a tidy handoff with next steps for your team.'
+      title: 'Shared memory',
+      desc: 'Key context carries across tasks so follow-ups are faster and consistent, with control to update or reset.'
     },
     {
       tag: '04',
-      title: 'Multi-format outputs',
-      desc: 'Documents, spreadsheets, summaries, posts, and code—delivered in formats your team can immediately reuse.'
+      title: 'Specialized employee playbooks',
+      desc: 'Each employee is trained for a role (Generalist, TPM, Coder, CEO, and more) so outputs are tailored, not generic.'
     },
     {
       tag: '05',
-      title: 'Multi-channel roadmap',
-      desc: 'Email first today. Slack, phone, Discord, WhatsApp, and more are coming as we expand access.'
+      title: 'Visible delivery loop',
+      desc: 'Expect a clear flow: brief intake, execution, and a tidy handoff with next steps for your team.'
     },
     {
       tag: '06',
@@ -459,23 +459,23 @@ function App() {
   const faqItems = [
     {
       question: 'What is DoWhiz?',
-      answer: 'DoWhiz is a digital employee team you can email to delegate work and receive finished outputs in the same thread.'
+      answer: 'DoWhiz is a multi-channel, tool-native digital employee team with shared memory that you can message to delegate work and receive finished outputs in-thread.'
     },
     {
       question: 'How do I get started?',
       answer: 'Join the waitlist, then email a DoWhiz employee with your request. We will follow up with clarifying questions and deliver completed work.'
     },
     {
+      question: 'Do the employees remember context?',
+      answer: 'Yes. Shared memory keeps key preferences and project context so follow-ups are faster and more consistent. You can always update or reset it.'
+    },
+    {
       question: 'What kinds of tasks can the employees handle?',
-      answer: 'Writing, project updates, summaries, research, formatting docs and spreadsheets, and other day-to-day ops tasks handled by role-specific employees.'
+      answer: 'Writing, project updates, summaries, research, and tool-native deliverables in docs, spreadsheets, slides, and code, tailored by role.'
     },
     {
-      question: 'How does delivery work?',
-      answer: 'You send a request by email, we confirm the brief, execute the task, and return results with clear next steps.'
-    },
-    {
-      question: 'Do I need to install any software?',
-      answer: 'No. DoWhiz is email-first today, with Slack, phone, Discord, WhatsApp, and more planned next.'
+      question: 'Where can I reach the team?',
+      answer: 'Email works today. Slack, phone, Discord, WhatsApp, and more are coming as multi-channel access expands.'
     }
   ];
 
@@ -738,10 +738,10 @@ function App() {
           <div className="container hero-content">
             <h1 className="hero-title">
               Empower Everyone<br />
-              <span className="text-gradient">with A Digital Employee Team</span>
+              <span className="text-gradient">with Multi-Channel Digital Employees</span>
             </h1>
             <p className="hero-subtitle">
-              Seamlessly collaborate with <a href="#roles" className="role-link">Oliver 🧸</a> (Generalist), <a href="#roles" className="role-link">Maggie 🐭</a> (TPM), <a href="#roles" className="role-link">Devin 🐙</a> (Coder), <a href="#roles" className="role-link">Lumio 🐉</a> (CEO), <a href="#roles" className="role-link">Claw 🦞</a> (OpenClaw assistant), <a href="#roles" className="role-link">Jeffery 🐦</a> (DeepTutor), <a href="#roles" className="role-link">Anna 🐘</a> (role in progress), and <a href="#roles" className="role-link">Rachel 👾</a> (GTM Specialist)—directly from your email inbox. Soon you will also reach them by phone, Slack, Discord, WhatsApp, and more.
+              Seamlessly collaborate with <a href="#roles" className="role-link">Oliver 🧸</a> (Generalist), <a href="#roles" className="role-link">Maggie 🐭</a> (TPM), <a href="#roles" className="role-link">Devin 🐙</a> (Coder), <a href="#roles" className="role-link">Lumio 🐉</a> (CEO), <a href="#roles" className="role-link">Claw 🦞</a> (OpenClaw assistant), <a href="#roles" className="role-link">Jeffery 🐦</a> (DeepTutor), <a href="#roles" className="role-link">Anna 🐘</a> (role in progress), and <a href="#roles" className="role-link">Rachel 👾</a> (GTM Specialist), a shared memory, tool-native team you can reach by email today. Slack, phone, Discord, WhatsApp, and more are coming soon.
             </p>
             <div className="hero-cta">
               <a className="btn btn-primary" href={WAITLIST_FORM_URL} target="_blank" rel="noopener noreferrer">
@@ -832,7 +832,7 @@ function App() {
           <div className="container">
             <h2 className="section-title">The Digital Employee Stack</h2>
             <p className="section-intro">
-              Built for real teams that live in their inbox. Pick an employee, send a request, and receive finished work with clear next steps.
+              Built for real teams that need multi-channel, tool-native delivery. Pick an employee, send a request, and receive shared-memory outputs with clear next steps.
             </p>
             <div className="features-grid">
               {features.map((feature) => (
@@ -901,9 +901,9 @@ function App() {
                 Do<span className="text-gradient">Whiz</span>
               </a>
               <p className="footer-tagline">
-                Digital employees that turn messages into finished work, delivered back to your inbox.
+                Tool-native digital employees that turn messages into finished work with shared memory.
               </p>
-              <div className="footer-pill">Email-first today. Multi-channel soon.</div>
+              <div className="footer-pill">Email-first today. Shared memory built-in. Multi-channel soon.</div>
             </div>
             <div className="footer-links">
               <span className="footer-title">Essentials</span>
@@ -917,7 +917,7 @@ function App() {
           </div>
           <div className="container footer-bottom">
             <span>&copy; {new Date().getFullYear()} DoWhiz. All rights reserved.</span>
-            <span>Built for teams that live in their inbox.</span>
+            <span>Built for teams that move across channels.</span>
           </div>
         </footer>
 
