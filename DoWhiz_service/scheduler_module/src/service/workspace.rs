@@ -67,7 +67,7 @@ pub(super) fn ensure_workspace_employee_files(
     Ok(())
 }
 
-pub(super) fn ensure_thread_workspace(
+pub(crate) fn ensure_thread_workspace(
     user_paths: &crate::user_store::UserPaths,
     user_id: &str,
     thread_key: &str,

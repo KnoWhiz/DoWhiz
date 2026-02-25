@@ -4,6 +4,7 @@ use std::thread;
 
 use tracing::{info, warn};
 
+use crate::account_store::AccountStore;
 use crate::channel::Channel;
 use crate::index_store::IndexStore;
 use crate::ingestion::IngestionEnvelope;
@@ -43,6 +44,7 @@ pub(super) fn spawn_ingestion_consumer(
     index_store: std::sync::Arc<IndexStore>,
     slack_store: std::sync::Arc<SlackStore>,
     message_router: std::sync::Arc<MessageRouter>,
+    account_store: std::sync::Arc<AccountStore>,
 ) -> Result<IngestionControl, BoxError> {
     let poll_interval = config.ingestion_poll_interval;
     let employee_id = config.employee_id.clone();
@@ -66,6 +68,7 @@ pub(super) fn spawn_ingestion_consumer(
                     &index_store,
                     &slack_store,
                     &message_router,
+                    &account_store,
                     &runtime,
                     &item.envelope,
                 ) {
@@ -111,6 +114,7 @@ fn process_ingestion_envelope(
     index_store: &IndexStore,
     slack_store: &SlackStore,
     message_router: &MessageRouter,
+    account_store: &AccountStore,
     runtime: &tokio::runtime::Handle,
     envelope: &IngestionEnvelope,
 ) -> Result<(), BoxError> {
@@ -139,7 +143,7 @@ fn process_ingestion_envelope(
             if raw_payload.is_empty() {
                 return Err("missing slack raw payload".into());
             }
-            process_slack_event(config, user_store, index_store, slack_store, &raw_payload)
+            process_slack_event(config, user_store, index_store, slack_store, account_store, &raw_payload)
         }
         Channel::BlueBubbles => {
             let message = envelope.to_inbound_message();
@@ -164,7 +168,7 @@ fn process_ingestion_envelope(
                 return Ok(());
             }
             let raw_payload = envelope.raw_payload_bytes();
-            process_discord_inbound_message(config, index_store, &message, &raw_payload)
+process_discord_inbound_message(config, user_store, index_store, account_store, &message, &raw_payload)
         }
         Channel::Sms => {
             let message = envelope.to_inbound_message();

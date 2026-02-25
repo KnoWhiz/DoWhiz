@@ -86,6 +86,16 @@
   background: transparent;
 }
 
+@media (max-width: 1024px) {
+  .blog-grid {
+    gap: 1.5rem;
+  }
+
+  .blog-card {
+    padding: 1.8rem;
+  }
+}
+
 @media (max-width: 768px) {
   .blog-grid {
     grid-template-columns: 1fr;
