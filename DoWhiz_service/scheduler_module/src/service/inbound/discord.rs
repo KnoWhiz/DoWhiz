@@ -15,7 +15,70 @@ use super::super::default_thread_state_path;
 use super::super::scheduler::cancel_pending_thread_tasks;
 use super::super::workspace::ensure_thread_workspace;
 use super::super::BoxError;
-use super::discord_context::hydrate_discord_context_files;
+use super::discord_context::{
+    build_discord_message_text_with_quote, hydrate_discord_context_files,
+    hydrate_discord_context_files_from_snapshot, DiscordContextSnapshot,
+};
+
+pub(crate) fn persist_discord_ingest_context(
+    config: &ServiceConfig,
+    user_store: &UserStore,
+    message: &crate::channel::InboundMessage,
+    raw_payload: &[u8],
+    snapshot: Option<&DiscordContextSnapshot>,
+) -> Result<(), BoxError> {
+    let channel_id = message
+        .metadata
+        .discord_channel_id
+        .ok_or("missing discord_channel_id")?;
+    let guild_id = message
+        .metadata
+        .discord_guild_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "dm".to_string());
+
+    let user = user_store.get_or_create_user("discord", &message.sender)?;
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+    user_store.ensure_user_dirs(&user_paths)?;
+
+    let thread_key = format!("discord:{}:{}:{}", guild_id, channel_id, message.thread_id);
+    let workspace = ensure_thread_workspace(
+        &user_paths,
+        &user.user_id,
+        &thread_key,
+        &config.employee_profile,
+        config.skills_source_dir.as_deref(),
+    )?;
+
+    let thread_state_path = default_thread_state_path(&workspace);
+    let thread_state =
+        bump_thread_state(&thread_state_path, &thread_key, message.message_id.clone())?;
+
+    append_discord_message_payload(
+        &workspace,
+        message,
+        raw_payload,
+        thread_state.last_email_seq,
+    )?;
+
+    if let Some(snapshot) = snapshot {
+        hydrate_discord_context_files_from_snapshot(
+            &workspace,
+            thread_state.last_email_seq,
+            snapshot,
+        )?;
+    } else {
+        hydrate_discord_context_files(
+            config,
+            &workspace,
+            message,
+            raw_payload,
+            thread_state.last_email_seq,
+        )?;
+    }
+
+    Ok(())
+}
 
 pub(crate) fn process_discord_inbound_message(
     config: &ServiceConfig,
@@ -193,7 +256,7 @@ pub(super) fn append_discord_message_payload(
     std::fs::write(&raw_path, raw_payload)?;
 
     let text_path = incoming_dir.join(format!("{:05}_discord_message.txt", seq));
-    let text_content = message.text_body.clone().unwrap_or_default();
+    let text_content = build_discord_message_text_with_quote(message, raw_payload);
     std::fs::write(&text_path, &text_content)?;
 
     let meta_path = incoming_dir.join(format!("{:05}_discord_meta.json", seq));
