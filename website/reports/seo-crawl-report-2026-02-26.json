@@ -1,0 +1,435 @@
+{
+  "summary": {
+    "generated_at": "2026-02-26T05:32:44.925Z",
+    "source_sitemap": "website/public/sitemap.xml",
+    "crawl_target_count": 21,
+    "indexable_pages": 21,
+    "title_issue_pages": 0,
+    "meta_description_issue_pages": 0,
+    "duplicate_h1_groups": 0,
+    "duplicate_h1_pages": 0,
+    "status_4xx": 0,
+    "status_5xx": 0,
+    "fetch_errors": 0
+  },
+  "crawl_results": [
+    {
+      "url": "https://dowhiz.com/",
+      "finalUrl": "https://www.dowhiz.com/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 426,
+      "indexable": true,
+      "title": "DoWhiz | Multi-Channel Tool-Native Digital Employees",
+      "titleLength": 52,
+      "metaDescription": "Multi-channel, tool-native digital employee team for daily operations. Trigger work from email, chat, GitHub, and shared docs with shared memory across platforms.",
+      "metaDescriptionLength": 162,
+      "robots": "index, follow",
+      "noindex": false,
+      "h1Count": 0,
+      "h1s": [],
+      "primaryH1": "",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/blog/",
+      "finalUrl": "https://www.dowhiz.com/blog/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 148,
+      "indexable": true,
+      "title": "DoWhiz Blog | SEO and Product Workflow Guides",
+      "titleLength": 45,
+      "metaDescription": "DoWhiz blog with product updates and eight new SEO articles covering AI workflow automation, channel operations, memory, onboarding, and governance.",
+      "metaDescriptionLength": 148,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "SEO guides and workflow notes from the DoWhiz team."
+      ],
+      "primaryH1": "SEO guides and workflow notes from the DoWhiz team.",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/privacy/",
+      "finalUrl": "https://www.dowhiz.com/privacy/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 199,
+      "indexable": true,
+      "title": "DoWhiz Privacy | Multi-Channel Data Handling and Access",
+      "titleLength": 55,
+      "metaDescription": "DoWhiz privacy policy covering multi-channel data handling, integration permissions, and our no-user-credentials access model.",
+      "metaDescriptionLength": 126,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Privacy for multi-channel digital work."
+      ],
+      "primaryH1": "Privacy for multi-channel digital work.",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/terms/",
+      "finalUrl": "https://www.dowhiz.com/terms/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 180,
+      "indexable": true,
+      "title": "DoWhiz Terms | Multi-Channel Digital Employee Service Terms",
+      "titleLength": 59,
+      "metaDescription": "DoWhiz terms of service for multi-channel digital employee usage, integration authorization, and access responsibilities.",
+      "metaDescriptionLength": 121,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Clear terms for working with DoWhiz."
+      ],
+      "primaryH1": "Clear terms for working with DoWhiz.",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/user-guide/",
+      "finalUrl": "https://www.dowhiz.com/user-guide/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 197,
+      "indexable": true,
+      "title": "DoWhiz User Guide | Multi-Channel Triggers and Shared Memory",
+      "titleLength": 60,
+      "metaDescription": "DoWhiz user guide for multi-channel triggers, tool-native execution, and shared memory across email, chat, GitHub, and shared workspaces.",
+      "metaDescriptionLength": 137,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Trigger DoWhiz from anywhere you work."
+      ],
+      "primaryH1": "Trigger DoWhiz from anywhere you work.",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/help-center/",
+      "finalUrl": "https://www.dowhiz.com/help-center/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 161,
+      "indexable": true,
+      "title": "DoWhiz Help Center | Top 20 User Questions",
+      "titleLength": 42,
+      "metaDescription": "DoWhiz Help Center: top 20 common user questions across setup, integrations, permissions, outputs, and support.",
+      "metaDescriptionLength": 111,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Top 20 user questions about DoWhiz"
+      ],
+      "primaryH1": "Top 20 user questions about DoWhiz",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/integrations/",
+      "finalUrl": "https://www.dowhiz.com/integrations/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 147,
+      "indexable": true,
+      "title": "Integrations | DoWhiz",
+      "titleLength": 21,
+      "metaDescription": "DoWhiz integrations across email, Slack, Discord, GitHub, Google Docs, and Notion with trigger + outcome examples.",
+      "metaDescriptionLength": 114,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Trigger agents where work already happens."
+      ],
+      "primaryH1": "Trigger agents where work already happens.",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/solutions/ai-workflow-automation/",
+      "finalUrl": "https://www.dowhiz.com/solutions/ai-workflow-automation/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 173,
+      "indexable": true,
+      "title": "AI Workflow Automation for Teams | DoWhiz",
+      "titleLength": 41,
+      "metaDescription": "Automate cross-tool workflows with AI digital employees. Trigger from email, Slack, GitHub, and docs, then receive finished outputs in-thread.",
+      "metaDescriptionLength": 142,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "AI workflow automation for teams that work across tools."
+      ],
+      "primaryH1": "AI workflow automation for teams that work across tools.",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/solutions/github-issue-automation/",
+      "finalUrl": "https://www.dowhiz.com/solutions/github-issue-automation/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 162,
+      "indexable": true,
+      "title": "GitHub Issue Automation to PR Delivery | DoWhiz",
+      "titleLength": 47,
+      "metaDescription": "Turn assigned GitHub issues into scoped implementation updates, tested pull requests, and concise review summaries with DoWhiz.",
+      "metaDescriptionLength": 127,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "GitHub issue automation from assignment to pull request."
+      ],
+      "primaryH1": "GitHub issue automation from assignment to pull request.",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/solutions/slack-task-automation/",
+      "finalUrl": "https://www.dowhiz.com/solutions/slack-task-automation/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 173,
+      "indexable": true,
+      "title": "Slack Task Automation for Execution Teams | DoWhiz",
+      "titleLength": 50,
+      "metaDescription": "Convert Slack requests and thread mentions into structured execution plans, owner-tracked action items, and delivered outputs.",
+      "metaDescriptionLength": 126,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Slack task automation for faster team execution."
+      ],
+      "primaryH1": "Slack task automation for faster team execution.",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/solutions/email-task-automation/",
+      "finalUrl": "https://www.dowhiz.com/solutions/email-task-automation/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 153,
+      "indexable": true,
+      "title": "Email Task Automation for Operations | DoWhiz",
+      "titleLength": 45,
+      "metaDescription": "Route email requests to DoWhiz digital employees and get completed deliverables, summaries, and follow-up actions back in the same thread.",
+      "metaDescriptionLength": 138,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Email task automation that keeps work in-thread."
+      ],
+      "primaryH1": "Email task automation that keeps work in-thread.",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/solutions/google-docs-automation/",
+      "finalUrl": "https://www.dowhiz.com/solutions/google-docs-automation/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 164,
+      "indexable": true,
+      "title": "Google Docs Action Item Automation | DoWhiz",
+      "titleLength": 43,
+      "metaDescription": "Use @mentions in Google Docs comments to generate action items, rewrites, summaries, and tracked follow-ups with shared context.",
+      "metaDescriptionLength": 128,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Google Docs automation for action items and follow-through."
+      ],
+      "primaryH1": "Google Docs automation for action items and follow-through.",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/trust-safety/",
+      "finalUrl": "https://www.dowhiz.com/trust-safety/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 189,
+      "indexable": true,
+      "title": "Trust & Safety | DoWhiz",
+      "titleLength": 23,
+      "metaDescription": "DoWhiz Trust & Safety: isolated execution, permission-based workspace access, no personal credential handoff, and data handling basics.",
+      "metaDescriptionLength": 135,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Safety model built for real operational workflows."
+      ],
+      "primaryH1": "Safety model built for real operational workflows.",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/agents/oliver/",
+      "finalUrl": "https://www.dowhiz.com/agents/oliver/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 152,
+      "indexable": true,
+      "title": "Oliver | DoWhiz Generalist Digital Employee",
+      "titleLength": 43,
+      "metaDescription": "Meet Oliver, the DoWhiz Generalist digital employee for multi-channel requests and tool-native delivery.",
+      "metaDescriptionLength": 104,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Oliver - Generalist"
+      ],
+      "primaryH1": "Oliver - Generalist",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/agents/maggie/",
+      "finalUrl": "https://www.dowhiz.com/agents/maggie/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 146,
+      "indexable": true,
+      "title": "Maggie | DoWhiz TPM Digital Employee",
+      "titleLength": 36,
+      "metaDescription": "Meet Maggie, the DoWhiz TPM digital employee for planning, status, and cross-team follow-up workflows.",
+      "metaDescriptionLength": 102,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Maggie - TPM"
+      ],
+      "primaryH1": "Maggie - TPM",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/agents/devin/",
+      "finalUrl": "https://www.dowhiz.com/agents/devin/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 147,
+      "indexable": true,
+      "title": "Devin | DoWhiz Coder Digital Employee",
+      "titleLength": 37,
+      "metaDescription": "Meet Devin, the DoWhiz Coder digital employee for issue-to-PR execution and engineering handoffs.",
+      "metaDescriptionLength": 97,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Devin - Coder"
+      ],
+      "primaryH1": "Devin - Coder",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/agents/lumio/",
+      "finalUrl": "https://www.dowhiz.com/agents/lumio/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 243,
+      "indexable": true,
+      "title": "Lumio | DoWhiz CEO Digital Employee",
+      "titleLength": 35,
+      "metaDescription": "Meet Lumio, the DoWhiz CEO digital employee for strategic planning and executive decision support.",
+      "metaDescriptionLength": 98,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Lumio - CEO"
+      ],
+      "primaryH1": "Lumio - CEO",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/agents/claw/",
+      "finalUrl": "https://www.dowhiz.com/agents/claw/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 149,
+      "indexable": true,
+      "title": "Claw | DoWhiz Workflow Specialist",
+      "titleLength": 33,
+      "metaDescription": "Meet Claw, the DoWhiz workflow specialist focused on safe, accessible, tool-native automation across channels.",
+      "metaDescriptionLength": 110,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Claw - Workflow Specialist"
+      ],
+      "primaryH1": "Claw - Workflow Specialist",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/agents/jeffery/",
+      "finalUrl": "https://www.dowhiz.com/agents/jeffery/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 154,
+      "indexable": true,
+      "title": "Jeffery | DoWhiz DeepTutor Digital Employee",
+      "titleLength": 43,
+      "metaDescription": "Meet Jeffery, the DoWhiz DeepTutor digital employee for document comprehension and structured takeaways.",
+      "metaDescriptionLength": 104,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Jeffery - DeepTutor"
+      ],
+      "primaryH1": "Jeffery - DeepTutor",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/agents/anna/",
+      "finalUrl": "https://www.dowhiz.com/agents/anna/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 170,
+      "indexable": true,
+      "title": "Anna | DoWhiz Role Design Digital Employee",
+      "titleLength": 42,
+      "metaDescription": "Meet Anna, the DoWhiz role-design digital employee for defining new specialist scopes and pilot plans.",
+      "metaDescriptionLength": 102,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Anna - Role Design"
+      ],
+      "primaryH1": "Anna - Role Design",
+      "error": ""
+    },
+    {
+      "url": "https://dowhiz.com/agents/rachel/",
+      "finalUrl": "https://www.dowhiz.com/agents/rachel/",
+      "status": 200,
+      "statusClass": "2xx",
+      "durationMs": 179,
+      "indexable": true,
+      "title": "Rachel | DoWhiz GTM Specialist Digital Employee",
+      "titleLength": 47,
+      "metaDescription": "Meet Rachel, the DoWhiz GTM specialist digital employee for launch planning and per-channel content operations.",
+      "metaDescriptionLength": 111,
+      "robots": "",
+      "noindex": false,
+      "h1Count": 1,
+      "h1s": [
+        "Rachel - GTM Specialist"
+      ],
+      "primaryH1": "Rachel - GTM Specialist",
+      "error": ""
+    }
+  ]
+}
