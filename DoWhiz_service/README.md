@@ -1,6 +1,6 @@
 # DoWhiz Service
 
-Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, Telegram, WhatsApp, Google Docs, BlueBubbles/iMessage), task scheduling, AI agent execution (Codex/Claude), and outbound replies.
+Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, Telegram, WhatsApp, Google Docs/Sheets/Slides, BlueBubbles/iMessage), task scheduling, AI agent execution (Codex/Claude), and outbound replies.
 
 ## Table of Contents
 
@@ -233,7 +233,7 @@ Outputs appear under:
 
 ### Inbound Gateway (Recommended)
 
-The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/WhatsApp/Google Docs inbound traffic, deduplicates it, and enqueues messages into Azure Service Bus while storing raw payloads in Azure Blob Storage. The gateway requires `INGESTION_QUEUE_BACKEND=servicebus` and `RAW_PAYLOAD_STORAGE_BACKEND=azure`. Workers poll the shared queue and filter by `employee_id`; workers no longer expose `/postmark/inbound`.
+The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/WhatsApp/Google Docs/Sheets/Slides inbound traffic, deduplicates it, and enqueues messages into Azure Service Bus while storing raw payloads in Azure Blob Storage. The gateway requires `INGESTION_QUEUE_BACKEND=servicebus` and `RAW_PAYLOAD_STORAGE_BACKEND=azure`. Workers poll the shared queue and filter by `employee_id`; workers no longer expose `/postmark/inbound`.
 
 HTTP endpoints:
 - `/postmark/inbound` (email)
@@ -243,7 +243,7 @@ HTTP endpoints:
 - `/sms/twilio`
 - `/whatsapp/webhook`
 
-Discord is handled via the bot gateway (requires `DISCORD_BOT_TOKEN`), and Google Docs uses a poller when `GOOGLE_DOCS_ENABLED=true`.
+Discord is handled via the bot gateway (requires `DISCORD_BOT_TOKEN` or per-employee Discord bot tokens), Google Docs uses a poller when `GOOGLE_DOCS_ENABLED=true`, and Google Sheets/Slides use a workspace poller when `GOOGLE_SHEETS_ENABLED=true` and/or `GOOGLE_SLIDES_ENABLED=true`.
 
 Optional webhook verification:
 - `POSTMARK_INBOUND_TOKEN` (validates `X-Postmark-Token`)
@@ -866,7 +866,9 @@ Set `SLACK_REDIRECT_URI` in `.env` to the OAuth Redirect URL.
 
 ### Discord Local Testing
 
-1. Set `DISCORD_BOT_TOKEN` and `DISCORD_BOT_USER_ID` in `.env`.
+1. Set either:
+   - `DISCORD_BOT_TOKEN` + `DISCORD_BOT_USER_ID` for a single bot, or
+   - `BOILED_EGG_DISCORD_BOT_TOKEN`/`BOILED_EGG_DISCORD_BOT_USER_ID` and/or `LITTLE_BEAR_DISCORD_BOT_TOKEN`/`LITTLE_BEAR_DISCORD_BOT_USER_ID` for per-employee bots.
 2. Start a worker and the inbound gateway with a shared ingestion queue.
 3. Add the bot to your server:
 `https://discord.com/oauth2/authorize?client_id=1472013251553525983&permissions=0&integration_type=0&scope=bot`
@@ -893,17 +895,18 @@ Set `SLACK_REDIRECT_URI` in `.env` to the OAuth Redirect URL.
 2. Start a worker and the inbound gateway with a shared ingestion queue.
 3. In BlueBubbles → API & WebHooks, create a webhook at `http://127.0.0.1:9100/bluebubbles/webhook` (gateway). If BlueBubbles runs remotely, expose the gateway with ngrok and use that URL.
 
-### Google Docs Integration
+### Google Workspace Integration (Docs/Sheets/Slides)
 
-Digital employees can collaborate on Google Docs with color-coded revision marks (suggesting mode).
+Digital employees can collaborate on Google Docs (suggesting mode) and respond to comment threads in Google Docs, Sheets, and Slides.
 
 ### Features
-- **@Mention Detection**: Employees detect when mentioned in document comments
-- **Suggesting Mode**: Edits appear as color-coded revisions:
+- **Docs @Mention Detection**: Employees detect when mentioned in document comments
+- **Docs Suggesting Mode**: Edits appear as color-coded revisions:
   - 🔴 **Red strikethrough** = Deletions
   - 🔵 **Blue text** = Insertions
-- **Apply/Discard**: Users can accept or reject all suggestions in batch
-- **Comment Replies**: Employees can respond to document comments
+- **Docs Apply/Discard**: Users can accept or reject all suggestions in batch
+- **Docs Comment Replies**: Employees can respond to document comments
+- **Sheets/Slides Comment Replies**: Employees can respond to comment threads in Sheets and Slides
 
 #### Quick Setup
 
@@ -913,6 +916,8 @@ Digital employees can collaborate on Google Docs with color-coded revision marks
 2. Create a new project or select existing
 3. Enable APIs:
    - Google Docs API
+   - Google Sheets API
+   - Google Slides API
    - Google Drive API
 4. Create OAuth 2.0 credentials:
    - Go to **APIs & Services → Credentials**
@@ -957,6 +962,14 @@ GOOGLE_REFRESH_TOKEN_LITTLE_BEAR=your-refresh-token-here
 # Enable Google Docs polling
 GOOGLE_DOCS_ENABLED=true
 GOOGLE_DOCS_POLL_INTERVAL_SECS=30
+
+# Enable Google Sheets/Slides polling
+GOOGLE_SHEETS_ENABLED=true
+GOOGLE_SLIDES_ENABLED=true
+GOOGLE_WORKSPACE_POLL_INTERVAL_SECS=15
+
+# Optional: additional employee emails to ignore (comma-separated)
+GOOGLE_EMPLOYEE_EMAILS=oliver@dowhiz.com,proto@dowhiz.com
 ```
 
 #### Testing
@@ -965,28 +978,32 @@ GOOGLE_DOCS_POLL_INTERVAL_SECS=30
 ```bash
 cd DoWhiz_service
 
-# Build the CLI
-cargo build --release --bin google-docs
+# Build the CLI tools
+cargo build --release --bin google-docs --bin google-sheets --bin google-slides
 
-# List accessible documents
+# Docs
 ./target/release/google-docs list-documents
-
-# Read a document
 ./target/release/google-docs read-document <doc_id>
-
-# Test suggesting mode (find and replace with revision marks)
 ./target/release/google-docs suggest-replace <doc_id> --find="old text" --replace="new text"
-
-# Apply all suggestions (removes red, normalizes blue)
 ./target/release/google-docs apply-suggestions <doc_id>
-
-# Discard all suggestions (removes blue, restores red)
 ./target/release/google-docs discard-suggestions <doc_id>
+
+# Sheets
+./target/release/google-sheets list-spreadsheets
+./target/release/google-sheets list-comments <sheet_id>
+
+# Slides
+./target/release/google-slides list-presentations
+./target/release/google-slides list-comments <slides_id>
 ```
 
 ##### E2E Tests
 ```bash
 cargo test --package scheduler_module --test google_docs_cli_e2e
+
+# Manual scripts (requires live credentials + shared files)
+./scheduler_module/tests/google_workspace_cli_test.sh
+./scheduler_module/tests/google_workspace_e2e_test.sh
 ```
 
 #### Multi-Employee Setup
@@ -1007,7 +1024,7 @@ Run `get_google_refresh_token.sh` once per employee, logging into the appropriat
 | `DNS lookup failed` | Ensure sandbox bypass is enabled for GoogleDocs tasks |
 | `Token refresh failed` | Re-run `get_google_refresh_token.sh` to get a new token |
 | `\n` appearing literally | Upgrade to latest CLI with escape sequence support |
-| `Permission denied` | Share the document with the employee's Google account |
+| `Permission denied` | Share the document/sheet/slides deck with the employee's Google account |
 
 ---
 ## Message Router (OpenAI)
@@ -1043,6 +1060,7 @@ This reduces API costs and latency for simple interactions while preserving full
 | `RUST_SERVICE_PORT` | `9001` | Port to bind |
 | `EMPLOYEE_ID` | - | Selects employee profile from `employee.toml` |
 | `EMPLOYEE_CONFIG_PATH` | `DoWhiz_service/employee.toml` | Path to employee config |
+| `FRONTEND_URL` | `http://localhost:5173` | Frontend base URL for OAuth redirects |
 | `POSTMARK_INBOUND_MAX_BYTES` | `26214400` | Max inbound body size for worker endpoints |
 
 ### Paths
@@ -1059,8 +1077,8 @@ This reduces API costs and latency for simple interactions while preserving full
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SCHEDULER_POLL_INTERVAL_SECS` | `1` | Poll interval for due tasks |
-| `SCHEDULER_MAX_CONCURRENCY` | `10` | Global max concurrent tasks |
-| `SCHEDULER_USER_MAX_CONCURRENCY` | `3` | Per-user max concurrent tasks |
+| `SCHEDULER_MAX_CONCURRENCY` | `200` | Global max concurrent tasks |
+| `SCHEDULER_USER_MAX_CONCURRENCY` | `200` | Per-user max concurrent tasks |
 
 ### Ingestion Queue
 | Variable | Default | Description |
@@ -1128,6 +1146,7 @@ This reduces API costs and latency for simple interactions while preserving full
 | `SERVICE_BUS_PEEK_LOCK_TIMEOUT_SECS` | `30` | Peek-lock timeout for Service Bus receive |
 | `RAW_PAYLOAD_STORAGE_BACKEND` | `supabase` | `supabase` or `azure` (gateway requires `azure`) |
 | `AZURE_STORAGE_ACCOUNT` | - | Azure Storage account name |
+| `AZURE_STORAGE_CONNECTION_STRING_INGEST` | - | Optional connection string (used to derive account name for ingestion SAS URLs) |
 | `AZURE_STORAGE_CONTAINER_INGEST` | - | Azure Blob container for raw payloads |
 | `AZURE_STORAGE_SAS_TOKEN` | - | SAS token for container access |
 | `AZURE_STORAGE_CONTAINER_SAS_URL` | - | Full container SAS URL (optional) |
@@ -1148,6 +1167,7 @@ This reduces API costs and latency for simple interactions while preserving full
 | `SLACK_CLIENT_ID` | - | Slack OAuth client id |
 | `SLACK_CLIENT_SECRET` | - | Slack OAuth client secret |
 | `SLACK_REDIRECT_URI` | - | Slack OAuth redirect URI |
+| `SLACK_AUTH_REDIRECT_URI` | - | Slack account-linking OAuth redirect URI (`/auth/slack/callback`) |
 | `SLACK_STORE_PATH` | `<runtime_root>/state/slack.db` | Slack installation store |
 | `SLACK_API_BASE_URL` | `https://slack.com/api` | Override Slack API base URL |
 
@@ -1156,6 +1176,13 @@ This reduces API costs and latency for simple interactions while preserving full
 |----------|---------|-------------|
 | `DISCORD_BOT_TOKEN` | - | Discord bot token |
 | `DISCORD_BOT_USER_ID` | - | Bot user id (filter self messages) |
+| `BOILED_EGG_DISCORD_BOT_TOKEN` | - | Per-employee Discord bot token (boiled_egg) |
+| `BOILED_EGG_DISCORD_BOT_USER_ID` | - | Per-employee Discord bot user id (boiled_egg) |
+| `LITTLE_BEAR_DISCORD_BOT_TOKEN` | - | Per-employee Discord bot token (little_bear) |
+| `LITTLE_BEAR_DISCORD_BOT_USER_ID` | - | Per-employee Discord bot user id (little_bear) |
+| `DISCORD_CLIENT_ID` | - | Discord OAuth client id (account linking) |
+| `DISCORD_CLIENT_SECRET` | - | Discord OAuth client secret (account linking) |
+| `DISCORD_REDIRECT_URI` | - | Discord OAuth redirect URI (account linking) |
 | `DISCORD_API_BASE_URL` | `https://discord.com/api/v10` | Override Discord API base URL |
 
 ### BlueBubbles (iMessage)
@@ -1178,6 +1205,22 @@ This reduces API costs and latency for simple interactions while preserving full
 |----------|---------|-------------|
 | `TELEGRAM_BOT_TOKEN` | - | Global Telegram bot token |
 | `DO_WHIZ_<EMPLOYEE>_BOT` | - | Per-employee bot token override (e.g., `DO_WHIZ_OLIVER_BOT`) |
+
+### Google Workspace (Docs/Sheets/Slides)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOOGLE_CLIENT_ID` | - | OAuth client id |
+| `GOOGLE_CLIENT_SECRET` | - | OAuth client secret |
+| `GOOGLE_REFRESH_TOKEN` | - | Global refresh token (fallback) |
+| `GOOGLE_REFRESH_TOKEN_<EMPLOYEE>` | - | Per-employee refresh token (uppercase ID) |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | - | Service account JSON (alternative auth) |
+| `GOOGLE_ACCESS_TOKEN` | - | Pre-generated access token (sandbox/CLI) |
+| `GOOGLE_DOCS_ENABLED` | `false` | Enable Google Docs polling |
+| `GOOGLE_DOCS_POLL_INTERVAL_SECS` | `30` | Poll interval for Docs comments |
+| `GOOGLE_SHEETS_ENABLED` | `false` | Enable Google Sheets polling |
+| `GOOGLE_SLIDES_ENABLED` | `false` | Enable Google Slides polling |
+| `GOOGLE_WORKSPACE_POLL_INTERVAL_SECS` | `15` | Poll interval for Sheets/Slides comments |
+| `GOOGLE_EMPLOYEE_EMAILS` | - | Comma-separated emails to ignore as "self" in Sheets/Slides |
 
 ### WhatsApp (Meta Cloud API)
 | Variable | Default | Description |

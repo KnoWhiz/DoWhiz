@@ -467,6 +467,61 @@ function App() {
     };
   }, []);
 
+  // Equalize intro and example heights per row within roles grid
+  useEffect(() => {
+    const syncRoleHeights = () => {
+      const cards = Array.from(document.querySelectorAll('.roles-grid .role-card'));
+      const descs = Array.from(document.querySelectorAll('.roles-grid .role-desc'));
+      const examples = Array.from(document.querySelectorAll('.roles-grid .role-example'));
+
+      // reset first
+      descs.forEach((el) => (el.style.minHeight = ''));
+      examples.forEach((el) => (el.style.minHeight = ''));
+
+      const rows = [];
+      cards.forEach((card) => {
+        const top = card.offsetTop;
+        let row = rows.find((r) => Math.abs(r.top - top) < 4);
+        if (!row) {
+          row = { top, cards: [] };
+          rows.push(row);
+        }
+        row.cards.push(card);
+      });
+
+      rows.forEach((row) => {
+        let maxDesc = 0;
+        let maxExample = 0;
+        row.cards.forEach((card) => {
+          const desc = card.querySelector('.role-desc');
+          const ex = card.querySelector('.role-example');
+          if (desc) {
+            maxDesc = Math.max(maxDesc, desc.offsetHeight);
+          }
+          if (ex) {
+            maxExample = Math.max(maxExample, ex.offsetHeight);
+          }
+        });
+        row.cards.forEach((card) => {
+          const desc = card.querySelector('.role-desc');
+          const ex = card.querySelector('.role-example');
+          if (desc && maxDesc) {
+            desc.style.minHeight = `${maxDesc}px`;
+          }
+          if (ex && maxExample) {
+            ex.style.minHeight = `${maxExample}px`;
+          }
+        });
+      });
+    };
+
+    syncRoleHeights();
+    window.addEventListener('resize', syncRoleHeights);
+    return () => {
+      window.removeEventListener('resize', syncRoleHeights);
+    };
+  }, []);
+
   const buildMailtoLink = (email, subject, body) => {
     const encodedSubject = encodeURIComponent(subject);
     const encodedBody = encodeURIComponent(body);
@@ -508,37 +563,40 @@ function App() {
 
   const howItWorksSteps = [
     {
-      tag: '01',
-      title: 'Trigger from anywhere',
-      desc: 'Start from the channel your team already uses. DoWhiz normalizes the request into one clear execution brief.',
+      id: '01',
+      phase: 'Trigger',
+      role: 'Users',
+      intro: 'Give DoWhiz a task through:',
       points: [
         'Email with attachments, links, and constraints',
         'Slack/Discord message or @mention in a thread',
         'GitHub issue assignment or shared doc comment mention'
       ],
-      outcome: 'A structured brief with requester context, expected output, and delivery target.'
+      output: 'A structured brief with requester context, expected output, and delivery target.'
     },
     {
-      tag: '02',
-      title: 'Execute in the right tools',
-      desc: 'The assigned agent works directly in approved tools with scoped permissions and agent-owned identities.',
+      id: '02',
+      phase: 'Execute',
+      role: 'Agent',
+      intro: 'Works directly in approved tools with scoped permissions and agent-owned identities.',
       points: [
         'No personal credential handoff required',
         'Workspace permissions are explicit and revocable',
         'Cross-agent coordination for multi-step tasks'
       ],
-      outcome: 'Work artifacts are created where your team already collaborates.'
+      output: 'Work artifacts are created where your team already collaborates.'
     },
     {
-      tag: '03',
-      title: 'Deliver where you work',
-      desc: 'Results return to the originating channel, and shared memory keeps continuity across future requests.',
+      id: '03',
+      phase: 'Deliver',
+      role: 'Agent',
+      intro: 'Results return to the originating channel, and shared memory keeps continuity across future requests.',
       points: [
         'PRs, docs, action items, and updates delivered in-thread',
         'Per-user context persists across channels',
         'Follow-ups start with history, not from scratch'
       ],
-      outcome: 'Faster iteration with consistent quality across every surface.'
+      output: 'Faster iteration with consistent quality across every surface.'
     }
   ];
 
@@ -546,6 +604,7 @@ function App() {
     {
       tag: 'A1',
       title: 'Isolated execution environment',
+      icon: '/icons/shield_lock.svg',
       desc: 'Every request runs in an isolated runtime boundary so tasks stay contained, reviewable, and predictable.',
       points: [
         'Separate sandbox/VM boundaries per task',
@@ -556,6 +615,7 @@ function App() {
     {
       tag: 'A2',
       title: 'No user credential handoff',
+      icon: '/icons/lock_person.svg',
       desc: 'You do not share personal passwords or account credentials with DoWhiz agents to get work done.',
       points: [
         'Agents operate with agent-owned identities',
@@ -566,6 +626,7 @@ function App() {
     {
       tag: 'A3',
       title: 'Explicit access grants',
+      icon: '/icons/key.svg',
       desc: 'Agents can only work in workspaces and integrations that you explicitly authorize and can revoke.',
       points: [
         'Granular workspace-level permission model',
@@ -632,33 +693,33 @@ function App() {
 
   const blogPosts = [
     {
-      tag: 'Weekly Update',
-      title: 'Weekly update: Feb 16–22, 2026',
-      date: 'Feb 16–22, 2026',
+      tag: 'SEO Guide',
+      title: 'AI workflow automation checklist for lean teams',
+      date: 'February 26, 2026',
       excerpt:
-        'Slack, Discord OAuth, Telegram, WhatsApp routing, unified account/memo work, infra upgrades, CI fixes, and docs shipped last week.',
-      link: '/blog/#weekly-update-2026-02-22'
+        'A practical rollout checklist for trigger design, quality gates, and weekly delivery metrics across channels.',
+      link: '/blog/ai-workflow-automation-checklist/'
     },
     {
-      tag: 'Launch Notes',
-      title: 'Multi-channel delegation',
-      date: 'February 2026',
-      excerpt: 'How DoWhiz handles the same task across email, chat, issues, and comments while keeping one shared context.',
-      link: '/blog/#multi-channel-delegation'
+      tag: 'SEO Guide',
+      title: 'GitHub issue automation best practices',
+      date: 'February 26, 2026',
+      excerpt: 'A repeatable issue-to-PR model with better scoping, validation, and reviewer-ready handoffs.',
+      link: '/blog/github-issue-automation-best-practices/'
     },
     {
-      tag: 'Workflow',
-      title: 'Inside the digital employee delivery loop',
-      date: 'February 2026',
-      excerpt: 'A closer look at how requests flow from brief to finished output, with clear checkpoints along the way.',
-      link: '/blog/#delivery-loop'
+      tag: 'SEO Guide',
+      title: 'Email task automation playbook for operations teams',
+      date: 'February 26, 2026',
+      excerpt: 'How to convert inbound email threads into structured execution, progress updates, and complete deliverables.',
+      link: '/blog/email-task-automation-playbook/'
     },
     {
-      tag: 'Team',
-      title: 'Meet the first DoWhiz employees',
-      date: 'February 2026',
-      excerpt: 'How Oliver and Maggie turn messy inputs into crisp updates, docs, and action items in a single thread.',
-      link: '/blog/#meet-team'
+      tag: 'SEO Guide',
+      title: 'AI employee trust, safety, and governance framework',
+      date: 'February 26, 2026',
+      excerpt: 'Governance essentials for permission scopes, audit trails, and escalation paths for high-confidence execution.',
+      link: '/blog/ai-employee-trust-safety-governance/'
     }
   ];
 
@@ -688,6 +749,32 @@ function App() {
       answer: 'Across email, Slack, Discord, GitHub issues, and shared workspace comments. See the Integrations page for the latest trigger surfaces.'
     }
   ];
+
+  const [openFaq, setOpenFaq] = useState(null);
+  const toggleFaq = (idx) => setOpenFaq((prev) => (prev === idx ? null : idx));
+
+  useEffect(() => {
+    const syncHowHeights = () => {
+      const roleCards = Array.from(document.querySelectorAll('.how-column .role-card-variant'));
+      const outputCards = Array.from(document.querySelectorAll('.how-column .how-card.output'));
+
+      roleCards.forEach((el) => (el.style.minHeight = ''));
+      outputCards.forEach((el) => (el.style.minHeight = ''));
+
+      if (roleCards.length) {
+        const maxRole = Math.max(...roleCards.map((el) => el.offsetHeight));
+        roleCards.forEach((el) => (el.style.minHeight = `${maxRole}px`));
+      }
+      if (outputCards.length) {
+        const maxOut = Math.max(...outputCards.map((el) => el.offsetHeight));
+        outputCards.forEach((el) => (el.style.minHeight = `${maxOut}px`));
+      }
+    };
+
+    syncHowHeights();
+    window.addEventListener('resize', syncHowHeights);
+    return () => window.removeEventListener('resize', syncHowHeights);
+  }, []);
 
   const structuredData = {
     '@context': 'https://schema.org',
@@ -849,7 +936,6 @@ function App() {
 
   return (
     <div className="app-container">
-      {enableMouseField ? <MouseField theme={theme} /> : null}
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
@@ -946,6 +1032,7 @@ function App() {
 
         {/* Hero Section */}
         <section className="hero-section">
+          {enableMouseField ? <MouseField theme={theme} /> : null}
           <div className="halo-effect"></div>
           <div className="container hero-content">
             <h1 className="hero-title">
@@ -978,6 +1065,11 @@ function App() {
                     className={cardClasses}
                     title={`${member.name}: view channels and trigger examples`}
                   >
+                    <span
+                      className={`status-badge role-status ${isActive ? 'status-active' : 'status-soon'}`}
+                    >
+                      {member.status}
+                    </span>
                     <div className="role-header">
                       <div className="role-profile">
                         <img
@@ -991,30 +1083,33 @@ function App() {
                           height="60"
                         />
                         <div>
-                          <h3>{member.name}</h3>
-                          <div className="role-title">
+                          <div className="role-row role-name-row">
+                            <h3>{member.name}</h3>
+                            <span className="nickname-tag">{member.nickname}</span>
+                          </div>
+                          <div className="role-row role-title-row">
                             <span className="role-title-text">{member.title}</span>
                             <span className="pronoun-tag">{member.pronoun}</span>
                           </div>
-                          {isActive ? (
-                            <a
-                              className="email-tag"
-                              href={buildMailtoLink(member.email, member.subject, member.body)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              aria-label={`Email ${member.name}`}
-                            >
-                              {member.email}
-                            </a>
-                          ) : (
-                            <span className="email-tag" aria-disabled="true">
-                              {member.email}
-                            </span>
-                          )}
-                          <div className="nickname-tag">{member.nickname}</div>
+                          <div className="role-row role-email-row">
+                            {isActive ? (
+                              <a
+                                className="email-tag role-email"
+                                href={buildMailtoLink(member.email, member.subject, member.body)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={`Email ${member.name}`}
+                              >
+                                {member.email}
+                              </a>
+                            ) : (
+                              <span className="email-tag role-email" aria-disabled="true">
+                                {member.email}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                      <span className={`status-badge ${isActive ? 'status-active' : 'status-soon'}`}>{member.status}</span>
                     </div>
                     <p className="role-desc">{member.desc}</p>
                     <div className="role-example">
@@ -1045,25 +1140,42 @@ function App() {
             <p className="section-intro">
               One operating model across channels: trigger, execute, and return with persistent shared memory.
             </p>
-            <div className="how-flow-grid">
-              {howItWorksSteps.map((step) => (
-                <article key={step.tag} className="how-step-card">
-                  <div className="how-step-header">
-                    <span className="how-step-tag">{step.tag}</span>
-                    <h3>{step.title}</h3>
+            <div className="how-columns">
+              {howItWorksSteps.map((step) => {
+                const icon =
+                  step.role.toLowerCase().includes('user') ? '/icons/user.svg' : '/icons/agent.svg';
+                return (
+                  <div key={step.id} className="how-column">
+                    <div className="how-head-cell">
+                      <div className="how-head-badge">{step.id}</div>
+                      <div className="how-head-title">{step.phase}</div>
+                    </div>
+
+                    <div className="how-stack">
+                      <div className="how-card role-card-variant">
+                        <div className="how-card-heading">
+                          <img src={icon} alt={`${step.role} icon`} className="how-card-icon" />
+                          <span className="how-card-title">{step.role}</span>
+                        </div>
+                        <p className="how-card-intro">{step.intro}</p>
+                        <ul className="how-card-list">
+                          {step.points.map((point) => (
+                            <li key={point}>{point}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="how-line" aria-hidden="true"></div>
+                      <div className="how-card output">
+                        <div className="how-card-heading">
+                          <img src="/icons/output.svg" alt="Output icon" className="how-card-icon" />
+                          <span className="how-card-title">Output</span>
+                        </div>
+                        <p className="how-card-intro">{step.output}</p>
+                      </div>
+                    </div>
                   </div>
-                  <p className="how-step-desc">{step.desc}</p>
-                  <ul className="how-step-points">
-                    {step.points.map((point) => (
-                      <li key={point}>{point}</li>
-                    ))}
-                  </ul>
-                  <div className="how-step-outcome">
-                    <span>Outcome</span>
-                    <p>{step.outcome}</p>
-                  </div>
-                </article>
-              ))}
+                );
+              })}
             </div>
           </div>
         </section>
@@ -1108,20 +1220,20 @@ function App() {
               Built for practical operations with explicit permissions and controlled execution.
             </p>
             <div className="safety-access-layout">
-              <div className="safety-card-grid">
                 {safetyItems.map((item) => (
                   <article key={item.tag} className="safety-card">
-                    <span className="safety-tag">{item.tag}</span>
+                    <div className="safety-card-iconwrap">
+                      <img src={item.icon} alt={item.tag} className="safety-card-icon" />
+                    </div>
                     <h3>{item.title}</h3>
                     <p>{item.desc}</p>
                     <ul className="safety-point-list">
                       {item.points.map((point) => (
                         <li key={point}>{point}</li>
-                      ))}
-                    </ul>
-                  </article>
-                ))}
-              </div>
+                    ))}
+                  </ul>
+                </article>
+              ))}
 
               <aside className="access-playbook">
                 <h3>How access works</h3>
@@ -1171,15 +1283,44 @@ function App() {
           <div className="container">
             <h2 className="section-title">Frequently Asked Questions</h2>
             <p className="section-intro">
-              Quick answers to the most common questions about working with the DoWhiz digital employee team.
+              Quick answers to the most common questions about the DoWhiz digital employee team.
             </p>
-            <div className="faq-grid">
-              {faqItems.map((item) => (
-                <article key={item.question} className="faq-card">
-                  <h3>{item.question}</h3>
-                  <p>{item.answer}</p>
-                </article>
-              ))}
+            <div className="faq-accordion">
+              {faqItems.map((item, idx) => {
+                const isOpen = openFaq === idx;
+                return (
+                  <article key={item.question} className={`faq-accordion-item ${isOpen ? 'open' : ''}`}>
+                    <button
+                      className="faq-accordion-header"
+                      onClick={() => toggleFaq(idx)}
+                      aria-expanded={isOpen}
+                      aria-controls={`faq-panel-${idx}`}
+                    >
+                      <span className="faq-question">{item.question}</span>
+                      <span className="faq-toggle" aria-hidden="true">
+                        {isOpen ? '−' : '+'}
+                      </span>
+                    </button>
+                    <div
+                      id={`faq-panel-${idx}`}
+                      className="faq-accordion-panel"
+                      style={{ display: isOpen ? 'block' : 'none' }}
+                    >
+                      <p>{item.answer}</p>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+            <div className="faq-cta">
+              <a className="btn btn-secondary" href="/help-center/">
+                View the full Help Center with top 20 questions
+              </a>
+            </div>
+            <div className="faq-help-center">
+              <a href="/help-center/" className="access-playbook-link">
+                View the full Help Center with top 20 questions
+              </a>
             </div>
           </div>
         </section>
@@ -1206,7 +1347,10 @@ function App() {
                   </div>
                   <h3>{post.title}</h3>
                   <p>{post.excerpt}</p>
-                  <a className="blog-link" href={post.link}>Read on the blog</a>
+                  <a className="blog-link" href={post.link}>
+                    Read on the blog
+                    <img src="/icons/forward.svg" alt="" aria-hidden="true" className="blog-link-icon" />
+                  </a>
                 </article>
               ))}
             </div>
@@ -1233,6 +1377,12 @@ function App() {
                 <a href="/trust-safety/" className="footer-link">Trust &amp; Safety</a>
                 <a href="/integrations/" className="footer-link">Integrations</a>
                 <a href="/user-guide/" className="footer-link">User Guide</a>
+                <a href="/help-center/" className="footer-link">Help Center</a>
+                <a href="/solutions/ai-workflow-automation/" className="footer-link">AI Workflow Automation</a>
+                <a href="/solutions/github-issue-automation/" className="footer-link">GitHub Issue Automation</a>
+                <a href="/solutions/slack-task-automation/" className="footer-link">Slack Task Automation</a>
+                <a href="/solutions/email-task-automation/" className="footer-link">Email Task Automation</a>
+                <a href="/solutions/google-docs-automation/" className="footer-link">Google Docs Automation</a>
                 <a href="mailto:admin@dowhiz.com" className="footer-link">Contact</a>
               </div>
             </div>

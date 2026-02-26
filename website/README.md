@@ -20,8 +20,10 @@ Open the local URL shown in the terminal (defaults to http://localhost:5173).
 - Lint: `npm run lint`
 - Production build: `npm run build`
 - Preview production build: `npm run preview`
+- SEO crawl report: `npm run seo:crawl`
 
 Build output goes to `website/dist/`.
+SEO crawl reports are written to `website/reports/` as dated `.md` + `.json` files.
 
 ## VM Deployment Workflow
 
