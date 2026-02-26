@@ -532,7 +532,7 @@ pub async fn link_identifier(
 
         // Send verification email
         let verify_url = format!(
-            "{}/auth?verify_email={}",
+            "{}/auth/index.html?verify_email={}",
             frontend_url, verification_token.token
         );
 

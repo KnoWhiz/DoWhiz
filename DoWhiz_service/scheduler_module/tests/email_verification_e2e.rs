@@ -380,3 +380,219 @@ fn email_verification_identifier_is_marked_verified() {
     // Cleanup
     cleanup_test_email(&store, account_id, &test_email);
 }
+
+#[test]
+fn email_verification_empty_token_is_invalid() {
+    let Some(store) = get_test_account_store() else {
+        return;
+    };
+
+    // Empty string token should be invalid
+    let result = store.verify_email_token("");
+    assert!(matches!(result, Err(AccountStoreError::TokenInvalid)));
+}
+
+#[test]
+fn email_verification_whitespace_token_is_invalid() {
+    let Some(store) = get_test_account_store() else {
+        return;
+    };
+
+    // Whitespace-only tokens should be invalid
+    let result = store.verify_email_token("   ");
+    assert!(matches!(result, Err(AccountStoreError::TokenInvalid)));
+
+    let result = store.verify_email_token("\t\n");
+    assert!(matches!(result, Err(AccountStoreError::TokenInvalid)));
+}
+
+#[test]
+fn email_verification_token_is_uuid_format() {
+    let Some(store) = get_test_account_store() else {
+        return;
+    };
+    let Some(account_id) = get_existing_test_account(&store) else {
+        return;
+    };
+
+    let test_email = format!("test-uuid-{}@example.com", Uuid::new_v4());
+
+    // Create verification token
+    let token = store
+        .create_email_verification_token(account_id, &test_email)
+        .expect("create verification token");
+
+    // Token should be a valid UUID
+    assert!(Uuid::parse_str(&token.token).is_ok(), "Token should be a valid UUID");
+
+    // Cleanup
+    cleanup_test_token_and_email(&store, account_id, &token.token, &test_email);
+}
+
+#[test]
+fn email_verification_tokens_are_unique() {
+    let Some(store) = get_test_account_store() else {
+        return;
+    };
+    let Some(account_id) = get_existing_test_account(&store) else {
+        return;
+    };
+
+    let email1 = format!("test-unique1-{}@example.com", Uuid::new_v4());
+    let email2 = format!("test-unique2-{}@example.com", Uuid::new_v4());
+
+    // Create tokens for different emails
+    let token1 = store
+        .create_email_verification_token(account_id, &email1)
+        .expect("create token 1");
+    let token2 = store
+        .create_email_verification_token(account_id, &email2)
+        .expect("create token 2");
+
+    // Tokens should be different
+    assert_ne!(token1.token, token2.token);
+
+    // Both tokens should be valid
+    let id1 = store.verify_email_token(&token1.token).expect("verify token 1");
+    let id2 = store.verify_email_token(&token2.token).expect("verify token 2");
+
+    assert_eq!(id1.identifier, email1);
+    assert_eq!(id2.identifier, email2);
+
+    // Cleanup
+    cleanup_test_email(&store, account_id, &email1);
+    cleanup_test_email(&store, account_id, &email2);
+}
+
+#[test]
+fn email_verification_relink_same_email() {
+    let Some(store) = get_test_account_store() else {
+        return;
+    };
+    let Some(account_id) = get_existing_test_account(&store) else {
+        return;
+    };
+
+    let test_email = format!("test-relink-{}@example.com", Uuid::new_v4());
+
+    // First: link email
+    let token1 = store
+        .create_email_verification_token(account_id, &test_email)
+        .expect("create token 1");
+    store.verify_email_token(&token1.token).expect("verify token 1");
+
+    // Verify it's linked
+    let found = store
+        .get_account_by_identifier("email", &test_email)
+        .expect("lookup");
+    assert!(found.is_some());
+
+    // Unlink it
+    store
+        .delete_identifier(account_id, "email", &test_email)
+        .expect("unlink");
+
+    // Verify it's unlinked
+    let not_found = store
+        .get_account_by_identifier("email", &test_email)
+        .expect("lookup after unlink");
+    assert!(not_found.is_none());
+
+    // Re-link the same email
+    let token2 = store
+        .create_email_verification_token(account_id, &test_email)
+        .expect("create token 2");
+    store.verify_email_token(&token2.token).expect("verify token 2");
+
+    // Should be linked again
+    let found_again = store
+        .get_account_by_identifier("email", &test_email)
+        .expect("lookup after relink");
+    assert!(found_again.is_some());
+    assert_eq!(found_again.unwrap().id, account_id);
+
+    // Cleanup
+    cleanup_test_email(&store, account_id, &test_email);
+}
+
+#[test]
+fn email_verification_special_characters_in_email() {
+    let Some(store) = get_test_account_store() else {
+        return;
+    };
+    let Some(account_id) = get_existing_test_account(&store) else {
+        return;
+    };
+
+    // Test emails with special characters (valid per RFC 5321)
+    let unique = Uuid::new_v4();
+    let test_email = format!("test+tag-{}@example.com", unique);
+
+    // Create and verify
+    let token = store
+        .create_email_verification_token(account_id, &test_email)
+        .expect("create token");
+    let identifier = store.verify_email_token(&token.token).expect("verify token");
+
+    assert_eq!(identifier.identifier, test_email);
+
+    // Should be findable
+    let found = store
+        .get_account_by_identifier("email", &test_email)
+        .expect("lookup");
+    assert!(found.is_some());
+
+    // Cleanup
+    cleanup_test_email(&store, account_id, &test_email);
+}
+
+#[test]
+fn email_verification_long_email_address() {
+    let Some(store) = get_test_account_store() else {
+        return;
+    };
+    let Some(account_id) = get_existing_test_account(&store) else {
+        return;
+    };
+
+    // Create a long but valid email (64 char local part is the max per RFC)
+    let unique = Uuid::new_v4().to_string().replace("-", "");
+    let local_part = format!("test-long-{}-padding", unique);
+    let test_email = format!("{}@example.com", &local_part[..50.min(local_part.len())]);
+
+    // Create and verify
+    let token = store
+        .create_email_verification_token(account_id, &test_email)
+        .expect("create token");
+    let identifier = store.verify_email_token(&token.token).expect("verify token");
+
+    assert_eq!(identifier.identifier, test_email);
+
+    // Cleanup
+    cleanup_test_email(&store, account_id, &test_email);
+}
+
+#[test]
+fn email_verification_preserves_email_case() {
+    let Some(store) = get_test_account_store() else {
+        return;
+    };
+    let Some(account_id) = get_existing_test_account(&store) else {
+        return;
+    };
+
+    let unique = Uuid::new_v4();
+    let test_email = format!("Test.Case.Mixed-{}@Example.COM", unique);
+
+    // Create and verify - should preserve the case as entered
+    let token = store
+        .create_email_verification_token(account_id, &test_email)
+        .expect("create token");
+    let identifier = store.verify_email_token(&token.token).expect("verify token");
+
+    // The stored identifier should match exactly what was provided
+    assert_eq!(identifier.identifier, test_email);
+
+    // Cleanup
+    cleanup_test_email(&store, account_id, &test_email);
+}
