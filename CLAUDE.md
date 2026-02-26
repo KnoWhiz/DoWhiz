@@ -110,7 +110,7 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 ## Key Concepts
 
 ### Task Kinds
-- **SendEmail**: Send HTML email with attachments
+- **SendReply**: Send outbound reply on a channel (email/slack/discord/sms/telegram/whatsapp/google workspace)
 - **RunTask**: Invoke Codex/Claude CLI to generate reply
 - **Noop**: Testing placeholder
 
@@ -119,7 +119,7 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 - **OneShot**: Single execution at specific DateTime
 
 ### Per-User Isolation
-Each user gets separate SQLite databases and workspace directories. Current defaults are `SCHEDULER_MAX_CONCURRENCY=200` and `SCHEDULER_USER_MAX_CONCURRENCY=200`.
+Each user gets separate SQLite databases and workspace directories. Default concurrency limits are global 200 and per-user 200 (configurable via env).
 
 ### Follow-up Scheduling
 Agents emit scheduled tasks in stdout:
@@ -134,7 +134,7 @@ SCHEDULED_TASKS_JSON_END
 Copy `.env.example` to `DoWhiz_service/.env` and configure:
 - `POSTMARK_SERVER_TOKEN` - Postmark API key (required)
 - `AZURE_OPENAI_API_KEY_BACKUP` - Required for Codex and Claude runners (Foundry config)
-- `AZURE_OPENAI_ENDPOINT_BACKUP` - Required for Codex runner
+- `AZURE_OPENAI_ENDPOINT_BACKUP` - Optional endpoint override for components that use Azure OpenAI directly (Codex runner endpoint is fixed in code)
 
 Optional:
 - `CODEX_DISABLED=1` - Bypass Codex CLI (uses placeholder replies)
@@ -142,7 +142,7 @@ Optional:
 - `GITHUB_USERNAME`, `GITHUB_PERSONAL_ACCESS_TOKEN` - GitHub access for agents
 - `OPENAI_API_KEY` - Enable message router quick replies
 - `INGESTION_QUEUE_BACKEND=servicebus` + `SERVICE_BUS_CONNECTION_STRING` + `SERVICE_BUS_QUEUE_NAME` - Required when running the inbound gateway
-- `AZURE_STORAGE_ACCOUNT`/`AZURE_STORAGE_CONTAINER_INGEST`/`AZURE_STORAGE_SAS_TOKEN` - Required for gateway raw payload storage (Azure Blob)
+- `AZURE_STORAGE_CONTAINER_INGEST` + `AZURE_STORAGE_SAS_TOKEN` (and optionally `AZURE_STORAGE_ACCOUNT` or `AZURE_STORAGE_CONTAINER_SAS_URL`) - Raw payload storage when `RAW_PAYLOAD_STORAGE_BACKEND=azure`
 
 ## Testing Expectations
 
@@ -169,11 +169,11 @@ When opening PRs, include a short summary, tests run, and any required env/confi
 
 # Operations & Deployment Notes (Azure VM)
 
-Use `DoWhiz_service/OPERATIONS.md` as the source of truth for VM runbook and troubleshooting.
+Use `DoWhiz_service/OPERATIONS.md` as the source of truth for VM paths, PM2 commands, deployment runbooks, and troubleshooting.
 
 Current deployment policy:
-- Production VM deploy target branch: `main` (CI/CD baseline)
-- Staging VM deploy target branch: `dev` (CI/CD planned)
+- Production VM deploy target branch: `main`
+- Staging VM deploy target branch: `dev`
 
 Single `.env` split policy:
 - Production uses base keys
@@ -182,3 +182,19 @@ Single `.env` split policy:
 
 For exact staging/prod commands, key split table, and rollback:
 - `DoWhiz_service/docs/staging_production_deploy.md`
+
+Quick checks:
+```bash
+HOME=/home/azureuser/server pm2 list
+pm2 logs dowhiz-inbound-gateway
+pm2 logs dowhiz-rust-service
+grep -i "service bus\\|enqueue\\|error" /home/azureuser/server/.pm2/logs/dowhiz-inbound-gateway-out.log | tail -50
+```
+
+Key env names to verify first:
+- `SERVICE_BUS_CONNECTION_STRING` (or `SCALE_OLIVER_SERVICE_BUS_CONNECTION_STRING`)
+- `SERVICE_BUS_QUEUE_NAME`
+- `INGESTION_QUEUE_BACKEND=servicebus`
+- `RAW_PAYLOAD_STORAGE_BACKEND=azure` (recommended for gateway production flow)
+- `AZURE_STORAGE_CONTAINER_INGEST`
+- `AZURE_STORAGE_SAS_TOKEN` (or `AZURE_STORAGE_CONTAINER_SAS_URL`)

@@ -24,6 +24,7 @@ let params = SendEmailParams {
     bcc: Vec::new(),
     in_reply_to: None,
     references: None,
+    reply_to: None,
 };
 
 let response = send_email(&params)?;
@@ -33,7 +34,7 @@ println!("Sent: {}", response.message_id);
 ## Folder structure
 
 - `DoWhiz_service/send_emails_module/src/lib.rs` : Postmark send logic and request payload construction.
-- `DoWhiz_service/send_emails_module/tests/` : Live Postmark tests (send + delivery status polling).
+- `DoWhiz_service/send_emails_module/tests/` : Offline integration tests + optional live Postmark tests.
 
 ## Notes
 

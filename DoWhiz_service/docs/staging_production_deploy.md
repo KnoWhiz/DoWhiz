@@ -107,9 +107,14 @@ Use this section when you deploy directly on VM.
 ssh dowhizstaging
 cd /home/azureuser/server/.dowhiz/DoWhiz
 ```
-2. Pull latest deployment branch:
+2. Pull staging deployment branch (default `dev`):
 ```bash
 git fetch origin
+git checkout dev
+git pull --ff-only origin dev
+```
+Optional hotfix/testing branch:
+```bash
 git checkout staging-vm-setup
 git pull --ff-only origin staging-vm-setup
 ```
