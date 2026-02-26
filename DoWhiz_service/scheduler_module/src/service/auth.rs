@@ -1685,8 +1685,8 @@ pub async fn slack_oauth_callback(
 
 /// Send a verification email with a magic link
 async fn send_verification_email(email: &str, verify_url: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let postmark_token = std::env::var("POSTMARK_API_TOKEN")
-        .map_err(|_| "POSTMARK_API_TOKEN not configured")?;
+    let postmark_token = std::env::var("POSTMARK_SERVER_TOKEN")
+        .map_err(|_| "POSTMARK_SERVER_TOKEN not configured")?;
     let from_email = std::env::var("POSTMARK_FROM_EMAIL")
         .unwrap_or_else(|_| "noreply@dowhiz.com".to_string());
 
