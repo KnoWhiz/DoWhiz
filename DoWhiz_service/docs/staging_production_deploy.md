@@ -45,6 +45,7 @@ Most keys can be shared. Keep these isolated by environment:
 
 Optional but recommended split:
 - `WORKER_INSTANCE_ID_OLIVER` / `STAGING_WORKER_INSTANCE_ID_OLIVER`
+- `POSTMARK_SMTP_PORT` / `STAGING_POSTMARK_SMTP_PORT` (set staging to `2525` if outbound port `25` is blocked by cloud policy)
 
 ## 3) Gateway routing isolation
 
