@@ -10,7 +10,9 @@ flowchart TD
   C -->|Discord WS| C5[Discord Gateway]
   C -->|Telegram| C6[HTTP /telegram/webhook]
   C -->|Google Docs| C7[Docs Poller]
-  C -->|WhatsApp| C8[HTTP /whatsapp/webhook]
+  C -->|Google Sheets| C8[Sheets Poller]
+  C -->|Google Slides| C9[Slides Poller]
+  C -->|WhatsApp| C10[HTTP /whatsapp/webhook]
 
   C1 --> D1{Verify token?}
   C2 --> D2{URL verification?}
@@ -18,7 +20,9 @@ flowchart TD
   C4 --> D4{Verify Twilio signature?}
   C5 --> D5{Mention or reply to bot?}
   C7 --> D7[Fetch comments -> filter actionable items]
-  C8 --> D8{Webhook verify?}
+  C8 --> D8[Fetch comments -> filter actionable items]
+  C9 --> D9[Fetch comments -> filter actionable items]
+  C10 --> D10{Webhook verify?}
 
   D1 -->|fail| X1[401/400]
   D1 -->|ok| E1[Parse Postmark payload]
@@ -28,17 +32,19 @@ flowchart TD
   D4 -->|fail| X1
   D5 -->|no| X3[ignore]
   D5 -->|yes| E5
-  D8 -->|yes| X5[return challenge]
-  D8 -->|no| E8
+  D10 -->|yes| X5[return challenge]
+  D10 -->|no| E10
 
   E1 --> F1[Extract service address]
-  E2[Parse Slack payload] --> F2[Extract team_id]
+  E2[Parse Slack payload] --> F2[Extract api_app_id]
   E3[Parse BlueBubbles payload] --> F3[Extract chat_guid]
   E4[Parse SMS form] --> F4[Extract To/From]
-  E5[Parse Discord message] --> F5[Extract guild_id/channel_id]
+  E5[Parse Discord message] --> F5[Employee_id from bot config]
   E6[Parse Telegram payload] --> F6[Extract chat_id]
   E7[Build GoogleDocs InboundMessage] --> F7[doc_id]
-  E8[Parse WhatsApp payload] --> F8[Extract phone_number]
+  E8[Build GoogleSheets InboundMessage] --> F8[sheet_id]
+  E9[Build GoogleSlides InboundMessage] --> F9[slides_id]
+  E10[Parse WhatsApp payload] --> F10[Extract phone_number]
 
   C2 --> E2
   C3 --> E3
@@ -47,15 +53,20 @@ flowchart TD
   C6 --> E6
   C7 --> E7
   C8 --> E8
+  C9 --> E9
+  C10 --> E10
 
   F1 --> G{Route match}
   F2 --> G
   F3 --> G
   F4 --> G
-  F5 --> G
   F6 --> G
   F7 --> G
   F8 --> G
+  F9 --> G
+  F10 --> G
+
+  F5 --> H[RouteDecision tenant_id + employee_id]
 
   G -->|hit| H[RouteDecision tenant_id + employee_id]
   G -->|miss| X4[no_route / ignore]
@@ -75,7 +86,7 @@ flowchart TD
   P -->|WhatsApp| Q5[Quick response router?]
   P -->|Email| R1[process_inbound_payload]
   P -->|SMS| R2[process_sms_message]
-  P -->|GoogleDocs| R3[process_google_docs_message]
+  P -->|Google Docs/Sheets/Slides| R3[process_google_docs_message]
 
   Q1 -->|Simple| S1[Send quick Slack reply]
   Q1 -->|Complex/Pass| R1S[process_slack_event]

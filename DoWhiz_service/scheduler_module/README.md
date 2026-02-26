@@ -1,6 +1,6 @@
 # scheduler_module
 
-Cron-based scheduler (6-field format with seconds) that persists tasks to disk and runs them in UTC. Supports two task types for now: send email and run task.
+Cron-based scheduler (6-field format with seconds) that persists tasks to disk and runs them in UTC. Supports send email, run task, and noop (test placeholder) task types.
 
 ## Usage
 
