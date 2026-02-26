@@ -561,4 +561,91 @@ impl GoogleWorkspacePoller {
             }
         }
     }
+
+    /// List all monitored files of a given type.
+    /// Used by push notification system to register watch channels.
+    pub fn list_files(&self, file_type: WorkspaceFileType) -> Result<Vec<DriveFile>, SchedulerError> {
+        match file_type {
+            WorkspaceFileType::Sheets => {
+                if let Some(cached) = self.file_cache.get_sheets() {
+                    return Ok(cached);
+                }
+                let adapter = GoogleSheetsInboundAdapter::new(
+                    self.auth.clone(),
+                    self.config.employee_emails.clone(),
+                );
+                let files = adapter
+                    .list_shared_spreadsheets()
+                    .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list spreadsheets: {}", e)))?;
+                self.file_cache.set_sheets(files.clone());
+                Ok(files)
+            }
+            WorkspaceFileType::Slides => {
+                if let Some(cached) = self.file_cache.get_slides() {
+                    return Ok(cached);
+                }
+                let adapter = GoogleSlidesInboundAdapter::new(
+                    self.auth.clone(),
+                    self.config.employee_emails.clone(),
+                );
+                let files = adapter
+                    .list_shared_presentations()
+                    .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list presentations: {}", e)))?;
+                self.file_cache.set_slides(files.clone());
+                Ok(files)
+            }
+        }
+    }
+
+    /// Poll a single file for comments (used by push notifications for immediate response).
+    pub fn poll_single_file(
+        &self,
+        file_id: &str,
+        file_type: WorkspaceFileType,
+    ) -> Result<Vec<(DriveFile, Vec<ActionableComment>)>, SchedulerError> {
+        // Get file metadata from cache or fetch
+        let files = self.list_files(file_type)?;
+        let file = files.into_iter().find(|f| f.id == file_id);
+
+        let Some(file) = file else {
+            debug!("File {} not found in {} file list", file_id, file_type.display_name());
+            return Ok(vec![]);
+        };
+
+        // Get comments for this specific file
+        let (comments, adapter_filter) = match file_type {
+            WorkspaceFileType::Sheets => {
+                let adapter = GoogleSheetsInboundAdapter::new(
+                    self.auth.clone(),
+                    self.config.employee_emails.clone(),
+                );
+                let comments = adapter
+                    .list_comments(file_id)
+                    .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list comments: {}", e)))?;
+                let processed = self.store.get_processed_ids(file_id)?;
+                let actionable = adapter.filter_actionable_comments(&comments, &processed);
+                (actionable, ())
+            }
+            WorkspaceFileType::Slides => {
+                let adapter = GoogleSlidesInboundAdapter::new(
+                    self.auth.clone(),
+                    self.config.employee_emails.clone(),
+                );
+                let comments = adapter
+                    .list_comments(file_id)
+                    .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list comments: {}", e)))?;
+                let processed = self.store.get_processed_ids(file_id)?;
+                let actionable = adapter.filter_actionable_comments(&comments, &processed);
+                (actionable, ())
+            }
+        };
+
+        let _ = adapter_filter; // suppress unused warning
+
+        if comments.is_empty() {
+            Ok(vec![])
+        } else {
+            Ok(vec![(file, comments)])
+        }
+    }
 }
