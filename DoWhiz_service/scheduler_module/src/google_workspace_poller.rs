@@ -7,8 +7,9 @@ use chrono::Utc;
 use rusqlite::{params, Connection};
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::Duration;
-use tracing::{debug, warn};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+use tracing::{debug, info, warn};
 
 use crate::adapters::google_common::{ActionableComment, DriveFile};
 use crate::adapters::google_sheets::GoogleSheetsInboundAdapter;
@@ -16,6 +17,86 @@ use crate::adapters::google_slides::GoogleSlidesInboundAdapter;
 use crate::channel::{Channel, InboundMessage};
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
 use crate::SchedulerError;
+
+/// Default TTL for file list cache (5 minutes).
+const FILE_LIST_CACHE_TTL_SECS: u64 = 300;
+
+/// Cache entry for file lists.
+struct FileListCacheEntry {
+    files: Vec<DriveFile>,
+    fetched_at: Instant,
+}
+
+/// Thread-safe cache for file lists.
+/// Reduces redundant API calls when file list hasn't changed.
+pub struct FileListCache {
+    sheets: Mutex<Option<FileListCacheEntry>>,
+    slides: Mutex<Option<FileListCacheEntry>>,
+    ttl: Duration,
+}
+
+impl FileListCache {
+    pub fn new(ttl_secs: u64) -> Self {
+        Self {
+            sheets: Mutex::new(None),
+            slides: Mutex::new(None),
+            ttl: Duration::from_secs(ttl_secs),
+        }
+    }
+
+    /// Get cached sheets file list if not expired.
+    pub fn get_sheets(&self) -> Option<Vec<DriveFile>> {
+        let cache = self.sheets.lock().ok()?;
+        if let Some(ref entry) = *cache {
+            if entry.fetched_at.elapsed() < self.ttl {
+                return Some(entry.files.clone());
+            }
+        }
+        None
+    }
+
+    /// Get cached slides file list if not expired.
+    pub fn get_slides(&self) -> Option<Vec<DriveFile>> {
+        let cache = self.slides.lock().ok()?;
+        if let Some(ref entry) = *cache {
+            if entry.fetched_at.elapsed() < self.ttl {
+                return Some(entry.files.clone());
+            }
+        }
+        None
+    }
+
+    /// Update sheets file list cache.
+    pub fn set_sheets(&self, files: Vec<DriveFile>) {
+        if let Ok(mut cache) = self.sheets.lock() {
+            *cache = Some(FileListCacheEntry {
+                files,
+                fetched_at: Instant::now(),
+            });
+        }
+    }
+
+    /// Update slides file list cache.
+    pub fn set_slides(&self, files: Vec<DriveFile>) {
+        if let Ok(mut cache) = self.slides.lock() {
+            *cache = Some(FileListCacheEntry {
+                files,
+                fetched_at: Instant::now(),
+            });
+        }
+    }
+
+    /// Invalidate all caches (force refresh on next poll).
+    #[allow(dead_code)]
+    pub fn invalidate_all(&self) {
+        if let Ok(mut cache) = self.sheets.lock() {
+            *cache = None;
+        }
+        if let Ok(mut cache) = self.slides.lock() {
+            *cache = None;
+        }
+    }
+}
 
 /// Type of Google Workspace file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,7 +150,8 @@ pub struct GoogleWorkspacePollerConfig {
 impl Default for GoogleWorkspacePollerConfig {
     fn default() -> Self {
         Self {
-            poll_interval_secs: 30,
+            // Reduced from 30s to 15s for faster comment detection
+            poll_interval_secs: 15,
             sheets_enabled: false,
             slides_enabled: false,
             employee_emails: HashSet::new(),
@@ -93,10 +175,11 @@ impl GoogleWorkspacePollerConfig {
             .map(|v| v.to_lowercase() == "true" || v == "1")
             .unwrap_or(false);
 
+        // Default reduced from 30s to 15s for faster comment detection
         let poll_interval_secs = std::env::var("GOOGLE_WORKSPACE_POLL_INTERVAL_SECS")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(30);
+            .unwrap_or(15);
 
         let mut employee_emails = HashSet::new();
         employee_emails.insert("oliver@dowhiz.com".to_string());
@@ -261,6 +344,7 @@ pub struct GoogleWorkspacePoller {
     config: GoogleWorkspacePollerConfig,
     auth: GoogleAuth,
     store: GoogleWorkspaceProcessedStore,
+    file_cache: FileListCache,
 }
 
 impl GoogleWorkspacePoller {
@@ -278,10 +362,14 @@ impl GoogleWorkspacePoller {
 
         let store = GoogleWorkspaceProcessedStore::new(config.processed_db_path.clone())?;
 
+        // Create file list cache with 5 minute TTL
+        let file_cache = FileListCache::new(FILE_LIST_CACHE_TTL_SECS);
+
         Ok(Self {
             config,
             auth,
             store,
+            file_cache,
         })
     }
 
@@ -308,9 +396,18 @@ impl GoogleWorkspacePoller {
             self.config.employee_emails.clone(),
         );
 
-        let files = adapter
-            .list_shared_spreadsheets()
-            .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list spreadsheets: {}", e)))?;
+        // Try to use cached file list first
+        let files = if let Some(cached_files) = self.file_cache.get_sheets() {
+            debug!("Using cached sheets file list ({} files)", cached_files.len());
+            cached_files
+        } else {
+            let fetched_files = adapter
+                .list_shared_spreadsheets()
+                .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list spreadsheets: {}", e)))?;
+            info!("Fetched {} shared spreadsheets (cache miss)", fetched_files.len());
+            self.file_cache.set_sheets(fetched_files.clone());
+            fetched_files
+        };
 
         debug!("Found {} shared spreadsheets", files.len());
 
@@ -360,9 +457,18 @@ impl GoogleWorkspacePoller {
             self.config.employee_emails.clone(),
         );
 
-        let files = adapter
-            .list_shared_presentations()
-            .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list presentations: {}", e)))?;
+        // Try to use cached file list first
+        let files = if let Some(cached_files) = self.file_cache.get_slides() {
+            debug!("Using cached slides file list ({} files)", cached_files.len());
+            cached_files
+        } else {
+            let fetched_files = adapter
+                .list_shared_presentations()
+                .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list presentations: {}", e)))?;
+            info!("Fetched {} shared presentations (cache miss)", fetched_files.len());
+            self.file_cache.set_slides(fetched_files.clone());
+            fetched_files
+        };
 
         debug!("Found {} shared presentations", files.len());
 

@@ -870,6 +870,12 @@ ul {
   line-height: 1.7;
 }
 
+.faq-help-center {
+  margin-top: 2rem;
+  display: flex;
+  justify-content: center;
+}
+
 /* Blog */
 .blog-section {
   padding-top: 6rem;

@@ -3,8 +3,9 @@
 //! The Comments API is the same for Docs, Sheets, and Slides.
 
 use std::collections::HashSet;
+use std::time::Duration;
 
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::channel::AdapterError;
 use crate::google_auth::GoogleAuth;
@@ -14,6 +15,34 @@ use super::models::{
     GoogleComment,
 };
 use super::types::{GOOGLE_DOCS_MIME, GOOGLE_SHEETS_MIME, GOOGLE_SLIDES_MIME};
+
+/// Default timeout for Google API requests (30 seconds).
+const API_TIMEOUT_SECS: u64 = 30;
+
+/// Maximum retry attempts for transient failures.
+const MAX_RETRIES: u32 = 3;
+
+/// Initial backoff delay for retries.
+const INITIAL_BACKOFF_MS: u64 = 500;
+
+/// Create an HTTP client with appropriate timeout settings.
+fn create_http_client() -> Result<reqwest::blocking::Client, AdapterError> {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(API_TIMEOUT_SECS))
+        .connect_timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| AdapterError::ConfigError(format!("Failed to create HTTP client: {}", e)))
+}
+
+/// Check if an error is retryable (network issues, 5xx errors).
+fn is_retryable_error(err: &reqwest::Error) -> bool {
+    err.is_timeout() || err.is_connect() || err.is_request()
+}
+
+/// Check if an HTTP status code is retryable.
+fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+    status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+}
 
 /// Client for Google Drive Comments API operations.
 /// Works with Docs, Sheets, and Slides.
@@ -44,7 +73,7 @@ impl GoogleCommentsClient {
             .get_access_token()
             .map_err(|e| AdapterError::ConfigError(e.to_string()))?;
 
-        let client = reqwest::blocking::Client::new();
+        let client = create_http_client()?;
 
         let query = format!(
             "mimeType='{}' or mimeType='{}' or mimeType='{}'",
@@ -56,27 +85,52 @@ impl GoogleCommentsClient {
             urlencoding::encode(&query)
         );
 
-        let response = client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", access_token))
-            .send()
-            .map_err(|e| AdapterError::SendError(e.to_string()))?;
+        // Retry logic for transient failures
+        let mut last_error = None;
+        for attempt in 0..MAX_RETRIES {
+            if attempt > 0 {
+                let backoff = Duration::from_millis(INITIAL_BACKOFF_MS * 2u64.pow(attempt - 1));
+                warn!("Retrying list_shared_files (attempt {}/{}), backoff {:?}", attempt + 1, MAX_RETRIES, backoff);
+                std::thread::sleep(backoff);
+            }
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().unwrap_or_default();
-            error!("Failed to list files: {} - {}", status, body);
-            return Err(AdapterError::SendError(format!(
-                "HTTP {}: {}",
-                status, body
-            )));
+            match client
+                .get(&url)
+                .header("Authorization", format!("Bearer {}", access_token))
+                .send()
+            {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let files_response: FilesListResponse = response
+                            .json()
+                            .map_err(|e| AdapterError::ParseError(e.to_string()))?;
+                        return Ok(files_response.files.unwrap_or_default());
+                    }
+
+                    let status = response.status();
+                    if is_retryable_status(status) && attempt < MAX_RETRIES - 1 {
+                        let body = response.text().unwrap_or_default();
+                        warn!("Retryable HTTP error listing files: {} - {}", status, body);
+                        last_error = Some(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                        continue;
+                    }
+
+                    let body = response.text().unwrap_or_default();
+                    error!("Failed to list files: {} - {}", status, body);
+                    return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                }
+                Err(e) => {
+                    if is_retryable_error(&e) && attempt < MAX_RETRIES - 1 {
+                        warn!("Retryable network error listing files: {}", e);
+                        last_error = Some(AdapterError::SendError(e.to_string()));
+                        continue;
+                    }
+                    return Err(AdapterError::SendError(e.to_string()));
+                }
+            }
         }
 
-        let files_response: FilesListResponse = response
-            .json()
-            .map_err(|e| AdapterError::ParseError(e.to_string()))?;
-
-        Ok(files_response.files.unwrap_or_default())
+        Err(last_error.unwrap_or_else(|| AdapterError::SendError("Max retries exceeded".to_string())))
     }
 
     /// List comments on a specific file.
@@ -86,34 +140,59 @@ impl GoogleCommentsClient {
             .get_access_token()
             .map_err(|e| AdapterError::ConfigError(e.to_string()))?;
 
-        let client = reqwest::blocking::Client::new();
+        let client = create_http_client()?;
 
         let url = format!(
             "https://www.googleapis.com/drive/v3/files/{}/comments?fields=comments(id,content,htmlContent,resolved,author,createdTime,modifiedTime,replies,anchor,quotedFileContent)",
             file_id
         );
 
-        let response = client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", access_token))
-            .send()
-            .map_err(|e| AdapterError::SendError(e.to_string()))?;
+        // Retry logic for transient failures
+        let mut last_error = None;
+        for attempt in 0..MAX_RETRIES {
+            if attempt > 0 {
+                let backoff = Duration::from_millis(INITIAL_BACKOFF_MS * 2u64.pow(attempt - 1));
+                warn!("Retrying list_comments for {} (attempt {}/{})", file_id, attempt + 1, MAX_RETRIES);
+                std::thread::sleep(backoff);
+            }
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().unwrap_or_default();
-            error!("Failed to list comments for {}: {} - {}", file_id, status, body);
-            return Err(AdapterError::SendError(format!(
-                "HTTP {}: {}",
-                status, body
-            )));
+            match client
+                .get(&url)
+                .header("Authorization", format!("Bearer {}", access_token))
+                .send()
+            {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let comments_response: CommentsListResponse = response
+                            .json()
+                            .map_err(|e| AdapterError::ParseError(e.to_string()))?;
+                        return Ok(comments_response.comments.unwrap_or_default());
+                    }
+
+                    let status = response.status();
+                    if is_retryable_status(status) && attempt < MAX_RETRIES - 1 {
+                        let body = response.text().unwrap_or_default();
+                        warn!("Retryable HTTP error listing comments for {}: {} - {}", file_id, status, body);
+                        last_error = Some(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                        continue;
+                    }
+
+                    let body = response.text().unwrap_or_default();
+                    error!("Failed to list comments for {}: {} - {}", file_id, status, body);
+                    return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                }
+                Err(e) => {
+                    if is_retryable_error(&e) && attempt < MAX_RETRIES - 1 {
+                        warn!("Retryable network error listing comments for {}: {}", file_id, e);
+                        last_error = Some(AdapterError::SendError(e.to_string()));
+                        continue;
+                    }
+                    return Err(AdapterError::SendError(e.to_string()));
+                }
+            }
         }
 
-        let comments_response: CommentsListResponse = response
-            .json()
-            .map_err(|e| AdapterError::ParseError(e.to_string()))?;
-
-        Ok(comments_response.comments.unwrap_or_default())
+        Err(last_error.unwrap_or_else(|| AdapterError::SendError("Max retries exceeded".to_string())))
     }
 
     /// Post a reply to a comment.
@@ -128,7 +207,7 @@ impl GoogleCommentsClient {
             .get_access_token()
             .map_err(|e| AdapterError::ConfigError(e.to_string()))?;
 
-        let client = reqwest::blocking::Client::new();
+        let client = create_http_client()?;
 
         let url = format!(
             "https://www.googleapis.com/drive/v3/files/{}/comments/{}/replies?fields=id,content,createdTime,author",
@@ -137,37 +216,58 @@ impl GoogleCommentsClient {
 
         let payload = serde_json::json!({ "content": reply_content });
 
-        let response = client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", access_token))
-            .header("Content-Type", "application/json")
-            .json(&payload)
-            .send()
-            .map_err(|e| AdapterError::SendError(e.to_string()))?;
+        // Retry logic for transient failures
+        let mut last_error = None;
+        for attempt in 0..MAX_RETRIES {
+            if attempt > 0 {
+                let backoff = Duration::from_millis(INITIAL_BACKOFF_MS * 2u64.pow(attempt - 1));
+                warn!("Retrying reply_to_comment {} on {} (attempt {}/{})", comment_id, file_id, attempt + 1, MAX_RETRIES);
+                std::thread::sleep(backoff);
+            }
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().unwrap_or_default();
-            error!(
-                "Failed to reply to comment {} on {}: {} - {}",
-                comment_id, file_id, status, body
-            );
-            return Err(AdapterError::SendError(format!(
-                "HTTP {}: {}",
-                status, body
-            )));
+            match client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", access_token))
+                .header("Content-Type", "application/json")
+                .json(&payload)
+                .send()
+            {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let reply: CommentReply = response
+                            .json()
+                            .map_err(|e| AdapterError::ParseError(e.to_string()))?;
+                        info!(
+                            "Posted reply {} to comment {} on file {}",
+                            reply.id, comment_id, file_id
+                        );
+                        return Ok(reply);
+                    }
+
+                    let status = response.status();
+                    if is_retryable_status(status) && attempt < MAX_RETRIES - 1 {
+                        let body = response.text().unwrap_or_default();
+                        warn!("Retryable HTTP error replying to comment {} on {}: {} - {}", comment_id, file_id, status, body);
+                        last_error = Some(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                        continue;
+                    }
+
+                    let body = response.text().unwrap_or_default();
+                    error!("Failed to reply to comment {} on {}: {} - {}", comment_id, file_id, status, body);
+                    return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                }
+                Err(e) => {
+                    if is_retryable_error(&e) && attempt < MAX_RETRIES - 1 {
+                        warn!("Retryable network error replying to comment {} on {}: {}", comment_id, file_id, e);
+                        last_error = Some(AdapterError::SendError(e.to_string()));
+                        continue;
+                    }
+                    return Err(AdapterError::SendError(e.to_string()));
+                }
+            }
         }
 
-        let reply: CommentReply = response
-            .json()
-            .map_err(|e| AdapterError::ParseError(e.to_string()))?;
-
-        info!(
-            "Posted reply {} to comment {} on file {}",
-            reply.id, comment_id, file_id
-        );
-
-        Ok(reply)
+        Err(last_error.unwrap_or_else(|| AdapterError::SendError("Max retries exceeded".to_string())))
     }
 
     /// Filter comments to find actionable ones.
@@ -195,7 +295,7 @@ impl GoogleCommentsClient {
             .get_access_token()
             .map_err(|e| AdapterError::ConfigError(e.to_string()))?;
 
-        let client = reqwest::blocking::Client::new();
+        let client = create_http_client()?;
 
         let url = format!(
             "https://www.googleapis.com/drive/v3/files/{}/export?mimeType={}",
@@ -203,25 +303,51 @@ impl GoogleCommentsClient {
             urlencoding::encode(export_mime_type)
         );
 
-        let response = client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", access_token))
-            .send()
-            .map_err(|e| AdapterError::SendError(e.to_string()))?;
+        // Retry logic for transient failures
+        let mut last_error = None;
+        for attempt in 0..MAX_RETRIES {
+            if attempt > 0 {
+                let backoff = Duration::from_millis(INITIAL_BACKOFF_MS * 2u64.pow(attempt - 1));
+                warn!("Retrying export_file_content for {} (attempt {}/{})", file_id, attempt + 1, MAX_RETRIES);
+                std::thread::sleep(backoff);
+            }
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().unwrap_or_default();
-            error!("Failed to export file {}: {} - {}", file_id, status, body);
-            return Err(AdapterError::SendError(format!(
-                "HTTP {}: {}",
-                status, body
-            )));
+            match client
+                .get(&url)
+                .header("Authorization", format!("Bearer {}", access_token))
+                .send()
+            {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        return response
+                            .text()
+                            .map_err(|e| AdapterError::ParseError(e.to_string()));
+                    }
+
+                    let status = response.status();
+                    if is_retryable_status(status) && attempt < MAX_RETRIES - 1 {
+                        let body = response.text().unwrap_or_default();
+                        warn!("Retryable HTTP error exporting file {}: {} - {}", file_id, status, body);
+                        last_error = Some(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                        continue;
+                    }
+
+                    let body = response.text().unwrap_or_default();
+                    error!("Failed to export file {}: {} - {}", file_id, status, body);
+                    return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                }
+                Err(e) => {
+                    if is_retryable_error(&e) && attempt < MAX_RETRIES - 1 {
+                        warn!("Retryable network error exporting file {}: {}", file_id, e);
+                        last_error = Some(AdapterError::SendError(e.to_string()));
+                        continue;
+                    }
+                    return Err(AdapterError::SendError(e.to_string()));
+                }
+            }
         }
 
-        response
-            .text()
-            .map_err(|e| AdapterError::ParseError(e.to_string()))
+        Err(last_error.unwrap_or_else(|| AdapterError::SendError("Max retries exceeded".to_string())))
     }
 }
 

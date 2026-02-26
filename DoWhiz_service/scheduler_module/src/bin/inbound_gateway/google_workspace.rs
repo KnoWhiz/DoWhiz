@@ -37,48 +37,68 @@ pub(super) fn spawn_google_workspace_poller(state: Arc<GatewayState>) {
     let poll_interval = poller_config.poll_interval_secs;
 
     info!(
-        "Starting Google Workspace poller: sheets={}, slides={}",
-        sheets_enabled, slides_enabled
+        "Starting Google Workspace poller: sheets={}, slides={}, interval={}s (parallel mode)",
+        sheets_enabled, slides_enabled, poll_interval
     );
 
-    std::thread::spawn(move || {
-        match GoogleWorkspacePoller::new(poller_config) {
-            Ok(poller) => loop {
-                // Poll Sheets
-                if sheets_enabled {
-                    match poll_workspace_comments(&poller, &state, WorkspaceFileType::Sheets) {
-                        Ok(count) => {
-                            if count > 0 {
-                                info!("Google Sheets polling enqueued {} items", count);
+    // Spawn separate threads for Sheets and Slides to poll in parallel
+    // This reduces latency significantly when both are enabled
+
+    if sheets_enabled {
+        let state_sheets = Arc::clone(&state);
+        let config_sheets = poller_config.clone();
+        std::thread::spawn(move || {
+            match GoogleWorkspacePoller::new(config_sheets) {
+                Ok(poller) => {
+                    info!("Google Sheets poller thread started");
+                    loop {
+                        match poll_workspace_comments(&poller, &state_sheets, WorkspaceFileType::Sheets) {
+                            Ok(count) => {
+                                if count > 0 {
+                                    info!("Google Sheets polling enqueued {} items", count);
+                                }
+                            }
+                            Err(err) => {
+                                error!("Google Sheets polling error: {}", err);
                             }
                         }
-                        Err(err) => {
-                            error!("Google Sheets polling error: {}", err);
-                        }
+                        std::thread::sleep(Duration::from_secs(poll_interval));
                     }
                 }
-
-                // Poll Slides
-                if slides_enabled {
-                    match poll_workspace_comments(&poller, &state, WorkspaceFileType::Slides) {
-                        Ok(count) => {
-                            if count > 0 {
-                                info!("Google Slides polling enqueued {} items", count);
-                            }
-                        }
-                        Err(err) => {
-                            error!("Google Slides polling error: {}", err);
-                        }
-                    }
+                Err(err) => {
+                    error!("Failed to create Google Sheets poller: {}", err);
                 }
-
-                std::thread::sleep(Duration::from_secs(poll_interval));
-            },
-            Err(err) => {
-                error!("Failed to create Google Workspace poller: {}", err);
             }
-        }
-    });
+        });
+    }
+
+    if slides_enabled {
+        let state_slides = Arc::clone(&state);
+        let config_slides = poller_config.clone();
+        std::thread::spawn(move || {
+            match GoogleWorkspacePoller::new(config_slides) {
+                Ok(poller) => {
+                    info!("Google Slides poller thread started");
+                    loop {
+                        match poll_workspace_comments(&poller, &state_slides, WorkspaceFileType::Slides) {
+                            Ok(count) => {
+                                if count > 0 {
+                                    info!("Google Slides polling enqueued {} items", count);
+                                }
+                            }
+                            Err(err) => {
+                                error!("Google Slides polling error: {}", err);
+                            }
+                        }
+                        std::thread::sleep(Duration::from_secs(poll_interval));
+                    }
+                }
+                Err(err) => {
+                    error!("Failed to create Google Slides poller: {}", err);
+                }
+            }
+        });
+    }
 }
 
 fn poll_workspace_comments(
