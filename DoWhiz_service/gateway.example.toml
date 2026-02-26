@@ -25,27 +25,16 @@ key = "oliver@dowhiz.com"
 employee_id = "little_bear"
 tenant_id = "default"
 
-# Slack routing by team_id (specific team example)
+# Slack routing by api_app_id (specific Slack app example)
 # [[routes]]
 # channel = "slack"
-# key = "T12345678"
+# key = "A12345678"
 # employee_id = "boiled_egg"
 # tenant_id = "acme"
 
-# Discord routing by guild_id (use "dm" for direct messages)
-# Specific guild example:
-# [[routes]]
-# channel = "discord"
-# key = "123456789012345678"
-# employee_id = "boiled_egg"
-# tenant_id = "acme"
-
-# Discord wildcard - routes all guilds/DMs to one employee
-[[routes]]
-channel = "discord"
-key = "*"
-employee_id = "little_bear"
-tenant_id = "default"
+# Discord ingress currently routes by bot token -> employee mapping
+# (`DISCORD_BOT_TOKEN` or per-employee `*_DISCORD_BOT_TOKEN`),
+# not by `gateway.toml` route keys.
 
 # SMS routing by inbound phone number (To)
 [[routes]]

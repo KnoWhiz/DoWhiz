@@ -128,7 +128,7 @@ Inbound message -> Ingress (Rust gateway) -> Raw payload storage (Azure Blob; Su
 - **[DoWhiz Service - Full Documentation](DoWhiz_service/README.md)** - Detailed setup, configuration, environment variables, Docker, E2E testing
 - **[Website](website/README.md)** - Frontend development
 - **[Contributing](CONTRIBUTING.md)** - Development workflow and guidelines
-- **[Vision](vision.md)** - Long-term product direction
+- **[Vision](reference_documentation/vision.md)** - Long-term product direction
 - **[Developer Docs](https://docs.google.com/document/d/1MRU00FTJIlCJno2yj9jrlnXNPq1TJ34B5jldg687fSg/edit?tab=t.0)** - Internal documentation and task board
 
 ## License

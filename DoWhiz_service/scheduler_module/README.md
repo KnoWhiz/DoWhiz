@@ -1,6 +1,6 @@
 # scheduler_module
 
-Cron-based scheduler (6-field format with seconds) that persists tasks to disk and runs them in UTC. Supports send email, run task, and noop (test placeholder) task types.
+Cron-based scheduler (6-field format with seconds) that persists tasks to disk and runs them in UTC. Supports `SendReply` (multi-channel), `RunTask`, and `Noop` task types.
 
 ## Usage
 
@@ -34,6 +34,7 @@ let task = SendReplyTask {
     archive_root: None,
     thread_epoch: None,
     thread_state_path: None,
+    employee_id: None,
 };
 
 scheduler.add_cron_task("0 */5 * * * *", TaskKind::SendReply(task))?;

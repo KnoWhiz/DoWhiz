@@ -9,7 +9,7 @@
   - `dowhiz-rust-service-out.log` - Rust service stdout
   - `dowhiz-rust-service-error.log` - Rust service errors
   - `dowhiz-inbound-gateway-out.log` - Inbound gateway logs
-- **Processed comments DB**: `/home/azureuser/server/DoWhiz_service/.workspace/*/run_task/google_workspace_processed.db`
+- **Processed comments DB**: `$WORKSPACE_ROOT/google_workspace_processed.db` (commonly under `/home/azureuser/server/.dowhiz/DoWhiz/run_task/`)
 - **Codex logs**: `/home/azureuser/server/.codex/log/codex-tui.log`
 
 ### PM2 Commands
@@ -47,8 +47,9 @@ grep -i "slides\|presentation" /home/azureuser/server/.pm2/logs/dowhiz-inbound-g
 # Check for "no route" errors (common issue)
 grep -i "no route" /home/azureuser/server/.pm2/logs/dowhiz-inbound-gateway-out.log | tail -20
 
-# Check processed Slides comments
-sqlite3 /home/azureuser/server/DoWhiz_service/.workspace/*/run_task/google_workspace_processed.db \
+# Locate processed comments DB then inspect recent Slides comments
+db_path="$(find /home/azureuser/server -name google_workspace_processed.db | head -n1)"
+sqlite3 "$db_path" \
   "SELECT * FROM google_workspace_processed_comments WHERE file_type='slides' ORDER BY processed_at DESC LIMIT 10;"
 ```
 
@@ -71,6 +72,9 @@ cat /home/azureuser/server/DoWhiz_service/.env | grep -i "SLIDES\|SHEETS\|GOOGLE
 **Symptoms**: User comments on Google Slides mentioning @oliver but no reply is received.
 
 **Possible causes**:
+0. **Service Bus credentials invalid/missing** - Queue enqueue fails at gateway
+   - Check `.env`: `SERVICE_BUS_CONNECTION_STRING` (or `SCALE_OLIVER_SERVICE_BUS_CONNECTION_STRING`) and `SERVICE_BUS_QUEUE_NAME`
+
 1. **No route configured** - The Slides file_id is not registered in the routing system
    - Check: `grep "no route" /home/azureuser/server/.pm2/logs/dowhiz-inbound-gateway-out.log`
 
@@ -90,13 +94,13 @@ cat /home/azureuser/server/DoWhiz_service/.env | grep -i "SLIDES\|SHEETS\|GOOGLE
 ### Issue 2: Long delay (20+ minutes) for Slides while Docs works
 **Root cause**: `scheduler_user_max_concurrency = 1` means only one task per user runs at a time.
 
-**Fix**: Increase `SCHEDULER_USER_MAX_CONCURRENCY` to 2 or 3 in `.env`
+**Fix**: Increase `SCHEDULER_USER_MAX_CONCURRENCY` in `.env` (code default is `200` if unset)
 - **Warning**: This affects ALL channels, discuss with team first
 
 ### Issue 3: 5+ minute response time
 **Breakdown**:
 - Polling delay: ~15-30 seconds (reduced from 30s to 15s)
-- Azure OpenAI API: 2-3 minutes (gpt-5.2-codex)
+- Azure OpenAI API: 2-3 minutes (gpt-5.3-codex default)
 - Web search (if enabled): 30-60 seconds
 - Google API calls: 10-30 seconds
 
@@ -108,7 +112,7 @@ cat /home/azureuser/server/DoWhiz_service/.env | grep -i "SLIDES\|SHEETS\|GOOGLE
 2. **HTTP timeout + retry** - 30s timeout, 3 retries with exponential backoff
 3. **Polling interval reduced** - 30s → 15s default
 4. **File list cache** - 5 minute TTL to reduce API calls
-5. **Google Drive Change API** - Foundation added (not yet enabled)
+5. **Google Drive Change API push notifications** - Implemented and opt-in via env vars
 
 ### Environment Variables for Tuning
 ```bash
@@ -120,10 +124,10 @@ GOOGLE_SHEETS_ENABLED=true
 GOOGLE_SLIDES_ENABLED=true
 
 # User concurrency (affects all channels!)
-SCHEDULER_USER_MAX_CONCURRENCY=1
+SCHEDULER_USER_MAX_CONCURRENCY=200
 
-# Push notifications (future)
-GOOGLE_DRIVE_PUSH_ENABLED=false
+# Push notifications (optional)
+GOOGLE_DRIVE_PUSH_ENABLED=true
 GOOGLE_DRIVE_WEBHOOK_URL=https://your-domain.com/webhooks/google-drive-changes
 ```
 
