@@ -632,33 +632,33 @@ function App() {
 
   const blogPosts = [
     {
-      tag: 'Weekly Update',
-      title: 'Weekly update: Feb 16–22, 2026',
-      date: 'Feb 16–22, 2026',
+      tag: 'SEO Guide',
+      title: 'AI workflow automation checklist for lean teams',
+      date: 'February 26, 2026',
       excerpt:
-        'Slack, Discord OAuth, Telegram, WhatsApp routing, unified account/memo work, infra upgrades, CI fixes, and docs shipped last week.',
-      link: '/blog/#weekly-update-2026-02-22'
+        'A practical rollout checklist for trigger design, quality gates, and weekly delivery metrics across channels.',
+      link: '/blog/ai-workflow-automation-checklist/'
     },
     {
-      tag: 'Launch Notes',
-      title: 'Multi-channel delegation',
-      date: 'February 2026',
-      excerpt: 'How DoWhiz handles the same task across email, chat, issues, and comments while keeping one shared context.',
-      link: '/blog/#multi-channel-delegation'
+      tag: 'SEO Guide',
+      title: 'GitHub issue automation best practices',
+      date: 'February 26, 2026',
+      excerpt: 'A repeatable issue-to-PR model with better scoping, validation, and reviewer-ready handoffs.',
+      link: '/blog/github-issue-automation-best-practices/'
     },
     {
-      tag: 'Workflow',
-      title: 'Inside the digital employee delivery loop',
-      date: 'February 2026',
-      excerpt: 'A closer look at how requests flow from brief to finished output, with clear checkpoints along the way.',
-      link: '/blog/#delivery-loop'
+      tag: 'SEO Guide',
+      title: 'Email task automation playbook for operations teams',
+      date: 'February 26, 2026',
+      excerpt: 'How to convert inbound email threads into structured execution, progress updates, and complete deliverables.',
+      link: '/blog/email-task-automation-playbook/'
     },
     {
-      tag: 'Team',
-      title: 'Meet the first DoWhiz employees',
-      date: 'February 2026',
-      excerpt: 'How Oliver and Maggie turn messy inputs into crisp updates, docs, and action items in a single thread.',
-      link: '/blog/#meet-team'
+      tag: 'SEO Guide',
+      title: 'AI employee trust, safety, and governance framework',
+      date: 'February 26, 2026',
+      excerpt: 'Governance essentials for permission scopes, audit trails, and escalation paths for high-confidence execution.',
+      link: '/blog/ai-employee-trust-safety-governance/'
     }
   ];
 
