@@ -1892,6 +1892,91 @@ pub async fn get_tasks(
     (StatusCode::OK, Json(TasksResponse { tasks })).into_response()
 }
 
+/// GET /api/account/tasks
+/// Returns all tasks for the authenticated user's unified account.
+/// This fetches from the account-level tasks.db which aggregates tasks from all channels.
+pub async fn get_account_tasks(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    // Validate auth token
+    let token = match extract_bearer_token(&headers) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(user) => user.id,
+        Err((status, msg)) => {
+            return (status, Json(serde_json::json!({ "error": msg }))).into_response();
+        }
+    };
+
+    // Check if users_root is configured
+    let users_root = match &state.users_root {
+        Some(root) => root.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Task storage not configured"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Get account by auth_user_id
+    let store = state.account_store.clone();
+    let account_result = task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id))
+        .await
+        .map_err(|e| {
+            error!("spawn_blocking panicked: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
+        });
+
+    let account = match account_result {
+        Ok(Ok(Some(acc))) => acc,
+        Ok(Ok(None)) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "Account not found" })),
+            )
+                .into_response();
+        }
+        Ok(Err(e)) => {
+            error!("Failed to get account: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to get account" })),
+            )
+                .into_response();
+        }
+        Err(resp) => return resp.into_response(),
+    };
+
+    // Load tasks from account-level tasks.db
+    let account_tasks_db_path = users_root
+        .join(account.id.to_string())
+        .join("state")
+        .join("tasks.db");
+
+    let tasks = load_tasks_with_status(&account_tasks_db_path);
+
+    (StatusCode::OK, Json(TasksResponse { tasks })).into_response()
+}
+
 // ============================================================================
 // Router
 // ============================================================================
@@ -1910,5 +1995,6 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/auth/slack", get(slack_oauth_start))
         .route("/auth/slack/callback", get(slack_oauth_callback))
         .route("/api/tasks", get(get_tasks))
+        .route("/api/account/tasks", get(get_account_tasks))
         .with_state(state)
 }

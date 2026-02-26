@@ -634,11 +634,16 @@ impl GoogleWorkspacePoller {
         file_type: WorkspaceFileType,
     ) -> InboundMessage {
         let file_name = file.name.as_deref().unwrap_or("Untitled");
+        let owner_email = file
+            .owners
+            .as_ref()
+            .and_then(|owners| owners.first())
+            .and_then(|o| o.email_address.clone());
 
         match file_type {
             WorkspaceFileType::Docs => {
                 // Build InboundMessage for Docs using the common ActionableComment type
-                self.build_docs_inbound_message(&file.id, file_name, actionable)
+                self.build_docs_inbound_message(&file.id, file_name, actionable, owner_email.as_deref())
             }
             WorkspaceFileType::Sheets => {
                 let adapter = GoogleSheetsInboundAdapter::new(
@@ -663,6 +668,7 @@ impl GoogleWorkspacePoller {
         document_id: &str,
         document_name: &str,
         actionable: &ActionableComment,
+        owner_email: Option<&str>,
     ) -> InboundMessage {
         use crate::channel::ChannelMetadata;
 
@@ -728,6 +734,7 @@ impl GoogleWorkspacePoller {
                 google_docs_document_id: Some(document_id.to_string()),
                 google_docs_comment_id: Some(actionable.comment.id.clone()),
                 google_docs_document_name: Some(document_name.to_string()),
+                google_docs_owner_email: owner_email.map(|s| s.to_string()),
                 ..Default::default()
             },
         }

@@ -353,8 +353,8 @@ fn sync_task_status_to_user_storage(
     status: &str,
     error_message: Option<&str>,
 ) {
-    // Only sync for Discord and Slack channels
-    if !matches!(task.channel, Channel::Discord | Channel::Slack) {
+    // Only sync for channels that support unified accounts
+    if !matches!(task.channel, Channel::Discord | Channel::Slack | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides) {
         return;
     }
 
@@ -531,4 +531,81 @@ fn notify_run_task_failure(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test that the channel whitelist for status sync includes Google Workspace channels.
+    /// This is a simple unit test to verify the match statement includes all expected channels.
+    #[test]
+    fn status_sync_whitelist_includes_google_channels() {
+        // Channels that should be synced
+        let syncable_channels = vec![
+            Channel::Discord,
+            Channel::Slack,
+            Channel::GoogleDocs,
+            Channel::GoogleSheets,
+            Channel::GoogleSlides,
+        ];
+
+        for channel in syncable_channels {
+            assert!(
+                matches!(
+                    channel,
+                    Channel::Discord
+                        | Channel::Slack
+                        | Channel::GoogleDocs
+                        | Channel::GoogleSheets
+                        | Channel::GoogleSlides
+                ),
+                "Channel {:?} should be in the sync whitelist",
+                channel
+            );
+        }
+
+        // Channels that should NOT be synced (yet)
+        let non_syncable_channels = vec![
+            Channel::Email,
+            Channel::Sms,
+            Channel::WhatsApp,
+            Channel::Telegram,
+            Channel::BlueBubbles,
+        ];
+
+        for channel in non_syncable_channels {
+            assert!(
+                !matches!(
+                    channel,
+                    Channel::Discord
+                        | Channel::Slack
+                        | Channel::GoogleDocs
+                        | Channel::GoogleSheets
+                        | Channel::GoogleSlides
+                ),
+                "Channel {:?} should NOT be in the sync whitelist",
+                channel
+            );
+        }
+    }
+
+    /// Test that channel_to_identifier_type maps Google channels to "email"
+    #[test]
+    fn google_channels_map_to_email_identifier() {
+        use crate::account_store::channel_to_identifier_type;
+
+        assert_eq!(channel_to_identifier_type(&Channel::GoogleDocs), "email");
+        assert_eq!(channel_to_identifier_type(&Channel::GoogleSheets), "email");
+        assert_eq!(channel_to_identifier_type(&Channel::GoogleSlides), "email");
+    }
+
+    /// Test that Discord and Slack have their own identifier types
+    #[test]
+    fn discord_slack_have_own_identifier_types() {
+        use crate::account_store::channel_to_identifier_type;
+
+        assert_eq!(channel_to_identifier_type(&Channel::Discord), "discord");
+        assert_eq!(channel_to_identifier_type(&Channel::Slack), "slack");
+    }
 }

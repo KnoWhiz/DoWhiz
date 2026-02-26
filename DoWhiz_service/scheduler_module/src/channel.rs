@@ -171,6 +171,12 @@ pub struct ChannelMetadata {
     pub google_slides_presentation_name: Option<String>,
     /// Google Slides-specific: Slide number where comment is located
     pub google_slides_slide_number: Option<i32>,
+    /// Google Docs-specific: Document owner's email (for account linking fallback)
+    pub google_docs_owner_email: Option<String>,
+    /// Google Sheets-specific: Spreadsheet owner's email (for account linking fallback)
+    pub google_sheets_owner_email: Option<String>,
+    /// Google Slides-specific: Presentation owner's email (for account linking fallback)
+    pub google_slides_owner_email: Option<String>,
     /// BlueBubbles-specific: Chat GUID (e.g., "iMessage;-;+1234567890")
     pub bluebubbles_chat_guid: Option<String>,
 
