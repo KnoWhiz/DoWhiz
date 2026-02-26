@@ -11,6 +11,12 @@ PLANNED = not implemented; should be added.
 Reporting rule:
 After any code change, consult this checklist, run all relevant AUTO tests, and explicitly mark LIVE/MANUAL/PLANNED with reason. Use the Test Report Template at the end of this document.
 
+Target/env rule:
+- Keep one `DoWhiz_service/.env`.
+- For production tests, use `DEPLOY_TARGET=production` (base keys).
+- For staging tests, use `DEPLOY_TARGET=staging` and `STAGING_`-prefixed keys.
+- `DoWhiz_service/scripts/load_env_target.sh` performs runtime mapping.
+
 ## Unit Tests: run_task_module
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
 |---|---|---|---|---|---|---|---|
@@ -181,7 +187,7 @@ Note: ingestion-queue tests use Postgres by default; set `SUPABASE_DB_URL` (or `
 | LIVE-SCH-08 | google_docs_cli_e2e_discard_suggestions | google-docs CLI | DoWhiz_service/scheduler_module/tests/google_docs_cli_e2e.rs | Discard suggestions | Conflicts | LIVE | GOOGLE_DOCS_CLI_E2E=1 + doc id |
 | LIVE-SCH-09 | google_docs_cli_e2e_full_suggestion_workflow | google-docs CLI | DoWhiz_service/scheduler_module/tests/google_docs_cli_e2e.rs | Full suggestion workflow | Network failures | LIVE | GOOGLE_DOCS_CLI_E2E=1 + doc id |
 | LIVE-SCH-10 | google_docs_cli_e2e_apply_edit | google-docs CLI | DoWhiz_service/scheduler_module/tests/google_docs_cli_e2e.rs | Apply edit | Text mismatch | LIVE | GOOGLE_DOCS_CLI_E2E=1 + doc id |
-| LIVE-SCH-11 | rust_service_real_email_end_to_end | run_server + gateway + Postmark | DoWhiz_service/scheduler_module/tests/service_real_email.rs | Real inbound/outbound email flow | Cost and external variance | LIVE | RUST_SERVICE_LIVE_TEST=1 + Postmark/ngrok |
+| LIVE-SCH-11 | rust_service_real_email_end_to_end | run_server + gateway + Postmark | DoWhiz_service/scheduler_module/tests/service_real_email.rs | Real inbound/outbound email flow | Cost and external variance | LIVE | `DEPLOY_TARGET=<target>` + `RUST_SERVICE_LIVE_TEST=1` + Postmark/ngrok (`POSTMARK_SMTP_PORT` optional, set `2525` when port 25 is blocked) |
 | LIVE-SCH-12 | unified_memo_azure_blob_routing | auth + memory queue + blob store | DoWhiz_service/scheduler_module/tests/unified_memo_e2e.rs | Supabase auth + account linkage + Azure memo write | Service availability | LIVE | cargo test -p scheduler_module --test unified_memo_e2e -- --ignored --nocapture (SERVICE_URL + SUPABASE_PROJECT_URL + SUPABASE_ANON_KEY + AZURE_STORAGE_CONNECTION_STRING + AZURE_STORAGE_CONTAINER + TEST_EMAIL/TEST_PASSWORD) |
 | MAN-SCH-01 | google_workspace_cli_smoke | Google Workspace CLI (Docs/Sheets/Slides) | DoWhiz_service/scheduler_module/tests/google_workspace_cli_test.sh | CLI list/read/comment flows | Full ingestion pipeline | MANUAL | GOOGLE_CLIENT_ID/SECRET + GOOGLE_REFRESH_TOKEN (or GOOGLE_ACCESS_TOKEN) + ./scheduler_module/tests/google_workspace_cli_test.sh |
 | MAN-SCH-02 | google_workspace_comment_workflow | Google Workspace comment E2E | DoWhiz_service/scheduler_module/tests/google_workspace_e2e_test.sh | Comment discovery + reply workflows | Gateway routing + queue handling | MANUAL | GOOGLE_CLIENT_ID/SECRET + GOOGLE_REFRESH_TOKEN (or GOOGLE_ACCESS_TOKEN) + shared Docs/Sheets/Slides + ./scheduler_module/tests/google_workspace_e2e_test.sh |
@@ -226,3 +232,4 @@ Rules:
 
 ## Live E2E Defaults (Ngrok)
 - If a real end-to-end test needs a public ngrok URL, use: https://shayne-laminar-lillian.ngrok-free.dev
+- Current staging inbound webhook URL in deployment docs: https://oliver.dowhiz.prod.ngrok.app/postmark/inbound

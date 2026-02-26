@@ -94,6 +94,12 @@ Do not use `start_all.sh` for production unless you explicitly want to start ngr
 
 Use this section when you deploy directly on VM.
 
+### Branch / CI policy
+
+- Production VM deploys from `main` (current CI/CD baseline).
+- Staging VM CI/CD target branch is `dev` (planned rollout).
+- During transition or emergency hotfixes, staging can still be deployed manually from `staging-vm-setup`.
+
 ### 5.1 Staging VM (`dowhizstaging`)
 
 1. SSH and enter repo:
@@ -144,11 +150,11 @@ RUN_CODEX_E2E=1 POSTMARK_LIVE_TEST=1 cargo test -p scheduler_module --test servi
 ssh dowhizprod1
 cd /home/azureuser/server/.dowhiz/DoWhiz
 ```
-2. Pull production branch/tag you deploy from:
+2. Pull production branch:
 ```bash
 git fetch origin
-git checkout <production-branch-or-tag>
-git pull --ff-only
+git checkout main
+git pull --ff-only origin main
 ```
 3. Start production target:
 ```bash

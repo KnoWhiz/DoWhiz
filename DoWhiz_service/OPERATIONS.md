@@ -1,153 +1,143 @@
 # DoWhiz Operations Guide
 
-## Azure VM Deployment Info
+This document is the operational runbook for VM-based deployment of:
+- `inbound_gateway`
+- `rust_service`
+- ngrok ingress (when needed)
 
-### Paths
-- **Server root**: `/home/azureuser/server/`
-- **DoWhiz Service**: `/home/azureuser/server/DoWhiz_service/`
-- **PM2 logs**: `/home/azureuser/server/.pm2/logs/`
-  - `dowhiz-rust-service-out.log` - Rust service stdout
-  - `dowhiz-rust-service-error.log` - Rust service errors
-  - `dowhiz-inbound-gateway-out.log` - Inbound gateway logs
-- **Processed comments DB**: `/home/azureuser/server/DoWhiz_service/.workspace/*/run_task/google_workspace_processed.db`
-- **Codex logs**: `/home/azureuser/server/.codex/log/codex-tui.log`
+For detailed deployment matrix and rollback between staging/prod targets, see:
+- `DoWhiz_service/docs/staging_production_deploy.md`
 
-### PM2 Commands
+## 1) Deployment Policy
+
+- Production deploy branch: `main` (CI/CD baseline)
+- Staging deploy branch: `dev` (CI/CD rollout target)
+- Transition/hotfix branch for staging (manual): `staging-vm-setup`
+
+Environment policy:
+- Use one `DoWhiz_service/.env`
+- Production uses base keys
+- Staging uses `STAGING_` keys
+- Runtime switching is controlled by `DEPLOY_TARGET=production|staging`
+- Mapping is applied by `DoWhiz_service/scripts/load_env_target.sh`
+
+## 2) VM Paths and Logs
+
+Common VM repo path:
+- `/home/azureuser/server/.dowhiz/DoWhiz`
+
+Service directory:
+- `/home/azureuser/server/.dowhiz/DoWhiz/DoWhiz_service`
+
+Default logs when using helper scripts:
+- `DoWhiz_service/gateway.log`
+- `DoWhiz_service/worker.log`
+- `/tmp/ngrok.log` (or `/tmp/ngrok-dowhiz.log`)
+
+## 3) Safety Rules
+
+- Do not run destructive git commands on shared VMs.
+- Do not restart production processes unless explicitly planned.
+- Do not run `start_all.sh` on production unless you intentionally want to start ngrok and overwrite Postmark inbound hook to ngrok.
+
+## 4) Staging Runbook (`dowhizstaging`)
+
 ```bash
-# PM2 requires HOME to be set correctly
-export HOME=/home/azureuser/server
+ssh dowhizstaging
+cd /home/azureuser/server/.dowhiz/DoWhiz
 
-# List services
-pm2 list
+git fetch origin
+git checkout staging-vm-setup
+git pull --ff-only origin staging-vm-setup
 
-# View logs
-pm2 logs dowhiz-rust-service
-pm2 logs dowhiz-inbound-gateway
-
-# Restart services
-pm2 restart dowhiz-rust-service
-pm2 restart dowhiz-inbound-gateway
-
-# Restart all
-pm2 restart all
+export DEPLOY_TARGET=staging
+./DoWhiz_service/scripts/start_all.sh
 ```
 
-### Common Diagnostic Commands
-
-#### Check if services are running
+Health checks:
 ```bash
-ps aux | grep -E "inbound|rust_service|dowhiz" | grep -v grep
+curl -sS http://127.0.0.1:9100/health
+curl -sS http://127.0.0.1:9001/health
 ```
 
-#### Check Google Slides issues
+Expected staging behavior:
+- inbound route only for `dowhiz@deep-tutor.com`
+- default outbound sender is `dowhiz@deep-tutor.com`
+- queue/storage/postmark use `STAGING_` values
+
+## 5) Production Runbook (`dowhizprod1`)
+
 ```bash
-# Check if Slides poller is working
-grep -i "slides\|presentation" /home/azureuser/server/.pm2/logs/dowhiz-inbound-gateway-out.log | tail -50
+ssh dowhizprod1
+cd /home/azureuser/server/.dowhiz/DoWhiz
 
-# Check for "no route" errors (common issue)
-grep -i "no route" /home/azureuser/server/.pm2/logs/dowhiz-inbound-gateway-out.log | tail -20
+git fetch origin
+git checkout main
+git pull --ff-only origin main
 
-# Check processed Slides comments
-sqlite3 /home/azureuser/server/DoWhiz_service/.workspace/*/run_task/google_workspace_processed.db \
-  "SELECT * FROM google_workspace_processed_comments WHERE file_type='slides' ORDER BY processed_at DESC LIMIT 10;"
+export DEPLOY_TARGET=production
+./DoWhiz_service/scripts/run_gateway_local.sh
+./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
 ```
 
-#### Check for errors
+Health checks:
 ```bash
-tail -100 /home/azureuser/server/.pm2/logs/dowhiz-rust-service-error.log
-grep -i "error\|failed" /home/azureuser/server/.pm2/logs/dowhiz-rust-service-out.log | tail -50
+curl -sS http://127.0.0.1:9100/health
+curl -sS http://127.0.0.1:9001/health
 ```
 
-#### Check environment variables
+## 6) Quick Verification Commands
+
+Check active env mapping:
 ```bash
-cat /home/azureuser/server/DoWhiz_service/.env | grep -i "SLIDES\|SHEETS\|GOOGLE"
+DEPLOY_TARGET=staging bash -lc 'source DoWhiz_service/scripts/load_env_target.sh; echo "$DEPLOY_TARGET|$SERVICE_BUS_QUEUE_NAME|$GATEWAY_CONFIG_PATH|$EMPLOYEE_CONFIG_PATH"'
+DEPLOY_TARGET=production bash -lc 'source DoWhiz_service/scripts/load_env_target.sh; echo "$DEPLOY_TARGET|$SERVICE_BUS_QUEUE_NAME|$GATEWAY_CONFIG_PATH|$EMPLOYEE_CONFIG_PATH"'
 ```
 
----
-
-## Known Issues & Fixes
-
-### Issue 1: Slides comment not receiving reply
-**Symptoms**: User comments on Google Slides mentioning @oliver but no reply is received.
-
-**Possible causes**:
-1. **No route configured** - The Slides file_id is not registered in the routing system
-   - Check: `grep "no route" /home/azureuser/server/.pm2/logs/dowhiz-inbound-gateway-out.log`
-
-2. **Comment already processed** - The comment ID is in the processed_comments database
-   - Check: Query the `google_workspace_processed_comments` table
-
-3. **Mention not detected** - The mention pattern doesn't match
-   - The system looks for: proto, oliver, maggie, little-bear, @proto, etc.
-
-4. **Service not running** - PM2 service crashed
-   - Check: `HOME=/home/azureuser/server pm2 list`
-
-5. **scheduler_user_max_concurrency = 1** - Task blocked by another running task
-   - This affects ALL channels (Email, Slack, Discord, Google Docs/Sheets/Slides)
-   - If a Docs task is running, Slides task waits
-
-### Issue 2: Long delay (20+ minutes) for Slides while Docs works
-**Root cause**: `scheduler_user_max_concurrency = 1` means only one task per user runs at a time.
-
-**Fix**: Increase `SCHEDULER_USER_MAX_CONCURRENCY` to 2 or 3 in `.env`
-- **Warning**: This affects ALL channels, discuss with team first
-
-### Issue 3: 5+ minute response time
-**Breakdown**:
-- Polling delay: ~15-30 seconds (reduced from 30s to 15s)
-- Azure OpenAI API: 2-3 minutes (gpt-5.2-codex)
-- Web search (if enabled): 30-60 seconds
-- Google API calls: 10-30 seconds
-
----
-
-## Recent Optimizations (Feb 2026)
-
-1. **Parallel polling** - Sheets and Slides now poll in separate threads
-2. **HTTP timeout + retry** - 30s timeout, 3 retries with exponential backoff
-3. **Polling interval reduced** - 30s → 15s default
-4. **File list cache** - 5 minute TTL to reduce API calls
-5. **Google Drive Change API** - Foundation added (not yet enabled)
-
-### Environment Variables for Tuning
+Check key processes:
 ```bash
-# Polling interval (default: 15 seconds)
-GOOGLE_WORKSPACE_POLL_INTERVAL_SECS=15
-
-# Enable Sheets/Slides
-GOOGLE_SHEETS_ENABLED=true
-GOOGLE_SLIDES_ENABLED=true
-
-# User concurrency (affects all channels!)
-SCHEDULER_USER_MAX_CONCURRENCY=1
-
-# Push notifications (future)
-GOOGLE_DRIVE_PUSH_ENABLED=false
-GOOGLE_DRIVE_WEBHOOK_URL=https://your-domain.com/webhooks/google-drive-changes
+pgrep -af inbound_gateway
+pgrep -af rust_service
+pgrep -af "ngrok http"
 ```
 
----
+## 7) Live E2E Notes
 
-## Deployment Notes
+- `scheduler_module/tests/service_real_email.rs` supports SMTP port override via `POSTMARK_SMTP_PORT`.
+- On cloud VMs where SMTP port `25` is blocked, set `POSTMARK_SMTP_PORT=2525` (or staging equivalent through `STAGING_POSTMARK_SMTP_PORT` + `DEPLOY_TARGET=staging`).
 
-### Do NOT restart without team coordination
-The VM is shared and runs production services. Avoid:
-- `pm2 restart all` without warning
-- Kernel upgrades that require reboot
-- Any destructive git operations
+Example:
+```bash
+export DEPLOY_TARGET=staging
+RUN_CODEX_E2E=1 POSTMARK_LIVE_TEST=1 cargo test -p scheduler_module --test service_real_email -- --nocapture
+```
 
-### After code changes
-1. Build locally: `cargo build --release`
-2. Test locally with `CODEX_DISABLED=1`
-3. Create PR to main
-4. On VM: `git pull && cargo build --release && pm2 restart all`
+## 8) Common Failure Patterns
 
----
+1. Gateway exits immediately with backend error
+- Cause: target-resolved `INGESTION_QUEUE_BACKEND` is not `servicebus`.
+- Fix: verify `DEPLOY_TARGET` and `STAGING_INGESTION_QUEUE_BACKEND` / `INGESTION_QUEUE_BACKEND`.
 
-## Contact
+2. Messages enqueue but worker does not process
+- Cause: queue mismatch between gateway and worker target config.
+- Fix: verify `SERVICE_BUS_CONNECTION_STRING` + `SERVICE_BUS_QUEUE_NAME` after `load_env_target.sh` mapping.
 
-For issues, check:
-1. This document
-2. PM2 logs
-3. GitHub issues: https://github.com/KnoWhiz/DoWhiz/issues
+3. Staging accidentally using production `SCALE_OLIVER_*`
+- Protection exists in `load_env_target.sh` (staging alias sync), but validate with the quick mapping command above.
+
+4. No outbound email in live tests
+- Cause: SMTP blocked or wrong sender signature.
+- Fix: set SMTP port override and verify sender/domain in Postmark.
+
+## 9) Rollback
+
+Use:
+- `DoWhiz_service/docs/staging_production_deploy.md` -> section `Rollback (staging -> production)`
+
+Minimal rollback steps:
+```bash
+./DoWhiz_service/scripts/stop_all.sh
+export DEPLOY_TARGET=production
+./DoWhiz_service/scripts/run_gateway_local.sh
+./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
+```

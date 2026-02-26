@@ -1,3 +1,16 @@
+## Gateway Workflow (Current)
+
+Operational invariants:
+- Inbound gateway requires `INGESTION_QUEUE_BACKEND=servicebus` (or `SCALE_OLIVER_INGESTION_QUEUE_BACKEND=servicebus`).
+- Raw payload storage for gateway should use Azure Blob (`RAW_PAYLOAD_STORAGE_BACKEND=azure`).
+- Routing config is loaded from `GATEWAY_CONFIG_PATH` (default `gateway.toml`).
+- Employee directory is loaded from `EMPLOYEE_CONFIG_PATH` (default `employee.toml`).
+- Discord gateway starts only when Discord routes exist in gateway config.
+
+Staging/prod split:
+- Use one `.env` with `STAGING_` keys.
+- Set `DEPLOY_TARGET=staging|production`; `load_env_target.sh` maps `STAGING_FOO -> FOO` at runtime.
+
 ```mermaid
 flowchart TD
   A[Input: external message] --> B{Ingress runtime}
@@ -117,3 +130,8 @@ flowchart TD
   AA --> AB[Send outbound reply by channel]
 
 ```
+
+## Notes
+
+- Staging email-only route pattern (current): `gateway.staging.toml` routes only `dowhiz@deep-tutor.com`.
+- Outbound sender behavior is controlled by `employee.toml` / `employee.staging.toml` address ordering.
