@@ -351,7 +351,7 @@ impl GoogleDocsPoller {
             for actionable in actionable_items {
                 // Convert to inbound message using the new method
                 let doc_name = doc.name.as_deref().unwrap_or("Untitled");
-                let message = adapter.actionable_to_inbound_message(&doc.id, doc_name, &actionable);
+                let message = adapter.actionable_to_inbound_message_with_owner(&doc.id, doc_name, &actionable, owner_email);
 
                 // Create workspace for this task (use tracking_id for unique workspace)
                 let workspace_dir = self.create_workspace(&doc.id, &actionable.tracking_id)?;
@@ -495,7 +495,7 @@ impl GoogleDocsPoller {
             for actionable in actionable_items {
                 // Convert to inbound message using the new method
                 let doc_name = doc.name.as_deref().unwrap_or("Untitled");
-                let message = adapter.actionable_to_inbound_message(&doc.id, doc_name, &actionable);
+                let message = adapter.actionable_to_inbound_message_with_owner(&doc.id, doc_name, &actionable, owner_email);
 
                 // Determine workspace directory
                 let workspace_dir = if let Some(ref session) = existing_session {
