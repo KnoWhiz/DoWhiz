@@ -563,37 +563,40 @@ function App() {
 
   const howItWorksSteps = [
     {
-      tag: '01',
-      title: 'Trigger from anywhere',
-      desc: 'Start from the channel your team already uses. DoWhiz normalizes the request into one clear execution brief.',
+      id: '01',
+      phase: 'Trigger',
+      role: 'Users',
+      intro: 'Give DoWhiz a task through:',
       points: [
         'Email with attachments, links, and constraints',
         'Slack/Discord message or @mention in a thread',
         'GitHub issue assignment or shared doc comment mention'
       ],
-      outcome: 'A structured brief with requester context, expected output, and delivery target.'
+      output: 'A structured brief with requester context, expected output, and delivery target.'
     },
     {
-      tag: '02',
-      title: 'Execute in the right tools',
-      desc: 'The assigned agent works directly in approved tools with scoped permissions and agent-owned identities.',
+      id: '02',
+      phase: 'Execute',
+      role: 'Agent',
+      intro: 'Works directly in approved tools with scoped permissions and agent-owned identities.',
       points: [
         'No personal credential handoff required',
         'Workspace permissions are explicit and revocable',
         'Cross-agent coordination for multi-step tasks'
       ],
-      outcome: 'Work artifacts are created where your team already collaborates.'
+      output: 'Work artifacts are created where your team already collaborates.'
     },
     {
-      tag: '03',
-      title: 'Deliver where you work',
-      desc: 'Results return to the originating channel, and shared memory keeps continuity across future requests.',
+      id: '03',
+      phase: 'Deliver',
+      role: 'Agent',
+      intro: 'Results return to the originating channel, and shared memory keeps continuity across future requests.',
       points: [
         'PRs, docs, action items, and updates delivered in-thread',
         'Per-user context persists across channels',
         'Follow-ups start with history, not from scratch'
       ],
-      outcome: 'Faster iteration with consistent quality across every surface.'
+      output: 'Faster iteration with consistent quality across every surface.'
     }
   ];
 
@@ -601,6 +604,7 @@ function App() {
     {
       tag: 'A1',
       title: 'Isolated execution environment',
+      icon: '/icons/shield_lock.svg',
       desc: 'Every request runs in an isolated runtime boundary so tasks stay contained, reviewable, and predictable.',
       points: [
         'Separate sandbox/VM boundaries per task',
@@ -611,6 +615,7 @@ function App() {
     {
       tag: 'A2',
       title: 'No user credential handoff',
+      icon: '/icons/lock_person.svg',
       desc: 'You do not share personal passwords or account credentials with DoWhiz agents to get work done.',
       points: [
         'Agents operate with agent-owned identities',
@@ -621,6 +626,7 @@ function App() {
     {
       tag: 'A3',
       title: 'Explicit access grants',
+      icon: '/icons/key.svg',
       desc: 'Agents can only work in workspaces and integrations that you explicitly authorize and can revoke.',
       points: [
         'Granular workspace-level permission model',
@@ -743,6 +749,32 @@ function App() {
       answer: 'Across email, Slack, Discord, GitHub issues, and shared workspace comments. See the Integrations page for the latest trigger surfaces.'
     }
   ];
+
+  const [openFaq, setOpenFaq] = useState(null);
+  const toggleFaq = (idx) => setOpenFaq((prev) => (prev === idx ? null : idx));
+
+  useEffect(() => {
+    const syncHowHeights = () => {
+      const roleCards = Array.from(document.querySelectorAll('.how-column .role-card-variant'));
+      const outputCards = Array.from(document.querySelectorAll('.how-column .how-card.output'));
+
+      roleCards.forEach((el) => (el.style.minHeight = ''));
+      outputCards.forEach((el) => (el.style.minHeight = ''));
+
+      if (roleCards.length) {
+        const maxRole = Math.max(...roleCards.map((el) => el.offsetHeight));
+        roleCards.forEach((el) => (el.style.minHeight = `${maxRole}px`));
+      }
+      if (outputCards.length) {
+        const maxOut = Math.max(...outputCards.map((el) => el.offsetHeight));
+        outputCards.forEach((el) => (el.style.minHeight = `${maxOut}px`));
+      }
+    };
+
+    syncHowHeights();
+    window.addEventListener('resize', syncHowHeights);
+    return () => window.removeEventListener('resize', syncHowHeights);
+  }, []);
 
   const structuredData = {
     '@context': 'https://schema.org',
@@ -1033,6 +1065,11 @@ function App() {
                     className={cardClasses}
                     title={`${member.name}: view channels and trigger examples`}
                   >
+                    <span
+                      className={`status-badge role-status ${isActive ? 'status-active' : 'status-soon'}`}
+                    >
+                      {member.status}
+                    </span>
                     <div className="role-header">
                       <div className="role-profile">
                         <img
@@ -1048,16 +1085,13 @@ function App() {
                         <div>
                           <div className="role-row role-name-row">
                             <h3>{member.name}</h3>
-                            <span
-                              className={`status-badge role-status-inline ${isActive ? 'status-active' : 'status-soon'}`}
-                            >
-                              {member.status}
-                            </span>
+                            <span className="nickname-tag">{member.nickname}</span>
                           </div>
                           <div className="role-row role-title-row">
                             <span className="role-title-text">{member.title}</span>
                             <span className="pronoun-tag">{member.pronoun}</span>
-                            <span className="nickname-tag">{member.nickname}</span>
+                          </div>
+                          <div className="role-row role-email-row">
                             {isActive ? (
                               <a
                                 className="email-tag role-email"
@@ -1106,25 +1140,42 @@ function App() {
             <p className="section-intro">
               One operating model across channels: trigger, execute, and return with persistent shared memory.
             </p>
-            <div className="how-flow-grid">
-              {howItWorksSteps.map((step) => (
-                <article key={step.tag} className="how-step-card">
-                  <div className="how-step-header">
-                    <span className="how-step-tag">{step.tag}</span>
-                    <h3>{step.title}</h3>
+            <div className="how-columns">
+              {howItWorksSteps.map((step) => {
+                const icon =
+                  step.role.toLowerCase().includes('user') ? '/icons/user.svg' : '/icons/agent.svg';
+                return (
+                  <div key={step.id} className="how-column">
+                    <div className="how-head-cell">
+                      <div className="how-head-badge">{step.id}</div>
+                      <div className="how-head-title">{step.phase}</div>
+                    </div>
+
+                    <div className="how-stack">
+                      <div className="how-card role-card-variant">
+                        <div className="how-card-heading">
+                          <img src={icon} alt={`${step.role} icon`} className="how-card-icon" />
+                          <span className="how-card-title">{step.role}</span>
+                        </div>
+                        <p className="how-card-intro">{step.intro}</p>
+                        <ul className="how-card-list">
+                          {step.points.map((point) => (
+                            <li key={point}>{point}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="how-line" aria-hidden="true"></div>
+                      <div className="how-card output">
+                        <div className="how-card-heading">
+                          <img src="/icons/output.svg" alt="Output icon" className="how-card-icon" />
+                          <span className="how-card-title">Output</span>
+                        </div>
+                        <p className="how-card-intro">{step.output}</p>
+                      </div>
+                    </div>
                   </div>
-                  <p className="how-step-desc">{step.desc}</p>
-                  <ul className="how-step-points">
-                    {step.points.map((point) => (
-                      <li key={point}>{point}</li>
-                    ))}
-                  </ul>
-                  <div className="how-step-outcome">
-                    <span>Outcome</span>
-                    <p>{step.outcome}</p>
-                  </div>
-                </article>
-              ))}
+                );
+              })}
             </div>
           </div>
         </section>
@@ -1169,20 +1220,20 @@ function App() {
               Built for practical operations with explicit permissions and controlled execution.
             </p>
             <div className="safety-access-layout">
-              <div className="safety-card-grid">
                 {safetyItems.map((item) => (
                   <article key={item.tag} className="safety-card">
-                    <span className="safety-tag">{item.tag}</span>
+                    <div className="safety-card-iconwrap">
+                      <img src={item.icon} alt={item.tag} className="safety-card-icon" />
+                    </div>
                     <h3>{item.title}</h3>
                     <p>{item.desc}</p>
                     <ul className="safety-point-list">
                       {item.points.map((point) => (
                         <li key={point}>{point}</li>
-                      ))}
-                    </ul>
-                  </article>
-                ))}
-              </div>
+                    ))}
+                  </ul>
+                </article>
+              ))}
 
               <aside className="access-playbook">
                 <h3>How access works</h3>
@@ -1232,15 +1283,39 @@ function App() {
           <div className="container">
             <h2 className="section-title">Frequently Asked Questions</h2>
             <p className="section-intro">
-              Quick answers to the most common questions about working with the DoWhiz digital employee team.
+              Quick answers to the most common questions about the DoWhiz digital employee team.
             </p>
-            <div className="faq-grid">
-              {faqItems.map((item) => (
-                <article key={item.question} className="faq-card">
-                  <h3>{item.question}</h3>
-                  <p>{item.answer}</p>
-                </article>
-              ))}
+            <div className="faq-accordion">
+              {faqItems.map((item, idx) => {
+                const isOpen = openFaq === idx;
+                return (
+                  <article key={item.question} className={`faq-accordion-item ${isOpen ? 'open' : ''}`}>
+                    <button
+                      className="faq-accordion-header"
+                      onClick={() => toggleFaq(idx)}
+                      aria-expanded={isOpen}
+                      aria-controls={`faq-panel-${idx}`}
+                    >
+                      <span className="faq-question">{item.question}</span>
+                      <span className="faq-toggle" aria-hidden="true">
+                        {isOpen ? '−' : '+'}
+                      </span>
+                    </button>
+                    <div
+                      id={`faq-panel-${idx}`}
+                      className="faq-accordion-panel"
+                      style={{ display: isOpen ? 'block' : 'none' }}
+                    >
+                      <p>{item.answer}</p>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+            <div className="faq-cta">
+              <a className="btn btn-secondary" href="/help-center/">
+                View the full Help Center with top 20 questions
+              </a>
             </div>
           </div>
         </section>
@@ -1267,7 +1342,10 @@ function App() {
                   </div>
                   <h3>{post.title}</h3>
                   <p>{post.excerpt}</p>
-                  <a className="blog-link" href={post.link}>Read on the blog</a>
+                  <a className="blog-link" href={post.link}>
+                    Read on the blog
+                    <img src="/icons/forward.svg" alt="" aria-hidden="true" className="blog-link-icon" />
+                  </a>
                 </article>
               ))}
             </div>
