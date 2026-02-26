@@ -2,8 +2,6 @@
 mod config;
 #[path = "inbound_gateway/discord.rs"]
 mod discord;
-#[path = "inbound_gateway/google_docs.rs"]
-mod google_docs;
 #[path = "inbound_gateway/google_drive_webhook.rs"]
 mod google_drive_webhook;
 #[path = "inbound_gateway/google_workspace.rs"]
@@ -40,7 +38,6 @@ use config::{
     GatewayConfigFile,
 };
 use discord::spawn_discord_gateway;
-use google_docs::spawn_google_docs_poller;
 use google_drive_webhook::handle_google_drive_webhook;
 use google_workspace::spawn_google_workspace_poller;
 use handlers::{
@@ -136,7 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
 
     spawn_discord_gateway(state.clone()).await;
-    spawn_google_docs_poller(state.clone());
+    // Unified poller handles Docs, Sheets, and Slides
     spawn_google_workspace_poller(state.clone());
 
     let max_body_bytes = env::var("GATEWAY_MAX_BODY_BYTES")
