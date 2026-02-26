@@ -16,7 +16,7 @@
   </a>
 </p>
 
-A lightweight Rust replica of OpenClaw🦞 with **better security, accessibility, and token usage**. Serve as your digital employee team, message us any task over email, Slack, Discord, SMS (Twilio), Telegram, WhatsApp, Google Docs comments, iMessage (BlueBubbles), or any other channel. 🧸🐭🐙🐘👾🦞🐦🐉
+A lightweight Rust replica of OpenClaw🦞 with **better security, accessibility, and token usage**. Serve as your digital employee team, message us any task over email, Slack, Discord, SMS (Twilio), Telegram, WhatsApp, Google Docs/Sheets/Slides comments, iMessage (BlueBubbles), or any other channel. 🧸🐭🐙🐘👾🦞🐦🐉
 
 ## Quick Start
 
@@ -46,7 +46,7 @@ export INGESTION_QUEUE_BACKEND=servicebus
 export SERVICE_BUS_CONNECTION_STRING="Endpoint=sb://..."
 export SERVICE_BUS_QUEUE_NAME="ingestion"
 export RAW_PAYLOAD_STORAGE_BACKEND=azure
-export AZURE_STORAGE_CONTAINER="ingestion-raw"
+export AZURE_STORAGE_CONTAINER_INGEST="ingestion-raw"
 export AZURE_STORAGE_SAS_TOKEN="..."
 ```
 For VM/pm2 deployments, prefer writing these into `DoWhiz_service/.env` so they survive restarts.
@@ -101,7 +101,7 @@ Inbound message -> Ingress (Rust gateway) -> Raw payload storage (Azure Blob; Su
 ```
 
 **Core capabilities:**
-- Any-channel task intake and replies (email, Slack, Discord, SMS/Twilio, Telegram, WhatsApp, Google Docs comments, iMessage/BlueBubbles)
+- Any-channel task intake and replies (email, Slack, Discord, SMS/Twilio, Telegram, WhatsApp, Google Docs/Sheets/Slides comments, iMessage/BlueBubbles)
 - Role-based agents with isolated, user-specific memory and data
 - Scheduling and orchestration for long-running or recurring work
 - Tool-backed execution for reliable outputs
