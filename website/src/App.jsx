@@ -1325,11 +1325,6 @@ function App() {
                 View the full Help Center with top 20 questions
               </a>
             </div>
-            <div className="faq-help-center">
-              <a href="/help-center/" className="access-playbook-link">
-                View the full Help Center with top 20 questions
-              </a>
-            </div>
           </div>
         </section>
 
