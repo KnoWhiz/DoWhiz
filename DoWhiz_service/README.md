@@ -260,6 +260,9 @@ This is the recommended Azure production flow. The Rust inbound gateway handles 
 For Docker-isolated RunTask execution on a VM (host Docker + per-task containers), see:
 `DoWhiz_service/docs/azure_vm_worker.md`.
 
+For Docker-isolated RunTask execution on a VM (host Docker + per-task containers), see:
+`DoWhiz_service/docs/azure_vm_worker.md`.
+
 **Step 1: Provision Azure resources**
 ```bash
 # Example (use your own names/location)
@@ -1128,7 +1131,6 @@ This reduces API costs and latency for simple interactions while preserving full
 | `AZURE_STORAGE_CONTAINER_INGEST` | - | Azure Blob container for raw payloads |
 | `AZURE_STORAGE_SAS_TOKEN` | - | SAS token for container access |
 | `AZURE_STORAGE_CONTAINER_SAS_URL` | - | Full container SAS URL (optional) |
-| `AZURE_FUNCTION_POSTMARK_URL` | - | Direct Function ingress URL |
 | `AZURE_APIM_POSTMARK_URL` | - | APIM ingress URL |
 
 ### Azure Memo Storage
