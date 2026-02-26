@@ -88,20 +88,90 @@ export DEPLOY_TARGET=production
 ./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
 ```
 
-If using one-command startup on VM:
+Do not use `start_all.sh` for production unless you explicitly want to start ngrok and update Postmark inbound hook to the ngrok URL.
+
+## 5) VM runbook (step-by-step)
+
+Use this section when you deploy directly on VM.
+
+### 5.1 Staging VM (`dowhizstaging`)
+
+1. SSH and enter repo:
 ```bash
-export DEPLOY_TARGET=production
+ssh dowhizstaging
+cd /home/azureuser/server/.dowhiz/DoWhiz
+```
+2. Pull latest deployment branch:
+```bash
+git fetch origin
+git checkout staging-vm-setup
+git pull --ff-only origin staging-vm-setup
+```
+3. Confirm `.env` has staging split keys (single file, `STAGING_` prefix), especially:
+- `STAGING_POSTMARK_SERVER_TOKEN`
+- `STAGING_POSTMARK_INBOUND_HOOK_URL`
+- `STAGING_POSTMARK_TEST_SERVICE_ADDRESS=dowhiz@deep-tutor.com`
+- `STAGING_SERVICE_BUS_CONNECTION_STRING`
+- `STAGING_SERVICE_BUS_QUEUE_NAME=ingestion-little_bear`
+- `STAGING_SERVICE_BUS_TEST_QUEUE_NAME=ingestion-test`
+- `STAGING_GATEWAY_CONFIG_PATH=gateway.staging.toml`
+- `STAGING_EMPLOYEE_CONFIG_PATH=employee.staging.toml`
+- `STAGING_RAW_PAYLOAD_PATH_PREFIX=staging/ingestion_raw`
+4. Start staging services:
+```bash
+export DEPLOY_TARGET=staging
 ./DoWhiz_service/scripts/start_all.sh
 ```
+5. Verify health and routing:
+```bash
+curl -sS http://127.0.0.1:9100/health
+curl -sS http://127.0.0.1:9001/health
+```
+- Gateway should be `ok`
+- Worker should be `ok`
+- Inbound route should only process `dowhiz@deep-tutor.com` (from `gateway.staging.toml`)
+- Outbound sender should default to `dowhiz@deep-tutor.com` (from `employee.staging.toml`)
+6. Optional live E2E (staging mailbox):
+```bash
+export DEPLOY_TARGET=staging
+RUN_CODEX_E2E=1 POSTMARK_LIVE_TEST=1 cargo test -p scheduler_module --test service_real_email -- --nocapture
+```
 
-## 5) Webhook notes (current staging URL)
+### 5.2 Production VM (`dowhizprod1`)
+
+1. SSH and enter repo:
+```bash
+ssh dowhizprod1
+cd /home/azureuser/server/.dowhiz/DoWhiz
+```
+2. Pull production branch/tag you deploy from:
+```bash
+git fetch origin
+git checkout <production-branch-or-tag>
+git pull --ff-only
+```
+3. Start production target:
+```bash
+export DEPLOY_TARGET=production
+./DoWhiz_service/scripts/run_gateway_local.sh
+./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
+```
+4. Verify:
+```bash
+curl -sS http://127.0.0.1:9100/health
+curl -sS http://127.0.0.1:9001/health
+```
+- Ensure Postmark inbound hook points to production endpoint
+- Ensure production Service Bus namespace/queue are used
+
+## 6) Webhook notes (current staging URL)
 
 Current staging inbound hook:
 - `https://oliver.dowhiz.prod.ngrok.app/postmark/inbound`
 
 When `DEPLOY_TARGET=staging`, scripts use `STAGING_POSTMARK_SERVER_TOKEN` and `STAGING_POSTMARK_INBOUND_HOOK_URL` automatically via env mapping.
 
-## 6) Shared container with staging folder prefix
+## 7) Shared container with staging folder prefix
 
 Using a dedicated staging folder in the same Azure Blob container is supported by:
 - `STAGING_RAW_PAYLOAD_PATH_PREFIX="staging/ingestion_raw"`
@@ -115,7 +185,7 @@ Tradeoffs:
 
 If you need stricter isolation later, move staging to a separate container or storage account.
 
-## 7) Rollback (staging -> production)
+## 8) Rollback (staging -> production)
 
 1. Stop staging processes:
 ```bash
@@ -135,7 +205,7 @@ export DEPLOY_TARGET=production
 - `curl http://127.0.0.1:9001/health`
 - confirm Postmark inbound hook points to production endpoint
 
-## 8) Sanity checks
+## 9) Sanity checks
 
 Queue counts:
 ```bash
