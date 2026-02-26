@@ -689,6 +689,7 @@
                   Enter the email address you want to link. A verification email will be sent to confirm ownership.
                 </p>
                 <button type="submit" class="auth-btn auth-btn-primary">Link Channel</button>
+                <div id="link-message" class="auth-message hidden" style="margin-top: 0.5rem; margin-bottom: 0;"></div>
               </form>
             </section>
 
@@ -763,6 +764,23 @@
 
       function hideMessage() {
         authMessage.classList.add('hidden');
+      }
+
+      // Show message in the link form area
+      function showLinkMessage(message, type = 'error') {
+        const linkMessage = document.getElementById('link-message');
+        if (linkMessage) {
+          linkMessage.textContent = message;
+          linkMessage.className = `auth-message ${type}`;
+          linkMessage.classList.remove('hidden');
+        }
+      }
+
+      function hideLinkMessage() {
+        const linkMessage = document.getElementById('link-message');
+        if (linkMessage) {
+          linkMessage.classList.add('hidden');
+        }
       }
 
       function hideExistingAccountOptions() {
@@ -1378,10 +1396,10 @@
       // Link new channel
       document.getElementById('link-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        hideMessage();
+        hideLinkMessage();
 
         const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return showMessage('Please sign in first');
+        if (!session) return showLinkMessage('Please sign in first');
 
         const identifierType = document.getElementById('link-type').value;
         const identifier = document.getElementById('link-identifier').value;
@@ -1405,10 +1423,10 @@
 
           // Show appropriate message based on verification status
           if (result.verified === false) {
-            // Email verification pending - show backend message
-            showMessage(result.message || 'Verification email sent. Please check your inbox.', 'success');
+            // Email verification pending - show backend message in form area
+            showLinkMessage(result.message || 'Verification email sent. Please check your inbox.', 'success');
           } else {
-            showMessage('Channel linked successfully!', 'success');
+            showLinkMessage('Channel linked successfully!', 'success');
           }
 
           document.getElementById('link-identifier').value = '';
@@ -1416,7 +1434,7 @@
           // Refresh tasks to include the new channel
           await loadTasks(session.access_token);
         } catch (err) {
-          showMessage(err.message);
+          showLinkMessage(err.message);
         }
       });
 
