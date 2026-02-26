@@ -2,8 +2,8 @@
 mod config;
 #[path = "inbound_gateway/discord.rs"]
 mod discord;
-#[path = "inbound_gateway/google_docs.rs"]
-mod google_docs;
+#[path = "inbound_gateway/google_drive_webhook.rs"]
+mod google_drive_webhook;
 #[path = "inbound_gateway/google_workspace.rs"]
 mod google_workspace;
 #[path = "inbound_gateway/handlers.rs"]
@@ -21,11 +21,13 @@ use axum::Router;
 use std::env;
 use std::sync::Arc;
 use tokio::task;
-use tracing::info;
+use tracing::{info, warn};
 
 use scheduler_module::account_store::AccountStore;
 use scheduler_module::blob_store::get_blob_store;
 use scheduler_module::employee_config::load_employee_directory;
+use scheduler_module::google_auth::GoogleAuth;
+use scheduler_module::google_drive_changes::{GoogleDriveChangesConfig, GoogleDriveChangesManager};
 use scheduler_module::ingestion_queue::{
     build_servicebus_queue_from_env, resolve_ingestion_queue_backend, IngestionQueue,
 };
@@ -36,7 +38,7 @@ use config::{
     GatewayConfigFile,
 };
 use discord::spawn_discord_gateway;
-use google_docs::spawn_google_docs_poller;
+use google_drive_webhook::handle_google_drive_webhook;
 use google_workspace::spawn_google_workspace_poller;
 use handlers::{
     health, ingest_bluebubbles, ingest_postmark, ingest_slack, ingest_sms, ingest_telegram,
@@ -86,6 +88,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .await
         .map_err(|err| -> Box<dyn std::error::Error + Send + Sync> { err.into() })??;
 
+    // Initialize Google Drive push notifications if enabled
+    let drive_changes_config = GoogleDriveChangesConfig::from_env();
+    let (drive_changes_manager, drive_change_notifier) = if drive_changes_config.is_valid() {
+        info!(
+            "Google Drive push notifications enabled, webhook_url={}",
+            drive_changes_config.webhook_url.as_deref().unwrap_or("")
+        );
+        match GoogleAuth::from_env() {
+            Ok(auth) => {
+                let manager = Arc::new(GoogleDriveChangesManager::new(drive_changes_config, auth));
+                let (tx, _rx) = tokio::sync::broadcast::channel::<String>(100);
+                (Some(manager), Some(tx))
+            }
+            Err(e) => {
+                warn!("Google Drive push notifications disabled: failed to initialize auth: {}", e);
+                (None, None)
+            }
+        }
+    } else {
+        info!("Google Drive push notifications disabled (set GOOGLE_DRIVE_PUSH_ENABLED=true to enable)");
+        (None, None)
+    };
+
     let state = Arc::new(GatewayState {
         config: GatewayConfig {
             defaults: config_file.defaults,
@@ -95,6 +120,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         employee_directory,
         address_to_employee,
         queue,
+        drive_changes_manager,
+        drive_change_notifier,
     });
 
     info!(
@@ -106,7 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
 
     spawn_discord_gateway(state.clone()).await;
-    spawn_google_docs_poller(state.clone());
+    // Unified poller handles Docs, Sheets, and Slides
     spawn_google_workspace_poller(state.clone());
 
     let max_body_bytes = env::var("GATEWAY_MAX_BODY_BYTES")
@@ -163,6 +190,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/sms/twilio", post(ingest_sms))
         .route("/whatsapp/webhook", get(verify_whatsapp_webhook))
         .route("/whatsapp/webhook", post(ingest_whatsapp))
+        .route(
+            "/webhooks/google-drive-changes",
+            post(handle_google_drive_webhook),
+        )
         .with_state(state)
         .merge(auth_router(auth_state))
         .layer(DefaultBodyLimit::max(max_body_bytes));

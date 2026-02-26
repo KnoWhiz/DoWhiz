@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DoWhiz is a multi-tenant, email-first digital employee platform. Users send tasks to digital employees via email (and other channels like Slack, Discord, SMS via Twilio, Telegram, WhatsApp, Google Docs/Sheets/Slides comments, iMessage via BlueBubbles), and AI agents (Codex CLI or Claude Code) process and respond. The system emphasizes per-user isolation, role-based agents, and tool-backed execution.
+DoWhiz is a multi-tenant, email-first digital employee platform. Users send tasks to digital employees via email (and other channels like Slack, Discord, SMS via Twilio, Telegram, WhatsApp, Google Docs comments, iMessage via BlueBubbles), and AI agents (Codex CLI or Claude Code) process and respond. The system emphasizes per-user isolation, role-based agents, and tool-backed execution.
 
 ## Build and Development Commands
 
@@ -65,7 +65,7 @@ docker run --rm -p 9001:9001 \
 
 ### Data Flow
 ```
-Inbound (Email/Slack/Discord/SMS/Telegram/WhatsApp/Google Docs/Sheets/Slides/iMessage)
+Inbound (Email/Slack/Discord/SMS/Telegram/WhatsApp/Google Docs/iMessage)
     → Ingestion Gateway (dedupe + raw payload storage in Azure Blob)
     → Ingestion Queue (Service Bus for gateway; Postgres optional/legacy)
     → Worker Service (per-employee)
@@ -77,7 +77,6 @@ Inbound (Email/Slack/Discord/SMS/Telegram/WhatsApp/Google Docs/Sheets/Slides/iMe
 |------|---------|
 | `scheduler_module/src/service/server.rs` | Worker HTTP server, scheduler loop |
 | `scheduler_module/src/bin/inbound_gateway.rs` | Inbound gateway entrypoint (webhooks + dedupe) |
-| `scheduler_module/src/bin/inbound_gateway/google_workspace.rs` | Google Sheets/Slides pollers (workspace comments) |
 | `scheduler_module/src/lib.rs` | Core Scheduler, TaskKind, Schedule definitions |
 | `scheduler_module/src/user_store/mod.rs` | Per-user data management |
 | `send_emails_module/src/lib.rs` | Postmark API wrapper |
@@ -105,7 +104,7 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 |----|------|--------|---------------|
 | `little_bear` | Oliver | Codex | oliver@dowhiz.com |
 | `mini_mouse` | Maggie | Claude | maggie@dowhiz.com |
-| `sticky_octopus` | Sticky-Octopus | Codex | devin@dowhiz.com |
+| `sticky_octopus` | Devin | Codex | devin@dowhiz.com |
 | `boiled_egg` | Boiled-Egg | Codex | proto@dowhiz.com |
 
 ## Key Concepts
@@ -120,7 +119,7 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 - **OneShot**: Single execution at specific DateTime
 
 ### Per-User Isolation
-Each user gets separate SQLite databases and workspace directories. Concurrency limits are configurable (defaults: global max 200, per-user max 200).
+Each user gets separate SQLite databases and workspace directories. Concurrency limits: global max 10, per-user max 3.
 
 ### Follow-up Scheduling
 Agents emit scheduled tasks in stdout:
@@ -143,8 +142,7 @@ Optional:
 - `GITHUB_USERNAME`, `GITHUB_PERSONAL_ACCESS_TOKEN` - GitHub access for agents
 - `OPENAI_API_KEY` - Enable message router quick replies
 - `INGESTION_QUEUE_BACKEND=servicebus` + `SERVICE_BUS_CONNECTION_STRING` + `SERVICE_BUS_QUEUE_NAME` - Required when running the inbound gateway
-- `AZURE_STORAGE_CONTAINER_INGEST` + `AZURE_STORAGE_SAS_TOKEN` (+ optional `AZURE_STORAGE_ACCOUNT` or `AZURE_STORAGE_CONNECTION_STRING_INGEST`) - Required for gateway raw payload storage (Azure Blob), unless using `AZURE_STORAGE_CONTAINER_SAS_URL`
-- `AZURE_STORAGE_CONTAINER_SAS_URL` - Optional full SAS URL for the ingestion container (overrides account + container + SAS token)
+- `AZURE_STORAGE_ACCOUNT`/`AZURE_STORAGE_CONTAINER`/`AZURE_STORAGE_SAS_TOKEN` - Required for gateway raw payload storage (Azure Blob)
 
 ## Testing Expectations
 
@@ -235,29 +233,39 @@ grep -i "service bus|enqueue" /home/azureuser/server/.pm2/logs/dowhiz-inbound-ga
 
 ## Session Notes (Update After Each Session)
 
-### 2026-02-25: Slides Debug Session
+### 2026-02-25: Slides Debug + Push Notifications
 
-**Problem**: User's Slides comments not getting replies
+**Session 1: Slides Debug**
+- Root cause: Azure Service Bus enqueue failing with `HttpResponse(400,unknown)`
+- Comments detected but cannot be queued for processing
 
-**Root Cause Found**: Azure Service Bus enqueue failing with `HttpResponse(400,unknown)`
-- Comments are being detected but cannot be queued for processing
-- Need to fix Service Bus connection string configuration
+**Session 2: Increase Concurrency + Google Drive Push Notifications**
+- Increased `SCHEDULER_MAX_CONCURRENCY` and `SCHEDULER_USER_MAX_CONCURRENCY` defaults from 10/3 to 200/200
+- Implemented Google Drive push notifications for near-real-time comment detection
 
 **Files Modified**:
-- `DoWhiz_service/scheduler_module/src/adapters/google_common/comments.rs` - Added timeout + retry
-- `DoWhiz_service/scheduler_module/src/google_workspace_poller.rs` - Added file list cache, reduced polling to 15s
-- `DoWhiz_service/scheduler_module/src/bin/inbound_gateway/google_workspace.rs` - Parallelized Sheets/Slides polling
-- `DoWhiz_service/scheduler_module/src/google_drive_changes.rs` - New file for future push notifications
-- `DoWhiz_service/OPERATIONS.md` - Created deployment guide
+- `DoWhiz_service/scheduler_module/src/service/config.rs` - Increased concurrency defaults
+- `DoWhiz_service/scheduler_module/src/bin/inbound_gateway.rs` - Added push notification init
+- `DoWhiz_service/scheduler_module/src/bin/inbound_gateway/google_drive_webhook.rs` - NEW: Webhook handler
+- `DoWhiz_service/scheduler_module/src/bin/inbound_gateway/google_workspace.rs` - Push notification integration
+- `DoWhiz_service/scheduler_module/src/bin/inbound_gateway/state.rs` - Added drive manager to state
+- `DoWhiz_service/scheduler_module/src/google_workspace_poller.rs` - Added list_files, poll_single_file
+- `DoWhiz_service/scheduler_module/src/lib.rs` - Export google_drive_changes module
 
-**Commits**:
-- `294c0bd` - Optimize Google Workspace polling for reduced latency
-- `bfdbabf` - Add OPERATIONS.md for Azure VM deployment guide
+**Commits** (feature/google-drive-push-notifications branch):
+- `11b2389` - Increase scheduler concurrency defaults to 200
+- `626c21a` - Add Google Drive push notifications for real-time comment detection
+
+**To Enable Push Notifications**:
+```bash
+GOOGLE_DRIVE_PUSH_ENABLED=true
+GOOGLE_DRIVE_WEBHOOK_URL=https://your-domain.com/webhooks/google-drive-changes
+```
 
 **Next Steps**:
-1. Fix Azure Service Bus connection string on VM
-2. Deploy new code after testing locally
-3. Consider increasing `SCHEDULER_USER_MAX_CONCURRENCY` (needs team discussion)
+1. Merge feature branch to main
+2. Deploy to VM
+3. Configure webhook URL in Google Cloud Console
 
 ---
 
@@ -278,6 +286,8 @@ DoWhiz_service/scheduler_module/src/bin/inbound_gateway/google_workspace.rs
 ### Key Environment Variables
 - `GOOGLE_DOCS_ENABLED` / `GOOGLE_SHEETS_ENABLED` / `GOOGLE_SLIDES_ENABLED`
 - `GOOGLE_WORKSPACE_POLL_INTERVAL_SECS` (default: 15)
-- `SCHEDULER_USER_MAX_CONCURRENCY` (default: 200; prod may set lower)
-- `GOOGLE_DRIVE_PUSH_ENABLED` (future feature)
-- `AZURE_SERVICE_BUS_CONNECTION_STRING`
+- `SCHEDULER_MAX_CONCURRENCY` (default: 200)
+- `SCHEDULER_USER_MAX_CONCURRENCY` (default: 200)
+- `GOOGLE_DRIVE_PUSH_ENABLED` (enable push notifications)
+- `GOOGLE_DRIVE_WEBHOOK_URL` (webhook endpoint for push notifications)
+- `AZURE_SERVICE_BUS_CONNECTION_STRING` / `SCALE_OLIVER_SERVICE_BUS_CONNECTION_STRING`
