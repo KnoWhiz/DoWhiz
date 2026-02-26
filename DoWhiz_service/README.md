@@ -9,6 +9,7 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
 - [Employee Configuration](#employee-configuration)
 - [Running the Service](#running-the-service)
   - [One-Command Local Run](#one-command-local-run)
+  - [Staging/Production Target Switching](#stagingproduction-target-switching)
   - [Manual Multi-Employee Setup](#manual-multi-employee-setup)
   - [Inbound Gateway (Recommended)](#inbound-gateway-recommended)
   - [Azure Deployment (Rust Gateway + Service Bus + Blob + Workers)](#azure-deployment-rust-gateway--service-bus--blob--workers)
@@ -149,6 +150,28 @@ scripts/run_employee.sh <employee_id> [port]
 scripts/run_employee.sh --employee <id> --port <port> [--public-url <url>] [--skip-hook] [--skip-ngrok] [--host <host>]
 ```
 
+### Staging/Production Target Switching
+
+Use one `.env` and switch targets with:
+```bash
+export DEPLOY_TARGET=production   # or staging
+```
+
+All startup scripts now load `DoWhiz_service/.env` and, when `DEPLOY_TARGET=staging`,
+automatically map `STAGING_FOO -> FOO` (for example, `STAGING_SERVICE_BUS_CONNECTION_STRING`
+overrides `SERVICE_BUS_CONNECTION_STRING`).
+
+Current staging profile defaults:
+- sender + receiver mailbox: `dowhiz@deep-tutor.com` (via `employee.staging.toml`)
+- raw payload storage prefix: `staging/ingestion_raw` (same container, separated folder path)
+
+Branch policy for VM deployments:
+- Production branch: `main` (CI/CD baseline)
+- Staging branch: `dev` (CI/CD rollout target)
+
+For full split-key matrix, gateway/worker commands, and rollback steps, see:
+`DoWhiz_service/docs/staging_production_deploy.md`.
+
 ### Manual Multi-Employee Setup
 
 **Step 0: Configure Azure ingestion (required for gateway)**
@@ -262,8 +285,8 @@ Optional webhook verification:
 
 This is the recommended Azure production flow. The Rust inbound gateway handles **all ingress** (email + Slack/Discord/etc), stores raw payloads in Azure Blob, and enqueues messages into Azure Service Bus. Workers (`rust_service`) run on VMs or containers and poll Service Bus.
 
-For Docker-isolated RunTask execution on a VM (host Docker + per-task containers), see:
-`DoWhiz_service/docs/azure_vm_worker.md`.
+For staging/prod split deployment with a single `.env` (`DEPLOY_TARGET` + `STAGING_` overrides), see:
+`DoWhiz_service/docs/staging_production_deploy.md`.
 
 **Step 1: Provision Azure resources**
 ```bash
@@ -982,22 +1005,22 @@ GOOGLE_EMPLOYEE_EMAILS=oliver@dowhiz.com,proto@dowhiz.com
 cd DoWhiz_service
 
 # Build the CLI tools
-cargo build --release --bin google-docs --bin google-sheets --bin google-slides
+cargo build --release --bin google_docs_cli --bin google_sheets_cli --bin google_slides_cli
 
 # Docs
-./target/release/google-docs list-documents
-./target/release/google-docs read-document <doc_id>
-./target/release/google-docs suggest-replace <doc_id> --find="old text" --replace="new text"
-./target/release/google-docs apply-suggestions <doc_id>
-./target/release/google-docs discard-suggestions <doc_id>
+./target/release/google_docs_cli list-documents
+./target/release/google_docs_cli read-document <doc_id>
+./target/release/google_docs_cli suggest-replace <doc_id> --find="old text" --replace="new text"
+./target/release/google_docs_cli apply-suggestions <doc_id>
+./target/release/google_docs_cli discard-suggestions <doc_id>
 
 # Sheets
-./target/release/google-sheets list-spreadsheets
-./target/release/google-sheets list-comments <sheet_id>
+./target/release/google_sheets_cli list-spreadsheets
+./target/release/google_sheets_cli list-comments <sheet_id>
 
 # Slides
-./target/release/google-slides list-presentations
-./target/release/google-slides list-comments <slides_id>
+./target/release/google_slides_cli list-presentations
+./target/release/google_slides_cli list-comments <slides_id>
 ```
 
 ##### E2E Tests
@@ -1055,6 +1078,11 @@ This reduces API costs and latency for simple interactions while preserving full
 ---
 
 ## Environment Variables
+
+Single-file env split:
+- Use one `DoWhiz_service/.env`.
+- Base keys are production values.
+- Put staging-specific keys under `STAGING_*` and run with `DEPLOY_TARGET=staging`.
 
 ### Service Configuration
 | Variable | Default | Description |

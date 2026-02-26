@@ -2,10 +2,21 @@
 set -euo pipefail
 
 # Setup Postmark inbound webhook with ngrok
-# Usage: ./scripts/setup_postmark_webhook.sh [--port 9001]
+# Usage: ./scripts/setup_postmark_webhook.sh [gateway_port]
 
-PORT="${1:-9001}"
-POSTMARK_TOKEN="${POSTMARK_SERVER_TOKEN:-7a14b884-2e10-440b-81d2-62b5aaa725ca}"
+PORT="${1:-9100}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load .env and apply DEPLOY_TARGET/STAGING_* overrides.
+# shellcheck source=./load_env_target.sh
+source "${SCRIPT_DIR}/load_env_target.sh"
+
+POSTMARK_TOKEN="${POSTMARK_SERVER_TOKEN:-}"
+
+if [[ -z "${POSTMARK_TOKEN}" ]]; then
+    echo "ERROR: POSTMARK_SERVER_TOKEN is required (DEPLOY_TARGET=${DEPLOY_TARGET:-production})."
+    exit 1
+fi
 
 echo "=== Postmark Webhook Setup ==="
 echo ""
@@ -62,8 +73,7 @@ if echo "$RESPONSE" | grep -q "InboundHookUrl"; then
     echo "=== SUCCESS ==="
     echo "Postmark webhook updated to: $NEW_URL"
     echo ""
-    echo "You can now send emails to proto@dowhiz.com"
-    echo "The service should receive them at: http://localhost:$PORT/postmark/inbound"
+    echo "The gateway should receive emails at: http://localhost:$PORT/postmark/inbound"
     echo ""
     echo "To monitor ngrok traffic: http://127.0.0.1:4040"
 else

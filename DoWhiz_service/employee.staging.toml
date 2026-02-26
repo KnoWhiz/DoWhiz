@@ -1,0 +1,15 @@
+# Staging-only employee config.
+# Goal: only receive with dowhiz@deep-tutor.com and send replies from this address.
+
+default_employee_id = "little_bear"
+
+[[employees]]
+id = "little_bear"
+display_name = "Oliver (Staging)"
+runner = "codex"
+model = "gpt-5.3-codex"
+addresses = ["dowhiz@deep-tutor.com"]
+agents_path = "employees/little_bear/AGENTS.md"
+claude_path = "employees/little_bear/CLAUDE.md"
+soul_path = "employees/little_bear/SOUL.md"
+skills_dir = "skills"

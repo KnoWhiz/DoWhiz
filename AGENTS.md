@@ -12,7 +12,7 @@ By default open RUN_CODEX_E2E=1 and POSTMARK_LIVE_TEST=1 to use real emails addr
 ## Build, Test, and Development Commands
 Backend (from repo root):
 ```bash
-./DoWhiz_service/scripts/run_employee.sh little_bear 9001
+./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
 # or manual
 EMPLOYEE_ID=little_bear RUST_SERVICE_PORT=9001 \
   cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001

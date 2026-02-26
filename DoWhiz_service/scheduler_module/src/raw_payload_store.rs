@@ -99,9 +99,17 @@ fn resolve_service_key() -> Result<String, RawPayloadStoreError> {
         .ok_or(RawPayloadStoreError::MissingServiceKey)
 }
 
+fn resolve_raw_payload_path_prefix() -> String {
+    var_with_scale_oliver("RAW_PAYLOAD_PATH_PREFIX")
+        .map(|value| value.trim().trim_matches('/').to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_PREFIX.to_string())
+}
+
 fn build_object_path(envelope_id: Uuid, received_at: DateTime<Utc>) -> String {
     let date = received_at.format("%Y/%m/%d");
-    format!("{}/{}/{}.bin", DEFAULT_PREFIX, date, envelope_id)
+    let prefix = resolve_raw_payload_path_prefix();
+    format!("{}/{}/{}.bin", prefix, date, envelope_id)
 }
 
 fn build_object_url(base: &str, bucket: &str, path: &str) -> String {
@@ -575,6 +583,58 @@ mod tests {
         match original_prefixed_container_sas_url {
             Some(value) => env::set_var("SCALE_OLIVER_AZURE_STORAGE_CONTAINER_SAS_URL", value),
             None => env::remove_var("SCALE_OLIVER_AZURE_STORAGE_CONTAINER_SAS_URL"),
+        }
+    }
+
+    #[test]
+    fn raw_payload_path_prefix_defaults_when_missing() {
+        let _guard = lock_env();
+        let original = env::var("RAW_PAYLOAD_PATH_PREFIX").ok();
+        let original_prefixed = env::var("SCALE_OLIVER_RAW_PAYLOAD_PATH_PREFIX").ok();
+        env::remove_var("RAW_PAYLOAD_PATH_PREFIX");
+        env::remove_var("SCALE_OLIVER_RAW_PAYLOAD_PATH_PREFIX");
+
+        let path = build_object_path(
+            Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("uuid"),
+            DateTime::parse_from_rfc3339("2026-02-26T12:34:56Z")
+                .expect("time")
+                .with_timezone(&Utc),
+        );
+        assert!(path.starts_with("ingestion_raw/2026/02/26/"));
+
+        match original {
+            Some(value) => env::set_var("RAW_PAYLOAD_PATH_PREFIX", value),
+            None => env::remove_var("RAW_PAYLOAD_PATH_PREFIX"),
+        }
+        match original_prefixed {
+            Some(value) => env::set_var("SCALE_OLIVER_RAW_PAYLOAD_PATH_PREFIX", value),
+            None => env::remove_var("SCALE_OLIVER_RAW_PAYLOAD_PATH_PREFIX"),
+        }
+    }
+
+    #[test]
+    fn raw_payload_path_prefix_honors_env_value() {
+        let _guard = lock_env();
+        let original = env::var("RAW_PAYLOAD_PATH_PREFIX").ok();
+        let original_prefixed = env::var("SCALE_OLIVER_RAW_PAYLOAD_PATH_PREFIX").ok();
+        env::set_var("RAW_PAYLOAD_PATH_PREFIX", "/staging/ingestion_raw/");
+        env::remove_var("SCALE_OLIVER_RAW_PAYLOAD_PATH_PREFIX");
+
+        let path = build_object_path(
+            Uuid::parse_str("22222222-2222-2222-2222-222222222222").expect("uuid"),
+            DateTime::parse_from_rfc3339("2026-02-26T12:34:56Z")
+                .expect("time")
+                .with_timezone(&Utc),
+        );
+        assert!(path.starts_with("staging/ingestion_raw/2026/02/26/"));
+
+        match original {
+            Some(value) => env::set_var("RAW_PAYLOAD_PATH_PREFIX", value),
+            None => env::remove_var("RAW_PAYLOAD_PATH_PREFIX"),
+        }
+        match original_prefixed {
+            Some(value) => env::set_var("SCALE_OLIVER_RAW_PAYLOAD_PATH_PREFIX", value),
+            None => env::remove_var("SCALE_OLIVER_RAW_PAYLOAD_PATH_PREFIX"),
         }
     }
 }

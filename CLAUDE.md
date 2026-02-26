@@ -43,9 +43,9 @@ cargo test -p scheduler_module --test service_real_email -- --nocapture
 
 ### Running Employees
 ```bash
-# One-command local run (starts ngrok, updates Postmark hook, runs service)
-./DoWhiz_service/scripts/run_employee.sh little_bear 9001
-./DoWhiz_service/scripts/run_employee.sh mini_mouse 9002
+# Worker-only local run (recommended with inbound gateway)
+./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
+./DoWhiz_service/scripts/run_employee.sh mini_mouse 9002 --skip-hook --skip-ngrok
 
 # Docker build and run
 docker build -t dowhiz-service .
@@ -167,9 +167,21 @@ When opening PRs, include a short summary, tests run, and any required env/confi
 
 ---
 
-# Operations & Debugging (Azure VM)
+# Operations & Deployment Notes (Azure VM)
 
-Use `DoWhiz_service/OPERATIONS.md` as the source of truth for VM paths, PM2 commands, and troubleshooting runbooks.
+Use `DoWhiz_service/OPERATIONS.md` as the source of truth for VM paths, PM2 commands, deployment runbooks, and troubleshooting.
+
+Current deployment policy:
+- Production VM deploy target branch: `main`
+- Staging VM deploy target branch: `dev`
+
+Single `.env` split policy:
+- Production uses base keys
+- Staging uses `STAGING_` keys with `DEPLOY_TARGET=staging`
+- Runtime mapping is handled by `DoWhiz_service/scripts/load_env_target.sh`
+
+For exact staging/prod commands, key split table, and rollback:
+- `DoWhiz_service/docs/staging_production_deploy.md`
 
 Quick checks:
 ```bash

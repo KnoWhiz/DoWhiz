@@ -1,0 +1,9 @@
+[defaults]
+tenant_id = "staging"
+employee_id = "little_bear"
+
+[[routes]]
+channel = "email"
+key = "dowhiz@deep-tutor.com"
+employee_id = "little_bear"
+tenant_id = "staging"

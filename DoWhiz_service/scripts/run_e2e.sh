@@ -55,16 +55,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 service_root="$(cd "${script_dir}/.." && pwd)"
 repo_root="$(cd "${service_root}/.." && pwd)"
 
-# Load env
-if [[ -f "${service_root}/.env" ]]; then
-  set -a
-  source "${service_root}/.env"
-  set +a
-elif [[ -f "${repo_root}/.env" ]]; then
-  set -a
-  source "${repo_root}/.env"
-  set +a
-fi
+# Load .env and apply DEPLOY_TARGET/STAGING_* overrides.
+# shellcheck source=./load_env_target.sh
+source "${script_dir}/load_env_target.sh"
 
 if [[ -z "$port" ]]; then
   port="${RUST_SERVICE_PORT:-9001}"

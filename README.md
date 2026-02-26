@@ -90,6 +90,11 @@ For a full single-VM deployment (no Docker) that runs the inbound gateway + an O
 4. Ensure `.env` includes Service Bus + Azure Blob settings, plus `EMPLOYEE_ID=little_bear` for GitHub auth when creating PRs.
 5. Run the live E2E email test.
 
+For single `.env` staging/prod split (`DEPLOY_TARGET` + `STAGING_` keys), plus VM runbooks and rollback:
+- `DoWhiz_service/docs/staging_production_deploy.md`
+- Production deploy branch: `main`
+- Staging CI target branch: `dev` (planned rollout)
+
 ## Azure Deployment (Production)
 
 For Azure-managed ingress, queues, and storage, follow `DoWhiz_service/README.md` under **Azure Deployment (Rust Gateway + Service Bus + Blob + Workers)**. This flow uses the Rust inbound gateway for **all** ingress (including email), Azure Service Bus for ingestion queues, Azure Blob for raw payloads, and worker services running on Azure VMs or containers.

@@ -54,7 +54,7 @@ Recommended contents:
 
 ## 5) Zoom Integration (based on local docs)
 Use the Zoom API docs snapshot at:
-`/Users/bingran_you/Documents/GitHub_MacBook/DoWhiz/api_reference_documentation/zoom_api_docs`
+`/Users/bingran_you/Documents/GitHub_MacBook/DoWhiz/reference_documentation/zoom_api_docs`
 
 Key endpoints:
 - Create meeting: `POST /users/{userId}/meetings`

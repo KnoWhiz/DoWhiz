@@ -4,6 +4,10 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 service_root="$(cd "${script_dir}/.." && pwd)"
 
+# Load .env and apply DEPLOY_TARGET/STAGING_* overrides.
+# shellcheck source=./load_env_target.sh
+source "${script_dir}/load_env_target.sh"
+
 export GATEWAY_CONFIG_PATH="${GATEWAY_CONFIG_PATH:-${service_root}/gateway.toml}"
 export GATEWAY_HOST="${GATEWAY_HOST:-0.0.0.0}"
 export GATEWAY_PORT="${GATEWAY_PORT:-9100}"

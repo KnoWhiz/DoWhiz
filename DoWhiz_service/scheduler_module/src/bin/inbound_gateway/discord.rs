@@ -7,7 +7,7 @@ use scheduler_module::channel::Channel;
 use tracing::{error, info, warn};
 
 use super::handlers::build_envelope;
-use super::state::{GatewayState, RouteDecision};
+use super::state::{GatewayConfig, GatewayState, RouteDecision};
 
 /// Configuration for a single employee's Discord bot.
 struct EmployeeDiscordConfig {
@@ -19,8 +19,16 @@ struct EmployeeDiscordConfig {
 /// Known employee Discord configurations.
 /// Each entry: (employee_id, token_env_key, user_id_env_key)
 const EMPLOYEE_DISCORD_CONFIGS: &[(&str, &str, &str)] = &[
-    ("boiled_egg", "BOILED_EGG_DISCORD_BOT_TOKEN", "BOILED_EGG_DISCORD_BOT_USER_ID"),
-    ("little_bear", "LITTLE_BEAR_DISCORD_BOT_TOKEN", "LITTLE_BEAR_DISCORD_BOT_USER_ID"),
+    (
+        "boiled_egg",
+        "BOILED_EGG_DISCORD_BOT_TOKEN",
+        "BOILED_EGG_DISCORD_BOT_USER_ID",
+    ),
+    (
+        "little_bear",
+        "LITTLE_BEAR_DISCORD_BOT_TOKEN",
+        "LITTLE_BEAR_DISCORD_BOT_USER_ID",
+    ),
 ];
 
 /// Collect all valid employee Discord configurations from environment.
@@ -38,7 +46,10 @@ fn collect_employee_discord_configs() -> Vec<EmployeeDiscordConfig> {
                     token,
                     bot_user_id,
                 });
-                info!("discord gateway: found config for employee {} (bot_user_id={:?})", employee_id, bot_user_id);
+                info!(
+                    "discord gateway: found config for employee {} (bot_user_id={:?})",
+                    employee_id, bot_user_id
+                );
             }
         }
     }
@@ -50,13 +61,17 @@ fn collect_employee_discord_configs() -> Vec<EmployeeDiscordConfig> {
                 let bot_user_id = env::var("DISCORD_BOT_USER_ID")
                     .ok()
                     .and_then(|v| v.parse::<u64>().ok());
-                let default_employee = env::var("EMPLOYEE_ID").unwrap_or_else(|_| "boiled_egg".to_string());
+                let default_employee =
+                    env::var("EMPLOYEE_ID").unwrap_or_else(|_| "boiled_egg".to_string());
                 configs.push(EmployeeDiscordConfig {
                     employee_id: default_employee.clone(),
                     token,
                     bot_user_id,
                 });
-                info!("discord gateway: using legacy config for employee {}", default_employee);
+                info!(
+                    "discord gateway: using legacy config for employee {}",
+                    default_employee
+                );
             }
         }
     }
@@ -64,7 +79,20 @@ fn collect_employee_discord_configs() -> Vec<EmployeeDiscordConfig> {
     configs
 }
 
+fn has_discord_routes(config: &GatewayConfig) -> bool {
+    config.channel_defaults.contains_key(&Channel::Discord)
+        || config
+            .routes
+            .keys()
+            .any(|route| route.channel == Channel::Discord)
+}
+
 pub(super) async fn spawn_discord_gateway(state: Arc<GatewayState>) {
+    if !has_discord_routes(&state.config) {
+        info!("discord gateway: no Discord routes configured, skipping");
+        return;
+    }
+
     let configs = collect_employee_discord_configs();
 
     if configs.is_empty() {
@@ -72,7 +100,12 @@ pub(super) async fn spawn_discord_gateway(state: Arc<GatewayState>) {
         return;
     }
 
-    let default_tenant_id = state.config.defaults.tenant_id.clone().unwrap_or_else(|| "default".to_string());
+    let default_tenant_id = state
+        .config
+        .defaults
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| "default".to_string());
 
     for config in configs {
         let employee_id = config.employee_id.clone();
@@ -93,11 +126,81 @@ pub(super) async fn spawn_discord_gateway(state: Arc<GatewayState>) {
         };
 
         tokio::spawn(async move {
-            info!("discord gateway: starting client for employee {}", employee_id);
+            info!(
+                "discord gateway: starting client for employee {}",
+                employee_id
+            );
             if let Err(err) = run_discord_gateway(token, handler_state).await {
-                error!("discord gateway error for employee {}: {}", employee_id, err);
+                error!(
+                    "discord gateway error for employee {}: {}",
+                    employee_id, err
+                );
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+    use crate::config::GatewayDefaultsConfig;
+    use crate::state::{GatewayConfig, RouteKey, RouteTarget};
+
+    fn mk_config(routes: Vec<RouteKey>, defaults: Vec<Channel>) -> GatewayConfig {
+        let mut route_map: HashMap<RouteKey, RouteTarget> = HashMap::new();
+        for route in routes {
+            route_map.insert(
+                route,
+                RouteTarget {
+                    tenant_id: Some("staging".to_string()),
+                    employee_id: "little_bear".to_string(),
+                },
+            );
+        }
+
+        let mut channel_defaults: HashMap<Channel, RouteTarget> = HashMap::new();
+        for channel in defaults {
+            channel_defaults.insert(
+                channel,
+                RouteTarget {
+                    tenant_id: Some("staging".to_string()),
+                    employee_id: "little_bear".to_string(),
+                },
+            );
+        }
+
+        GatewayConfig {
+            defaults: GatewayDefaultsConfig::default(),
+            routes: route_map,
+            channel_defaults,
+        }
+    }
+
+    #[test]
+    fn has_discord_routes_false_when_not_configured() {
+        let config = mk_config(vec![], vec![]);
+        assert!(!has_discord_routes(&config));
+    }
+
+    #[test]
+    fn has_discord_routes_true_when_default_exists() {
+        let config = mk_config(vec![], vec![Channel::Discord]);
+        assert!(has_discord_routes(&config));
+    }
+
+    #[test]
+    fn has_discord_routes_true_when_explicit_route_exists() {
+        let config = mk_config(
+            vec![RouteKey {
+                channel: Channel::Discord,
+                key: "U12345".to_string(),
+            }],
+            vec![],
+        );
+
+        assert!(has_discord_routes(&config));
     }
 }
 
