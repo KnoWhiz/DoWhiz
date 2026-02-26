@@ -68,6 +68,17 @@ impl GoogleSlidesInboundAdapter {
         presentation_name: &str,
         actionable: &ActionableComment,
     ) -> InboundMessage {
+        self.actionable_to_inbound_message_with_owner(presentation_id, presentation_name, actionable, None)
+    }
+
+    /// Convert an ActionableComment to an InboundMessage with owner email.
+    pub fn actionable_to_inbound_message_with_owner(
+        &self,
+        presentation_id: &str,
+        presentation_name: &str,
+        actionable: &ActionableComment,
+        owner_email: Option<&str>,
+    ) -> InboundMessage {
         let sender = actionable
             .triggering_author()
             .and_then(|a| a.email_address.clone())
@@ -130,6 +141,7 @@ impl GoogleSlidesInboundAdapter {
                 google_slides_presentation_id: Some(presentation_id.to_string()),
                 google_slides_comment_id: Some(actionable.comment.id.clone()),
                 google_slides_presentation_name: Some(presentation_name.to_string()),
+                google_slides_owner_email: owner_email.map(|s| s.to_string()),
                 ..Default::default()
             },
         }

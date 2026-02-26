@@ -89,7 +89,7 @@ fn poll_google_docs_comments(
         let actionable_items = adapter.filter_actionable_comments(&comments, &processed);
 
         for actionable in actionable_items {
-            let message = adapter.actionable_to_inbound_message(&doc.id, doc_name, &actionable);
+            let message = adapter.actionable_to_inbound_message_with_owner(&doc.id, doc_name, &actionable, owner_email);
             let route_key = doc.id.clone();
             let Some(route) = resolve_route(Channel::GoogleDocs, &route_key, state) else {
                 info!("gateway no route for google docs doc_id={}", route_key);

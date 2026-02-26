@@ -650,14 +650,14 @@ impl GoogleWorkspacePoller {
                     self.auth.clone(),
                     self.config.employee_emails.clone(),
                 );
-                adapter.actionable_to_inbound_message(&file.id, file_name, actionable)
+                adapter.actionable_to_inbound_message_with_owner(&file.id, file_name, actionable, owner_email.as_deref())
             }
             WorkspaceFileType::Slides => {
                 let adapter = GoogleSlidesInboundAdapter::new(
                     self.auth.clone(),
                     self.config.employee_emails.clone(),
                 );
-                adapter.actionable_to_inbound_message(&file.id, file_name, actionable)
+                adapter.actionable_to_inbound_message_with_owner(&file.id, file_name, actionable, owner_email.as_deref())
             }
         }
     }

@@ -201,7 +201,7 @@ impl GoogleDocsInboundAdapter {
         comment: &GoogleDocsComment,
     ) -> InboundMessage {
         let actionable = ActionableComment::from_comment(comment.clone());
-        self.actionable_to_inbound_message(document_id, document_name, &actionable)
+        self.actionable_to_inbound_message_with_owner(document_id, document_name, &actionable, None)
     }
 
     /// Convert an ActionableComment to an InboundMessage.
@@ -211,6 +211,19 @@ impl GoogleDocsInboundAdapter {
         document_id: &str,
         document_name: &str,
         actionable: &ActionableComment,
+    ) -> InboundMessage {
+        self.actionable_to_inbound_message_with_owner(document_id, document_name, actionable, None)
+    }
+
+    /// Convert an ActionableComment to an InboundMessage with owner email.
+    /// The owner_email is used as a fallback for account lookup when the commenter's
+    /// email is not available from the Google API.
+    pub fn actionable_to_inbound_message_with_owner(
+        &self,
+        document_id: &str,
+        document_name: &str,
+        actionable: &ActionableComment,
+        owner_email: Option<&str>,
     ) -> InboundMessage {
         // Get sender from the triggering item (reply or parent comment)
         let sender = actionable
@@ -282,6 +295,7 @@ impl GoogleDocsInboundAdapter {
                 google_docs_document_id: Some(document_id.to_string()),
                 google_docs_comment_id: Some(actionable.comment.id.clone()),
                 google_docs_document_name: Some(document_name.to_string()),
+                google_docs_owner_email: owner_email.map(|s| s.to_string()),
                 ..Default::default()
             },
         }
