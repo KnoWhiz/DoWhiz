@@ -1,4 +1,0 @@
-azure-functions
-azure-servicebus
-azure-storage-blob
-cryptography==41.0.7

@@ -25,6 +25,15 @@ pub struct AccountIdentifier {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone)]
+pub struct EmailVerificationToken {
+    pub token: String,
+    pub account_id: Uuid,
+    pub email: String,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum AccountStoreError {
     #[error("postgres error: {0}")]
@@ -37,6 +46,8 @@ pub enum AccountStoreError {
     NotFound,
     #[error("identifier already linked to another account")]
     IdentifierTaken,
+    #[error("verification token expired or invalid")]
+    TokenInvalid,
     #[error("config error: {0}")]
     Config(String),
 }
@@ -288,6 +299,95 @@ impl AccountStore {
             return Err(AccountStoreError::NotFound);
         }
         Ok(())
+    }
+
+    /// Create an email verification token (expires in 24 hours)
+    pub fn create_email_verification_token(
+        &self,
+        account_id: Uuid,
+        email: &str,
+    ) -> Result<EmailVerificationToken, AccountStoreError> {
+        let mut conn = self.conn()?;
+        let token = Uuid::new_v4().to_string();
+        let expires_at = Utc::now() + chrono::Duration::hours(24);
+
+        // Delete any existing tokens for this email
+        conn.execute(
+            "DELETE FROM email_verification_tokens WHERE email = $1",
+            &[&email],
+        )?;
+
+        let row = conn.query_one(
+            "INSERT INTO email_verification_tokens (token, account_id, email, expires_at, created_at)
+             VALUES ($1, $2, $3, $4, NOW())
+             RETURNING token, account_id, email, expires_at, created_at",
+            &[&token, &account_id, &email, &expires_at],
+        )?;
+
+        Ok(EmailVerificationToken {
+            token: row.get(0),
+            account_id: row.get(1),
+            email: row.get(2),
+            expires_at: row.get(3),
+            created_at: row.get(4),
+        })
+    }
+
+    /// Verify an email token and link the email to the account
+    pub fn verify_email_token(&self, token: &str) -> Result<AccountIdentifier, AccountStoreError> {
+        let mut conn = self.conn()?;
+
+        // Look up the token
+        let row = conn.query_opt(
+            "SELECT token, account_id, email, expires_at FROM email_verification_tokens WHERE token = $1",
+            &[&token],
+        )?;
+
+        let verification = match row {
+            Some(r) => EmailVerificationToken {
+                token: r.get(0),
+                account_id: r.get(1),
+                email: r.get(2),
+                expires_at: r.get(3),
+                created_at: Utc::now(), // Not needed for verification
+            },
+            None => return Err(AccountStoreError::TokenInvalid),
+        };
+
+        // Check if expired
+        if Utc::now() > verification.expires_at {
+            // Delete expired token
+            conn.execute(
+                "DELETE FROM email_verification_tokens WHERE token = $1",
+                &[&token],
+            )?;
+            return Err(AccountStoreError::TokenInvalid);
+        }
+
+        // Create or update the identifier as verified
+        let id = Uuid::new_v4();
+        let row = conn.query_one(
+            "INSERT INTO account_identifiers (id, account_id, identifier_type, identifier, verified, created_at)
+             VALUES ($1, $2, 'email', $3, true, NOW())
+             ON CONFLICT (identifier_type, identifier) DO UPDATE SET account_id = $2, verified = true
+             RETURNING id, account_id, identifier_type, identifier, verified, created_at",
+            &[&id, &verification.account_id, &verification.email],
+        )?;
+
+        // Delete the used token
+        conn.execute(
+            "DELETE FROM email_verification_tokens WHERE token = $1",
+            &[&token],
+        )?;
+
+        Ok(AccountIdentifier {
+            id: row.get(0),
+            account_id: row.get(1),
+            identifier_type: row.get(2),
+            identifier: row.get(3),
+            verified: row.get(4),
+            created_at: row.get(5),
+        })
     }
 }
 
