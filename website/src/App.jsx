@@ -1239,6 +1239,11 @@ function App() {
                 <a href="/integrations/" className="footer-link">Integrations</a>
                 <a href="/user-guide/" className="footer-link">User Guide</a>
                 <a href="/help-center/" className="footer-link">Help Center</a>
+                <a href="/solutions/ai-workflow-automation/" className="footer-link">AI Workflow Automation</a>
+                <a href="/solutions/github-issue-automation/" className="footer-link">GitHub Issue Automation</a>
+                <a href="/solutions/slack-task-automation/" className="footer-link">Slack Task Automation</a>
+                <a href="/solutions/email-task-automation/" className="footer-link">Email Task Automation</a>
+                <a href="/solutions/google-docs-automation/" className="footer-link">Google Docs Automation</a>
                 <a href="mailto:admin@dowhiz.com" className="footer-link">Contact</a>
               </div>
             </div>
