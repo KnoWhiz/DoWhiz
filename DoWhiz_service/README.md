@@ -9,6 +9,7 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
 - [Employee Configuration](#employee-configuration)
 - [Running the Service](#running-the-service)
   - [One-Command Local Run](#one-command-local-run)
+  - [Staging/Production Target Switching](#stagingproduction-target-switching)
   - [Manual Multi-Employee Setup](#manual-multi-employee-setup)
   - [Inbound Gateway (Recommended)](#inbound-gateway-recommended)
   - [Azure Deployment (Rust Gateway + Service Bus + Blob + Workers)](#azure-deployment-rust-gateway--service-bus--blob--workers)
@@ -149,6 +150,24 @@ scripts/run_employee.sh <employee_id> [port]
 scripts/run_employee.sh --employee <id> --port <port> [--public-url <url>] [--skip-hook] [--skip-ngrok] [--host <host>]
 ```
 
+### Staging/Production Target Switching
+
+Use one `.env` and switch targets with:
+```bash
+export DEPLOY_TARGET=production   # or staging
+```
+
+All startup scripts now load `DoWhiz_service/.env` and, when `DEPLOY_TARGET=staging`,
+automatically map `STAGING_FOO -> FOO` (for example, `STAGING_SERVICE_BUS_CONNECTION_STRING`
+overrides `SERVICE_BUS_CONNECTION_STRING`).
+
+Current staging profile defaults:
+- sender + receiver mailbox: `dowhiz@deep-tutor.com` (via `employee.staging.toml`)
+- raw payload storage prefix: `staging/ingestion_raw` (same container, separated folder path)
+
+For full split-key matrix, gateway/worker commands, and rollback steps, see:
+`DoWhiz_service/docs/staging_production_deploy.md`.
+
 ### Manual Multi-Employee Setup
 
 **Step 0: Configure Azure ingestion (required for gateway)**
@@ -257,8 +276,8 @@ Optional webhook verification:
 
 This is the recommended Azure production flow. The Rust inbound gateway handles **all ingress** (email + Slack/Discord/etc), stores raw payloads in Azure Blob, and enqueues messages into Azure Service Bus. Workers (`rust_service`) run on VMs or containers and poll Service Bus.
 
-For Docker-isolated RunTask execution on a VM (host Docker + per-task containers), see:
-`DoWhiz_service/docs/azure_vm_worker.md`.
+For staging/prod split deployment with a single `.env` (`DEPLOY_TARGET` + `STAGING_` overrides), see:
+`DoWhiz_service/docs/staging_production_deploy.md`.
 
 For Docker-isolated RunTask execution on a VM (host Docker + per-task containers), see:
 `DoWhiz_service/docs/azure_vm_worker.md`.

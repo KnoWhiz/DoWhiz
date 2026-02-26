@@ -1,0 +1,27 @@
+[defaults]
+tenant_id = "staging"
+employee_id = "little_bear"
+
+[[routes]]
+channel = "email"
+key = "dowhiz@deep-tutor.com"
+employee_id = "little_bear"
+tenant_id = "staging"
+
+[[routes]]
+channel = "slack"
+key = "*"
+employee_id = "little_bear"
+tenant_id = "staging"
+
+[[routes]]
+channel = "discord"
+key = "*"
+employee_id = "little_bear"
+tenant_id = "staging"
+
+[[routes]]
+channel = "google_docs"
+key = "*"
+employee_id = "little_bear"
+tenant_id = "staging"
