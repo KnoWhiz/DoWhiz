@@ -1,7 +1,6 @@
 mod bluebubbles;
 mod discord;
 mod discord_context;
-mod google_docs;
 mod google_workspace;
 mod quick_responses;
 mod slack;
@@ -15,7 +14,6 @@ pub(crate) use discord::persist_discord_ingest_context;
 pub(crate) use discord_context::build_discord_router_context;
 pub(crate) use discord_context::build_discord_message_text_with_quote;
 pub(crate) use discord_context::hydrate_discord_context_files;
-pub(super) use google_docs::process_google_docs_message;
 pub(super) use google_workspace::process_google_workspace_message;
 pub(super) use quick_responses::{
     try_quick_response_bluebubbles, try_quick_response_discord, try_quick_response_slack,

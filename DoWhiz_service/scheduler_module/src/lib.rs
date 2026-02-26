@@ -7,6 +7,7 @@ pub mod employee_config;
 pub mod env_alias;
 pub mod google_auth;
 pub mod google_docs_poller;
+pub mod google_drive_changes;
 pub mod google_workspace_poller;
 pub mod ingestion;
 pub mod ingestion_queue;

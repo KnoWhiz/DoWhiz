@@ -35,3 +35,7 @@ DoWhiz_service/.env.example
 /tmp
 /test_reports
 DoWhiz_service/.env.production
+
+# Claude configuration files (contain sensitive context)
+CLAUDE.md
+**/CLAUDE.md

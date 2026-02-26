@@ -1,9 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use tokio::sync::broadcast;
+
 use scheduler_module::adapters::postmark::PostmarkInboundPayload;
 use scheduler_module::channel::Channel;
 use scheduler_module::employee_config::EmployeeDirectory;
+use scheduler_module::google_drive_changes::GoogleDriveChangesManager;
 use scheduler_module::ingestion_queue::IngestionQueue;
 use scheduler_module::mailbox;
 
@@ -16,12 +19,15 @@ pub(super) struct GatewayConfig {
     pub(super) channel_defaults: HashMap<Channel, RouteTarget>,
 }
 
-#[derive(Clone)]
 pub(super) struct GatewayState {
     pub(super) config: GatewayConfig,
     pub(super) employee_directory: EmployeeDirectory,
     pub(super) address_to_employee: HashMap<String, String>,
     pub(super) queue: Arc<dyn IngestionQueue>,
+    /// Google Drive push notification manager (optional, only if enabled)
+    pub(super) drive_changes_manager: Option<Arc<GoogleDriveChangesManager>>,
+    /// Channel to notify workspace poller of file changes
+    pub(super) drive_change_notifier: Option<broadcast::Sender<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
