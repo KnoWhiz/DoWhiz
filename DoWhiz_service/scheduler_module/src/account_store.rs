@@ -6,6 +6,8 @@ use std::env;
 use tracing::error;
 use uuid::Uuid;
 
+use crate::env_alias::bool_with_scale_oliver;
+
 #[derive(Debug, Clone)]
 pub struct Account {
     pub id: Uuid,
@@ -78,10 +80,7 @@ impl AccountStore {
         let config: postgres::Config = db_url.parse()?;
 
         let mut tls_builder = native_tls::TlsConnector::builder();
-        if env::var("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS")
-            .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
-            .unwrap_or(false)
-        {
+        if bool_with_scale_oliver("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS", false) {
             tls_builder.danger_accept_invalid_certs(true);
             tls_builder.danger_accept_invalid_hostnames(true);
         }

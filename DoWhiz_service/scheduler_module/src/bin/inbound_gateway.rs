@@ -74,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let backend = resolve_ingestion_queue_backend();
     if backend != "servicebus" && backend != "service_bus" {
         return Err(format!(
-            "inbound gateway requires INGESTION_QUEUE_BACKEND=servicebus (got '{}')",
+            "inbound gateway requires SCALE_OLIVER_INGESTION_QUEUE_BACKEND (or INGESTION_QUEUE_BACKEND)=servicebus (got '{}')",
             backend
         )
         .into());
@@ -136,8 +136,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let slack_redirect_uri = env::var("SLACK_AUTH_REDIRECT_URI").ok();
 
     // Frontend URL for OAuth redirects
-    let frontend_url = env::var("FRONTEND_URL")
-        .unwrap_or_else(|_| "http://localhost:5173".to_string());
+    let frontend_url =
+        env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:5173".to_string());
 
     let auth_state = AuthState {
         account_store,

@@ -1318,7 +1318,15 @@
         window.history.replaceState({}, document.title, window.location.pathname);
       }
 
-      // Check for email verification callback result
+      // Check for email verification token (from magic link in email)
+      const verifyEmailToken = urlParams.get('verify_email');
+      if (verifyEmailToken) {
+        // Redirect to backend to verify the token
+        window.location.href = `${DOWHIZ_API_URL}/auth/verify-email?token=${encodeURIComponent(verifyEmailToken)}`;
+        return; // Stop further execution while redirecting
+      }
+
+      // Check for email verification callback result (redirect from backend after verification)
       const emailVerifiedResult = urlParams.get('email_verified');
       if (emailVerifiedResult) {
         if (emailVerifiedResult === 'success') {
@@ -1394,7 +1402,16 @@
             throw new Error(errText);
           }
 
-          showMessage('Channel linked successfully!', 'success');
+          const result = await res.json();
+
+          // Show appropriate message based on verification status
+          if (result.verified === false) {
+            // Email verification pending - show backend message
+            showMessage(result.message || 'Verification email sent. Please check your inbox.', 'success');
+          } else {
+            showMessage('Channel linked successfully!', 'success');
+          }
+
           document.getElementById('link-identifier').value = '';
           await loadIdentifiers(session.access_token);
           // Refresh tasks to include the new channel
