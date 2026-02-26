@@ -68,6 +68,17 @@ impl GoogleSheetsInboundAdapter {
         spreadsheet_name: &str,
         actionable: &ActionableComment,
     ) -> InboundMessage {
+        self.actionable_to_inbound_message_with_owner(spreadsheet_id, spreadsheet_name, actionable, None)
+    }
+
+    /// Convert an ActionableComment to an InboundMessage with owner email.
+    pub fn actionable_to_inbound_message_with_owner(
+        &self,
+        spreadsheet_id: &str,
+        spreadsheet_name: &str,
+        actionable: &ActionableComment,
+        owner_email: Option<&str>,
+    ) -> InboundMessage {
         let sender = actionable
             .triggering_author()
             .and_then(|a| a.email_address.clone())
@@ -130,6 +141,7 @@ impl GoogleSheetsInboundAdapter {
                 google_sheets_spreadsheet_id: Some(spreadsheet_id.to_string()),
                 google_sheets_comment_id: Some(actionable.comment.id.clone()),
                 google_sheets_spreadsheet_name: Some(spreadsheet_name.to_string()),
+                google_sheets_owner_email: owner_email.map(|s| s.to_string()),
                 ..Default::default()
             },
         }
