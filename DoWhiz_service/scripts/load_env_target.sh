@@ -60,6 +60,33 @@ load_dowhiz_env_for_target() {
       base_key="${key#STAGING_}"
       export "${base_key}=${!key-}"
     done < <(env)
+
+    # Keep SCALE_OLIVER_* aliases in sync with staging-resolved base keys.
+    # This prevents legacy SCALE_OLIVER_* production values from shadowing
+    # the staging values in modules that read SCALE_OLIVER_* first.
+    local scale_aliases alias value
+    scale_aliases=(
+      INGESTION_QUEUE_BACKEND
+      SERVICE_BUS_CONNECTION_STRING
+      SERVICE_BUS_QUEUE_NAME
+      SERVICE_BUS_TEST_QUEUE_NAME
+      SERVICE_BUS_NAMESPACE
+      SERVICE_BUS_POLICY_NAME
+      SERVICE_BUS_POLICY_KEY
+      RAW_PAYLOAD_STORAGE_BACKEND
+      RAW_PAYLOAD_PATH_PREFIX
+      AZURE_STORAGE_ACCOUNT
+      AZURE_STORAGE_CONTAINER_INGEST
+      AZURE_STORAGE_SAS_TOKEN
+      AZURE_STORAGE_CONTAINER_SAS_URL
+      AZURE_STORAGE_CONNECTION_STRING_INGEST
+    )
+    for alias in "${scale_aliases[@]}"; do
+      value="${!alias-}"
+      if [[ -n "${value}" ]]; then
+        export "SCALE_OLIVER_${alias}=${value}"
+      fi
+    done
   fi
 }
 

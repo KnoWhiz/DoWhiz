@@ -6,6 +6,7 @@ This guide keeps one `DoWhiz_service/.env` file and uses:
 - `DEPLOY_TARGET=production|staging` to switch at startup time
 
 `scripts/load_env_target.sh` loads `.env` and, in staging mode, maps `STAGING_FOO -> FOO`.
+It also mirrors key queue/storage vars from `FOO -> SCALE_OLIVER_FOO` in staging mode, so legacy code paths cannot accidentally read production `SCALE_OLIVER_*` values.
 
 ## 1) Isolated staging Service Bus (created)
 
