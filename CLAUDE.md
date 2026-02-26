@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DoWhiz is a multi-tenant, email-first digital employee platform. Users send tasks to digital employees via email (and other channels like Slack, Discord, SMS via Twilio, Telegram, WhatsApp, Google Docs comments, iMessage via BlueBubbles), and AI agents (Codex CLI or Claude Code) process and respond. The system emphasizes per-user isolation, role-based agents, and tool-backed execution.
+DoWhiz is a multi-tenant, email-first digital employee platform. Users send tasks to digital employees via email (and other channels like Slack, Discord, SMS via Twilio, Telegram, WhatsApp, Google Docs/Sheets/Slides comments, iMessage via BlueBubbles), and AI agents (Codex CLI or Claude Code) process and respond. The system emphasizes per-user isolation, role-based agents, and tool-backed execution.
 
 ## Build and Development Commands
 
@@ -65,7 +65,7 @@ docker run --rm -p 9001:9001 \
 
 ### Data Flow
 ```
-Inbound (Email/Slack/Discord/SMS/Telegram/WhatsApp/Google Docs/iMessage)
+Inbound (Email/Slack/Discord/SMS/Telegram/WhatsApp/Google Docs/Sheets/Slides/iMessage)
     → Ingestion Gateway (dedupe + raw payload storage in Azure Blob)
     → Ingestion Queue (Service Bus for gateway; Postgres optional/legacy)
     → Worker Service (per-employee)
@@ -77,6 +77,7 @@ Inbound (Email/Slack/Discord/SMS/Telegram/WhatsApp/Google Docs/iMessage)
 |------|---------|
 | `scheduler_module/src/service/server.rs` | Worker HTTP server, scheduler loop |
 | `scheduler_module/src/bin/inbound_gateway.rs` | Inbound gateway entrypoint (webhooks + dedupe) |
+| `scheduler_module/src/bin/inbound_gateway/google_workspace.rs` | Google Sheets/Slides pollers (workspace comments) |
 | `scheduler_module/src/lib.rs` | Core Scheduler, TaskKind, Schedule definitions |
 | `scheduler_module/src/user_store/mod.rs` | Per-user data management |
 | `send_emails_module/src/lib.rs` | Postmark API wrapper |
@@ -104,7 +105,7 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 |----|------|--------|---------------|
 | `little_bear` | Oliver | Codex | oliver@dowhiz.com |
 | `mini_mouse` | Maggie | Claude | maggie@dowhiz.com |
-| `sticky_octopus` | Devin | Codex | devin@dowhiz.com |
+| `sticky_octopus` | Sticky-Octopus | Codex | devin@dowhiz.com |
 | `boiled_egg` | Boiled-Egg | Codex | proto@dowhiz.com |
 
 ## Key Concepts
@@ -119,7 +120,7 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 - **OneShot**: Single execution at specific DateTime
 
 ### Per-User Isolation
-Each user gets separate SQLite databases and workspace directories. Concurrency limits: global max 10, per-user max 3.
+Each user gets separate SQLite databases and workspace directories. Concurrency limits are configurable (defaults: global max 200, per-user max 200).
 
 ### Follow-up Scheduling
 Agents emit scheduled tasks in stdout:
@@ -142,7 +143,8 @@ Optional:
 - `GITHUB_USERNAME`, `GITHUB_PERSONAL_ACCESS_TOKEN` - GitHub access for agents
 - `OPENAI_API_KEY` - Enable message router quick replies
 - `INGESTION_QUEUE_BACKEND=servicebus` + `SERVICE_BUS_CONNECTION_STRING` + `SERVICE_BUS_QUEUE_NAME` - Required when running the inbound gateway
-- `AZURE_STORAGE_ACCOUNT`/`AZURE_STORAGE_CONTAINER`/`AZURE_STORAGE_SAS_TOKEN` - Required for gateway raw payload storage (Azure Blob)
+- `AZURE_STORAGE_CONTAINER_INGEST` + `AZURE_STORAGE_SAS_TOKEN` (+ optional `AZURE_STORAGE_ACCOUNT` or `AZURE_STORAGE_CONNECTION_STRING_INGEST`) - Required for gateway raw payload storage (Azure Blob), unless using `AZURE_STORAGE_CONTAINER_SAS_URL`
+- `AZURE_STORAGE_CONTAINER_SAS_URL` - Optional full SAS URL for the ingestion container (overrides account + container + SAS token)
 
 ## Testing Expectations
 
@@ -276,6 +278,6 @@ DoWhiz_service/scheduler_module/src/bin/inbound_gateway/google_workspace.rs
 ### Key Environment Variables
 - `GOOGLE_DOCS_ENABLED` / `GOOGLE_SHEETS_ENABLED` / `GOOGLE_SLIDES_ENABLED`
 - `GOOGLE_WORKSPACE_POLL_INTERVAL_SECS` (default: 15)
-- `SCHEDULER_USER_MAX_CONCURRENCY` (default: 1)
+- `SCHEDULER_USER_MAX_CONCURRENCY` (default: 200; prod may set lower)
 - `GOOGLE_DRIVE_PUSH_ENABLED` (future feature)
 - `AZURE_SERVICE_BUS_CONNECTION_STRING`
