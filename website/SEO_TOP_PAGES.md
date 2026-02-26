@@ -1,6 +1,6 @@
 # SEO Top Pages (H1 Audit)
 
-As of 2026-02-25, the website repo exposes 15 indexable pages.
+As of 2026-02-26, the website repo exposes 16 indexable pages.
 
 1. https://dowhiz.com/
 H1 count: 1
@@ -77,11 +77,17 @@ H1 count: 1
 H1: Rachel - GTM Specialist
 H2: Best for, How it works, Trigger examples, Output preview
 
+16. https://dowhiz.com/help-center/
+H1 count: 1
+H1: Top 20 user questions about DoWhiz
+H2: Numbered help questions (1–20)
+
 ## Duplicate / Parameterized URL Inventory (Canonical Mapping)
 
 - `https://dowhiz.com/?utm_*`, `https://dowhiz.com/?ref=*`, and other tracking/query variants canonicalize to `https://dowhiz.com/`.
 - `https://dowhiz.com/blog/?*` canonicalizes to `https://dowhiz.com/blog/`.
 - `https://dowhiz.com/user-guide/?*` canonicalizes to `https://dowhiz.com/user-guide/`.
+- `https://dowhiz.com/help-center/?*` canonicalizes to `https://dowhiz.com/help-center/`.
 - `https://dowhiz.com/integrations/?*` canonicalizes to `https://dowhiz.com/integrations/`.
 - `https://dowhiz.com/trust-safety/?*` canonicalizes to `https://dowhiz.com/trust-safety/`.
 - `https://dowhiz.com/privacy/?*` canonicalizes to `https://dowhiz.com/privacy/`.
