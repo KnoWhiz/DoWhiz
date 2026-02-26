@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use tracing::{info, warn};
 
+use crate::account_store::AccountStore;
 use crate::adapters::google_common::ActionableComment;
 use crate::channel::Channel;
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
@@ -17,21 +18,22 @@ use super::super::bump_thread_state;
 use super::super::config::ServiceConfig;
 use super::super::default_thread_state_path;
 use super::super::workspace::ensure_thread_workspace;
-use super::super::BoxError;
+use crate::service::BoxError;
 
 /// Process an incoming Google Workspace comment (Docs, Sheets, or Slides).
 pub(crate) fn process_google_workspace_message(
     config: &ServiceConfig,
     user_store: &UserStore,
     index_store: &IndexStore,
+    account_store: &AccountStore,
     message: &crate::channel::InboundMessage,
     raw_payload: &[u8],
 ) -> Result<(), BoxError> {
     let actionable: ActionableComment = serde_json::from_slice(raw_payload)?;
     let channel = message.channel.clone();
 
-    // Get file ID and name based on channel
-    let (file_id, file_name, channel_prefix) = match channel {
+    // Get file ID, name, and owner email based on channel
+    let (file_id, file_name, channel_prefix, owner_email) = match channel {
         Channel::GoogleDocs => {
             let id = message
                 .metadata
@@ -43,7 +45,8 @@ pub(crate) fn process_google_workspace_message(
                 .google_docs_document_name
                 .as_deref()
                 .unwrap_or("Document");
-            (id, name, "gdocs")
+            let owner = message.metadata.google_docs_owner_email.as_deref();
+            (id, name, "gdocs", owner)
         }
         Channel::GoogleSheets => {
             let id = message
@@ -56,7 +59,8 @@ pub(crate) fn process_google_workspace_message(
                 .google_sheets_spreadsheet_name
                 .as_deref()
                 .unwrap_or("Spreadsheet");
-            (id, name, "gsheets")
+            let owner = message.metadata.google_sheets_owner_email.as_deref();
+            (id, name, "gsheets", owner)
         }
         Channel::GoogleSlides => {
             let id = message
@@ -69,15 +73,32 @@ pub(crate) fn process_google_workspace_message(
                 .google_slides_presentation_name
                 .as_deref()
                 .unwrap_or("Presentation");
-            (id, name, "gslides")
+            let owner = message.metadata.google_slides_owner_email.as_deref();
+            (id, name, "gslides", owner)
         }
         _ => return Err("Invalid channel for Google Workspace handler".into()),
     };
 
-    let user_email = extract_emails(&message.sender)
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| format!("{}_{}@local", channel_prefix, message.sender.replace(' ', "_")));
+    // Extract commenter email, falling back to document owner email if unknown
+    let extracted_email = extract_emails(&message.sender).into_iter().next();
+
+    // Check if we got a real email or the "unknown@unknown.com" placeholder
+    let user_email = match extracted_email {
+        Some(email) if email != "unknown@unknown.com" => email,
+        _ => {
+            // Commenter email is not available or is the placeholder
+            // Try to use owner email as fallback (works when commenter is also doc owner)
+            if let Some(owner) = owner_email {
+                info!(
+                    "Commenter email unknown, using document owner email '{}' as fallback",
+                    owner
+                );
+                owner.to_string()
+            } else {
+                format!("{}_{}@local", channel_prefix, message.sender.replace(' ', "_"))
+            }
+        }
+    };
     let user = user_store.get_or_create_user(channel_prefix, &user_email)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     user_store.ensure_user_dirs(&user_paths)?;
@@ -195,7 +216,7 @@ pub(crate) fn process_google_workspace_message(
         model_name,
         runner: config.employee_profile.runner.clone(),
         codex_disabled: config.codex_disabled,
-        reply_to: vec![message.sender.clone()],
+        reply_to: vec![user_email.clone()],
         reply_from: config.employee_profile.addresses.first().cloned(),
         archive_root: None,
         thread_id: Some(thread_key.clone()),
@@ -205,6 +226,9 @@ pub(crate) fn process_google_workspace_message(
         slack_team_id: None,
         employee_id: Some(config.employee_profile.id.clone()),
     };
+
+    // Clone run_task before consuming it, in case we need to write to account-level storage
+    let run_task_for_account = run_task.clone();
 
     let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
     let task_id = scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
@@ -219,6 +243,68 @@ pub(crate) fn process_google_workspace_message(
         thread_state.epoch,
         channel_display_name(&channel)
     );
+
+    // If the Google Workspace user has linked their email, also write to account-level tasks.db
+    // user_email is extracted from message.sender and maps to "email" identifier type
+    info!(
+        "Looking up account for email '{}' (sender was '{}')",
+        user_email, message.sender
+    );
+    match account_store.get_account_by_identifier("email", &user_email) {
+        Ok(Some(account)) => {
+            info!("Found account {} for email {}", account.id, user_email);
+        let account_tasks_dir = config.users_root.join(account.id.to_string()).join("state");
+        if let Err(err) = std::fs::create_dir_all(&account_tasks_dir) {
+            warn!(
+                "failed to create account tasks dir for account {}: {}",
+                account.id, err
+            );
+        } else {
+            let account_tasks_db_path = account_tasks_dir.join("tasks.db");
+            match Scheduler::load(&account_tasks_db_path, ModuleExecutor::default()) {
+                Ok(mut account_scheduler) => {
+                    // Use the same task_id so we can update status at completion
+                    match account_scheduler.add_one_shot_in_with_id(
+                        task_id,
+                        Duration::from_secs(0),
+                        TaskKind::RunTask(run_task_for_account),
+                    ) {
+                        Ok(()) => {
+                            info!(
+                                "also enqueued task to account-level storage account={} task_id={} channel={}",
+                                account.id, task_id, channel_display_name(&channel)
+                            );
+                        }
+                        Err(err) => {
+                            warn!(
+                                "failed to add task to account scheduler for account {}: {}",
+                                account.id, err
+                            );
+                        }
+                    }
+                }
+                Err(err) => {
+                    warn!(
+                        "failed to load account scheduler for account {}: {}",
+                        account.id, err
+                    );
+                }
+            }
+        }
+        }
+        Ok(None) => {
+            info!(
+                "No account linked for email '{}', skipping account-level task",
+                user_email
+            );
+        }
+        Err(err) => {
+            warn!(
+                "Failed to look up account for email '{}': {}",
+                user_email, err
+            );
+        }
+    }
 
     Ok(())
 }
@@ -442,4 +528,323 @@ google-slides reply-comment {file_id} {comment_id} "Your reply"
         incoming_dir.display()
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::account_store::AccountStore;
+    use crate::adapters::google_common::{ActionableComment, CommentAuthor, GoogleComment};
+    use crate::channel::{ChannelMetadata, InboundMessage};
+    use crate::employee_config::{EmployeeDirectory, EmployeeProfile};
+    use crate::index_store::IndexStore;
+    use crate::service::config::ServiceConfig;
+    use crate::user_store::UserStore;
+    use crate::{ModuleExecutor, Scheduler, TaskKind};
+    use std::collections::{HashMap, HashSet};
+    use std::fs;
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    fn create_test_config(root: &std::path::Path) -> ServiceConfig {
+        let users_root = root.join("users");
+        let state_root = root.join("state");
+        fs::create_dir_all(&users_root).unwrap();
+        fs::create_dir_all(&state_root).unwrap();
+
+        let addresses = vec!["service@example.com".to_string()];
+        let address_set: HashSet<String> = addresses
+            .iter()
+            .map(|value| value.to_ascii_lowercase())
+            .collect();
+        let employee = EmployeeProfile {
+            id: "test-employee".to_string(),
+            display_name: None,
+            runner: "codex".to_string(),
+            model: None,
+            addresses,
+            address_set: address_set.clone(),
+            runtime_root: None,
+            agents_path: None,
+            claude_path: None,
+            soul_path: None,
+            skills_dir: None,
+            discord_enabled: false,
+            slack_enabled: false,
+            bluebubbles_enabled: false,
+        };
+        let mut employee_by_id = HashMap::new();
+        employee_by_id.insert(employee.id.clone(), employee.clone());
+        let employee_directory = EmployeeDirectory {
+            employees: vec![employee.clone()],
+            employee_by_id,
+            default_employee_id: Some(employee.id.clone()),
+            service_addresses: address_set,
+        };
+
+        ServiceConfig {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            employee_id: employee.id.clone(),
+            employee_config_path: root.join("employee.toml"),
+            employee_profile: employee,
+            employee_directory,
+            workspace_root: root.join("workspaces"),
+            scheduler_state_path: state_root.join("tasks.db"),
+            processed_ids_path: state_root.join("processed_ids.txt"),
+            ingestion_db_url: "postgres://localhost/test".to_string(),
+            ingestion_poll_interval: Duration::from_millis(50),
+            users_root,
+            users_db_path: state_root.join("users.db"),
+            task_index_path: state_root.join("task_index.db"),
+            codex_model: "gpt-5.3-codex".to_string(),
+            codex_disabled: true,
+            scheduler_poll_interval: Duration::from_millis(50),
+            scheduler_max_concurrency: 1,
+            scheduler_user_max_concurrency: 1,
+            inbound_body_max_bytes: crate::service::DEFAULT_INBOUND_BODY_MAX_BYTES,
+            skills_source_dir: None,
+            slack_bot_token: None,
+            slack_bot_user_id: None,
+            slack_store_path: state_root.join("slack.db"),
+            slack_client_id: None,
+            slack_client_secret: None,
+            slack_redirect_uri: None,
+            discord_bot_token: None,
+            discord_bot_user_id: None,
+            google_docs_enabled: false,
+            bluebubbles_url: None,
+            bluebubbles_password: None,
+            telegram_bot_token: None,
+            whatsapp_access_token: None,
+            whatsapp_phone_number_id: None,
+            whatsapp_verify_token: None,
+        }
+    }
+
+    fn create_actionable_comment(comment_id: &str, content: &str) -> ActionableComment {
+        ActionableComment {
+            comment: GoogleComment {
+                id: comment_id.to_string(),
+                content: content.to_string(),
+                html_content: None,
+                resolved: None,
+                author: Some(CommentAuthor {
+                    display_name: Some("Test User".to_string()),
+                    email_address: Some("testuser@example.com".to_string()),
+                    photo_link: None,
+                    me: false,
+                }),
+                created_time: None,
+                modified_time: None,
+                replies: None,
+                anchor: None,
+                quoted_file_content: None,
+            },
+            triggering_reply: None,
+            tracking_id: format!("tracking_{}", comment_id),
+        }
+    }
+
+    #[test]
+    fn process_google_docs_message_creates_run_task() -> Result<(), crate::service::BoxError> {
+        let temp = TempDir::new()?;
+        let config = create_test_config(temp.path());
+
+        let user_store = UserStore::new(&config.users_db_path)?;
+        let index_store = IndexStore::new(&config.task_index_path)?;
+        let account_store = AccountStore::new(&config.ingestion_db_url)?;
+
+        // Use angle bracket format so extract_emails() can parse it
+        let sender_email = "testuser@example.com";
+        let sender = format!("Test User <{}>", sender_email);
+        let doc_id = "1abc123def456";
+        let doc_name = "Test Document";
+        let actionable = create_actionable_comment("comment-1", "Please review this section");
+        let raw_payload = serde_json::to_vec(&actionable)?;
+
+        let message = InboundMessage {
+            channel: Channel::GoogleDocs,
+            sender: sender.clone(),
+            sender_name: Some("Test User".to_string()),
+            recipient: doc_id.to_string(),
+            subject: Some(format!("Comment on {}", doc_name)),
+            text_body: Some(actionable.comment.content.clone()),
+            html_body: None,
+            thread_id: format!("gdocs:{}:{}", doc_id, actionable.comment.id),
+            message_id: Some(actionable.tracking_id.clone()),
+            attachments: Vec::new(),
+            reply_to: vec![sender.clone()],
+            raw_payload: raw_payload.clone(),
+            metadata: ChannelMetadata {
+                google_docs_document_id: Some(doc_id.to_string()),
+                google_docs_document_name: Some(doc_name.to_string()),
+                ..Default::default()
+            },
+        };
+
+        process_google_workspace_message(
+            &config,
+            &user_store,
+            &index_store,
+            &account_store,
+            &message,
+            &raw_payload,
+        )?;
+
+        // Verify user was created with the extracted email
+        let user = user_store.get_or_create_user("gdocs", sender_email)?;
+        let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+
+        // Verify task was created
+        let scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+        let run_task = scheduler
+            .tasks()
+            .iter()
+            .find_map(|task| match &task.kind {
+                TaskKind::RunTask(run) => Some(run),
+                _ => None,
+            })
+            .expect("run task created");
+
+        assert_eq!(run_task.channel, Channel::GoogleDocs);
+        assert!(run_task.workspace_dir.exists());
+
+        // Verify files were written using thread_state seq
+        let state_path = crate::thread_state::default_thread_state_path(&run_task.workspace_dir);
+        let thread_state = crate::thread_state::load_thread_state(&state_path)
+            .ok_or("thread_state.json not found")?;
+        let seq = thread_state.last_email_seq;
+
+        let incoming_dir = run_task.workspace_dir.join("incoming_email");
+        assert!(incoming_dir.join(format!("{:05}_gdocs_comment.json", seq)).exists());
+        assert!(incoming_dir.join(format!("{:05}_email.html", seq)).exists());
+        assert!(incoming_dir.join(format!("{:05}_gdocs_meta.json", seq)).exists());
+
+        Ok(())
+    }
+
+    #[test]
+    fn process_google_sheets_message_creates_run_task() -> Result<(), crate::service::BoxError> {
+        let temp = TempDir::new()?;
+        let config = create_test_config(temp.path());
+
+        let user_store = UserStore::new(&config.users_db_path)?;
+        let index_store = IndexStore::new(&config.task_index_path)?;
+        let account_store = AccountStore::new(&config.ingestion_db_url)?;
+
+        let sender_email = "testuser@example.com";
+        let sender = format!("Test User <{}>", sender_email);
+        let spreadsheet_id = "spreadsheet-abc123";
+        let actionable = create_actionable_comment("comment-2", "Check these numbers");
+        let raw_payload = serde_json::to_vec(&actionable)?;
+
+        let message = InboundMessage {
+            channel: Channel::GoogleSheets,
+            sender: sender.clone(),
+            sender_name: Some("Test User".to_string()),
+            recipient: spreadsheet_id.to_string(),
+            subject: None,
+            text_body: Some(actionable.comment.content.clone()),
+            html_body: None,
+            thread_id: format!("gsheets:{}:{}", spreadsheet_id, actionable.comment.id),
+            message_id: Some(actionable.tracking_id.clone()),
+            attachments: Vec::new(),
+            reply_to: vec![sender.clone()],
+            raw_payload: raw_payload.clone(),
+            metadata: ChannelMetadata {
+                google_sheets_spreadsheet_id: Some(spreadsheet_id.to_string()),
+                google_sheets_spreadsheet_name: Some("Test Spreadsheet".to_string()),
+                ..Default::default()
+            },
+        };
+
+        process_google_workspace_message(
+            &config,
+            &user_store,
+            &index_store,
+            &account_store,
+            &message,
+            &raw_payload,
+        )?;
+
+        let user = user_store.get_or_create_user("gsheets", sender_email)?;
+        let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+        let scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+
+        let run_task = scheduler
+            .tasks()
+            .iter()
+            .find_map(|task| match &task.kind {
+                TaskKind::RunTask(run) => Some(run),
+                _ => None,
+            })
+            .expect("run task created");
+
+        assert_eq!(run_task.channel, Channel::GoogleSheets);
+
+        Ok(())
+    }
+
+    #[test]
+    fn process_google_slides_message_creates_run_task() -> Result<(), crate::service::BoxError> {
+        let temp = TempDir::new()?;
+        let config = create_test_config(temp.path());
+
+        let user_store = UserStore::new(&config.users_db_path)?;
+        let index_store = IndexStore::new(&config.task_index_path)?;
+        let account_store = AccountStore::new(&config.ingestion_db_url)?;
+
+        let sender_email = "testuser@example.com";
+        let sender = format!("Test User <{}>", sender_email);
+        let presentation_id = "presentation-xyz789";
+        let actionable = create_actionable_comment("comment-3", "Update this slide");
+        let raw_payload = serde_json::to_vec(&actionable)?;
+
+        let message = InboundMessage {
+            channel: Channel::GoogleSlides,
+            sender: sender.clone(),
+            sender_name: Some("Test User".to_string()),
+            recipient: presentation_id.to_string(),
+            subject: None,
+            text_body: Some(actionable.comment.content.clone()),
+            html_body: None,
+            thread_id: format!("gslides:{}:{}", presentation_id, actionable.comment.id),
+            message_id: Some(actionable.tracking_id.clone()),
+            attachments: Vec::new(),
+            reply_to: vec![sender.clone()],
+            raw_payload: raw_payload.clone(),
+            metadata: ChannelMetadata {
+                google_slides_presentation_id: Some(presentation_id.to_string()),
+                google_slides_presentation_name: Some("Test Presentation".to_string()),
+                ..Default::default()
+            },
+        };
+
+        process_google_workspace_message(
+            &config,
+            &user_store,
+            &index_store,
+            &account_store,
+            &message,
+            &raw_payload,
+        )?;
+
+        let user = user_store.get_or_create_user("gslides", sender_email)?;
+        let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+        let scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+
+        let run_task = scheduler
+            .tasks()
+            .iter()
+            .find_map(|task| match &task.kind {
+                TaskKind::RunTask(run) => Some(run),
+                _ => None,
+            })
+            .expect("run task created");
+
+        assert_eq!(run_task.channel, Channel::GoogleSlides);
+
+        Ok(())
+    }
 }

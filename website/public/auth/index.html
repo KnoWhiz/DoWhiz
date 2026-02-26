@@ -1442,45 +1442,27 @@
       let taskPollingInterval = null;
       let cachedIdentifiers = [];
 
-      // Load tasks for all linked identifiers
+      // Load tasks from the unified account-level storage
       async function loadTasks(accessToken) {
         const taskList = document.getElementById('task-list');
         const tasksStatus = document.getElementById('tasks-status');
 
-        // If we don't have cached identifiers, fetch them first
-        if (cachedIdentifiers.length === 0) {
-          try {
-            const res = await fetch(`${DOWHIZ_API_URL}/auth/account`, {
-              headers: { 'Authorization': `Bearer ${accessToken}` }
-            });
-            if (res.ok) {
-              const data = await res.json();
-              cachedIdentifiers = data.identifiers || [];
-            }
-          } catch (err) {
-            console.error('Failed to fetch identifiers for tasks:', err);
-          }
-        }
-
-        if (cachedIdentifiers.length === 0) {
-          taskList.innerHTML = '<li class="task-item" style="text-align: center; color: var(--text-muted, #888);">Link a channel to see your tasks.</li>';
-          return;
-        }
-
         try {
-          // Fetch tasks for each identifier in parallel
-          const taskPromises = cachedIdentifiers.map(async (id) => {
-            const res = await fetch(
-              `${DOWHIZ_API_URL}/api/tasks?channel=${encodeURIComponent(id.identifier_type)}&identifier=${encodeURIComponent(id.identifier)}`,
-              { headers: { 'Authorization': `Bearer ${accessToken}` } }
-            );
-            if (!res.ok) return [];
-            const data = await res.json();
-            return (data.tasks || []).map(task => ({ ...task, source: id.identifier_type }));
+          // Fetch all tasks for this account (aggregated from all channels)
+          const res = await fetch(`${DOWHIZ_API_URL}/api/account/tasks`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
           });
 
-          const taskArrays = await Promise.all(taskPromises);
-          const allTasks = taskArrays.flat();
+          if (!res.ok) {
+            if (res.status === 404) {
+              taskList.innerHTML = '<li class="task-item" style="text-align: center; color: var(--text-muted, #888);">No tasks scheduled yet.</li>';
+              return;
+            }
+            throw new Error(`HTTP ${res.status}`);
+          }
+
+          const data = await res.json();
+          const allTasks = data.tasks || [];
 
           // Sort by created_at descending (newest first)
           allTasks.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));

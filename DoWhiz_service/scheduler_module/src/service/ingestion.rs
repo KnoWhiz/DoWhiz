@@ -192,7 +192,7 @@ fn process_ingestion_envelope(
         Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
             let message = envelope.to_inbound_message();
             let raw_payload = envelope.raw_payload_bytes();
-            process_google_workspace_message(config, user_store, index_store, &message, &raw_payload)
+            process_google_workspace_message(config, user_store, index_store, account_store, &message, &raw_payload)
         }
         Channel::Telegram => {
             let message = envelope.to_inbound_message();
