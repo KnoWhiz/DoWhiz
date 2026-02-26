@@ -33,6 +33,7 @@ Most keys can be shared. Keep these isolated by environment:
 |---|---|---|
 | Postmark server token | `POSTMARK_SERVER_TOKEN` | `STAGING_POSTMARK_SERVER_TOKEN` |
 | Postmark inbound hook URL | `POSTMARK_INBOUND_HOOK_URL` | `STAGING_POSTMARK_INBOUND_HOOK_URL` |
+| Live E2E service mailbox | `POSTMARK_TEST_SERVICE_ADDRESS` | `STAGING_POSTMARK_TEST_SERVICE_ADDRESS` |
 | Ingestion backend | `INGESTION_QUEUE_BACKEND` | `STAGING_INGESTION_QUEUE_BACKEND` |
 | Service Bus connection | `SERVICE_BUS_CONNECTION_STRING` | `STAGING_SERVICE_BUS_CONNECTION_STRING` |
 | Service Bus queue | `SERVICE_BUS_QUEUE_NAME` | `STAGING_SERVICE_BUS_QUEUE_NAME` |
@@ -57,6 +58,7 @@ Use separate employee configs:
 
 `gateway.staging.toml` currently routes to `little_bear` for:
 - `dowhiz@deep-tutor.com`
+- no default Slack/Discord/Google Docs routes (email-only by default)
 
 ## 4) Deploy commands
 
