@@ -9,6 +9,7 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
 - [Employee Configuration](#employee-configuration)
 - [Running the Service](#running-the-service)
   - [One-Command Local Run](#one-command-local-run)
+  - [Staging/Production Target Switching](#stagingproduction-target-switching)
   - [Manual Multi-Employee Setup](#manual-multi-employee-setup)
   - [Inbound Gateway (Recommended)](#inbound-gateway-recommended)
   - [Azure Deployment (Rust Gateway + Service Bus + Blob + Workers)](#azure-deployment-rust-gateway--service-bus--blob--workers)
@@ -149,6 +150,28 @@ scripts/run_employee.sh <employee_id> [port]
 scripts/run_employee.sh --employee <id> --port <port> [--public-url <url>] [--skip-hook] [--skip-ngrok] [--host <host>]
 ```
 
+### Staging/Production Target Switching
+
+Use one `.env` and switch targets with:
+```bash
+export DEPLOY_TARGET=production   # or staging
+```
+
+All startup scripts now load `DoWhiz_service/.env` and, when `DEPLOY_TARGET=staging`,
+automatically map `STAGING_FOO -> FOO` (for example, `STAGING_SERVICE_BUS_CONNECTION_STRING`
+overrides `SERVICE_BUS_CONNECTION_STRING`).
+
+Current staging profile defaults:
+- sender + receiver mailbox: `dowhiz@deep-tutor.com` (via `employee.staging.toml`)
+- raw payload storage prefix: `staging/ingestion_raw` (same container, separated folder path)
+
+Branch policy for VM deployments:
+- Production branch: `main` (CI/CD baseline)
+- Staging branch: `dev` (CI/CD rollout target)
+
+For full split-key matrix, gateway/worker commands, and rollback steps, see:
+`DoWhiz_service/docs/staging_production_deploy.md`.
+
 ### Manual Multi-Employee Setup
 
 **Step 0: Configure Azure ingestion (required for gateway)**
@@ -227,13 +250,17 @@ oliver@dowhiz.com   # or mini-mouse@dowhiz.com, devin@dowhiz.com, proto@dowhiz.c
 **Step 7: Watch logs for task execution**
 
 Outputs appear under:
-- `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces/<message_id>/reply_email_draft.html`
-- `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces/<message_id>/reply_email_attachments/`
+- Email / Google Workspace replies:
+  - `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces/<message_id>/reply_email_draft.html`
+  - `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces/<message_id>/reply_email_attachments/`
+- Chat/SMS channel replies:
+  - `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces/<message_id>/reply_message.txt`
+  - `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces/<message_id>/reply_attachments/`
 - Scheduler state: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/tasks.db`
 
 ### Inbound Gateway (Recommended)
 
-The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/WhatsApp/Google Docs/Sheets/Slides inbound traffic, deduplicates it, and enqueues messages into Azure Service Bus while storing raw payloads in Azure Blob Storage. The gateway requires `INGESTION_QUEUE_BACKEND=servicebus` and `RAW_PAYLOAD_STORAGE_BACKEND=azure`. Workers poll the shared queue and filter by `employee_id`; workers no longer expose `/postmark/inbound`.
+The inbound gateway (`inbound_gateway`) handles Postmark/Slack/Discord/BlueBubbles/Twilio SMS/Telegram/WhatsApp/Google Docs/Sheets/Slides inbound traffic, deduplicates it, and enqueues messages into Azure Service Bus. Raw payload storage backend is configurable (`supabase` by default, `azure` recommended for production). Workers poll the shared queue and filter by `employee_id`; workers no longer expose `/postmark/inbound`.
 
 HTTP endpoints:
 - `/postmark/inbound` (email)
@@ -242,8 +269,9 @@ HTTP endpoints:
 - `/telegram/webhook`
 - `/sms/twilio`
 - `/whatsapp/webhook`
+- `/webhooks/google-drive-changes` (Google Drive push notifications for Docs/Sheets file changes)
 
-Discord is handled via the bot gateway (requires `DISCORD_BOT_TOKEN` or per-employee Discord bot tokens), Google Docs uses a poller when `GOOGLE_DOCS_ENABLED=true`, and Google Sheets/Slides use a workspace poller when `GOOGLE_SHEETS_ENABLED=true` and/or `GOOGLE_SLIDES_ENABLED=true`.
+Discord is handled via bot gateway clients (requires `DISCORD_BOT_TOKEN` or per-employee Discord bot tokens). Discord routing is determined by the bot token to employee mapping (not by `gateway.toml` route keys). Google Docs/Sheets/Slides comments are handled by the workspace poller when the corresponding `GOOGLE_*_ENABLED` flags are set.
 
 Optional webhook verification:
 - `POSTMARK_INBOUND_TOKEN` (validates `X-Postmark-Token`)
@@ -257,11 +285,8 @@ Optional webhook verification:
 
 This is the recommended Azure production flow. The Rust inbound gateway handles **all ingress** (email + Slack/Discord/etc), stores raw payloads in Azure Blob, and enqueues messages into Azure Service Bus. Workers (`rust_service`) run on VMs or containers and poll Service Bus.
 
-For Docker-isolated RunTask execution on a VM (host Docker + per-task containers), see:
-`DoWhiz_service/docs/azure_vm_worker.md`.
-
-For Docker-isolated RunTask execution on a VM (host Docker + per-task containers), see:
-`DoWhiz_service/docs/azure_vm_worker.md`.
+For staging/prod split deployment with a single `.env` (`DEPLOY_TARGET` + `STAGING_` overrides), see:
+`DoWhiz_service/docs/staging_production_deploy.md`.
 
 **Step 1: Provision Azure resources**
 ```bash
@@ -870,6 +895,7 @@ Set `SLACK_REDIRECT_URI` in `.env` to the OAuth Redirect URL.
    - `DISCORD_BOT_TOKEN` + `DISCORD_BOT_USER_ID` for a single bot, or
    - `BOILED_EGG_DISCORD_BOT_TOKEN`/`BOILED_EGG_DISCORD_BOT_USER_ID` and/or `LITTLE_BEAR_DISCORD_BOT_TOKEN`/`LITTLE_BEAR_DISCORD_BOT_USER_ID` for per-employee bots.
 2. Start a worker and the inbound gateway with a shared ingestion queue.
+   - Discord routing is based on bot token -> employee mapping; `gateway.toml` Discord route keys are not used.
 3. Add the bot to your server:
 `https://discord.com/oauth2/authorize?client_id=1472013251553525983&permissions=0&integration_type=0&scope=bot`
 
@@ -979,22 +1005,22 @@ GOOGLE_EMPLOYEE_EMAILS=oliver@dowhiz.com,proto@dowhiz.com
 cd DoWhiz_service
 
 # Build the CLI tools
-cargo build --release --bin google-docs --bin google-sheets --bin google-slides
+cargo build --release --bin google_docs_cli --bin google_sheets_cli --bin google_slides_cli
 
 # Docs
-./target/release/google-docs list-documents
-./target/release/google-docs read-document <doc_id>
-./target/release/google-docs suggest-replace <doc_id> --find="old text" --replace="new text"
-./target/release/google-docs apply-suggestions <doc_id>
-./target/release/google-docs discard-suggestions <doc_id>
+./target/release/google_docs_cli list-documents
+./target/release/google_docs_cli read-document <doc_id>
+./target/release/google_docs_cli suggest-replace <doc_id> --find="old text" --replace="new text"
+./target/release/google_docs_cli apply-suggestions <doc_id>
+./target/release/google_docs_cli discard-suggestions <doc_id>
 
 # Sheets
-./target/release/google-sheets list-spreadsheets
-./target/release/google-sheets list-comments <sheet_id>
+./target/release/google_sheets_cli list-spreadsheets
+./target/release/google_sheets_cli list-comments <sheet_id>
 
 # Slides
-./target/release/google-slides list-presentations
-./target/release/google-slides list-comments <slides_id>
+./target/release/google_slides_cli list-presentations
+./target/release/google_slides_cli list-comments <slides_id>
 ```
 
 ##### E2E Tests
@@ -1053,6 +1079,11 @@ This reduces API costs and latency for simple interactions while preserving full
 
 ## Environment Variables
 
+Single-file env split:
+- Use one `DoWhiz_service/.env`.
+- Base keys are production values.
+- Put staging-specific keys under `STAGING_*` and run with `DEPLOY_TARGET=staging`.
+
 ### Service Configuration
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -1087,9 +1118,9 @@ This reduces API costs and latency for simple interactions while preserving full
 | `INGESTION_DB_URL` | - | Legacy alias for `SUPABASE_DB_URL` |
 | `DATABASE_URL` | - | Legacy Postgres connection string for ingestion |
 | `SUPABASE_POOLER_URL` | - | Legacy PgBouncer/Pooler URL for Postgres ingestion |
-| `SUPABASE_PROJECT_URL` | - | Legacy Supabase raw payload storage (not used by inbound gateway) |
-| `SUPABASE_SECRET_KEY` | - | Legacy Supabase storage key |
-| `SUPABASE_STORAGE_BUCKET` | `ingestion-raw` | Legacy Supabase storage bucket |
+| `SUPABASE_PROJECT_URL` | - | Supabase project URL (used when `RAW_PAYLOAD_STORAGE_BACKEND=supabase`) |
+| `SUPABASE_SECRET_KEY` | - | Supabase service key (used when `RAW_PAYLOAD_STORAGE_BACKEND=supabase`) |
+| `SUPABASE_STORAGE_BUCKET` | `ingestion-raw` | Supabase storage bucket for raw payloads |
 | `INGESTION_QUEUE_TABLE` | `ingestion_queue` | Postgres table name for the queue |
 | `INGESTION_QUEUE_POOL_SIZE` | `8` | Max size for the ingestion queue Postgres pool |
 | `INGESTION_QUEUE_LEASE_SECS` | `60` | Lease timeout before reclaiming stuck jobs |
@@ -1100,12 +1131,12 @@ This reduces API costs and latency for simple interactions while preserving full
 ### Codex (OpenAI)
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CODEX_MODEL` | `gpt-5.3-codex` (fixed) | Model name (overrides ignored) |
+| `CODEX_MODEL` | `gpt-5.3-codex` | Default model when a RunTask payload does not provide `model_name` |
 | `CODEX_DISABLED` | `0` | Set to `1` to bypass Codex CLI |
-| `CODEX_SANDBOX` | `workspace-write` (fixed) | Sandbox mode (overrides ignored) |
+| `CODEX_SANDBOX` | `workspace-write` (fixed) | Historical var; run_task currently uses fixed sandbox in code |
 | `CODEX_BYPASS_SANDBOX` | `0` | Set to `1` to pass `--yolo` (bypass approvals/sandbox) |
 | `AZURE_OPENAI_API_KEY_BACKUP` | - | Azure OpenAI API key |
-| `AZURE_OPENAI_ENDPOINT_BACKUP` | `https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1` (fixed) | Azure OpenAI base URL (overrides ignored) |
+| `AZURE_OPENAI_ENDPOINT_BACKUP` | `https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1` (fixed) | Endpoint used by Codex runner is fixed in code |
 
 ### Claude (Anthropic)
 | Variable | Default | Description |
@@ -1144,7 +1175,7 @@ This reduces API costs and latency for simple interactions while preserving full
 | `SERVICE_BUS_QUEUE_NAME` | `ingestion` | Shared queue name for all employees |
 | `SERVICE_BUS_TEST_QUEUE_NAME` | `ingestion-test` | Queue used by Service Bus tests |
 | `SERVICE_BUS_PEEK_LOCK_TIMEOUT_SECS` | `30` | Peek-lock timeout for Service Bus receive |
-| `RAW_PAYLOAD_STORAGE_BACKEND` | `supabase` | `supabase` or `azure` (gateway requires `azure`) |
+| `RAW_PAYLOAD_STORAGE_BACKEND` | `supabase` | `supabase` or `azure` (`azure` recommended for gateway production flow) |
 | `AZURE_STORAGE_ACCOUNT` | - | Azure Storage account name |
 | `AZURE_STORAGE_CONNECTION_STRING_INGEST` | - | Optional connection string (used to derive account name for ingestion SAS URLs) |
 | `AZURE_STORAGE_CONTAINER_INGEST` | - | Azure Blob container for raw payloads |
@@ -1215,12 +1246,15 @@ This reduces API costs and latency for simple interactions while preserving full
 | `GOOGLE_REFRESH_TOKEN_<EMPLOYEE>` | - | Per-employee refresh token (uppercase ID) |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | - | Service account JSON (alternative auth) |
 | `GOOGLE_ACCESS_TOKEN` | - | Pre-generated access token (sandbox/CLI) |
-| `GOOGLE_DOCS_ENABLED` | `false` | Enable Google Docs polling |
-| `GOOGLE_DOCS_POLL_INTERVAL_SECS` | `30` | Poll interval for Docs comments |
+| `GOOGLE_DOCS_ENABLED` | `false` | Enable Google Docs comment polling in the gateway workspace poller |
+| `GOOGLE_DOCS_POLL_INTERVAL_SECS` | `30` | Legacy docs-only poller interval (not used by default gateway flow) |
 | `GOOGLE_SHEETS_ENABLED` | `false` | Enable Google Sheets polling |
 | `GOOGLE_SLIDES_ENABLED` | `false` | Enable Google Slides polling |
-| `GOOGLE_WORKSPACE_POLL_INTERVAL_SECS` | `15` | Poll interval for Sheets/Slides comments |
-| `GOOGLE_EMPLOYEE_EMAILS` | - | Comma-separated emails to ignore as "self" in Sheets/Slides |
+| `GOOGLE_WORKSPACE_POLL_INTERVAL_SECS` | `15` | Poll interval for gateway workspace poller (Docs/Sheets/Slides) |
+| `GOOGLE_EMPLOYEE_EMAILS` | - | Comma-separated emails to ignore as "self" in Google Workspace comments |
+| `GOOGLE_DRIVE_PUSH_ENABLED` | `false` | Enable Google Drive push notifications for Docs/Sheets file changes (Slides unsupported by Drive watch API) |
+| `GOOGLE_DRIVE_WEBHOOK_URL` | - | Public webhook URL for push notifications (`/webhooks/google-drive-changes`) |
+| `GOOGLE_DRIVE_CHANNEL_EXPIRATION_SECS` | `3600` | Watch channel expiration interval |
 
 ### WhatsApp (Meta Cloud API)
 | Variable | Default | Description |
@@ -1268,8 +1302,10 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 ├── workspaces/<message_id>/
 │   ├── workspace/                  # Agent workspace
 │   ├── references/past_emails/     # Hydrated email history
-│   ├── reply_email_draft.html      # Generated reply
-│   └── reply_email_attachments/
+│   ├── reply_email_draft.html      # Email / Google Workspace reply
+│   ├── reply_email_attachments/    # Email / Google Workspace attachments
+│   ├── reply_message.txt           # Chat/SMS reply (Slack/Discord/Telegram/SMS/WhatsApp/BlueBubbles)
+│   └── reply_attachments/          # Chat/SMS attachments
 └── users/<user_id>/
     ├── state/tasks.db              # Per-user task queue
     ├── memory/                     # Agent context/memory
@@ -1291,10 +1327,11 @@ Global task index for due work. Table `task_index(task_id, user_id, next_run, en
 ### tasks.db (per-user)
 Per-user scheduler store (SQLite with foreign keys on). Key tables:
 
-- `tasks(id, kind, enabled, created_at, last_run, schedule_type, cron_expression, next_run, run_at)` - Scheduling metadata. `schedule_type` is `cron` or `one_shot`; cron uses `cron_expression` + `next_run`, one-shot uses `run_at`.
-- `send_email_tasks(task_id, subject, html_path, attachments_dir, in_reply_to, references_header[, archive_root])` - Email task payloads. `archive_root` may be added by auto-migration.
+- `tasks(id, kind, channel, enabled, created_at, last_run, schedule_type, cron_expression, next_run, run_at, retry_count)` - Scheduling metadata. `schedule_type` is `cron` or `one_shot`; cron uses `cron_expression` + `next_run`, one-shot uses `run_at`.
+- `send_email_tasks(task_id, subject, html_path, attachments_dir, from_address, in_reply_to, references_header, archive_root, thread_epoch, thread_state_path)` - Email payloads (also reused by Google Workspace comment replies).
 - `send_email_recipients(id, task_id, recipient_type, address)` - `to`/`cc`/`bcc` recipients.
-- `run_task_tasks(task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, runner, codex_disabled, reply_to, reply_from[, archive_root])` - RunTask parameters. `reply_to` is newline-separated; `reply_from` carries the inbound service mailbox used for replies.
+- `send_slack_tasks`, `send_discord_tasks`, `send_sms_tasks`, `send_telegram_tasks`, `send_bluebubbles_tasks`, `send_whatsapp_tasks` - Channel-specific outbound payloads for `SendReply`.
+- `run_task_tasks(task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, runner, codex_disabled, reply_to, reply_from, archive_root, thread_id, thread_epoch, thread_state_path, employee_id)` - RunTask parameters. `reply_to` is newline-separated; `reply_from` carries the inbound service mailbox used for replies.
 - `task_executions(id, task_id, started_at, finished_at, status, error_message)` - Execution history and errors.
 
 ---
@@ -1305,7 +1342,7 @@ Each new workspace populates `references/past_emails/` from the user archive und
 
 The hydrator copies `incoming_email/` and any attachments <= 50MB; larger attachments are referenced via `attachments_manifest.json` (set `*.azure_url` sidecar files to supply the Azure blob URL if needed).
 
-Outgoing agent replies are archived after successful `send_email` execution and appear in `past_emails` with `direction: "outbound"`.
+Outgoing agent replies are archived after successful `send_reply` execution and appear in `past_emails` with `direction: "outbound"` (for channels that maintain email-style archives).
 
 **Manual run:**
 ```bash
@@ -1371,6 +1408,7 @@ Entry directories are named `YYYY-MM-DD_<action>_<topic>_<shortid>`. `direction`
 ## Scheduled Follow-ups
 
 If the agent needs to send a follow-up later, it should emit a schedule block to stdout at the end of its response. The scheduler parses the block and stores follow-up tasks in SQLite.
+`"type":"send_email"` remains the wire-format tag for backward compatibility, and is mapped to `SendReply` internally.
 
 **Example schedule block:**
 ```
@@ -1380,7 +1418,7 @@ SCHEDULED_TASKS_JSON_END
 ```
 
 ### Task Kinds
-- **SendEmail**: Send HTML email with attachments
+- **SendReply**: Send outbound reply by channel (email/chat/sms/google workspace)
 - **RunTask**: Invoke Codex/Claude CLI to generate reply
 - **Noop**: Testing placeholder
 

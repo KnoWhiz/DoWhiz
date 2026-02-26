@@ -16,18 +16,21 @@
 - `cargo test -p scheduler_module`: module-specific tests.
 - `cargo clippy --all-targets --all-features`: lint.
 - `cargo fmt --check`: formatting check.
-- `./scripts/run_employee.sh little_bear 9001`: run a local worker with ngrok + Postmark hook update.
+- `./scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok`: run a local worker only.
 - When using the inbound gateway, run workers with `--skip-hook --skip-ngrok` (workers only consume the ingestion queue; webhooks hit the gateway).
 - `cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001`: run the service directly.
 - `./scripts/run_gateway_local.sh`: start the inbound gateway locally.
-- The inbound gateway requires `INGESTION_QUEUE_BACKEND=servicebus` plus Service Bus + Azure Blob env vars; Postgres ingestion is legacy.
+- The inbound gateway requires `INGESTION_QUEUE_BACKEND=servicebus`; raw payload storage backend is configurable (`supabase` default, `azure` recommended for production). Postgres ingestion remains legacy/worker-only.
 - `docker build -t dowhiz-service .`: build the container image.
+- For single-file staging/prod split (`DEPLOY_TARGET` + `STAGING_` overrides), follow `docs/staging_production_deploy.md`.
 
 ## Coding Style & Naming Conventions
 Use rustfmt defaults. Follow Rust naming: `snake_case` for functions/modules, `CamelCase` for types, and `SCREAMING_SNAKE_CASE` for constants. Keep files and modules focused; split large files instead of growing monoliths. Prefer explicit error handling and structured logging via `tracing`.
 
 ## Testing Guidelines
 Unit tests live in `src` with `#[test]`; integration tests live in `*/tests/*.rs`. Live E2E email tests are opt-in and require env vars like `RUST_SERVICE_LIVE_TEST=1`, `POSTMARK_SERVER_TOKEN`, and `POSTMARK_INBOUND_HOOK_URL`. Example: `cargo test -p scheduler_module --test service_real_email -- --nocapture`.
+
+Canonical checklist: `reference_documentation/test_plans/DoWhiz_service_tests.md`.
 
 ## Testing Expectations
 After completing code changes, you must design targeted, detailed unit tests and end-to-end tests to ensure both new and existing functionality behave as expected. Debug and resolve any issues found during test runs. If certain issues require manual intervention, provide a detailed report and follow-up steps.

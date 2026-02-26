@@ -11,6 +11,12 @@ PLANNED = not implemented; should be added.
 Reporting rule:
 After any code change, consult this checklist, run all relevant AUTO tests, and explicitly mark LIVE/MANUAL/PLANNED with reason. Use the Test Report Template at the end of this document.
 
+Target/env rule:
+- Keep one `DoWhiz_service/.env`.
+- For production tests, use `DEPLOY_TARGET=production` (base keys).
+- For staging tests, use `DEPLOY_TARGET=staging` and `STAGING_`-prefixed keys.
+- `DoWhiz_service/scripts/load_env_target.sh` performs runtime mapping.
+
 ## Unit Tests: run_task_module
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
 |---|---|---|---|---|---|---|---|
@@ -73,6 +79,8 @@ Note: ingestion-queue tests use Postgres by default; set `SUPABASE_DB_URL` (or `
 | UT-SCH-46 | test_queue_sequential_writes | memory_queue::MemoryWriteQueue | DoWhiz_service/scheduler_module/src/memory_queue.rs | Sequential queued writes | Cross-process locking | AUTO | cargo test -p scheduler_module |
 | UT-SCH-47 | test_concurrent_submits_serialized | memory_queue::MemoryWriteQueue | DoWhiz_service/scheduler_module/src/memory_queue.rs | Serialized concurrent submits | High contention | AUTO | cargo test -p scheduler_module |
 | UT-SCH-48 | test_blob_store_roundtrip | blob_store::BlobStore | DoWhiz_service/scheduler_module/src/blob_store.rs | Azure memo read/write/delete | Supabase/local fallback | LIVE | cargo test -p scheduler_module blob_store -- --ignored --nocapture |
+| UT-SCH-49 | test_config_from_env | google_drive_changes::GoogleDriveChangesConfig | DoWhiz_service/scheduler_module/src/google_drive_changes.rs | Push config defaults/shape | Real webhook delivery | AUTO | cargo test -p scheduler_module |
+| UT-SCH-50 | test_channel_needs_renewal | google_drive_changes::WatchChannel::needs_renewal | DoWhiz_service/scheduler_module/src/google_drive_changes.rs | Renewal window logic | Real channel lifecycle | AUTO | cargo test -p scheduler_module |
 
 ## Unit Tests: scheduler_module (adapters)
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
@@ -181,7 +189,7 @@ Note: ingestion-queue tests use Postgres by default; set `SUPABASE_DB_URL` (or `
 | LIVE-SCH-08 | google_docs_cli_e2e_discard_suggestions | google-docs CLI | DoWhiz_service/scheduler_module/tests/google_docs_cli_e2e.rs | Discard suggestions | Conflicts | LIVE | GOOGLE_DOCS_CLI_E2E=1 + doc id |
 | LIVE-SCH-09 | google_docs_cli_e2e_full_suggestion_workflow | google-docs CLI | DoWhiz_service/scheduler_module/tests/google_docs_cli_e2e.rs | Full suggestion workflow | Network failures | LIVE | GOOGLE_DOCS_CLI_E2E=1 + doc id |
 | LIVE-SCH-10 | google_docs_cli_e2e_apply_edit | google-docs CLI | DoWhiz_service/scheduler_module/tests/google_docs_cli_e2e.rs | Apply edit | Text mismatch | LIVE | GOOGLE_DOCS_CLI_E2E=1 + doc id |
-| LIVE-SCH-11 | rust_service_real_email_end_to_end | run_server + gateway + Postmark | DoWhiz_service/scheduler_module/tests/service_real_email.rs | Real inbound/outbound email flow | Cost and external variance | LIVE | RUST_SERVICE_LIVE_TEST=1 + Postmark/ngrok |
+| LIVE-SCH-11 | rust_service_real_email_end_to_end | run_server + gateway + Postmark | DoWhiz_service/scheduler_module/tests/service_real_email.rs | Real inbound/outbound email flow | Cost and external variance | LIVE | `DEPLOY_TARGET=<target>` + `RUST_SERVICE_LIVE_TEST=1` + Postmark/ngrok (`POSTMARK_SMTP_PORT` optional, set `2525` when port 25 is blocked) |
 | LIVE-SCH-12 | unified_memo_azure_blob_routing | auth + memory queue + blob store | DoWhiz_service/scheduler_module/tests/unified_memo_e2e.rs | Supabase auth + account linkage + Azure memo write | Service availability | LIVE | cargo test -p scheduler_module --test unified_memo_e2e -- --ignored --nocapture (SERVICE_URL + SUPABASE_PROJECT_URL + SUPABASE_ANON_KEY + AZURE_STORAGE_CONNECTION_STRING + AZURE_STORAGE_CONTAINER + TEST_EMAIL/TEST_PASSWORD) |
 | MAN-SCH-01 | google_workspace_cli_smoke | Google Workspace CLI (Docs/Sheets/Slides) | DoWhiz_service/scheduler_module/tests/google_workspace_cli_test.sh | CLI list/read/comment flows | Full ingestion pipeline | MANUAL | GOOGLE_CLIENT_ID/SECRET + GOOGLE_REFRESH_TOKEN (or GOOGLE_ACCESS_TOKEN) + ./scheduler_module/tests/google_workspace_cli_test.sh |
 | MAN-SCH-02 | google_workspace_comment_workflow | Google Workspace comment E2E | DoWhiz_service/scheduler_module/tests/google_workspace_e2e_test.sh | Comment discovery + reply workflows | Gateway routing + queue handling | MANUAL | GOOGLE_CLIENT_ID/SECRET + GOOGLE_REFRESH_TOKEN (or GOOGLE_ACCESS_TOKEN) + shared Docs/Sheets/Slides + ./scheduler_module/tests/google_workspace_e2e_test.sh |
@@ -213,6 +221,7 @@ Note: ingestion-queue tests use Postgres by default; set `SUPABASE_DB_URL` (or `
 | GAP-12 | P1 | WhatsApp inbound media/interactive coverage | adapters/whatsapp.rs::WhatsAppInboundAdapter::parse | Media/interactive payloads not covered | PLANNED | Add unit tests for media + interactive payloads |
 | GAP-13 | P1 | WhatsApp outbound adapter send/error mapping | adapters/whatsapp.rs::WhatsAppOutboundAdapter::send | No outbound/mock coverage | PLANNED | Mock Graph API or inject base URL |
 | GAP-14 | P1 | Raw payload storage upload/download | raw_payload_store::{upload_raw_payload, download_raw_payload} | No Supabase storage tests | PLANNED | Run against a test bucket or mock HTTP |
+| GAP-15 | P1 | Google Drive push webhook integration | inbound_gateway/google_drive_webhook.rs + google_workspace poller | No automated end-to-end test for notification -> immediate file poll -> enqueue path | PLANNED | Mock push headers + notifier and assert single-file poll/enqueue |
 
 ## Test Report Template
 | Test ID | Status (PASS/FAIL/SKIP) | Evidence (log/summary) | Notes/Reason |
@@ -226,3 +235,4 @@ Rules:
 
 ## Live E2E Defaults (Ngrok)
 - If a real end-to-end test needs a public ngrok URL, use: https://shayne-laminar-lillian.ngrok-free.dev
+- Current staging inbound webhook URL in deployment docs: https://oliver.dowhiz.prod.ngrok.app/postmark/inbound

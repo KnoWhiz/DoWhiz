@@ -410,8 +410,15 @@ fn send_smtp_inbound(
     }
     let message = builder.body("Rust service live email test.".to_string())?;
 
-    let mailer = lettre::SmtpTransport::builder_dangerous("inbound.postmarkapp.com")
-        .port(25)
+    let smtp_host = env::var("POSTMARK_SMTP_HOST")
+        .unwrap_or_else(|_| "inbound.postmarkapp.com".to_string());
+    let smtp_port = env::var("POSTMARK_SMTP_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(25);
+
+    let mailer = lettre::SmtpTransport::builder_dangerous(&smtp_host)
+        .port(smtp_port)
         .build();
     mailer.send(&message)?;
     Ok(())

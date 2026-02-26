@@ -8,7 +8,11 @@ id = "little_bear"
 display_name = "Oliver"
 runner = "codex"
 model = "gpt-5.3-codex"
-addresses = ["oliver@dowhiz.com", "little-bear@dowhiz.com", "agent@dowhiz.com"]
+addresses = [
+  "oliver@dowhiz.com",
+  "little-bear@dowhiz.com",
+  "agent@dowhiz.com",
+]
 agents_path = "employees/little_bear/AGENTS.md"
 claude_path = "employees/little_bear/CLAUDE.md"
 soul_path = "employees/little_bear/SOUL.md"

@@ -4,6 +4,10 @@ This guide runs `rust_service` on an Azure VM with host Docker so each task can 
 Codex container (single image). It keeps per-user workspaces on Azure Files for isolation +
 durability.
 
+For a single-`.env` staging/prod split (`DEPLOY_TARGET` + `STAGING_` prefixed keys), plus
+gateway + worker deploy/rollback steps, see:
+`DoWhiz_service/docs/staging_production_deploy.md`.
+
 ## Prereqs
 - Azure resources (RG, Storage account + Azure Files share, Service Bus, ACR).
 - Image pushed to ACR (e.g., `acrdwhzoliverdev.azurecr.io/dowhiz-service:dev`).

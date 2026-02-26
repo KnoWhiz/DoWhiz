@@ -1,6 +1,8 @@
 # run_task_module
 
-Run Codex or Claude CLI to generate `reply_email_draft.html` and optional `reply_email_attachments/` based on workspace inputs.
+Run Codex or Claude CLI for workspace-based task execution. Output files are channel-aware:
+- Email / Google Workspace: `reply_email_draft.html` + `reply_email_attachments/`
+- Slack / Discord / Telegram / SMS / WhatsApp / BlueBubbles: `reply_message.txt` + `reply_attachments/`
 
 ## Usage
 
@@ -30,19 +32,23 @@ use std::path::PathBuf;
 let params = RunTaskParams {
     workspace_dir: PathBuf::from("/path/to/workspace"),
     input_email_dir: PathBuf::from("incoming_email"),
-    input_attachments_dir: PathBuf::from("input_attachments"),
+    input_attachments_dir: PathBuf::from("incoming_attachments"),
     memory_dir: PathBuf::from("memory"),
     reference_dir: PathBuf::from("references"),
     reply_to: vec!["user@example.com".to_string()],
     model_name: "gpt-5.3-codex".to_string(),
     runner: "codex".to_string(),
     codex_disabled: false,
+    channel: "email".to_string(),
+    google_access_token: None,
+    has_unified_account: true,
 };
 
 // runner: "codex" (default) or "claude"
 // For Claude runs, install @anthropic-ai/claude-code and ensure
 // AZURE_OPENAI_API_KEY_BACKUP is set so the Foundry settings are written.
-// For Codex runs, model/base_url/sandbox are fixed in code; overrides are ignored.
+// For Codex runs, model is taken from `params.model_name` (or `CODEX_MODEL` when empty),
+// while base_url and sandbox mode are fixed in code.
 
 let result = run_task(&params)?;
 println!("Reply saved at: {}", result.reply_html_path.display());
@@ -56,11 +62,13 @@ println!("Reply saved at: {}", result.reply_html_path.display());
 ## Notes
 
 - Input paths must be relative to `workspace_dir`.
-- The module creates `reply_email_draft.html` and `reply_email_attachments/` inside the workspace.
+- The module creates output files based on `channel`:
+  - `email` / `google_docs` / `google_sheets` / `google_slides`: `reply_email_draft.html` + `reply_email_attachments/`
+  - other channels: `reply_message.txt` + `reply_attachments/`
 - When `codex_disabled` is true, it writes a placeholder reply instead of calling Codex (unless `reply_to` is empty).
-- When `reply_to` is empty, the prompt skips email drafting and `reply_email_draft.html` is optional.
+- When `reply_to` is empty, the prompt skips drafting output content and the reply file is optional.
 - Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.
-- Codex runs always use `gpt-5.3-codex` + `workspace-write` sandbox + `https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1`.
+- Codex runs use `params.model_name` (fallback `CODEX_MODEL`, then `gpt-5.3-codex`), with fixed `workspace-write` sandbox and fixed endpoint `https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1`.
 - Codex exec adds `--add-dir $HOME/.config/gh` to allow GitHub CLI state writes under sandbox.
 
 ## Production Deployment
