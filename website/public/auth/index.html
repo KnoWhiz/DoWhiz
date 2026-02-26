@@ -1321,9 +1321,8 @@
       // Check for email verification token (from magic link in email)
       const verifyEmailToken = urlParams.get('verify_email');
       if (verifyEmailToken) {
-        // Redirect to backend to verify the token
+        // Redirect to backend to verify the token - page will navigate away
         window.location.href = `${DOWHIZ_API_URL}/auth/verify-email?token=${encodeURIComponent(verifyEmailToken)}`;
-        return; // Stop further execution while redirecting
       }
 
       // Check for email verification callback result (redirect from backend after verification)
