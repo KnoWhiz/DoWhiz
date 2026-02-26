@@ -4,9 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Sign in to DoWhiz to manage your digital employee integrations." />
+    <meta name="robots" content="noindex, nofollow" />
     <link rel="icon" type="image/svg+xml" href="/do-whiz-mark.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
+    <link rel="canonical" href="https://dowhiz.com/auth/" />
     <link rel="stylesheet" href="/legal.css" />
     <title>Sign In | DoWhiz</title>
     <style>
@@ -676,14 +678,15 @@
               <p style="margin-bottom: 0.5rem; font-size: 0.9rem; color: var(--text-muted, #888);">Or enter your channel ID directly:</p>
               <form id="link-form" class="auth-form">
                 <select id="link-type" class="auth-input">
+                  <option value="email">Email</option>
                   <option value="phone">Phone (SMS)</option>
                   <option value="discord">Discord</option>
                   <option value="slack">Slack</option>
                   <option value="telegram">Telegram</option>
                 </select>
-                <input type="text" id="link-identifier" class="auth-input" placeholder="e.g., 15551234567" required />
+                <input type="text" id="link-identifier" class="auth-input" placeholder="e.g., you@example.com" required />
                 <p id="link-help" style="font-size: 0.85rem; color: var(--text-muted, #888); margin: 0;">
-                  Enter your phone number with country code (e.g., 16309153426 for US)
+                  Enter the email address you want to link. A verification email will be sent to confirm ownership.
                 </p>
                 <button type="submit" class="auth-btn auth-btn-primary">Link Channel</button>
               </form>
@@ -1315,8 +1318,31 @@
         window.history.replaceState({}, document.title, window.location.pathname);
       }
 
+      // Check for email verification callback result
+      const emailVerifiedResult = urlParams.get('email_verified');
+      if (emailVerifiedResult) {
+        if (emailVerifiedResult === 'success') {
+          showMessage('Email verified successfully! It is now linked to your account.', 'success');
+          // Refresh identifiers list
+          supabase.auth.getSession().then(({ data: { session } }) => {
+            if (session) {
+              loadIdentifiers(session.access_token);
+            }
+          });
+        } else if (emailVerifiedResult === 'error') {
+          const reason = urlParams.get('reason') || 'unknown error';
+          showMessage(`Failed to verify email: ${reason}`, 'error');
+        }
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
       // Channel type placeholders and help text
       const channelInfo = {
+        email: {
+          placeholder: 'e.g., you@example.com',
+          help: 'Enter the email address you want to link. A verification email will be sent to confirm ownership.'
+        },
         phone: {
           placeholder: 'e.g., 15551234567',
           help: 'Enter your phone number with country code (e.g., 16309153426 for US)'

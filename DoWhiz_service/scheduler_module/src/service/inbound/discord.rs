@@ -373,7 +373,7 @@ mod tests {
 
         let user_store = UserStore::new(&config.users_db_path)?;
         let index_store = IndexStore::new(&config.task_index_path)?;
-        let account_store = AccountStore::new(state_root.join("accounts.db").to_str().unwrap())?;
+        let account_store = AccountStore::new(&config.ingestion_db_url)?;
 
         let sender = "12345".to_string();
         let channel_id = 67890u64;

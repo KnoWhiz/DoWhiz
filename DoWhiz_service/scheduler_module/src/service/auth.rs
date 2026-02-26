@@ -495,7 +495,76 @@ pub async fn link_identifier(
         Err(resp) => return resp.into_response(),
     };
 
-    // Create identifier (run on blocking thread)
+    // For email type, create a verification token and send email
+    if req.identifier_type == "email" {
+        let account_id = account.id;
+        let email = req.identifier.clone();
+        let store = state.account_store.clone();
+        let frontend_url = state.frontend_url.clone();
+
+        // Create verification token
+        let token_result = task::spawn_blocking(move || {
+            store.create_email_verification_token(account_id, &email)
+        })
+        .await
+        .map_err(|e| {
+            error!("spawn_blocking panicked: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
+        });
+
+        let verification_token = match token_result {
+            Ok(Ok(token)) => token,
+            Ok(Err(e)) => {
+                error!("Failed to create verification token: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": "Failed to create verification token"
+                    })),
+                )
+                    .into_response();
+            }
+            Err(resp) => return resp.into_response(),
+        };
+
+        // Send verification email
+        let verify_url = format!(
+            "{}/auth?verify_email={}",
+            frontend_url, verification_token.token
+        );
+
+        if let Err(e) = send_verification_email(&verification_token.email, &verify_url).await {
+            error!("Failed to send verification email: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to send verification email"
+                })),
+            )
+                .into_response();
+        }
+
+        info!(
+            "Sent verification email to {} for account {}",
+            verification_token.email, account.id
+        );
+
+        return (
+            StatusCode::OK,
+            Json(LinkResponse {
+                identifier_type: req.identifier_type,
+                identifier: req.identifier,
+                verified: false,
+                message: "Verification email sent. Please check your inbox.".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    // For other types (discord, slack, phone, etc.), create identifier directly
     let account_id = account.id;
     let identifier_type = req.identifier_type.clone();
     let identifier = req.identifier.clone();
@@ -518,14 +587,13 @@ pub async fn link_identifier(
                 "Linked identifier {}:{} to account {}",
                 req.identifier_type, req.identifier, account.id
             );
-            // TODO: Send verification code for phone/email channels
             (
                 StatusCode::CREATED,
                 Json(LinkResponse {
                     identifier_type: identifier.identifier_type,
                     identifier: identifier.identifier,
                     verified: identifier.verified,
-                    message: "Identifier linked. Verification may be required.".to_string(),
+                    message: "Identifier linked.".to_string(),
                 }),
             )
                 .into_response()
@@ -1612,6 +1680,113 @@ pub async fn slack_oauth_callback(
 }
 
 // ============================================================================
+// Email Verification
+// ============================================================================
+
+/// Send a verification email with a magic link
+async fn send_verification_email(email: &str, verify_url: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let postmark_token = std::env::var("POSTMARK_API_TOKEN")
+        .map_err(|_| "POSTMARK_API_TOKEN not configured")?;
+    let from_email = std::env::var("POSTMARK_FROM_EMAIL")
+        .unwrap_or_else(|_| "noreply@dowhiz.com".to_string());
+
+    let html_body = format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Verify your email</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; background: #f5f5f5;">
+    <div style="max-width: 500px; margin: 0 auto; background: white; border-radius: 8px; padding: 40px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+        <h1 style="margin: 0 0 20px; color: #333;">Verify your email</h1>
+        <p style="color: #666; line-height: 1.6;">Click the button below to verify your email address and link it to your DoWhiz account.</p>
+        <a href="{}" style="display: inline-block; margin: 20px 0; padding: 12px 24px; background: #333; color: white; text-decoration: none; border-radius: 6px; font-weight: 500;">Verify Email</a>
+        <p style="color: #999; font-size: 14px; margin-top: 30px;">This link expires in 24 hours. If you didn't request this, you can ignore this email.</p>
+    </div>
+</body>
+</html>"#,
+        verify_url
+    );
+
+    let text_body = format!(
+        "Verify your email\n\nClick the link below to verify your email address:\n{}\n\nThis link expires in 24 hours.",
+        verify_url
+    );
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post("https://api.postmarkapp.com/email")
+        .header("X-Postmark-Server-Token", &postmark_token)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "From": from_email,
+            "To": email,
+            "Subject": "Verify your email for DoWhiz",
+            "HtmlBody": html_body,
+            "TextBody": text_body,
+            "MessageStream": "outbound"
+        }))
+        .send()
+        .await?;
+
+    if !res.status().is_success() {
+        let error_text = res.text().await.unwrap_or_default();
+        return Err(format!("Postmark error: {}", error_text).into());
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VerifyEmailQuery {
+    pub token: String,
+}
+
+/// GET /auth/verify-email?token=<token>
+/// Verify an email address via magic link.
+pub async fn verify_email(
+    State(state): State<AuthState>,
+    Query(query): Query<VerifyEmailQuery>,
+) -> impl IntoResponse {
+    let frontend_url = state.frontend_url.clone();
+    let redirect_to = |path: &str| -> axum::response::Response {
+        Redirect::to(&format!("{}{}", frontend_url, path)).into_response()
+    };
+
+    let store = state.account_store.clone();
+    let token = query.token.clone();
+
+    let verify_result = task::spawn_blocking(move || store.verify_email_token(&token))
+        .await
+        .map_err(|e| {
+            error!("spawn_blocking panicked: {}", e);
+            "Internal error"
+        });
+
+    match verify_result {
+        Ok(Ok(identifier)) => {
+            info!(
+                "Email {} verified for account {}",
+                identifier.identifier, identifier.account_id
+            );
+            redirect_to("/auth/index.html?email_verified=success")
+        }
+        Ok(Err(AccountStoreError::TokenInvalid)) => {
+            warn!("Invalid or expired email verification token");
+            redirect_to("/auth/index.html?email_verified=error&reason=invalid_token")
+        }
+        Ok(Err(e)) => {
+            error!("Failed to verify email: {}", e);
+            redirect_to("/auth/index.html?email_verified=error&reason=database_error")
+        }
+        Err(_) => {
+            redirect_to("/auth/index.html?email_verified=error&reason=internal_error")
+        }
+    }
+}
+
+// ============================================================================
 // Tasks
 // ============================================================================
 
@@ -1727,6 +1902,7 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/auth/account", get(get_account).delete(delete_account))
         .route("/auth/link", post(link_identifier))
         .route("/auth/verify", post(verify_identifier))
+        .route("/auth/verify-email", get(verify_email))
         .route("/auth/unlink", delete(unlink_identifier))
         .route("/auth/memo", get(get_memo).post(update_memo))
         .route("/auth/discord", get(discord_oauth_start))
