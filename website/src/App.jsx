@@ -1181,6 +1181,11 @@ function App() {
                 </article>
               ))}
             </div>
+            <div className="faq-help-center">
+              <a href="/help-center/" className="access-playbook-link">
+                View the full Help Center with top 20 questions
+              </a>
+            </div>
           </div>
         </section>
 
@@ -1233,6 +1238,7 @@ function App() {
                 <a href="/trust-safety/" className="footer-link">Trust &amp; Safety</a>
                 <a href="/integrations/" className="footer-link">Integrations</a>
                 <a href="/user-guide/" className="footer-link">User Guide</a>
+                <a href="/help-center/" className="footer-link">Help Center</a>
                 <a href="mailto:admin@dowhiz.com" className="footer-link">Contact</a>
               </div>
             </div>
