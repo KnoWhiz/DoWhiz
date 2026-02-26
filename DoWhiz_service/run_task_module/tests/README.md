@@ -11,8 +11,9 @@ cargo test
 ```
 
 The tests spin up a temporary workspace, inject a fake `codex` executable, and
-verify that `run_task` writes `reply_email_draft.html`, creates the
-attachments directory, and handles error cases (missing env, missing CLI,
+verify that `run_task` writes channel-appropriate reply files
+(`reply_email_draft.html` for email-style channels, `reply_message.txt` for chat-style channels),
+creates the attachments directory, and handles error cases (missing env, missing CLI,
 failed CLI, missing output, invalid paths).
 
 ## Optional real Codex E2E test (RUN_CODEX_E2E)
@@ -55,8 +56,8 @@ workspace/
 2) Ensure AZURE_OPENAI_API_KEY_BACKUP is set.
 3) Run a small Rust harness that calls run_task from run_task_module (see `src/run_task/`).
 4) Verify the outputs:
-   - reply_email_draft.html exists in the workspace root.
-   - reply_email_attachments/ exists (and contains any generated attachments).
+   - email-style channels: `reply_email_draft.html` + `reply_email_attachments/`
+   - chat-style channels: `reply_message.txt` + `reply_attachments/`
    - Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.
 
 ## Production Deployment

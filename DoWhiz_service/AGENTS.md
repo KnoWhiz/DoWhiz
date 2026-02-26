@@ -20,7 +20,7 @@
 - When using the inbound gateway, run workers with `--skip-hook --skip-ngrok` (workers only consume the ingestion queue; webhooks hit the gateway).
 - `cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001`: run the service directly.
 - `./scripts/run_gateway_local.sh`: start the inbound gateway locally.
-- The inbound gateway requires `INGESTION_QUEUE_BACKEND=servicebus` plus Service Bus + Azure Blob env vars; Postgres ingestion is legacy.
+- The inbound gateway requires `INGESTION_QUEUE_BACKEND=servicebus`; raw payload storage backend is configurable (`supabase` default, `azure` recommended for production). Postgres ingestion remains legacy/worker-only.
 - `docker build -t dowhiz-service .`: build the container image.
 
 ## Coding Style & Naming Conventions

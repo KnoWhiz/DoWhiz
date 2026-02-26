@@ -73,6 +73,8 @@ Note: ingestion-queue tests use Postgres by default; set `SUPABASE_DB_URL` (or `
 | UT-SCH-46 | test_queue_sequential_writes | memory_queue::MemoryWriteQueue | DoWhiz_service/scheduler_module/src/memory_queue.rs | Sequential queued writes | Cross-process locking | AUTO | cargo test -p scheduler_module |
 | UT-SCH-47 | test_concurrent_submits_serialized | memory_queue::MemoryWriteQueue | DoWhiz_service/scheduler_module/src/memory_queue.rs | Serialized concurrent submits | High contention | AUTO | cargo test -p scheduler_module |
 | UT-SCH-48 | test_blob_store_roundtrip | blob_store::BlobStore | DoWhiz_service/scheduler_module/src/blob_store.rs | Azure memo read/write/delete | Supabase/local fallback | LIVE | cargo test -p scheduler_module blob_store -- --ignored --nocapture |
+| UT-SCH-49 | test_config_from_env | google_drive_changes::GoogleDriveChangesConfig | DoWhiz_service/scheduler_module/src/google_drive_changes.rs | Push config defaults/shape | Real webhook delivery | AUTO | cargo test -p scheduler_module |
+| UT-SCH-50 | test_channel_needs_renewal | google_drive_changes::WatchChannel::needs_renewal | DoWhiz_service/scheduler_module/src/google_drive_changes.rs | Renewal window logic | Real channel lifecycle | AUTO | cargo test -p scheduler_module |
 
 ## Unit Tests: scheduler_module (adapters)
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
@@ -213,6 +215,7 @@ Note: ingestion-queue tests use Postgres by default; set `SUPABASE_DB_URL` (or `
 | GAP-12 | P1 | WhatsApp inbound media/interactive coverage | adapters/whatsapp.rs::WhatsAppInboundAdapter::parse | Media/interactive payloads not covered | PLANNED | Add unit tests for media + interactive payloads |
 | GAP-13 | P1 | WhatsApp outbound adapter send/error mapping | adapters/whatsapp.rs::WhatsAppOutboundAdapter::send | No outbound/mock coverage | PLANNED | Mock Graph API or inject base URL |
 | GAP-14 | P1 | Raw payload storage upload/download | raw_payload_store::{upload_raw_payload, download_raw_payload} | No Supabase storage tests | PLANNED | Run against a test bucket or mock HTTP |
+| GAP-15 | P1 | Google Drive push webhook integration | inbound_gateway/google_drive_webhook.rs + google_workspace poller | No automated end-to-end test for notification -> immediate file poll -> enqueue path | PLANNED | Mock push headers + notifier and assert single-file poll/enqueue |
 
 ## Test Report Template
 | Test ID | Status (PASS/FAIL/SKIP) | Evidence (log/summary) | Notes/Reason |

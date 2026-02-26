@@ -13,6 +13,7 @@ flowchart TD
   C -->|Google Sheets| C8[Sheets Poller]
   C -->|Google Slides| C9[Slides Poller]
   C -->|WhatsApp| C10[HTTP /whatsapp/webhook]
+  C -->|Google Drive Push| C11[HTTP /webhooks/google-drive-changes]
 
   C1 --> D1{Verify token?}
   C2 --> D2{URL verification?}
@@ -23,6 +24,7 @@ flowchart TD
   C8 --> D8[Fetch comments -> filter actionable items]
   C9 --> D9[Fetch comments -> filter actionable items]
   C10 --> D10{Webhook verify?}
+  C11 --> D11{Push enabled and channel valid?}
 
   D1 -->|fail| X1[401/400]
   D1 -->|ok| E1[Parse Postmark payload]
@@ -34,6 +36,8 @@ flowchart TD
   D5 -->|yes| E5
   D10 -->|yes| X5[return challenge]
   D10 -->|no| E10
+  D11 -->|no| X3
+  D11 -->|yes| N1[Notify workspace poller for changed file]
 
   E1 --> F1[Extract service address]
   E2[Parse Slack payload] --> F2[Extract api_app_id]
@@ -55,6 +59,8 @@ flowchart TD
   C8 --> E8
   C9 --> E9
   C10 --> E10
+  N1 --> D7
+  N1 --> D8
 
   F1 --> G{Route match}
   F2 --> G
@@ -73,7 +79,7 @@ flowchart TD
 
   H --> I[Build IngestionEnvelope]
   I --> J[Compute dedupe_key]
-  J --> K[Store raw payload (Azure Blob)]
+  J --> K[Store raw payload (Azure Blob or Supabase)]
   K --> L[Enqueue ingestion queue (Service Bus)]
   L --> M[worker poll shared queue (filter by employee_id)]
   M --> O[process_ingestion_envelope]
@@ -86,7 +92,7 @@ flowchart TD
   P -->|WhatsApp| Q5[Quick response router?]
   P -->|Email| R1[process_inbound_payload]
   P -->|SMS| R2[process_sms_message]
-  P -->|Google Docs/Sheets/Slides| R3[process_google_docs_message]
+  P -->|Google Docs/Sheets/Slides| R3[process_google_workspace_message]
 
   Q1 -->|Simple| S1[Send quick Slack reply]
   Q1 -->|Complex/Pass| R1S[process_slack_event]

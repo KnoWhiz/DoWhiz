@@ -5,9 +5,9 @@
 By default open RUN_CODEX_E2E=1 and POSTMARK_LIVE_TEST=1 to use real emails address (mini-mouse@dowhiz.com / deep-tutor@deep-tutor.com to send emails to proto@dowhiz.com / oliver@dowhiz.com / maggie@dowhiz.com). For ngrok domain you can use: `https://shayne-laminar-lillian.ngrok-free.dev`
 
 ## Project Structure & Module Organization
-- `DoWhiz_service/`: Rust backend (inbound gateway + worker service, scheduler, task runner, email/webhook handling). Modules live under `*_module/`, with shared assets in `skills/` and employee configs in `employees/` plus `employee.toml`. Ingestion queue defaults to Postgres but the inbound gateway requires Azure Service Bus; raw payloads default to Supabase storage while the gateway writes to Azure Blob Storage.
+- `DoWhiz_service/`: Rust backend (inbound gateway + worker service, scheduler, task runner, email/webhook handling). Modules live under `*_module/`, with shared assets in `skills/` and employee configs in `employees/` plus `employee.toml`. Ingestion queue defaults to Postgres but the inbound gateway requires Azure Service Bus; raw payload storage defaults to Supabase unless `RAW_PAYLOAD_STORAGE_BACKEND=azure` is set (recommended for gateway production flow).
 - `website/`: React 19 + Vite marketing site (`src/`, `public/`, `eslint.config.js`).
-- `assets/`, `api_reference_documentation/`, `example_files/`, `external/openclaw/`: supporting docs, reference material, and design assets.
+- `assets/`, `reference_documentation/`, `example_files/`, `external/openclaw/`: supporting docs, reference material, and design assets.
 
 ## Build, Test, and Development Commands
 Backend (from repo root):
@@ -41,7 +41,7 @@ For gateway and multi-employee setups, see `DoWhiz_service/README.md`.
 After completing code changes, you must design targeted, detailed unit tests and end-to-end tests to ensure both new and existing functionality behave as expected. Debug and resolve any issues found during test runs. If certain issues require manual intervention, provide a detailed report and follow-up steps.
 
 ## Test Checklist and Report (DoWhiz_service)
-- Canonical checklist: `test_plans/DoWhiz_service_tests.md`
+- Canonical checklist: `reference_documentation/test_plans/DoWhiz_service_tests.md`
 - After any DoWhiz_service change, run all relevant AUTO tests from the checklist.
 - For LIVE/MANUAL/PLANNED entries, mark SKIP with a reason unless explicitly run.
 - If the user asks so, include the Test Report table from the checklist in your final response (PASS/FAIL/SKIP per Test ID). Otherwise by default summarize the tests results.

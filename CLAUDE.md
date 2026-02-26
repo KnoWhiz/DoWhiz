@@ -110,7 +110,7 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 ## Key Concepts
 
 ### Task Kinds
-- **SendEmail**: Send HTML email with attachments
+- **SendReply**: Send outbound reply on a channel (email/slack/discord/sms/telegram/whatsapp/google workspace)
 - **RunTask**: Invoke Codex/Claude CLI to generate reply
 - **Noop**: Testing placeholder
 
@@ -119,7 +119,7 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 - **OneShot**: Single execution at specific DateTime
 
 ### Per-User Isolation
-Each user gets separate SQLite databases and workspace directories. Concurrency limits: global max 10, per-user max 3.
+Each user gets separate SQLite databases and workspace directories. Default concurrency limits are global 200 and per-user 200 (configurable via env).
 
 ### Follow-up Scheduling
 Agents emit scheduled tasks in stdout:
@@ -134,7 +134,7 @@ SCHEDULED_TASKS_JSON_END
 Copy `.env.example` to `DoWhiz_service/.env` and configure:
 - `POSTMARK_SERVER_TOKEN` - Postmark API key (required)
 - `AZURE_OPENAI_API_KEY_BACKUP` - Required for Codex and Claude runners (Foundry config)
-- `AZURE_OPENAI_ENDPOINT_BACKUP` - Required for Codex runner
+- `AZURE_OPENAI_ENDPOINT_BACKUP` - Optional endpoint override for components that use Azure OpenAI directly (Codex runner endpoint is fixed in code)
 
 Optional:
 - `CODEX_DISABLED=1` - Bypass Codex CLI (uses placeholder replies)
@@ -142,14 +142,14 @@ Optional:
 - `GITHUB_USERNAME`, `GITHUB_PERSONAL_ACCESS_TOKEN` - GitHub access for agents
 - `OPENAI_API_KEY` - Enable message router quick replies
 - `INGESTION_QUEUE_BACKEND=servicebus` + `SERVICE_BUS_CONNECTION_STRING` + `SERVICE_BUS_QUEUE_NAME` - Required when running the inbound gateway
-- `AZURE_STORAGE_ACCOUNT`/`AZURE_STORAGE_CONTAINER`/`AZURE_STORAGE_SAS_TOKEN` - Required for gateway raw payload storage (Azure Blob)
+- `AZURE_STORAGE_CONTAINER_INGEST` + `AZURE_STORAGE_SAS_TOKEN` (and optionally `AZURE_STORAGE_ACCOUNT` or `AZURE_STORAGE_CONTAINER_SAS_URL`) - Raw payload storage when `RAW_PAYLOAD_STORAGE_BACKEND=azure`
 
 ## Testing Expectations
 
 After completing code changes, you must design targeted, detailed unit tests and end-to-end tests to ensure both new and existing functionality behave as expected. Debug and resolve any issues found during test runs. If certain issues require manual intervention, provide a detailed report and follow-up steps.
 
 ## Test Checklist and Report (DoWhiz_service)
-- Canonical checklist: `test_plans/DoWhiz_service_tests.md`
+- Canonical checklist: `reference_documentation/test_plans/DoWhiz_service_tests.md`
 - After any DoWhiz_service change, run all relevant AUTO tests from the checklist.
 - For LIVE/MANUAL/PLANNED entries, mark SKIP with a reason unless explicitly run.
 - If the user asks so, include the Test Report table from the checklist in your final response (PASS/FAIL/SKIP per Test ID). Otherwise by default summarize the tests results.
@@ -169,125 +169,20 @@ When opening PRs, include a short summary, tests run, and any required env/confi
 
 # Operations & Debugging (Azure VM)
 
-## IMPORTANT: Read This Before Debugging
+Use `DoWhiz_service/OPERATIONS.md` as the source of truth for VM paths, PM2 commands, and troubleshooting runbooks.
 
-Before debugging DoWhiz deployment issues, read `DoWhiz_service/OPERATIONS.md` for:
-- Azure VM paths and PM2 commands
-- Common issues and solutions
-- Recent optimizations
-
-## Quick Reference
-
-### Azure VM Info
-- **Server root**: `/home/azureuser/server/`
-- **DoWhiz Service**: `/home/azureuser/server/DoWhiz_service/`
-- **PM2 logs**: `/home/azureuser/server/.pm2/logs/`
-- **PM2 requires**: `export HOME=/home/azureuser/server`
-
-### Common Issues
-
-#### 1. Azure Service Bus Enqueue Error
-```
-gateway enqueue error: service bus error: HttpResponse(400,unknown)
-```
-**Cause**: Service Bus connection string misconfigured or expired
-**Fix**: Check `AZURE_SERVICE_BUS_CONNECTION_STRING` in `.env`
-
-#### 2. "missing policy name in connection string"
-**Cause**: Azure Service Bus SAS policy not specified
-**Fix**: Connection string format should be:
-```
-Endpoint=sb://<namespace>.servicebus.windows.net/;SharedAccessKeyName=<policy>;SharedAccessKey=<key>
-```
-
-#### 3. Slides/Sheets comments not processed
-**Check order**:
-1. Is `GOOGLE_SLIDES_ENABLED=true` in `.env`?
-2. Are there Service Bus errors in logs?
-3. Is `scheduler_user_max_concurrency` causing blocking?
-4. Check `google_workspace_processed.db` for already-processed comments
-
-#### 4. 20+ minute delay for tasks
-**Root cause**: `SCHEDULER_USER_MAX_CONCURRENCY=1`
-- Only one task per user runs at a time
-- Affects ALL channels (Email, Slack, Discord, Google Docs/Sheets/Slides)
-- Team discussion needed before increasing
-
-### Diagnostic Commands for VM
-
+Quick checks:
 ```bash
-# Check PM2 status
 HOME=/home/azureuser/server pm2 list
-
-# Check recent errors
-tail -100 /home/azureuser/server/.pm2/logs/dowhiz-inbound-gateway-out.log | grep -i error
-
-# Check Slides polling
-grep -i "slides|presentation" /home/azureuser/server/.pm2/logs/dowhiz-inbound-gateway-out.log | tail -30
-
-# Check Service Bus errors
-grep -i "service bus|enqueue" /home/azureuser/server/.pm2/logs/dowhiz-inbound-gateway-out.log | tail -20
+pm2 logs dowhiz-inbound-gateway
+pm2 logs dowhiz-rust-service
+grep -i "service bus\\|enqueue\\|error" /home/azureuser/server/.pm2/logs/dowhiz-inbound-gateway-out.log | tail -50
 ```
 
----
-
-## Session Notes (Update After Each Session)
-
-### 2026-02-25: Slides Debug + Push Notifications
-
-**Session 1: Slides Debug**
-- Root cause: Azure Service Bus enqueue failing with `HttpResponse(400,unknown)`
-- Comments detected but cannot be queued for processing
-
-**Session 2: Increase Concurrency + Google Drive Push Notifications**
-- Increased `SCHEDULER_MAX_CONCURRENCY` and `SCHEDULER_USER_MAX_CONCURRENCY` defaults from 10/3 to 200/200
-- Implemented Google Drive push notifications for near-real-time comment detection
-
-**Files Modified**:
-- `DoWhiz_service/scheduler_module/src/service/config.rs` - Increased concurrency defaults
-- `DoWhiz_service/scheduler_module/src/bin/inbound_gateway.rs` - Added push notification init
-- `DoWhiz_service/scheduler_module/src/bin/inbound_gateway/google_drive_webhook.rs` - NEW: Webhook handler
-- `DoWhiz_service/scheduler_module/src/bin/inbound_gateway/google_workspace.rs` - Push notification integration
-- `DoWhiz_service/scheduler_module/src/bin/inbound_gateway/state.rs` - Added drive manager to state
-- `DoWhiz_service/scheduler_module/src/google_workspace_poller.rs` - Added list_files, poll_single_file
-- `DoWhiz_service/scheduler_module/src/lib.rs` - Export google_drive_changes module
-
-**Commits** (feature/google-drive-push-notifications branch):
-- `11b2389` - Increase scheduler concurrency defaults to 200
-- `626c21a` - Add Google Drive push notifications for real-time comment detection
-
-**To Enable Push Notifications**:
-```bash
-GOOGLE_DRIVE_PUSH_ENABLED=true
-GOOGLE_DRIVE_WEBHOOK_URL=https://your-domain.com/webhooks/google-drive-changes
-```
-
-**Next Steps**:
-1. Merge feature branch to main
-2. Deploy to VM
-3. Configure webhook URL in Google Cloud Console
-
----
-
-## Code Patterns
-
-### Google Workspace Comment Flow
-```
-DoWhiz_service/scheduler_module/src/bin/inbound_gateway/google_workspace.rs
-  └─> spawn_google_workspace_poller()
-       └─> poll_workspace_comments() [every 15s]
-            └─> GoogleWorkspacePoller.poll_sheets() / poll_slides()
-                 └─> GoogleCommentsClient.list_comments()
-                      └─> filter_actionable_comments()
-                           └─> resolve_route()
-                                └─> state.queue.enqueue()  <-- THIS IS FAILING
-```
-
-### Key Environment Variables
-- `GOOGLE_DOCS_ENABLED` / `GOOGLE_SHEETS_ENABLED` / `GOOGLE_SLIDES_ENABLED`
-- `GOOGLE_WORKSPACE_POLL_INTERVAL_SECS` (default: 15)
-- `SCHEDULER_MAX_CONCURRENCY` (default: 200)
-- `SCHEDULER_USER_MAX_CONCURRENCY` (default: 200)
-- `GOOGLE_DRIVE_PUSH_ENABLED` (enable push notifications)
-- `GOOGLE_DRIVE_WEBHOOK_URL` (webhook endpoint for push notifications)
-- `AZURE_SERVICE_BUS_CONNECTION_STRING` / `SCALE_OLIVER_SERVICE_BUS_CONNECTION_STRING`
+Key env names to verify first:
+- `SERVICE_BUS_CONNECTION_STRING` (or `SCALE_OLIVER_SERVICE_BUS_CONNECTION_STRING`)
+- `SERVICE_BUS_QUEUE_NAME`
+- `INGESTION_QUEUE_BACKEND=servicebus`
+- `RAW_PAYLOAD_STORAGE_BACKEND=azure` (recommended for gateway production flow)
+- `AZURE_STORAGE_CONTAINER_INGEST`
+- `AZURE_STORAGE_SAS_TOKEN` (or `AZURE_STORAGE_CONTAINER_SAS_URL`)
