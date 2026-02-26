@@ -34,3 +34,4 @@ DoWhiz_service/bin/google-docs
 DoWhiz_service/.env.example
 /tmp
 /test_reports
+DoWhiz_service/.env.production
