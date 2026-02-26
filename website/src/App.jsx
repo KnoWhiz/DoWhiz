@@ -491,25 +491,16 @@ function App() {
 
       rows.forEach((row) => {
         let maxDesc = 0;
-        let maxExample = 0;
         row.cards.forEach((card) => {
           const desc = card.querySelector('.role-desc');
-          const ex = card.querySelector('.role-example');
           if (desc) {
             maxDesc = Math.max(maxDesc, desc.offsetHeight);
-          }
-          if (ex) {
-            maxExample = Math.max(maxExample, ex.offsetHeight);
           }
         });
         row.cards.forEach((card) => {
           const desc = card.querySelector('.role-desc');
-          const ex = card.querySelector('.role-example');
           if (desc && maxDesc) {
             desc.style.minHeight = `${maxDesc}px`;
-          }
-          if (ex && maxExample) {
-            ex.style.minHeight = `${maxExample}px`;
           }
         });
       });
@@ -517,8 +508,19 @@ function App() {
 
     syncRoleHeights();
     window.addEventListener('resize', syncRoleHeights);
+    window.addEventListener('load', syncRoleHeights);
+
+    const roleGrid = document.querySelector('.roles-grid');
+    const resizeObserver = new ResizeObserver(() => syncRoleHeights());
+    if (roleGrid) {
+      resizeObserver.observe(roleGrid);
+      Array.from(roleGrid.children).forEach((child) => resizeObserver.observe(child));
+    }
+
     return () => {
       window.removeEventListener('resize', syncRoleHeights);
+      window.removeEventListener('load', syncRoleHeights);
+      resizeObserver.disconnect();
     };
   }, []);
 
@@ -1164,13 +1166,19 @@ function App() {
                           ))}
                         </ul>
                       </div>
-                      <div className="how-line" aria-hidden="true"></div>
-                      <div className="how-card output">
-                        <div className="how-card-heading">
-                          <img src="/icons/output.svg" alt="Output icon" className="how-card-icon" />
-                          <span className="how-card-title">Output</span>
+                      <div className="how-connector-wrap" aria-hidden="true">
+                        <span className="how-connector-line"></span>
+                        <span className="how-connector-dot"></span>
+                      </div>
+                      <div className="how-output-wrap">
+                        <span className="how-output-dot" aria-hidden="true"></span>
+                        <div className="how-card output">
+                          <div className="how-card-heading">
+                            <img src="/icons/output.svg" alt="Output icon" className="how-card-icon" />
+                            <span className="how-card-title">Output</span>
+                          </div>
+                          <p className="how-card-intro">{step.output}</p>
                         </div>
-                        <p className="how-card-intro">{step.output}</p>
                       </div>
                     </div>
                   </div>
@@ -1336,11 +1344,15 @@ function App() {
                   Notes on building multi-channel digital employees, shipping integrations, and improving handoffs.
                 </p>
               </div>
-              <a className="btn btn-primary blog-header-btn" href="/blog/">View all posts</a>
+              <a className="btn btn-secondary blog-header-btn" href="/blog/">View all posts</a>
             </div>
             <div className="blog-grid">
               {blogPosts.map((post) => (
-                <article key={post.title} className="blog-card">
+                <article
+                  key={post.title}
+                  className="blog-card"
+                  role="article"
+                >
                   <div className="blog-meta">
                     <span className="blog-tag">{post.tag}</span>
                     <span className="blog-date">{post.date}</span>
@@ -1349,7 +1361,7 @@ function App() {
                   <p>{post.excerpt}</p>
                   <a className="blog-link" href={post.link}>
                     Read on the blog
-                    <img src="/icons/forward.svg" alt="" aria-hidden="true" className="blog-link-icon" />
+                    <span aria-hidden="true" className="blog-link-icon"></span>
                   </a>
                 </article>
               ))}
