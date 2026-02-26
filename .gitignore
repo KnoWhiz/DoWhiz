@@ -33,4 +33,5 @@ mvp_python/email_pipeline/state/postmark_processed_ids.txt
 DoWhiz_service/bin/google-docs
 DoWhiz_service/.env.example
 /tmp
+/test_reports
 DoWhiz_service/.env.production

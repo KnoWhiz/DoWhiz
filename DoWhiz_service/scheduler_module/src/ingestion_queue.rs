@@ -6,6 +6,7 @@ use std::env;
 use tracing::{error, warn};
 use uuid::Uuid;
 
+use crate::env_alias::{bool_with_scale_oliver, var_with_scale_oliver};
 use crate::ingestion::IngestionEnvelope;
 use crate::service_bus_queue::ServiceBusIngestionQueue;
 
@@ -67,9 +68,8 @@ pub struct PostgresIngestionQueue {
 }
 
 pub fn resolve_ingestion_queue_backend() -> String {
-    env::var("INGESTION_QUEUE_BACKEND")
-        .ok()
-        .map(|value| value.trim().to_ascii_lowercase())
+    var_with_scale_oliver("INGESTION_QUEUE_BACKEND")
+        .map(|value| value.to_ascii_lowercase())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "postgres".to_string())
 }
@@ -547,11 +547,7 @@ fn resolve_pool_size() -> u32 {
 }
 
 fn resolve_bool_env(key: &str) -> bool {
-    env::var(key)
-        .ok()
-        .map(|value| value.trim().to_ascii_lowercase())
-        .map(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
-        .unwrap_or(false)
+    bool_with_scale_oliver(key, false)
 }
 
 fn resolve_pooler_db_url() -> Option<String> {
@@ -646,9 +642,7 @@ mod tests {
         let db_url = match resolve_db_url() {
             Ok(url) if !url.trim().is_empty() => url,
             Err(err) => {
-                eprintln!(
-                    "Skipping ingestion queue postgres tests; database URL not set: {err}"
-                );
+                eprintln!("Skipping ingestion queue postgres tests; database URL not set: {err}");
                 return None;
             }
             _ => {
@@ -665,8 +659,8 @@ mod tests {
         if is_service_bus_backend() {
             dotenvy::dotenv().ok();
             env::set_var("SERVICE_BUS_QUEUE_PER_EMPLOYEE", "0");
-            let test_queue = env::var("SERVICE_BUS_TEST_QUEUE_NAME")
-                .unwrap_or_else(|_| "ingestion-test".to_string());
+            let test_queue = var_with_scale_oliver("SERVICE_BUS_TEST_QUEUE_NAME")
+                .unwrap_or_else(|| "ingestion-test".to_string());
             env::set_var("SERVICE_BUS_QUEUE_NAME", &test_queue);
             let queue = ServiceBusIngestionQueue::from_env().expect("service bus queue");
             let dedupe_key = format!("dedupe-{}", Uuid::new_v4());

@@ -255,7 +255,10 @@ Optional webhook verification:
 
 ### Azure Deployment (Rust Gateway + Service Bus + Blob + Workers)
 
-This is the recommended Azure production flow. The Rust inbound gateway handles **all ingress** (email + Slack/Discord/etc), stores raw payloads in Azure Blob, and enqueues messages into Azure Service Bus. Workers (`rust_service`) run on VMs or containers and poll Service Bus. This removes the separate Azure Function ingress and keeps routing logic in one place.
+This is the recommended Azure production flow. The Rust inbound gateway handles **all ingress** (email + Slack/Discord/etc), stores raw payloads in Azure Blob, and enqueues messages into Azure Service Bus. Workers (`rust_service`) run on VMs or containers and poll Service Bus.
+
+For Docker-isolated RunTask execution on a VM (host Docker + per-task containers), see:
+`DoWhiz_service/docs/azure_vm_worker.md`.
 
 **Step 1: Provision Azure resources**
 ```bash
@@ -308,7 +311,6 @@ export AZURE_STORAGE_SAS_TOKEN="..."
 Notes:
 - All employees share the same Service Bus queue; workers filter by `employee_id` in the envelope.
 - Keep `gateway.toml` and `employee.toml` consistent across the gateway and workers.
-- If you previously used the Azure Function ingress, stop it after switching Postmark/webhooks to the Rust gateway.
 
 **Local gateway + Docker workers (Service Bus + Azure Blob)**
 
