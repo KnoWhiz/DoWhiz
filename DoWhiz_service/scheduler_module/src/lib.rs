@@ -8,6 +8,7 @@ pub mod env_alias;
 pub mod google_auth;
 pub mod google_docs_poller;
 pub mod google_workspace_poller;
+pub mod gtm_agents;
 pub mod ingestion;
 pub mod ingestion_queue;
 pub mod mailbox;

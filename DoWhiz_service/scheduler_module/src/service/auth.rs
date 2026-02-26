@@ -4,7 +4,8 @@ use axum::response::{IntoResponse, Redirect};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use base64::Engine;
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use chrono::Utc;
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::task;
@@ -13,6 +14,12 @@ use uuid::Uuid;
 
 use crate::account_store::{AccountStore, AccountStoreError};
 use crate::blob_store::BlobStore;
+use crate::gtm_agents::{
+    AccountSignal, AgentId, AgentTaskEnvelope, ChannelPolicy, ClaimRisk, GtmChannel,
+    HubspotModeAExecutor, IcpScoutInput, IcpTier, MessageBundle, MessageVariant, ModeAAgentEngine,
+    ModeAOutboundDispatchInput, ModeAOutboundDispatchOutput, OutboundSdrInput, Phase1AgentEngine,
+    PolicyPack, SegmentContact, SequencePolicy, TaskPriority,
+};
 use crate::user_store::UserStore;
 use crate::{load_tasks_with_status, TaskStatusSummary};
 
@@ -40,8 +47,8 @@ pub struct AuthState {
 /// JWT Claims from Supabase token
 #[derive(Debug, Deserialize)]
 struct JwtClaims {
-    sub: Uuid,           // User ID
-    exp: usize,          // Expiration time
+    sub: Uuid,  // User ID
+    exp: usize, // Expiration time
     #[serde(default)]
     aud: Option<String>, // Audience (optional)
     #[serde(default)]
@@ -142,6 +149,62 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(|s| s.to_string())
+}
+
+async fn resolve_authenticated_account_id(
+    state: &AuthState,
+    headers: &HeaderMap,
+) -> Result<Uuid, axum::response::Response> {
+    let token = match extract_bearer_token(headers) {
+        Some(t) => t,
+        None => {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response());
+        }
+    };
+
+    let auth_user = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(user) => user,
+        Err((status, msg)) => {
+            return Err((status, Json(serde_json::json!({ "error": msg }))).into_response());
+        }
+    };
+
+    let store = state.account_store.clone();
+    let account_lookup = task::spawn_blocking(move || store.get_account_by_auth_user(auth_user.id))
+        .await
+        .map_err(|err| {
+            error!("spawn_blocking panicked: {}", err);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
+                .into_response()
+        })?;
+
+    match account_lookup {
+        Ok(Some(account)) => Ok(account.id),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error": "No DoWhiz account found. Complete sign-in again to provision account."
+            })),
+        )
+            .into_response()),
+        Err(err) => {
+            error!("Failed to resolve account: {}", err);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Database error" })),
+            )
+                .into_response())
+        }
+    }
 }
 
 // ============================================================================
@@ -503,17 +566,16 @@ pub async fn link_identifier(
         let frontend_url = state.frontend_url.clone();
 
         // Create verification token
-        let token_result = task::spawn_blocking(move || {
-            store.create_email_verification_token(account_id, &email)
-        })
-        .await
-        .map_err(|e| {
-            error!("spawn_blocking panicked: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "Internal error" })),
-            )
-        });
+        let token_result =
+            task::spawn_blocking(move || store.create_email_verification_token(account_id, &email))
+                .await
+                .map_err(|e| {
+                    error!("spawn_blocking panicked: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": "Internal error" })),
+                    )
+                });
 
         let verification_token = match token_result {
             Ok(Ok(token)) => token,
@@ -1373,7 +1435,10 @@ pub async fn discord_oauth_callback(
         .get("https://discord.com/api/users/@me")
         .header(
             "Authorization",
-            format!("{} {}", discord_token.token_type, discord_token.access_token),
+            format!(
+                "{} {}",
+                discord_token.token_type, discord_token.access_token
+            ),
         )
         .send()
         .await;
@@ -1424,10 +1489,9 @@ pub async fn discord_oauth_callback(
     // Link Discord ID to account
     let store = state.account_store.clone();
     let discord_id = discord_user.id.clone();
-    let link_result = task::spawn_blocking(move || {
-        store.create_identifier(account.id, "discord", &discord_id)
-    })
-    .await;
+    let link_result =
+        task::spawn_blocking(move || store.create_identifier(account.id, "discord", &discord_id))
+            .await;
 
     match link_result {
         Ok(Ok(_identifier)) => {
@@ -1610,7 +1674,9 @@ pub async fn slack_oauth_callback(
 
     // Check if Slack returned an error
     if !slack_response.ok {
-        let error_msg = slack_response.error.unwrap_or_else(|| "unknown".to_string());
+        let error_msg = slack_response
+            .error
+            .unwrap_or_else(|| "unknown".to_string());
         error!("Slack OAuth error: {}", error_msg);
         return redirect_to(&format!(
             "/auth/index.html?slack=error&reason={}",
@@ -1655,10 +1721,8 @@ pub async fn slack_oauth_callback(
     // Link Slack ID to account
     let store = state.account_store.clone();
     let slack_id = slack_user.id.clone();
-    let link_result = task::spawn_blocking(move || {
-        store.create_identifier(account.id, "slack", &slack_id)
-    })
-    .await;
+    let link_result =
+        task::spawn_blocking(move || store.create_identifier(account.id, "slack", &slack_id)).await;
 
     match link_result {
         Ok(Ok(_identifier)) => {
@@ -1684,11 +1748,14 @@ pub async fn slack_oauth_callback(
 // ============================================================================
 
 /// Send a verification email with a magic link
-async fn send_verification_email(email: &str, verify_url: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn send_verification_email(
+    email: &str,
+    verify_url: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let postmark_token = std::env::var("POSTMARK_SERVER_TOKEN")
         .map_err(|_| "POSTMARK_SERVER_TOKEN not configured")?;
-    let from_email = std::env::var("POSTMARK_FROM_EMAIL")
-        .unwrap_or_else(|_| "noreply@dowhiz.com".to_string());
+    let from_email =
+        std::env::var("POSTMARK_FROM_EMAIL").unwrap_or_else(|_| "noreply@dowhiz.com".to_string());
 
     let html_body = format!(
         r#"<!DOCTYPE html>
@@ -1780,9 +1847,7 @@ pub async fn verify_email(
             error!("Failed to verify email: {}", e);
             redirect_to("/auth/index.html?email_verified=error&reason=database_error")
         }
-        Err(_) => {
-            redirect_to("/auth/index.html?email_verified=error&reason=internal_error")
-        }
+        Err(_) => redirect_to("/auth/index.html?email_verified=error&reason=internal_error"),
     }
 }
 
@@ -1893,6 +1958,462 @@ pub async fn get_tasks(
 }
 
 // ============================================================================
+// GTM Mode A API
+// ============================================================================
+
+#[derive(Debug, Deserialize)]
+pub struct GtmIcpPreviewRequest {
+    pub leads: Vec<GtmLeadInput>,
+    pub min_sample_size: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GtmLeadInput {
+    pub recipient_id: Option<Uuid>,
+    pub account_id: Option<Uuid>,
+    pub email: String,
+    pub first_name: Option<String>,
+    pub job_title: Option<String>,
+    pub company_name: Option<String>,
+    pub timezone: Option<String>,
+    pub company_size: Option<u32>,
+    pub industry: Option<String>,
+    pub region: Option<String>,
+    pub product_events_14d: Option<u32>,
+    pub support_tickets_30d: Option<u32>,
+    pub won_deals_12m: Option<u32>,
+    pub lost_deals_12m: Option<u32>,
+    pub churned: Option<bool>,
+    pub activation_days: Option<u32>,
+    pub ltv_usd: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GtmIcpPreviewLead {
+    pub recipient_id: Uuid,
+    pub account_id: Uuid,
+    pub email: String,
+    pub first_name: Option<String>,
+    pub job_title: Option<String>,
+    pub company_name: Option<String>,
+    pub timezone: Option<String>,
+    pub company_size: u32,
+    pub industry: String,
+    pub region: String,
+    pub score_0_100: u8,
+    pub tier: IcpTier,
+    pub recommended: bool,
+    pub top_drivers: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GtmIcpPreviewResponse {
+    pub status: String,
+    pub errors: Vec<String>,
+    pub segment_definitions: Vec<crate::gtm_agents::SegmentDefinition>,
+    pub anti_icp_rules: Vec<String>,
+    pub leads: Vec<GtmIcpPreviewLead>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GtmOutboundPlanRequest {
+    pub leads: Vec<GtmOutboundLead>,
+    pub segment_id: Option<String>,
+    pub message_subject: String,
+    pub message_body: String,
+    pub claim_risk: Option<ClaimRisk>,
+    pub max_touches: Option<u8>,
+    pub cadence_days: Option<u16>,
+    pub stop_conditions: Option<Vec<String>>,
+    pub approval_required: Option<bool>,
+    pub assignee_team: Option<String>,
+    pub reviewer_group: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GtmOutboundLead {
+    #[serde(default = "default_true")]
+    pub selected: bool,
+    pub recipient_id: Option<Uuid>,
+    pub account_id: Option<Uuid>,
+    pub email: String,
+    pub first_name: Option<String>,
+    pub job_title: Option<String>,
+    pub company_name: Option<String>,
+    pub timezone: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GtmOutboundPlanResponse {
+    pub outbound_status: String,
+    pub outbound_errors: Vec<String>,
+    pub dispatch_status: String,
+    pub dispatch_errors: Vec<String>,
+    pub mode_a_output: ModeAOutboundDispatchOutput,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GtmHubspotPushRequest {
+    pub mode_a_output: ModeAOutboundDispatchOutput,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GtmHubspotPushResponse {
+    pub report: crate::gtm_agents::HubspotDispatchReport,
+}
+
+pub async fn gtm_icp_preview(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    Json(payload): Json<GtmIcpPreviewRequest>,
+) -> impl IntoResponse {
+    let account_id = match resolve_authenticated_account_id(&state, &headers).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+
+    if payload.leads.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "At least one lead is required"
+            })),
+        )
+            .into_response();
+    }
+
+    let engine = Phase1AgentEngine;
+    let mut envelope = AgentTaskEnvelope::new(AgentId::RachelOrchestrator);
+    envelope.tenant_id = account_id;
+    envelope.priority = TaskPriority::High;
+    envelope.input_refs = vec!["ui://gtm_linkedin_console".to_string()];
+
+    let mut leads = Vec::new();
+    let mut accounts = Vec::new();
+    for lead in payload.leads {
+        let normalized_email = lead.email.trim().to_lowercase();
+        if normalized_email.is_empty() {
+            continue;
+        }
+        let account_id = lead.account_id.unwrap_or_else(Uuid::new_v4);
+        let recipient_id = lead.recipient_id.unwrap_or_else(Uuid::new_v4);
+        let company_size = lead.company_size.unwrap_or(50);
+        let industry = lead.industry.unwrap_or_else(|| "unknown".to_string());
+        let region = lead.region.unwrap_or_else(|| "US".to_string());
+        let product_events_14d = lead.product_events_14d.unwrap_or(3);
+        let support_tickets_30d = lead.support_tickets_30d.unwrap_or(1);
+        let won_deals_12m = lead.won_deals_12m.unwrap_or(1);
+        let lost_deals_12m = lead.lost_deals_12m.unwrap_or(1);
+        let churned = lead.churned.unwrap_or(false);
+        let activation_days = lead.activation_days.unwrap_or(14);
+        let ltv_usd = lead.ltv_usd.unwrap_or(1500.0);
+
+        leads.push(GtmIcpPreviewLead {
+            recipient_id,
+            account_id,
+            email: normalized_email.clone(),
+            first_name: lead.first_name,
+            job_title: lead.job_title,
+            company_name: lead.company_name,
+            timezone: lead.timezone,
+            company_size,
+            industry: industry.clone(),
+            region: region.clone(),
+            score_0_100: 0,
+            tier: IcpTier::D,
+            recommended: false,
+            top_drivers: Vec::new(),
+        });
+
+        accounts.push(AccountSignal {
+            entity_id: account_id,
+            company_size,
+            industry,
+            region,
+            product_events_14d,
+            support_tickets_30d,
+            won_deals_12m,
+            lost_deals_12m,
+            churned,
+            activation_days,
+            ltv_usd,
+        });
+    }
+
+    if accounts.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "No valid leads provided"
+            })),
+        )
+            .into_response();
+    }
+
+    let min_sample_size = payload
+        .min_sample_size
+        .unwrap_or_else(|| accounts.len().min(25).max(2));
+    let result = match engine.run_icp_scout(
+        envelope.with_agent(AgentId::RachelIcpScout),
+        IcpScoutInput {
+            accounts,
+            current_segment_ids: Vec::new(),
+            min_sample_size,
+        },
+    ) {
+        Ok(value) => value,
+        Err(err) => {
+            error!("GTM ICP preview failed: {}", err);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to run ICP preview"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let scores_by_entity = result
+        .output_payload
+        .icp_scores
+        .iter()
+        .map(|score| (score.entity_id, score))
+        .collect::<std::collections::HashMap<_, _>>();
+    for lead in &mut leads {
+        if let Some(score) = scores_by_entity.get(&lead.account_id) {
+            lead.score_0_100 = score.score_0_100;
+            lead.tier = score.tier;
+            lead.top_drivers = score.top_drivers.clone();
+            lead.recommended = matches!(score.tier, IcpTier::A | IcpTier::B);
+        }
+    }
+
+    let status = match result.status {
+        crate::gtm_agents::TaskStatus::Succeeded => "succeeded",
+        crate::gtm_agents::TaskStatus::NeedsHuman => "needs_human",
+        crate::gtm_agents::TaskStatus::Failed => "failed",
+        crate::gtm_agents::TaskStatus::Partial => "partial",
+    };
+
+    (
+        StatusCode::OK,
+        Json(GtmIcpPreviewResponse {
+            status: status.to_string(),
+            errors: result.errors,
+            segment_definitions: result.output_payload.segment_definitions,
+            anti_icp_rules: result.output_payload.anti_icp_rules,
+            leads,
+        }),
+    )
+        .into_response()
+}
+
+pub async fn gtm_outbound_plan(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    Json(payload): Json<GtmOutboundPlanRequest>,
+) -> impl IntoResponse {
+    let account_id = match resolve_authenticated_account_id(&state, &headers).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+
+    if payload.message_subject.trim().is_empty() || payload.message_body.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "message_subject and message_body are required"
+            })),
+        )
+            .into_response();
+    }
+
+    let segment_manifest = payload
+        .leads
+        .iter()
+        .filter(|lead| lead.selected)
+        .filter_map(|lead| {
+            let email = lead.email.trim().to_lowercase();
+            if email.is_empty() {
+                return None;
+            }
+            Some(SegmentContact {
+                recipient_id: lead.recipient_id.unwrap_or_else(Uuid::new_v4),
+                account_id: lead.account_id.unwrap_or_else(Uuid::new_v4),
+                email,
+                first_name: lead.first_name.clone(),
+                job_title: lead.job_title.clone(),
+                company_name: lead.company_name.clone(),
+                timezone: lead.timezone.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if segment_manifest.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Select at least one lead to plan outbound outreach"
+            })),
+        )
+            .into_response();
+    }
+
+    let claim_risk = payload.claim_risk.unwrap_or(ClaimRisk::Low);
+    let segment_id = payload
+        .segment_id
+        .clone()
+        .unwrap_or_else(|| "linkedin_icp_selected".to_string());
+    let outbound_input = OutboundSdrInput {
+        segment_manifest,
+        message_bundle: MessageBundle {
+            segment_id: segment_id.clone(),
+            variants: vec![MessageVariant {
+                template_id: format!("linkedin_dm_{}", Utc::now().timestamp()),
+                subject: payload.message_subject.clone(),
+                body: payload.message_body.clone(),
+                claim_risk,
+            }],
+        },
+        sequence_policy: SequencePolicy {
+            max_touches: payload.max_touches.unwrap_or(2).clamp(1, 6),
+            cadence_days: payload.cadence_days.unwrap_or(2),
+            stop_conditions: payload
+                .stop_conditions
+                .clone()
+                .unwrap_or_else(|| vec!["positive_reply".to_string()]),
+        },
+        channel_policy: ChannelPolicy {
+            email_enabled: false,
+            linkedin_ads_enabled: false,
+            linkedin_dm_enabled: true,
+        },
+    };
+
+    let approval_required = payload.approval_required.unwrap_or(true);
+    let mut base_envelope = AgentTaskEnvelope::new(AgentId::RachelOrchestrator);
+    base_envelope.tenant_id = account_id;
+    base_envelope.priority = TaskPriority::High;
+    base_envelope.input_refs = vec![format!("ui://gtm/segment/{}", segment_id)];
+    base_envelope.policy_pack = PolicyPack::default();
+    base_envelope.policy_pack.human_approval_required = approval_required;
+    base_envelope.policy_pack.allowed_channels =
+        vec![GtmChannel::LinkedinDm, GtmChannel::HubspotWorkflow];
+
+    let phase1 = Phase1AgentEngine;
+    let outbound_result = match phase1.run_outbound_sdr(
+        base_envelope.with_agent(AgentId::RachelOutboundSdr),
+        outbound_input.clone(),
+    ) {
+        Ok(value) => value,
+        Err(err) => {
+            error!("Failed to run outbound planner: {}", err);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to generate outbound sequence"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let mode_a = ModeAAgentEngine;
+    let dispatch = match mode_a.run_workflow(crate::gtm_agents::ModeAWorkflowInput {
+        base_envelope,
+        dispatch: ModeAOutboundDispatchInput {
+            outbound_input,
+            outbound_output: outbound_result.output_payload,
+            assignee_team: payload
+                .assignee_team
+                .clone()
+                .unwrap_or_else(|| "sdr_team".to_string()),
+            reviewer_group: payload
+                .reviewer_group
+                .clone()
+                .unwrap_or_else(|| "gtm_ops".to_string()),
+            approval_required,
+        },
+    }) {
+        Ok(value) => value,
+        Err(err) => {
+            error!("Failed to run Mode A dispatch planner: {}", err);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to generate Mode A dispatch plan"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let outbound_status = match outbound_result.status {
+        crate::gtm_agents::TaskStatus::Succeeded => "succeeded",
+        crate::gtm_agents::TaskStatus::NeedsHuman => "needs_human",
+        crate::gtm_agents::TaskStatus::Failed => "failed",
+        crate::gtm_agents::TaskStatus::Partial => "partial",
+    };
+    let dispatch_status = match dispatch.dispatch.status {
+        crate::gtm_agents::TaskStatus::Succeeded => "succeeded",
+        crate::gtm_agents::TaskStatus::NeedsHuman => "needs_human",
+        crate::gtm_agents::TaskStatus::Failed => "failed",
+        crate::gtm_agents::TaskStatus::Partial => "partial",
+    };
+
+    (
+        StatusCode::OK,
+        Json(GtmOutboundPlanResponse {
+            outbound_status: outbound_status.to_string(),
+            outbound_errors: outbound_result.errors,
+            dispatch_status: dispatch_status.to_string(),
+            dispatch_errors: dispatch.dispatch.errors,
+            mode_a_output: dispatch.dispatch.output_payload,
+        }),
+    )
+        .into_response()
+}
+
+pub async fn gtm_outbound_push_hubspot(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    Json(payload): Json<GtmHubspotPushRequest>,
+) -> impl IntoResponse {
+    if let Err(response) = resolve_authenticated_account_id(&state, &headers).await {
+        return response;
+    }
+
+    let executor = match HubspotModeAExecutor::from_env() {
+        Ok(value) => value,
+        Err(err) => {
+            let status = if matches!(
+                err,
+                crate::gtm_agents::HubspotDispatchError::MissingAccessToken
+            ) {
+                StatusCode::SERVICE_UNAVAILABLE
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            return (
+                status,
+                Json(serde_json::json!({
+                    "error": format!("HubSpot executor not available: {}", err)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let report = executor.dispatch_mode_a_drafts(&payload.mode_a_output);
+    (StatusCode::OK, Json(GtmHubspotPushResponse { report })).into_response()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+// ============================================================================
 // Router
 // ============================================================================
 
@@ -1910,5 +2431,11 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/auth/slack", get(slack_oauth_start))
         .route("/auth/slack/callback", get(slack_oauth_callback))
         .route("/api/tasks", get(get_tasks))
+        .route("/api/gtm/icp/preview", post(gtm_icp_preview))
+        .route("/api/gtm/outbound/plan", post(gtm_outbound_plan))
+        .route(
+            "/api/gtm/outbound/push-hubspot",
+            post(gtm_outbound_push_hubspot),
+        )
         .with_state(state)
 }

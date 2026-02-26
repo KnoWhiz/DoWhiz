@@ -92,6 +92,11 @@
         border: 1px solid rgba(34, 197, 94, 0.3);
         color: #22c55e;
       }
+      .api-target-info {
+        margin-bottom: 1rem;
+        font-size: 0.8rem;
+        color: var(--text-muted, #888);
+      }
       .auth-toggle {
         text-align: center;
         margin-top: 1rem;
@@ -284,6 +289,116 @@
       #refresh-tasks-btn {
         padding: 0.5rem 1rem;
         font-size: 0.85rem;
+      }
+
+      .gtm-panel-grid {
+        display: grid;
+        gap: 1rem;
+      }
+
+      .gtm-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+      }
+
+      .gtm-status {
+        font-size: 0.85rem;
+        color: var(--text-muted, #888);
+      }
+
+      .gtm-table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--border, #333);
+        border-radius: 8px;
+      }
+
+      .gtm-table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 920px;
+      }
+
+      .gtm-table th,
+      .gtm-table td {
+        padding: 0.55rem 0.65rem;
+        border-bottom: 1px solid var(--border, #333);
+        text-align: left;
+        vertical-align: middle;
+        font-size: 0.85rem;
+      }
+
+      .gtm-table th {
+        background: rgba(56, 189, 248, 0.12);
+        font-weight: 600;
+      }
+
+      .gtm-table tr:last-child td {
+        border-bottom: none;
+      }
+
+      .gtm-table input[type="text"] {
+        width: 100%;
+        padding: 0.35rem 0.45rem;
+        border: 1px solid var(--border, #333);
+        border-radius: 6px;
+        background: var(--surface, #1a1a1a);
+        color: var(--text, #fff);
+      }
+
+      .gtm-tier-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.2rem 0.5rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        min-width: 2rem;
+      }
+
+      .gtm-tier-a {
+        background: rgba(34, 197, 94, 0.2);
+        color: #22c55e;
+      }
+
+      .gtm-tier-b {
+        background: rgba(59, 130, 246, 0.2);
+        color: #3b82f6;
+      }
+
+      .gtm-tier-c {
+        background: rgba(245, 158, 11, 0.2);
+        color: #f59e0b;
+      }
+
+      .gtm-tier-d {
+        background: rgba(239, 68, 68, 0.2);
+        color: #ef4444;
+      }
+
+      .gtm-plan-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        gap: 0.5rem;
+      }
+
+      .gtm-plan-item {
+        border: 1px solid var(--border, #333);
+        border-radius: 8px;
+        padding: 0.75rem;
+        background: var(--surface, #1a1a1a);
+      }
+
+      .gtm-inline-code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.8rem;
+        background: rgba(148, 163, 184, 0.18);
+        padding: 0.15rem 0.35rem;
+        border-radius: 4px;
       }
 
       .memo-actions {
@@ -506,6 +621,7 @@
         <div class="auth-container">
           <!-- Message display -->
           <div id="auth-message" class="auth-message hidden"></div>
+          <div id="api-target-info" class="api-target-info"></div>
 
           <!-- Loading state (shown when loggedIn=true) -->
           <div id="loading-container" class="hidden" style="text-align: center; padding: 2rem;">
@@ -624,6 +740,57 @@
             </section>
 
             <section class="legal-card dashboard-section">
+              <h2>GTM LinkedIn Copilot</h2>
+              <p>Review ICP candidates, edit the list, and confirm a human-in-the-loop LinkedIn outreach plan before pushing drafts to HubSpot.</p>
+              <div class="gtm-panel-grid">
+                <div>
+                  <label for="gtm-leads-input" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">Step 1: Paste Leads CSV</label>
+                  <textarea id="gtm-leads-input" class="auth-input" style="min-height: 140px; width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.82rem;">email,first_name,job_title,company_name,company_size,industry,region,product_events_14d,support_tickets_30d,won_deals_12m,lost_deals_12m,churned,activation_days,ltv_usd
+alpha@example.com,Avery,Head of Growth,Alpha,120,SaaS,US,10,1,4,1,false,6,9500
+bravo@example.com,Bailey,VP Marketing,Bravo,80,SaaS,US,7,2,2,1,false,8,6200</textarea>
+                  <div class="gtm-controls" style="margin-top: 0.5rem;">
+                    <button id="gtm-run-icp-btn" class="auth-btn auth-btn-primary" type="button">Find ICP Matches</button>
+                    <span id="gtm-status" class="gtm-status"></span>
+                  </div>
+                </div>
+
+                <div>
+                  <label style="display: block; margin-bottom: 0.4rem; font-weight: 600;">Step 2: Review / Edit ICP List</label>
+                  <div id="gtm-icp-results" class="gtm-table-wrap">
+                    <div style="padding: 0.85rem; color: var(--text-muted, #888);">Run ICP matching to see candidates.</div>
+                  </div>
+                </div>
+
+                <div>
+                  <label style="display: block; margin-bottom: 0.4rem; font-weight: 600;">Step 3: Confirm Cold Message Plan</label>
+                  <div class="gtm-panel-grid">
+                    <input id="gtm-subject" class="auth-input" type="text" value="Idea for faster GTM execution" />
+                    <textarea id="gtm-body" class="auth-input" style="min-height: 90px;">I reviewed your GTM motion and saw a pattern we can improve quickly. Open to a short exchange this week?</textarea>
+                    <div class="gtm-controls">
+                      <select id="gtm-claim-risk" class="auth-input" style="max-width: 180px;">
+                        <option value="low">Claim Risk: Low</option>
+                        <option value="medium">Claim Risk: Medium</option>
+                        <option value="high">Claim Risk: High</option>
+                      </select>
+                      <label style="display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.9rem;">
+                        <input id="gtm-approval-required" type="checkbox" checked />
+                        Require manager approval before reps send
+                      </label>
+                    </div>
+                    <div class="gtm-controls">
+                      <button id="gtm-plan-btn" class="auth-btn auth-btn-primary" type="button" disabled>Create Outreach Plan</button>
+                      <button id="gtm-hubspot-btn" class="auth-btn auth-btn-oauth" type="button" disabled>Push Drafts to HubSpot</button>
+                      <span id="gtm-plan-status" class="gtm-status"></span>
+                    </div>
+                    <ul id="gtm-plan-results" class="gtm-plan-list">
+                      <li class="gtm-plan-item" style="color: var(--text-muted, #888);">No plan generated yet.</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="legal-card dashboard-section">
               <h2>Your Memo</h2>
               <p>This is your unified memo synced across all channels. If you want to make changes, please edit below and save.</p>
               <div id="memo-container" style="margin-top: 1rem;">
@@ -712,9 +879,93 @@
       // Configuration
       const SUPABASE_URL = 'https://resmseutzmwumflevfqw.supabase.co';
       const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlc21zZXV0em13dW1mbGV2ZnF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAxNTQ1MjIsImV4cCI6MjA4NTczMDUyMn0.-QMndwi4m8nBtjMeS5WbDmrHZSe2l1UFY-UQJCl0Frc';
-      const DOWHIZ_API_URL = window.location.hostname === 'localhost'
-        ? 'http://localhost:9001'
-        : 'https://api.production1.dowhiz.com/service';
+      const API_URL_STORAGE_KEY = 'dowhiz_api_url';
+
+      function normalizeApiBaseUrl(rawValue) {
+        if (typeof rawValue !== 'string') return null;
+
+        let value = rawValue.trim();
+        if (!value) return null;
+
+        if (/^(localhost|127\.0\.0\.1):\d+$/i.test(value)) {
+          value = `http://${value}`;
+        } else if (value.startsWith('/')) {
+          value = `${window.location.origin}${value}`;
+        }
+
+        try {
+          const parsed = new URL(value);
+          const pathname = parsed.pathname.replace(/\/+$/, '');
+          return `${parsed.origin}${pathname && pathname !== '/' ? pathname : ''}`;
+        } catch (error) {
+          console.warn('Ignoring invalid API URL override:', rawValue, error);
+          return null;
+        }
+      }
+
+      function defaultApiBaseUrl() {
+        const host = window.location.hostname;
+        if (host === 'localhost' || host === '127.0.0.1') {
+          return 'http://localhost:9001';
+        }
+        if (
+          host.endsWith('.ngrok-free.dev')
+          || host.endsWith('.ngrok.io')
+          || host.endsWith('.ngrok.app')
+        ) {
+          return `${window.location.origin}/service`;
+        }
+        if (host.endsWith('dowhiz.com')) {
+          return 'https://api.production1.dowhiz.com/service';
+        }
+        return `${window.location.origin}/service`;
+      }
+
+      function resolveApiBaseUrl() {
+        const params = new URLSearchParams(window.location.search);
+        const windowOverride = normalizeApiBaseUrl(window.__DOWHIZ_API_URL__);
+        const queryOverrideRaw = params.get('api');
+        const queryOverride = normalizeApiBaseUrl(queryOverrideRaw);
+        let storedOverride = null;
+
+        try {
+          storedOverride = normalizeApiBaseUrl(window.localStorage.getItem(API_URL_STORAGE_KEY));
+          if (queryOverrideRaw !== null) {
+            if (queryOverride) {
+              window.localStorage.setItem(API_URL_STORAGE_KEY, queryOverride);
+            } else {
+              window.localStorage.removeItem(API_URL_STORAGE_KEY);
+            }
+          }
+        } catch (error) {
+          console.warn('Unable to access localStorage for API URL overrides:', error);
+        }
+
+        return windowOverride || queryOverride || storedOverride || defaultApiBaseUrl();
+      }
+
+      const DOWHIZ_API_URL = resolveApiBaseUrl();
+
+      function buildApiUrl(path) {
+        if (!path) return DOWHIZ_API_URL;
+        return path.startsWith('/') ? `${DOWHIZ_API_URL}${path}` : `${DOWHIZ_API_URL}/${path}`;
+      }
+
+      function buildApiFetchError(error) {
+        const details = error?.message ? ` (${error.message})` : '';
+        return `Cannot reach DoWhiz API at ${DOWHIZ_API_URL}. Check backend availability or override via ?api=<url>.${details}`;
+      }
+
+      async function apiFetch(path, options = {}) {
+        try {
+          return await fetch(buildApiUrl(path), options);
+        } catch (error) {
+          if (error instanceof TypeError || /failed to fetch/i.test(error?.message || '')) {
+            throw new Error(buildApiFetchError(error));
+          }
+          throw error;
+        }
+      }
 
       const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
@@ -729,6 +980,7 @@
       const dashboardContainer = document.getElementById('dashboard-container');
       const loadingContainer = document.getElementById('loading-container');
       const authMessage = document.getElementById('auth-message');
+      const apiTargetInfo = document.getElementById('api-target-info');
       const pageTitle = document.getElementById('page-title');
       const pageSubtitle = document.getElementById('page-subtitle');
       const existingAccountContainer = document.getElementById('existing-account-container');
@@ -741,14 +993,31 @@
       const backToSigninLink = document.getElementById('back-to-signin');
       const forgotPasswordLink = document.getElementById('forgot-password-link');
       const setPasswordLink = document.getElementById('set-password-link');
+      const gtmLeadsInput = document.getElementById('gtm-leads-input');
+      const gtmRunIcpBtn = document.getElementById('gtm-run-icp-btn');
+      const gtmIcpResults = document.getElementById('gtm-icp-results');
+      const gtmStatus = document.getElementById('gtm-status');
+      const gtmPlanBtn = document.getElementById('gtm-plan-btn');
+      const gtmHubspotBtn = document.getElementById('gtm-hubspot-btn');
+      const gtmPlanStatus = document.getElementById('gtm-plan-status');
+      const gtmPlanResults = document.getElementById('gtm-plan-results');
+      const gtmSubject = document.getElementById('gtm-subject');
+      const gtmBody = document.getElementById('gtm-body');
+      const gtmClaimRisk = document.getElementById('gtm-claim-risk');
+      const gtmApprovalRequired = document.getElementById('gtm-approval-required');
 
       let lastSignupEmail = null;
       let recoverySession = null;
       let lastEmailActionAt = 0;
       const EMAIL_ACTION_COOLDOWN_MS = 30000;
+      let gtmLeadsState = [];
+      let gtmLatestPlan = null;
 
       // Check if user came from logged-in state (expecting dashboard)
       const expectingDashboard = new URLSearchParams(window.location.search).get('loggedIn') === 'true';
+      if (apiTargetInfo) {
+        apiTargetInfo.textContent = `API target: ${DOWHIZ_API_URL} (override with ?api=https://your-api.example.com)`;
+      }
       // If expecting dashboard, keep everything hidden until ready
       // If not, show sign-in form immediately
       if (!expectingDashboard) {
@@ -1049,7 +1318,7 @@
       async function handleAuthSuccess(session) {
         try {
           // Create/get DoWhiz account
-          const signupRes = await fetch(`${DOWHIZ_API_URL}/auth/signup`, {
+          const signupRes = await apiFetch('/auth/signup', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${session.access_token}` }
           });
@@ -1081,6 +1350,15 @@
 
         document.getElementById('account-id').textContent = accountData.account_id;
         document.getElementById('user-email').textContent = session.user.email;
+        gtmLeadsState = [];
+        gtmLatestPlan = null;
+        renderGtmIcpResults();
+        if (gtmPlanResults) {
+          gtmPlanResults.innerHTML = '<li class="gtm-plan-item" style="color: var(--text-muted, #888);">No plan generated yet.</li>';
+        }
+        gtmHubspotBtn.disabled = true;
+        setGtmStatus('');
+        setGtmPlanStatus('');
 
         // Load identifiers, memo, and tasks in parallel
         await Promise.all([
@@ -1096,7 +1374,7 @@
       // Load linked identifiers
       async function loadIdentifiers(accessToken) {
         try {
-          const res = await fetch(`${DOWHIZ_API_URL}/auth/account`, {
+          const res = await apiFetch('/auth/account', {
             headers: { 'Authorization': `Bearer ${accessToken}` }
           });
 
@@ -1140,7 +1418,7 @@
       // Unlink an identifier
       async function unlinkIdentifier(accessToken, identifierType, identifier) {
         try {
-          const res = await fetch(`${DOWHIZ_API_URL}/auth/unlink`, {
+          const res = await apiFetch('/auth/unlink', {
             method: 'DELETE',
             headers: {
               'Authorization': `Bearer ${accessToken}`,
@@ -1167,7 +1445,7 @@
       async function loadMemo(accessToken) {
         const memoContent = document.getElementById('memo-content');
         try {
-          const res = await fetch(`${DOWHIZ_API_URL}/auth/memo`, {
+          const res = await apiFetch('/auth/memo', {
             headers: { 'Authorization': `Bearer ${accessToken}` }
           });
 
@@ -1194,7 +1472,7 @@
         memoStatus.style.color = 'var(--text-muted, #888)';
 
         try {
-          const res = await fetch(`${DOWHIZ_API_URL}/auth/memo`, {
+          const res = await apiFetch('/auth/memo', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${accessToken}`,
@@ -1250,7 +1528,7 @@
         discordStatus.style.color = 'var(--text-muted, #888)';
 
         try {
-          const res = await fetch(`${DOWHIZ_API_URL}/auth/discord`, {
+          const res = await apiFetch('/auth/discord', {
             headers: { 'Authorization': `Bearer ${session.access_token}` }
           });
 
@@ -1301,7 +1579,7 @@
         slackStatus.style.color = 'var(--text-muted, #888)';
 
         try {
-          const res = await fetch(`${DOWHIZ_API_URL}/auth/slack`, {
+          const res = await apiFetch('/auth/slack', {
             headers: { 'Authorization': `Bearer ${session.access_token}` }
           });
 
@@ -1340,7 +1618,7 @@
       const verifyEmailToken = urlParams.get('verify_email');
       if (verifyEmailToken) {
         // Redirect to backend to verify the token - page will navigate away
-        window.location.href = `${DOWHIZ_API_URL}/auth/verify-email?token=${encodeURIComponent(verifyEmailToken)}`;
+        window.location.href = buildApiUrl(`/auth/verify-email?token=${encodeURIComponent(verifyEmailToken)}`);
       }
 
       // Check for email verification callback result (redirect from backend after verification)
@@ -1405,7 +1683,7 @@
         const identifier = document.getElementById('link-identifier').value;
 
         try {
-          const res = await fetch(`${DOWHIZ_API_URL}/auth/link`, {
+          const res = await apiFetch('/auth/link', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${session.access_token}`,
@@ -1450,7 +1728,7 @@
         // If we don't have cached identifiers, fetch them first
         if (cachedIdentifiers.length === 0) {
           try {
-            const res = await fetch(`${DOWHIZ_API_URL}/auth/account`, {
+            const res = await apiFetch('/auth/account', {
               headers: { 'Authorization': `Bearer ${accessToken}` }
             });
             if (res.ok) {
@@ -1470,8 +1748,8 @@
         try {
           // Fetch tasks for each identifier in parallel
           const taskPromises = cachedIdentifiers.map(async (id) => {
-            const res = await fetch(
-              `${DOWHIZ_API_URL}/api/tasks?channel=${encodeURIComponent(id.identifier_type)}&identifier=${encodeURIComponent(id.identifier)}`,
+            const res = await apiFetch(
+              `/api/tasks?channel=${encodeURIComponent(id.identifier_type)}&identifier=${encodeURIComponent(id.identifier)}`,
               { headers: { 'Authorization': `Bearer ${accessToken}` } }
             );
             if (!res.ok) return [];
@@ -1589,6 +1867,337 @@
         }
       }
 
+      function setGtmStatus(message, isError = false) {
+        if (!gtmStatus) return;
+        gtmStatus.textContent = message || '';
+        gtmStatus.style.color = isError ? '#ef4444' : 'var(--text-muted, #888)';
+      }
+
+      function setGtmPlanStatus(message, isError = false) {
+        if (!gtmPlanStatus) return;
+        gtmPlanStatus.textContent = message || '';
+        gtmPlanStatus.style.color = isError ? '#ef4444' : 'var(--text-muted, #888)';
+      }
+
+      function parseLeadCsv(csvText) {
+        const lines = csvText
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0);
+        if (lines.length < 2) {
+          throw new Error('Provide a CSV header and at least one lead row.');
+        }
+
+        const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
+        const headerIndex = (name) => headers.indexOf(name);
+        if (headerIndex('email') < 0) {
+          throw new Error('CSV must include an email column.');
+        }
+
+        const boolFrom = (value, fallback = false) => {
+          if (value == null || value === '') return fallback;
+          const normalized = String(value).trim().toLowerCase();
+          if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+          if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+          return fallback;
+        };
+        const intFrom = (value, fallback) => {
+          const parsed = Number.parseInt(value, 10);
+          return Number.isFinite(parsed) ? parsed : fallback;
+        };
+        const floatFrom = (value, fallback) => {
+          const parsed = Number.parseFloat(value);
+          return Number.isFinite(parsed) ? parsed : fallback;
+        };
+
+        return lines.slice(1).map((line) => {
+          const cells = line.split(',').map((cell) => cell.trim());
+          const get = (name) => {
+            const idx = headerIndex(name);
+            return idx >= 0 ? (cells[idx] || '') : '';
+          };
+          return {
+            email: get('email').toLowerCase(),
+            first_name: get('first_name') || null,
+            job_title: get('job_title') || null,
+            company_name: get('company_name') || null,
+            timezone: get('timezone') || null,
+            company_size: intFrom(get('company_size'), 50),
+            industry: get('industry') || 'unknown',
+            region: get('region') || 'US',
+            product_events_14d: intFrom(get('product_events_14d'), 3),
+            support_tickets_30d: intFrom(get('support_tickets_30d'), 1),
+            won_deals_12m: intFrom(get('won_deals_12m'), 1),
+            lost_deals_12m: intFrom(get('lost_deals_12m'), 1),
+            churned: boolFrom(get('churned'), false),
+            activation_days: intFrom(get('activation_days'), 14),
+            ltv_usd: floatFrom(get('ltv_usd'), 1500),
+          };
+        }).filter((lead) => lead.email.length > 0);
+      }
+
+      function selectedGtmLeadCount() {
+        return gtmLeadsState.filter((lead) => lead.selected).length;
+      }
+
+      function updateGtmPlanButtonState() {
+        if (!gtmPlanBtn) return;
+        gtmPlanBtn.disabled = selectedGtmLeadCount() === 0;
+      }
+
+      function tierClass(tier) {
+        switch ((tier || '').toLowerCase()) {
+          case 'a':
+            return 'gtm-tier-a';
+          case 'b':
+            return 'gtm-tier-b';
+          case 'c':
+            return 'gtm-tier-c';
+          default:
+            return 'gtm-tier-d';
+        }
+      }
+
+      function renderGtmIcpResults() {
+        if (!gtmIcpResults) return;
+        if (!gtmLeadsState.length) {
+          gtmIcpResults.innerHTML = '<div style="padding: 0.85rem; color: var(--text-muted, #888);">Run ICP matching to see candidates.</div>';
+          updateGtmPlanButtonState();
+          return;
+        }
+
+        const rows = gtmLeadsState.map((lead, idx) => `
+          <tr>
+            <td><input type="checkbox" data-gtm-field="selected" data-index="${idx}" ${lead.selected ? 'checked' : ''} /></td>
+            <td>${lead.score_0_100 ?? 0}</td>
+            <td><span class="gtm-tier-pill ${tierClass(lead.tier)}">${escapeHtml((lead.tier || 'd').toUpperCase())}</span></td>
+            <td><input type="text" data-gtm-field="email" data-index="${idx}" value="${escapeHtml(lead.email || '')}" /></td>
+            <td><input type="text" data-gtm-field="first_name" data-index="${idx}" value="${escapeHtml(lead.first_name || '')}" /></td>
+            <td><input type="text" data-gtm-field="job_title" data-index="${idx}" value="${escapeHtml(lead.job_title || '')}" /></td>
+            <td><input type="text" data-gtm-field="company_name" data-index="${idx}" value="${escapeHtml(lead.company_name || '')}" /></td>
+            <td>${escapeHtml(lead.industry || 'unknown')}</td>
+            <td>${escapeHtml(lead.region || 'US')}</td>
+          </tr>
+        `).join('');
+
+        gtmIcpResults.innerHTML = `
+          <table class="gtm-table">
+            <thead>
+              <tr>
+                <th>Use</th>
+                <th>Score</th>
+                <th>Tier</th>
+                <th>Email</th>
+                <th>First Name</th>
+                <th>Title</th>
+                <th>Company</th>
+                <th>Industry</th>
+                <th>Region</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        `;
+
+        gtmIcpResults.querySelectorAll('[data-gtm-field]').forEach((el) => {
+          el.addEventListener('change', (event) => {
+            const index = Number.parseInt(event.target.dataset.index, 10);
+            const field = event.target.dataset.gtmField;
+            if (!Number.isFinite(index) || index < 0 || index >= gtmLeadsState.length) return;
+            if (field === 'selected') {
+              gtmLeadsState[index].selected = !!event.target.checked;
+            } else {
+              gtmLeadsState[index][field] = event.target.value.trim();
+            }
+            setGtmStatus(`Selected ${selectedGtmLeadCount()} / ${gtmLeadsState.length} leads.`);
+            updateGtmPlanButtonState();
+          });
+        });
+
+        setGtmStatus(`Selected ${selectedGtmLeadCount()} / ${gtmLeadsState.length} leads.`);
+        updateGtmPlanButtonState();
+      }
+
+      function renderGtmPlan(plan) {
+        if (!gtmPlanResults) return;
+        const modeA = plan?.mode_a_output || {};
+        const manualTasks = modeA.manual_send_tasks || [];
+        const approvals = modeA.approval_queue || [];
+
+        const header = `
+          <li class="gtm-plan-item">
+            <div><strong>Outbound:</strong> ${escapeHtml(plan.outbound_status || 'unknown')}</div>
+            <div><strong>Dispatch:</strong> ${escapeHtml(plan.dispatch_status || 'unknown')}</div>
+            <div><strong>Manual LinkedIn Tasks:</strong> ${manualTasks.length}</div>
+            <div><strong>Approval Queue:</strong> ${approvals.length}</div>
+            <div><strong>HubSpot Task Drafts:</strong> ${(modeA.hubspot_task_drafts || []).length}</div>
+            <div><strong>HubSpot Timeline Drafts:</strong> ${(modeA.hubspot_communication_drafts || []).length}</div>
+          </li>
+        `;
+
+        const taskItems = manualTasks.slice(0, 20).map((task) => `
+          <li class="gtm-plan-item">
+            <div><strong>${escapeHtml(task.recipient_email)}</strong> (${escapeHtml(task.company_name || 'unknown company')})</div>
+            <div>Status: <span class="gtm-inline-code">${escapeHtml(task.status)}</span></div>
+            <div>Template: <span class="gtm-inline-code">${escapeHtml(task.template_id)}</span></div>
+            <div>Send At: ${new Date(task.send_at).toLocaleString()}</div>
+          </li>
+        `).join('');
+
+        gtmPlanResults.innerHTML = header + (taskItems || '');
+      }
+
+      gtmRunIcpBtn?.addEventListener('click', async () => {
+        setGtmPlanStatus('');
+        gtmLatestPlan = null;
+        gtmHubspotBtn.disabled = true;
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) {
+            setGtmStatus('Please sign in first.', true);
+            return;
+          }
+
+          const leads = parseLeadCsv(gtmLeadsInput.value);
+          if (!leads.length) {
+            setGtmStatus('No valid leads found in CSV.', true);
+            return;
+          }
+
+          setGtmStatus('Scoring ICP candidates...');
+          const response = await apiFetch('/api/gtm/icp/preview', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              leads,
+              min_sample_size: Math.min(Math.max(leads.length, 2), 25)
+            })
+          });
+
+          const responseBody = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(responseBody.error || 'Failed to score ICP candidates.');
+          }
+
+          gtmLeadsState = (responseBody.leads || []).map((lead) => ({
+            ...lead,
+            selected: lead.recommended !== false
+          }));
+          renderGtmIcpResults();
+        } catch (error) {
+          gtmLeadsState = [];
+          renderGtmIcpResults();
+          setGtmStatus(error.message || 'Failed to run ICP matching.', true);
+        }
+      });
+
+      gtmPlanBtn?.addEventListener('click', async () => {
+        setGtmPlanStatus('');
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) {
+            setGtmPlanStatus('Please sign in first.', true);
+            return;
+          }
+
+          if (selectedGtmLeadCount() === 0) {
+            setGtmPlanStatus('Select at least one lead before planning outreach.', true);
+            return;
+          }
+
+          setGtmPlanStatus('Generating Mode A outreach plan...');
+          const payload = {
+            leads: gtmLeadsState.map((lead) => ({
+              selected: !!lead.selected,
+              recipient_id: lead.recipient_id,
+              account_id: lead.account_id,
+              email: lead.email,
+              first_name: lead.first_name || null,
+              job_title: lead.job_title || null,
+              company_name: lead.company_name || null,
+              timezone: lead.timezone || null
+            })),
+            message_subject: gtmSubject.value,
+            message_body: gtmBody.value,
+            claim_risk: gtmClaimRisk.value,
+            approval_required: !!gtmApprovalRequired.checked,
+            assignee_team: 'sdr_team',
+            reviewer_group: 'gtm_ops',
+            segment_id: 'linkedin_icp_selected',
+            max_touches: 2,
+            cadence_days: 2
+          };
+
+          const response = await apiFetch('/api/gtm/outbound/plan', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+          const responseBody = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(responseBody.error || 'Failed to generate outreach plan.');
+          }
+
+          gtmLatestPlan = responseBody;
+          renderGtmPlan(responseBody);
+          const modeA = responseBody.mode_a_output || {};
+          const canPush = (modeA.hubspot_task_drafts || []).length > 0 || (modeA.hubspot_communication_drafts || []).length > 0;
+          gtmHubspotBtn.disabled = !canPush;
+          setGtmPlanStatus('Plan ready. Review tasks, then push drafts to HubSpot if desired.');
+        } catch (error) {
+          gtmHubspotBtn.disabled = true;
+          setGtmPlanStatus(error.message || 'Failed to create outreach plan.', true);
+        }
+      });
+
+      gtmHubspotBtn?.addEventListener('click', async () => {
+        setGtmPlanStatus('');
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) {
+            setGtmPlanStatus('Please sign in first.', true);
+            return;
+          }
+          if (!gtmLatestPlan || !gtmLatestPlan.mode_a_output) {
+            setGtmPlanStatus('Generate a plan before pushing to HubSpot.', true);
+            return;
+          }
+
+          setGtmPlanStatus('Pushing drafts to HubSpot...');
+          const response = await apiFetch('/api/gtm/outbound/push-hubspot', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              mode_a_output: gtmLatestPlan.mode_a_output
+            })
+          });
+          const responseBody = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(responseBody.error || 'Failed to push drafts to HubSpot.');
+          }
+
+          const report = responseBody.report || {};
+          setGtmPlanStatus(
+            `HubSpot push complete. Tasks ${report.tasks_created || 0}/${report.tasks_attempted || 0}, Notes ${report.notes_created || 0}/${report.notes_attempted || 0}.`
+          );
+          if (Array.isArray(report.errors) && report.errors.length) {
+            const errorItems = report.errors.map((err) => `<li class="gtm-plan-item" style="color: #ef4444;">${escapeHtml(err)}</li>`).join('');
+            gtmPlanResults.insertAdjacentHTML('beforeend', errorItems);
+          }
+        } catch (error) {
+          setGtmPlanStatus(error.message || 'Failed to push HubSpot drafts.', true);
+        }
+      });
+
       // Refresh tasks button
       document.getElementById('refresh-tasks-btn').addEventListener('click', async () => {
         const { data: { session } } = await supabase.auth.getSession();
@@ -1658,7 +2267,7 @@
 
           // Assume OAuth flow if no explicit type is provided
           try {
-            const res = await fetch(`${DOWHIZ_API_URL}/auth/signup`, {
+            const res = await apiFetch('/auth/signup', {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${data.session.access_token}` }
             });
