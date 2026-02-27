@@ -491,25 +491,16 @@ function App() {
 
       rows.forEach((row) => {
         let maxDesc = 0;
-        let maxExample = 0;
         row.cards.forEach((card) => {
           const desc = card.querySelector('.role-desc');
-          const ex = card.querySelector('.role-example');
           if (desc) {
             maxDesc = Math.max(maxDesc, desc.offsetHeight);
-          }
-          if (ex) {
-            maxExample = Math.max(maxExample, ex.offsetHeight);
           }
         });
         row.cards.forEach((card) => {
           const desc = card.querySelector('.role-desc');
-          const ex = card.querySelector('.role-example');
           if (desc && maxDesc) {
             desc.style.minHeight = `${maxDesc}px`;
-          }
-          if (ex && maxExample) {
-            ex.style.minHeight = `${maxExample}px`;
           }
         });
       });
@@ -517,8 +508,19 @@ function App() {
 
     syncRoleHeights();
     window.addEventListener('resize', syncRoleHeights);
+    window.addEventListener('load', syncRoleHeights);
+
+    const roleGrid = document.querySelector('.roles-grid');
+    const resizeObserver = new ResizeObserver(() => syncRoleHeights());
+    if (roleGrid) {
+      resizeObserver.observe(roleGrid);
+      Array.from(roleGrid.children).forEach((child) => resizeObserver.observe(child));
+    }
+
     return () => {
       window.removeEventListener('resize', syncRoleHeights);
+      window.removeEventListener('load', syncRoleHeights);
+      resizeObserver.disconnect();
     };
   }, []);
 
@@ -532,32 +534,38 @@ function App() {
     {
       tag: '01',
       title: 'Trigger from every surface',
-      desc: 'Start work from email, Slack/Discord messages, GitHub issues, or @mentions in shared Google Docs and Notion comments.'
+      desc: 'Start work from email, Slack/Discord messages, GitHub issues, or @mentions in shared Google Docs and Notion comments.',
+      icon: '/icons/The%20Digital%20Employee%20Stack/trigger.svg'
     },
     {
       tag: '02',
       title: 'Tool-native execution',
-      desc: 'Agents work directly in your docs, project boards, repos, and chat spaces so outputs land where your team already works.'
+      desc: 'Agents work directly in your docs, project boards, repos, and chat spaces so outputs land where your team already works.',
+      icon: '/icons/The%20Digital%20Employee%20Stack/execute.svg'
     },
     {
       tag: '03',
       title: 'Shared memory across channels',
-      desc: 'Per-user context carries over across email, chat, issues, and comments so follow-ups do not restart from zero.'
+      desc: 'Per-user context carries over across email, chat, issues, and comments so follow-ups do not restart from zero.',
+      icon: '/icons/The%20Digital%20Employee%20Stack/shared.svg'
     },
     {
       tag: '04',
       title: 'Agent-owned identities',
-      desc: 'Each digital employee has their own account identity. You do not hand over personal credentials to get work done.'
+      desc: 'Each digital employee has their own account identity. You do not hand over personal credentials to get work done.',
+      icon: '/icons/The%20Digital%20Employee%20Stack/agent.svg'
     },
     {
       tag: '05',
       title: 'Permissioned workspace access',
-      desc: 'Agents only access workspaces and integrations when you explicitly grant access and can be revoked at any time.'
+      desc: 'Agents only access workspaces and integrations when you explicitly grant access and can be revoked at any time.',
+      icon: '/icons/The%20Digital%20Employee%20Stack/permission.svg'
     },
     {
       tag: '06',
       title: 'Cross-agent collaboration',
-      desc: 'Agents can hand off tasks to each other while keeping a shared context trail so delivery stays coherent end to end.'
+      desc: 'Agents can hand off tasks to each other while keeping a shared context trail so delivery stays coherent end to end.',
+      icon: '/icons/The%20Digital%20Employee%20Stack/collaboration.svg'
     }
   ];
 
@@ -657,8 +665,28 @@ function App() {
 
   const workflowExamples = [
     {
-      tag: 'Workflow 1',
+      id: 'maggie',
+      title: 'Meeting Summary and Follow-up Task Assignment',
+      owner: 'Maggie',
+      avatar: miniMouseImg,
+      mediaType: 'video',
+      media: '/icons/workflow%20example/maggie.mov',
+      trigger: 'Tell Maggie her tasks in a meeting.',
+      execution: [
+        'Maggie extracts decisions, actions, dependencies, and owners.',
+        'Builds due-date follow-ups and milestone checkpoints.',
+        'Prepares a status-ready update for your team channel.',
+        'Assigns tasks to other agents.'
+      ],
+      result: 'You get an owner-tracked execution plan with clear follow-up cadence.'
+    },
+    {
+      id: 'devin',
       title: 'Engineering delivery from GitHub',
+      owner: 'Devin',
+      avatar: stickyOctopusImg,
+      mediaType: 'video',
+      media: '/icons/workflow%20example/devin.mov',
       trigger: 'Create a GitHub issue, assign Devin, and include acceptance criteria.',
       execution: [
         'Devin breaks work into implementation checkpoints.',
@@ -668,26 +696,20 @@ function App() {
       result: 'You get a PR, test status, and a concise summary in the same issue thread.'
     },
     {
-      tag: 'Workflow 2',
-      title: 'Meeting follow-through from shared docs',
-      trigger: '@mention Maggie in a Google Doc or Notion comment after a planning discussion.',
+      id: 'oliver',
+      title: 'Chat Summary and Todo List from Discord',
+      owner: 'Oliver',
+      avatar: oliverImg,
+      mediaType: 'image',
+      media: '/icons/workflow%20example/oliver.png',
+      trigger: '@mention Oliver in Discord channel and assign him tasks.',
       execution: [
-        'Maggie extracts decisions, actions, dependencies, and owners.',
-        'Builds due-date follow-ups and milestone checkpoints.',
-        'Prepares a status-ready update for your team channel.'
+        'Oliver scans the full conversation history in the channel.',
+        'Identifies key decisions, technical conclusions, and shared updates.',
+        'Extracts concrete action items with clear ownership and priorities.',
+        'Organizes them into a structured, execution-ready checklist.'
       ],
-      result: 'You get an owner-tracked execution plan with clear follow-up cadence.'
-    },
-    {
-      tag: 'Workflow 3',
-      title: 'Launch coordination from chat',
-      trigger: 'Message Rachel in Slack or Discord with launch assets and target date.',
-      execution: [
-        'Rachel creates a channel-by-channel launch timeline.',
-        'Drafts per-channel copy and handoff tasks.',
-        'Coordinates supporting agents for docs, tracking, and updates.'
-      ],
-      result: 'You get a complete launch plan with timeline, copy, and ownership.'
+      result: 'You get a concise recap of what happened and a clear, owner-aligned action plan for the next step.'
     }
   ];
 
@@ -1164,13 +1186,19 @@ function App() {
                           ))}
                         </ul>
                       </div>
-                      <div className="how-line" aria-hidden="true"></div>
-                      <div className="how-card output">
-                        <div className="how-card-heading">
-                          <img src="/icons/output.svg" alt="Output icon" className="how-card-icon" />
-                          <span className="how-card-title">Output</span>
+                      <div className="how-connector-wrap" aria-hidden="true">
+                        <span className="how-connector-line"></span>
+                        <span className="how-connector-dot"></span>
+                      </div>
+                      <div className="how-output-wrap">
+                        <span className="how-output-dot" aria-hidden="true"></span>
+                        <div className="how-card output">
+                          <div className="how-card-heading">
+                            <img src="/icons/output.svg" alt="Output icon" className="how-card-icon" />
+                            <span className="how-card-title">Output</span>
+                          </div>
+                          <p className="how-card-intro">{step.output}</p>
                         </div>
-                        <p className="how-card-intro">{step.output}</p>
                       </div>
                     </div>
                   </div>
@@ -1188,24 +1216,43 @@ function App() {
             </p>
             <div className="workflow-showcase-grid">
               {workflowExamples.map((workflow) => (
-                <article key={workflow.tag} className="workflow-showcase-card">
-                  <span className="workflow-badge">{workflow.tag}</span>
-                  <h3>{workflow.title}</h3>
-                  <div className="workflow-showcase-row">
-                    <span>Trigger</span>
-                    <p>{workflow.trigger}</p>
+                <article key={workflow.id} className="workflow-showcase-card">
+                  <div className="workflow-media-frame">
+                    {workflow.mediaType === 'video' ? (
+                      <video
+                        className="workflow-media"
+                        src={workflow.media}
+                        autoPlay
+                        muted
+                        loop
+                        playsInline
+                        controls
+                      />
+                    ) : (
+                      <img className="workflow-media" src={workflow.media} alt={workflow.title} />
+                    )}
                   </div>
-                  <div className="workflow-showcase-row">
-                    <span>Execution</span>
-                    <ul className="workflow-execution-list">
-                      {workflow.execution.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div className="workflow-showcase-row">
-                    <span>Result</span>
-                    <p>{workflow.result}</p>
+                  <div className="workflow-body">
+                    <div className="workflow-title-row">
+                      <img className="workflow-avatar" src={workflow.avatar} alt={`${workflow.owner} avatar`} />
+                      <h3>{workflow.title}</h3>
+                    </div>
+                    <div className="workflow-block">
+                      <span className="workflow-label">Trigger</span>
+                      <p>{workflow.trigger}</p>
+                    </div>
+                    <div className="workflow-block">
+                      <span className="workflow-label">Execution</span>
+                      <ul className="workflow-execution-list">
+                        {workflow.execution.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="workflow-block">
+                      <span className="workflow-label">Result</span>
+                      <p>{workflow.result}</p>
+                    </div>
                   </div>
                 </article>
               ))}
@@ -1269,7 +1316,9 @@ function App() {
             <div className="features-grid">
               {features.map((feature) => (
                 <div key={feature.tag} className="feature-card">
-                  <span className="feature-tag">{feature.tag}</span>
+                  <div className="feature-iconwrap">
+                    <img src={feature.icon} alt={feature.title} className="feature-icon" />
+                  </div>
                   <h3>{feature.title}</h3>
                   <p>{feature.desc}</p>
                 </div>
@@ -1313,12 +1362,7 @@ function App() {
               })}
             </div>
             <div className="faq-cta">
-              <a className="btn btn-secondary" href="/help-center/">
-                View the full Help Center with top 20 questions
-              </a>
-            </div>
-            <div className="faq-help-center">
-              <a href="/help-center/" className="access-playbook-link">
+              <a className="btn btn-secondary" href="https://www.dowhiz.com/help-center/">
                 View the full Help Center with top 20 questions
               </a>
             </div>
@@ -1336,11 +1380,15 @@ function App() {
                   Notes on building multi-channel digital employees, shipping integrations, and improving handoffs.
                 </p>
               </div>
-              <a className="btn btn-primary blog-header-btn" href="/blog/">View all posts</a>
+              <a className="btn btn-secondary blog-header-btn" href="/blog/">View all posts</a>
             </div>
             <div className="blog-grid">
               {blogPosts.map((post) => (
-                <article key={post.title} className="blog-card">
+                <article
+                  key={post.title}
+                  className="blog-card"
+                  role="article"
+                >
                   <div className="blog-meta">
                     <span className="blog-tag">{post.tag}</span>
                     <span className="blog-date">{post.date}</span>
@@ -1349,7 +1397,7 @@ function App() {
                   <p>{post.excerpt}</p>
                   <a className="blog-link" href={post.link}>
                     Read on the blog
-                    <img src="/icons/forward.svg" alt="" aria-hidden="true" className="blog-link-icon" />
+                    <span aria-hidden="true" className="blog-link-icon"></span>
                   </a>
                 </article>
               ))}
@@ -1377,7 +1425,7 @@ function App() {
                 <a href="/trust-safety/" className="footer-link">Trust &amp; Safety</a>
                 <a href="/integrations/" className="footer-link">Integrations</a>
                 <a href="/user-guide/" className="footer-link">User Guide</a>
-                <a href="/help-center/" className="footer-link">Help Center</a>
+                <a href="https://www.dowhiz.com/help-center/" className="footer-link">Help Center</a>
                 <a href="/solutions/ai-workflow-automation/" className="footer-link">AI Workflow Automation</a>
                 <a href="/solutions/github-issue-automation/" className="footer-link">GitHub Issue Automation</a>
                 <a href="/solutions/slack-task-automation/" className="footer-link">Slack Task Automation</a>
