@@ -1,0 +1,12 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#F6F8FA', 'primaryBorderColor': '#4B5563', 'lineColor': '#374151', 'textColor': '#111827', 'fontSize': '19px'}}}%%
+flowchart LR
+    A[接收兼容接口请求] --> B[网关鉴权与限流]
+    B --> C[解析请求体并标准化输入]
+    C --> D[解析代理与会话键]
+    D --> E[统一转换为代理命令]
+    E --> F[调用代理执行链路]
+    F --> G{是否流式返回}
+    G -- 否 --> H[组装兼容响应对象并返回]
+    G -- 是 --> I[订阅代理事件]
+    I --> J[映射增量为事件流输出]
+    J --> K[生命周期结束并发送完成事件]

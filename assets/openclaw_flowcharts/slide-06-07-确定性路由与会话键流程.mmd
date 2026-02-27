@@ -1,0 +1,15 @@
+%%{init: {'theme': 'base', 'flowchart': {'rankSpacing': 70, 'nodeSpacing': 45}, 'themeVariables': { 'primaryColor': '#F6F8FA', 'primaryBorderColor': '#4B5563', 'lineColor': '#374151', 'textColor': '#111827', 'fontSize': '20px'}}}%%
+flowchart LR
+    A[收到渠道消息] --> B[标准化上下文信息]
+    B --> C[从第一匹配层开始]
+    C --> D{当前层是否命中}
+    D -- 是 --> E[锁定目标代理]
+    D -- 否 --> F{是否还有下一层}
+    F -- 是 --> G[切换到下一层继续匹配]
+    G --> D
+    F -- 否 --> H[使用默认代理]
+    E --> I[按会话域生成会话键]
+    H --> I
+    I --> J[输出代理与会话键]
+
+    K[匹配层顺序\n同伴\n父线程\n群组加角色\n群组\n团队\n账号\n渠道\n默认兜底] -. 匹配顺序 .-> C

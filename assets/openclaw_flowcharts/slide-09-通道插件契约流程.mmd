@@ -1,0 +1,10 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#F6F8FA', 'primaryBorderColor': '#4B5563', 'lineColor': '#374151', 'textColor': '#111827', 'fontSize': '19px'}}}%%
+flowchart LR
+    A[加载通道插件契约] --> B[声明能力与适配器集合]
+    B --> C[配置与鉴权配对安全初始化]
+    C --> D[入站消息适配]
+    D --> E[线程与消息语义归一]
+    E --> F[交给代理执行链路]
+    F --> G[流式与出站适配]
+    G --> H[发送到目标渠道]
+    B --> I[挂接网关方法命令状态目录与心跳]
