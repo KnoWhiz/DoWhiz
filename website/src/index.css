@@ -1522,6 +1522,11 @@ ul {
   border: 3px solid rgba(59, 130, 246, 0.9);
 }
 
+
+[data-theme="light"] .how-connector-dot {
+  background: #fff;                     /* light mode override */
+}
+
 .how-output-wrap {
   position: relative;
   display: flex;
