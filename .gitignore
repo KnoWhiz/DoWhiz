@@ -39,3 +39,4 @@ DoWhiz_service/.env.production
 # Claude configuration files (contain sensitive context)
 CLAUDE.md
 **/CLAUDE.md
+/.playwright-cli
