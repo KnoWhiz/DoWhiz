@@ -151,5 +151,9 @@ jobs:
       - name: Restart DoWhiz services
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'
+          set -e
+          if [ -s /home/${{ secrets.STAGING_AZURE_VM_USER }}/.nvm/nvm.sh ]; then
+            source /home/${{ secrets.STAGING_AZURE_VM_USER }}/.nvm/nvm.sh
+          fi
           pm2 restart dowhiz_rust_service
           EOF
