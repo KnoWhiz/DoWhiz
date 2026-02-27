@@ -4,13 +4,13 @@ on:
   pull_request:
     types: [closed]
     branches:
-      - main
+      - dev
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    environment: production
+    environment: staging
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
 
     defaults:
@@ -70,36 +70,36 @@ jobs:
 
       - name: Decode SSH Private Key
         run: |
-          echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/private_key.pem
+          echo "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" > ~/.ssh/private_key.pem
           chmod 600 ~/.ssh/private_key.pem
 
       - name: Add Azure VM to known_hosts
         run: |
-          ssh-keyscan -H ${{ secrets.PROD_AZURE_VM_IP }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.STAGING_AZURE_VM_IP }} >> ~/.ssh/known_hosts
 
       - name: Create SSH config file
         run: |
           echo "Host azureproduction" >> ~/.ssh/config
-          echo "  HostName ${{ secrets.PROD_AZURE_VM_IP }}" >> ~/.ssh/config
-          echo "  User ${{ secrets.PROD_AZURE_VM_USER }}" >> ~/.ssh/config
+          echo "  HostName ${{ secrets.STAGING_AZURE_VM_IP }}" >> ~/.ssh/config
+          echo "  User ${{ secrets.STAGING_AZURE_VM_USER }}" >> ~/.ssh/config
           echo "  Port 22" >> ~/.ssh/config
           echo "  IdentityFile ~/.ssh/private_key.pem" >> ~/.ssh/config
 
       - name: Update repo and build on Azure VM
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'
-          cd /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz
+          cd /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz
           git checkout -f
-          git checkout main
+          git checkout dev
           git pull
-          mkdir -p /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
+          mkdir -p /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
           EOF
 
       - name: Ensure release directory is writable
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'
           set -e
-          RELEASE_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
+          RELEASE_DIR=/home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
           mkdir -p "$RELEASE_DIR"
           chmod u+rwx "$RELEASE_DIR"
           EOF
@@ -107,7 +107,7 @@ jobs:
       - name: Inspect release directory (debug)
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'
-          RELEASE_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
+          RELEASE_DIR=/home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
           echo "== whoami =="
           whoami
           echo "== id =="
@@ -131,25 +131,25 @@ jobs:
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'
           set -e
-          RELEASE_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
+          RELEASE_DIR=/home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
           install -m 755 /tmp/dowhiz-release/rust_service "$RELEASE_DIR/rust_service"
           install -m 755 /tmp/dowhiz-release/inbound_gateway "$RELEASE_DIR/inbound_gateway"
           install -m 755 /tmp/dowhiz-release/set_postmark_inbound_hook "$RELEASE_DIR/set_postmark_inbound_hook"
           rm -rf /tmp/dowhiz-release
           EOF
 
-      - name: Write production .env on Azure VM
+      - name: Write staging .env on Azure VM
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'
-          mkdir -p /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
-          cat << 'ENVEOF' > /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/.env
-          ${{ secrets.COMMON_ENV }}
+          mkdir -p /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
+          cat << 'ENVEOF' > /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/.env
+          ${{ secrets.STAGING_ENV }}
           ENVEOF
-          chmod 600 /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/.env
+          chmod 600 /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/.env
           EOF
 
       - name: Restart DoWhiz services
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'
-          pm2 restart dowhiz_rust_service dowhiz_inbound_gateway
+          pm2 restart dowhiz_rust_service
           EOF

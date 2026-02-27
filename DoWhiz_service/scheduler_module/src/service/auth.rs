@@ -1895,6 +1895,8 @@ pub async fn get_tasks(
 /// GET /api/account/tasks
 /// Returns all tasks for the authenticated user's unified account.
 /// This fetches from the account-level tasks.db which aggregates tasks from all channels.
+/// For Slack, it also fetches from legacy user storage since Slack task status updates
+/// go to legacy storage (because reply_to contains channel_id, not user_id).
 pub async fn get_account_tasks(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -1935,44 +1937,103 @@ pub async fn get_account_tasks(
     };
 
     // Get account by auth_user_id
-    let store = state.account_store.clone();
-    let account_result = task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id))
-        .await
-        .map_err(|e| {
-            error!("spawn_blocking panicked: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "Internal error" })),
-            )
-        });
+    let account_id_for_identifiers = {
+        let store_clone = state.account_store.clone();
+        let account_result = task::spawn_blocking(move || store_clone.get_account_by_auth_user(auth_user_id))
+            .await
+            .map_err(|e| {
+                error!("spawn_blocking panicked: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": "Internal error" })),
+                )
+            });
 
-    let account = match account_result {
-        Ok(Ok(Some(acc))) => acc,
-        Ok(Ok(None)) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "Account not found" })),
-            )
-                .into_response();
+        match account_result {
+            Ok(Ok(Some(acc))) => acc.id,
+            Ok(Ok(None)) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({ "error": "Account not found" })),
+                )
+                    .into_response();
+            }
+            Ok(Err(e)) => {
+                error!("Failed to get account: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": "Failed to get account" })),
+                )
+                    .into_response();
+            }
+            Err(resp) => return resp.into_response(),
         }
-        Ok(Err(e)) => {
-            error!("Failed to get account: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "Failed to get account" })),
-            )
-                .into_response();
-        }
-        Err(resp) => return resp.into_response(),
     };
 
     // Load tasks from account-level tasks.db
     let account_tasks_db_path = users_root
-        .join(account.id.to_string())
+        .join(account_id_for_identifiers.to_string())
         .join("state")
         .join("tasks.db");
 
-    let tasks = load_tasks_with_status(&account_tasks_db_path);
+    let mut tasks = load_tasks_with_status(&account_tasks_db_path);
+
+    // For Slack, also fetch from legacy user storage (where status updates go)
+    // Get linked Slack identifiers for this account
+    let account_id = account_id_for_identifiers;
+    let store_for_identifiers = state.account_store.clone();
+    let identifiers_result = task::spawn_blocking(move || store_for_identifiers.list_identifiers(account_id))
+        .await;
+
+    if let Ok(Ok(identifiers)) = identifiers_result {
+        let slack_identifiers: Vec<_> = identifiers
+            .iter()
+            .filter(|id| id.identifier_type == "slack" && id.verified)
+            .collect();
+
+        if !slack_identifiers.is_empty() {
+            if let Some(user_store) = &state.user_store {
+                for slack_id in slack_identifiers {
+                    // Look up the legacy user for this Slack identifier
+                    let user_store_clone = user_store.clone();
+                    let identifier = slack_id.identifier.clone();
+                    let user_result = task::spawn_blocking(move || {
+                        user_store_clone.get_user_by_identifier("slack", &identifier)
+                    })
+                    .await;
+
+                    if let Ok(Ok(Some(user_record))) = user_result {
+                        // Load tasks from legacy user storage
+                        let user_paths = user_store.user_paths(&users_root, &user_record.user_id);
+                        let legacy_tasks = load_tasks_with_status(&user_paths.tasks_db_path);
+
+                        // Merge legacy tasks, preferring ones with execution_status set
+                        // (legacy storage has the updated status for Slack tasks)
+                        for legacy_task in legacy_tasks {
+                            if let Some(existing_idx) = tasks.iter().position(|t| t.id == legacy_task.id) {
+                                // If legacy task has status and existing doesn't, use legacy
+                                if legacy_task.execution_status.is_some() && tasks[existing_idx].execution_status.is_none() {
+                                    tasks[existing_idx] = legacy_task;
+                                }
+                                // If both have status, prefer the one that's not "pending"/"running"
+                                else if legacy_task.execution_status.is_some() {
+                                    let legacy_status = legacy_task.execution_status.as_deref().unwrap_or("");
+                                    let existing_status = tasks[existing_idx].execution_status.as_deref().unwrap_or("");
+                                    if (existing_status == "pending" || existing_status == "running")
+                                        && (legacy_status == "success" || legacy_status == "failed") {
+                                        tasks[existing_idx] = legacy_task;
+                                    }
+                                }
+                            } else {
+                                // Task only exists in legacy storage, add it
+                                tasks.push(legacy_task);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     (StatusCode::OK, Json(TasksResponse { tasks })).into_response()
 }
