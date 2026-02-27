@@ -6,6 +6,9 @@
   --text-subtle: #aac2ee;
   --accent: #8ac4ff;
   --accent-strong: #c2e7ff;
+  --font-sans: 'Calibri', 'Gill Sans', 'Gill Sans MT', 'Myriad Pro', 'Myriad',
+    'DejaVu Sans Condensed', 'Liberation Sans', 'Nimbus Sans L', Tahoma, Geneva,
+    'Helvetica Neue', Helvetica, Arial, sans-serif;
 }
 
 * {
@@ -20,7 +23,7 @@ body {
 
 body {
   min-height: 100vh;
-  font-family: "Manrope", "Segoe UI", "Helvetica Neue", sans-serif;
+  font-family: var(--font-sans);
   background: radial-gradient(circle at 12% 8%, rgba(58, 104, 198, 0.5), transparent 38%),
     radial-gradient(circle at 88% 92%, rgba(8, 141, 168, 0.35), transparent 42%), var(--bg);
   color: var(--text-main);
