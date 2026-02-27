@@ -21,9 +21,9 @@
     </td>
   </tr>
   <tr>
-    <td align="center"><sub><a href="https://www.youtube.com/shorts/SI9mxW_Top0">Short 1</a></sub></td>
-    <td align="center"><sub><a href="https://www.youtube.com/shorts/PSsJ7WBk71w">Short 2</a></sub></td>
-    <td align="center"><sub><a href="https://www.youtube.com/shorts/5H9g3LOGkMc">Short 3</a></sub></td>
+    <td align="center"><sub><a href="https://www.youtube.com/shorts/SI9mxW_Top0">DoWhiz employee in Notion</a></sub></td>
+    <td align="center"><sub><a href="https://www.youtube.com/shorts/PSsJ7WBk71w">DoWhiz employee in Email</a></sub></td>
+    <td align="center"><sub><a href="https://www.youtube.com/shorts/5H9g3LOGkMc">DoWhiz employee in Discord</a></sub></td>
   </tr>
 </table>
 
