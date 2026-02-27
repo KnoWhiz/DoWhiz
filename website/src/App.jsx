@@ -534,32 +534,38 @@ function App() {
     {
       tag: '01',
       title: 'Trigger from every surface',
-      desc: 'Start work from email, Slack/Discord messages, GitHub issues, or @mentions in shared Google Docs and Notion comments.'
+      desc: 'Start work from email, Slack/Discord messages, GitHub issues, or @mentions in shared Google Docs and Notion comments.',
+      icon: '/icons/The%20Digital%20Employee%20Stack/trigger.svg'
     },
     {
       tag: '02',
       title: 'Tool-native execution',
-      desc: 'Agents work directly in your docs, project boards, repos, and chat spaces so outputs land where your team already works.'
+      desc: 'Agents work directly in your docs, project boards, repos, and chat spaces so outputs land where your team already works.',
+      icon: '/icons/The%20Digital%20Employee%20Stack/execute.svg'
     },
     {
       tag: '03',
       title: 'Shared memory across channels',
-      desc: 'Per-user context carries over across email, chat, issues, and comments so follow-ups do not restart from zero.'
+      desc: 'Per-user context carries over across email, chat, issues, and comments so follow-ups do not restart from zero.',
+      icon: '/icons/The%20Digital%20Employee%20Stack/shared.svg'
     },
     {
       tag: '04',
       title: 'Agent-owned identities',
-      desc: 'Each digital employee has their own account identity. You do not hand over personal credentials to get work done.'
+      desc: 'Each digital employee has their own account identity. You do not hand over personal credentials to get work done.',
+      icon: '/icons/The%20Digital%20Employee%20Stack/agent.svg'
     },
     {
       tag: '05',
       title: 'Permissioned workspace access',
-      desc: 'Agents only access workspaces and integrations when you explicitly grant access and can be revoked at any time.'
+      desc: 'Agents only access workspaces and integrations when you explicitly grant access and can be revoked at any time.',
+      icon: '/icons/The%20Digital%20Employee%20Stack/permission.svg'
     },
     {
       tag: '06',
       title: 'Cross-agent collaboration',
-      desc: 'Agents can hand off tasks to each other while keeping a shared context trail so delivery stays coherent end to end.'
+      desc: 'Agents can hand off tasks to each other while keeping a shared context trail so delivery stays coherent end to end.',
+      icon: '/icons/The%20Digital%20Employee%20Stack/collaboration.svg'
     }
   ];
 
@@ -659,8 +665,28 @@ function App() {
 
   const workflowExamples = [
     {
-      tag: 'Workflow 1',
+      id: 'maggie',
+      title: 'Meeting Summary and Follow-up Task Assignment',
+      owner: 'Maggie',
+      avatar: miniMouseImg,
+      mediaType: 'video',
+      media: '/icons/workflow%20example/maggie.mov',
+      trigger: 'Tell Maggie her tasks in a meeting.',
+      execution: [
+        'Maggie extracts decisions, actions, dependencies, and owners.',
+        'Builds due-date follow-ups and milestone checkpoints.',
+        'Prepares a status-ready update for your team channel.',
+        'Assigns tasks to other agents.'
+      ],
+      result: 'You get an owner-tracked execution plan with clear follow-up cadence.'
+    },
+    {
+      id: 'devin',
       title: 'Engineering delivery from GitHub',
+      owner: 'Devin',
+      avatar: stickyOctopusImg,
+      mediaType: 'video',
+      media: '/icons/workflow%20example/devin.mov',
       trigger: 'Create a GitHub issue, assign Devin, and include acceptance criteria.',
       execution: [
         'Devin breaks work into implementation checkpoints.',
@@ -670,26 +696,20 @@ function App() {
       result: 'You get a PR, test status, and a concise summary in the same issue thread.'
     },
     {
-      tag: 'Workflow 2',
-      title: 'Meeting follow-through from shared docs',
-      trigger: '@mention Maggie in a Google Doc or Notion comment after a planning discussion.',
+      id: 'oliver',
+      title: 'Chat Summary and Todo List from Discord',
+      owner: 'Oliver',
+      avatar: oliverImg,
+      mediaType: 'image',
+      media: '/icons/workflow%20example/oliver.png',
+      trigger: '@mention Oliver in Discord channel and assign him tasks.',
       execution: [
-        'Maggie extracts decisions, actions, dependencies, and owners.',
-        'Builds due-date follow-ups and milestone checkpoints.',
-        'Prepares a status-ready update for your team channel.'
+        'Oliver scans the full conversation history in the channel.',
+        'Identifies key decisions, technical conclusions, and shared updates.',
+        'Extracts concrete action items with clear ownership and priorities.',
+        'Organizes them into a structured, execution-ready checklist.'
       ],
-      result: 'You get an owner-tracked execution plan with clear follow-up cadence.'
-    },
-    {
-      tag: 'Workflow 3',
-      title: 'Launch coordination from chat',
-      trigger: 'Message Rachel in Slack or Discord with launch assets and target date.',
-      execution: [
-        'Rachel creates a channel-by-channel launch timeline.',
-        'Drafts per-channel copy and handoff tasks.',
-        'Coordinates supporting agents for docs, tracking, and updates.'
-      ],
-      result: 'You get a complete launch plan with timeline, copy, and ownership.'
+      result: 'You get a concise recap of what happened and a clear, owner-aligned action plan for the next step.'
     }
   ];
 
@@ -1196,24 +1216,43 @@ function App() {
             </p>
             <div className="workflow-showcase-grid">
               {workflowExamples.map((workflow) => (
-                <article key={workflow.tag} className="workflow-showcase-card">
-                  <span className="workflow-badge">{workflow.tag}</span>
-                  <h3>{workflow.title}</h3>
-                  <div className="workflow-showcase-row">
-                    <span>Trigger</span>
-                    <p>{workflow.trigger}</p>
+                <article key={workflow.id} className="workflow-showcase-card">
+                  <div className="workflow-media-frame">
+                    {workflow.mediaType === 'video' ? (
+                      <video
+                        className="workflow-media"
+                        src={workflow.media}
+                        autoPlay
+                        muted
+                        loop
+                        playsInline
+                        controls
+                      />
+                    ) : (
+                      <img className="workflow-media" src={workflow.media} alt={workflow.title} />
+                    )}
                   </div>
-                  <div className="workflow-showcase-row">
-                    <span>Execution</span>
-                    <ul className="workflow-execution-list">
-                      {workflow.execution.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div className="workflow-showcase-row">
-                    <span>Result</span>
-                    <p>{workflow.result}</p>
+                  <div className="workflow-body">
+                    <div className="workflow-title-row">
+                      <img className="workflow-avatar" src={workflow.avatar} alt={`${workflow.owner} avatar`} />
+                      <h3>{workflow.title}</h3>
+                    </div>
+                    <div className="workflow-block">
+                      <span className="workflow-label">Trigger</span>
+                      <p>{workflow.trigger}</p>
+                    </div>
+                    <div className="workflow-block">
+                      <span className="workflow-label">Execution</span>
+                      <ul className="workflow-execution-list">
+                        {workflow.execution.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="workflow-block">
+                      <span className="workflow-label">Result</span>
+                      <p>{workflow.result}</p>
+                    </div>
                   </div>
                 </article>
               ))}
@@ -1277,7 +1316,9 @@ function App() {
             <div className="features-grid">
               {features.map((feature) => (
                 <div key={feature.tag} className="feature-card">
-                  <span className="feature-tag">{feature.tag}</span>
+                  <div className="feature-iconwrap">
+                    <img src={feature.icon} alt={feature.title} className="feature-icon" />
+                  </div>
                   <h3>{feature.title}</h3>
                   <p>{feature.desc}</p>
                 </div>
