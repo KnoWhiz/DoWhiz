@@ -1068,6 +1068,9 @@ function App() {
               <a className="btn btn-primary" href={WAITLIST_FORM_URL} target="_blank" rel="noopener noreferrer">
                 Join waitlist
               </a>
+              <a className="btn btn-secondary" href="/demo-videos/">
+                Watch demo videos
+              </a>
             </div>
           </div>
         </section>
