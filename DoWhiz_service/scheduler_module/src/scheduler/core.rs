@@ -12,6 +12,7 @@ use crate::channel::Channel;
 use super::actions::{apply_scheduler_actions, ingest_follow_up_tasks, schedule_auto_reply};
 use super::executor::TaskExecutor;
 use super::outbound::execute_slack_send;
+use super::reply::load_reply_context;
 use super::schedule::{next_run_after, validate_cron_expression};
 use super::snapshot::{snapshot_reply_draft, write_scheduler_snapshot};
 use super::store::SqliteSchedulerStore;
@@ -272,7 +273,13 @@ impl<E: TaskExecutor> Scheduler<E> {
                 )?;
                 // Sync failure status to user's account-level storage for Discord/Slack
                 if let TaskKind::RunTask(task) = &task_kind {
-                    sync_task_status_to_user_storage(task_id, task, executed_at, "failed", Some(&message));
+                    sync_task_status_to_user_storage(
+                        task_id,
+                        task,
+                        executed_at,
+                        "failed",
+                        Some(&message),
+                    );
                 }
                 // Disable one-shot tasks on failure, but allow a few retries for RunTask.
                 if matches!(self.tasks[index].schedule, Schedule::OneShot { .. }) {
@@ -355,7 +362,10 @@ fn sync_task_status_to_user_storage(
     error_message: Option<&str>,
 ) {
     // Only sync for channels that support unified accounts (Slack excluded - uses legacy user storage)
-    if !matches!(task.channel, Channel::Discord | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides) {
+    if !matches!(
+        task.channel,
+        Channel::Discord | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides
+    ) {
         return;
     }
 
@@ -363,7 +373,10 @@ fn sync_task_status_to_user_storage(
     let identifier = match task.reply_to.first() {
         Some(id) => id,
         None => {
-            warn!("no reply_to identifier for task {} to sync to user storage", task_id);
+            warn!(
+                "no reply_to identifier for task {} to sync to user storage",
+                task_id
+            );
             return;
         }
     };
@@ -381,7 +394,10 @@ fn sync_task_status_to_user_storage(
     let users_root = match std::env::var("USERS_ROOT") {
         Ok(path) => PathBuf::from(path),
         Err(_) => {
-            warn!("USERS_ROOT not set, cannot sync task {} to user storage", task_id);
+            warn!(
+                "USERS_ROOT not set, cannot sync task {} to user storage",
+                task_id
+            );
             return;
         }
     };
@@ -398,8 +414,16 @@ fn sync_task_status_to_user_storage(
             // Record execution start and finish to update status
             match store.record_execution_start(task_id, executed_at) {
                 Ok(execution_id) => {
-                    if let Err(err) = store.record_execution_finish(execution_id, executed_at, status, error_message) {
-                        warn!("failed to record execution finish for task {} in user storage: {}", task_id, err);
+                    if let Err(err) = store.record_execution_finish(
+                        execution_id,
+                        executed_at,
+                        status,
+                        error_message,
+                    ) {
+                        warn!(
+                            "failed to record execution finish for task {} in user storage: {}",
+                            task_id, err
+                        );
                     } else {
                         info!(
                             "synced task {} status '{}' to user storage account={}",
@@ -408,7 +432,10 @@ fn sync_task_status_to_user_storage(
                     }
                 }
                 Err(err) => {
-                    warn!("failed to record execution start for task {} in user storage: {}", task_id, err);
+                    warn!(
+                        "failed to record execution start for task {} in user storage: {}",
+                        task_id, err
+                    );
                 }
             }
         }
@@ -449,6 +476,9 @@ fn notify_run_task_failure(
 
     if !task.reply_to.is_empty() {
         if is_slack {
+            let slack_thread_ts = load_reply_context(&task.workspace_dir)
+                .in_reply_to
+                .or_else(|| slack_thread_ts_from_thread_key(task.thread_id.as_deref()));
             let send_task = SendReplyTask {
                 channel: Channel::Slack,
                 subject: RUN_TASK_FAILURE_NOTICE.to_string(),
@@ -458,7 +488,7 @@ fn notify_run_task_failure(
                 to: task.reply_to.clone(),
                 cc: vec![],
                 bcc: vec![],
-                in_reply_to: task.thread_id.clone(),
+                in_reply_to: slack_thread_ts,
                 references: None,
                 archive_root: None,
                 thread_epoch: None,
@@ -534,6 +564,19 @@ fn notify_run_task_failure(
     Ok(())
 }
 
+fn slack_thread_ts_from_thread_key(thread_key: Option<&str>) -> Option<String> {
+    let raw = thread_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let mut parts = raw.splitn(3, ':');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some("slack"), Some(_channel), Some(thread_ts)) if !thread_ts.trim().is_empty() => {
+            Some(thread_ts.trim().to_string())
+        }
+        _ => Some(raw.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -545,7 +588,6 @@ mod tests {
         // Channels that should be synced
         let syncable_channels = vec![
             Channel::Discord,
-            Channel::Slack,
             Channel::GoogleDocs,
             Channel::GoogleSheets,
             Channel::GoogleSlides,
@@ -556,7 +598,6 @@ mod tests {
                 matches!(
                     channel,
                     Channel::Discord
-                        | Channel::Slack
                         | Channel::GoogleDocs
                         | Channel::GoogleSheets
                         | Channel::GoogleSlides
@@ -580,7 +621,6 @@ mod tests {
                 !matches!(
                     channel,
                     Channel::Discord
-                        | Channel::Slack
                         | Channel::GoogleDocs
                         | Channel::GoogleSheets
                         | Channel::GoogleSlides
@@ -608,5 +648,17 @@ mod tests {
 
         assert_eq!(channel_to_identifier_type(&Channel::Discord), "discord");
         assert_eq!(channel_to_identifier_type(&Channel::Slack), "slack");
+    }
+
+    #[test]
+    fn slack_thread_ts_from_thread_key_parses_compound_key() {
+        assert_eq!(
+            super::slack_thread_ts_from_thread_key(Some("slack:C123:1700000000.001")),
+            Some("1700000000.001".to_string())
+        );
+        assert_eq!(
+            super::slack_thread_ts_from_thread_key(Some("1700000000.002")),
+            Some("1700000000.002".to_string())
+        );
     }
 }

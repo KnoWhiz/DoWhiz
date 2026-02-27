@@ -71,8 +71,7 @@ fn base_send_task(channel: Channel, html_path: PathBuf, attachments_dir: PathBuf
 #[test]
 fn send_reply_slack_uses_mock() -> Result<(), Box<dyn std::error::Error>> {
     let _lock = ENV_MUTEX.lock().unwrap();
-    let Some(mut server) = test_support::start_mockito_server("send_reply_slack_uses_mock")
-    else {
+    let Some(mut server) = test_support::start_mockito_server("send_reply_slack_uses_mock") else {
         return Ok(());
     };
 
@@ -97,6 +96,49 @@ fn send_reply_slack_uses_mock() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut task = base_send_task(Channel::Slack, html_path, attachments_dir);
     task.to = vec!["C123".to_string()];
+
+    let db_path = temp.path().join("tasks.db");
+    let mut scheduler = Scheduler::load(&db_path, ModuleExecutor::default())?;
+    scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::SendReply(task))?;
+    scheduler.tick()?;
+
+    slack_mock.assert();
+    Ok(())
+}
+
+#[test]
+fn send_reply_slack_includes_thread_ts_when_present() -> Result<(), Box<dyn std::error::Error>> {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let Some(mut server) =
+        test_support::start_mockito_server("send_reply_slack_includes_thread_ts_when_present")
+    else {
+        return Ok(());
+    };
+
+    let slack_mock = server
+        .mock("POST", "/chat.postMessage")
+        .match_header("authorization", "Bearer xoxb-test")
+        .match_header("content-type", "application/json")
+        .match_body(Matcher::Regex("\\\"channel\\\":\\\"C123\\\"".to_string()))
+        .match_body(Matcher::Regex(
+            "\\\"thread_ts\\\":\\\"1700000000\\.123\\\"".to_string(),
+        ))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"ok":true,"ts":"1700000000.456"}"#)
+        .expect(1)
+        .create();
+
+    let _guard_token = EnvGuard::set("SLACK_BOT_TOKEN", "xoxb-test");
+    let _guard_api = EnvGuard::set("SLACK_API_BASE_URL", server.url());
+
+    let temp = TempDir::new()?;
+    let html_path = write_text_file(&temp, "slack_message.txt", "Hello Slack thread")?;
+    let attachments_dir = create_attachments_dir(&temp)?;
+
+    let mut task = base_send_task(Channel::Slack, html_path, attachments_dir);
+    task.to = vec!["C123".to_string()];
+    task.in_reply_to = Some("1700000000.123".to_string());
 
     let db_path = temp.path().join("tasks.db");
     let mut scheduler = Scheduler::load(&db_path, ModuleExecutor::default())?;
@@ -148,8 +190,7 @@ fn send_reply_discord_uses_mock() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn send_reply_sms_uses_mock() -> Result<(), Box<dyn std::error::Error>> {
     let _lock = ENV_MUTEX.lock().unwrap();
-    let Some(mut server) = test_support::start_mockito_server("send_reply_sms_uses_mock")
-    else {
+    let Some(mut server) = test_support::start_mockito_server("send_reply_sms_uses_mock") else {
         return Ok(());
     };
 

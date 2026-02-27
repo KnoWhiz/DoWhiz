@@ -54,8 +54,7 @@ fn success_body(to: &str) -> String {
 fn slack_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Error>> {
     let _lock = ENV_MUTEX.lock().unwrap();
 
-    let Some(mut server) =
-        test_support::start_mockito_server("slack_failure_retries_and_notifies")
+    let Some(mut server) = test_support::start_mockito_server("slack_failure_retries_and_notifies")
     else {
         return Ok(());
     };
@@ -66,6 +65,9 @@ fn slack_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Error>
         .match_header("authorization", "Bearer xoxb-test")
         .match_header("content-type", "application/json")
         .match_body(Matcher::Regex("\"channel\":\"C123\"".to_string()))
+        .match_body(Matcher::Regex(
+            "\"thread_ts\":\"1700000000.123\"".to_string(),
+        ))
         .match_body(Matcher::Regex(
             "We could not complete your request".to_string(),
         ))
@@ -93,7 +95,12 @@ fn slack_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Error>
 
     let temp = TempDir::new()?;
     let workspace = temp.path().join("workspace");
-    fs::create_dir_all(&workspace)?;
+    let incoming_dir = workspace.join("incoming_email");
+    fs::create_dir_all(&incoming_dir)?;
+    fs::write(
+        incoming_dir.join("00001_slack_meta.json"),
+        r#"{"channel":"slack","thread_id":"1700000000.123"}"#,
+    )?;
 
     let run_task = RunTaskTask {
         workspace_dir: workspace.clone(),
