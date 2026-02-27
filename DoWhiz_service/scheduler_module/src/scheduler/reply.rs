@@ -58,6 +58,12 @@ struct DiscordMetaLite {
     message_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct SlackMetaLite {
+    channel: Option<String>,
+    thread_id: Option<String>,
+}
+
 pub(crate) fn load_reply_context(workspace_dir: &Path) -> ReplyContext {
     let incoming_dir = workspace_dir.join("incoming_email");
 
@@ -66,6 +72,16 @@ pub(crate) fn load_reply_context(workspace_dir: &Path) -> ReplyContext {
         return ReplyContext {
             subject: "Discord reply".to_string(),
             in_reply_to: Some(message_id),
+            references: None,
+            from: None,
+        };
+    }
+
+    // Slack: reply in the same thread.
+    if let Some(thread_ts) = latest_slack_thread_id(&incoming_dir) {
+        return ReplyContext {
+            subject: "Slack reply".to_string(),
+            in_reply_to: Some(thread_ts),
             references: None,
             from: None,
         };
@@ -150,6 +166,35 @@ fn latest_discord_message_id(incoming_dir: &Path) -> Option<String> {
     {
         return meta
             .message_id
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+    }
+    None
+}
+
+fn latest_slack_thread_id(incoming_dir: &Path) -> Option<String> {
+    let entries = fs::read_dir(incoming_dir).ok()?;
+    let mut meta_files = entries
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.ends_with("_slack_meta.json"))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    meta_files.sort();
+    let latest = meta_files.last()?;
+    let content = fs::read_to_string(latest).ok()?;
+    let meta = serde_json::from_str::<SlackMetaLite>(&content).ok()?;
+    if meta
+        .channel
+        .as_deref()
+        .map(|channel| channel.eq_ignore_ascii_case("slack"))
+        .unwrap_or(false)
+    {
+        return meta
+            .thread_id
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
     }
@@ -248,5 +293,27 @@ mod tests {
         assert_eq!(context.subject, "Re: Hello");
         assert_eq!(context.in_reply_to.as_deref(), Some("<msg-123>"));
         assert_eq!(context.references.as_deref(), Some("<msg-122> <msg-123>"));
+    }
+
+    #[test]
+    fn load_reply_context_prefers_latest_slack_thread_id() {
+        let temp = TempDir::new().expect("tempdir");
+        let incoming_dir = temp.path().join("incoming_email");
+        fs::create_dir_all(&incoming_dir).expect("incoming_email");
+
+        fs::write(
+            incoming_dir.join("00001_slack_meta.json"),
+            r#"{"channel":"slack","thread_id":"1700000000.001"}"#,
+        )
+        .expect("write first");
+        fs::write(
+            incoming_dir.join("00002_slack_meta.json"),
+            r#"{"channel":"slack","thread_id":"1700000000.002"}"#,
+        )
+        .expect("write second");
+
+        let context = load_reply_context(temp.path());
+        assert_eq!(context.subject, "Slack reply");
+        assert_eq!(context.in_reply_to.as_deref(), Some("1700000000.002"));
     }
 }
