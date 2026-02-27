@@ -156,5 +156,5 @@ jobs:
           if [ -s /home/${{ secrets.STAGING_AZURE_VM_USER }}/.nvm/nvm.sh ]; then
             source /home/${{ secrets.STAGING_AZURE_VM_USER }}/.nvm/nvm.sh
           fi
-          pm2 restart dowhiz_rust_service
+          pm2 restart dw_worker dw_gateway
           EOF
