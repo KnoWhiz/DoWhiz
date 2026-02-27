@@ -344,8 +344,9 @@ impl<E: TaskExecutor> Scheduler<E> {
     }
 }
 
-/// Sync task execution status to user's account-level tasks.db for Discord/Slack channels.
+/// Sync task execution status to user's account-level tasks.db for Discord/Google Workspace channels.
 /// This allows users to see task status in their dashboard for linked accounts.
+/// Note: Slack is excluded because reply_to contains channel_id, not user_id - Slack uses legacy user storage.
 fn sync_task_status_to_user_storage(
     task_id: Uuid,
     task: &RunTaskTask,
@@ -353,12 +354,12 @@ fn sync_task_status_to_user_storage(
     status: &str,
     error_message: Option<&str>,
 ) {
-    // Only sync for channels that support unified accounts
-    if !matches!(task.channel, Channel::Discord | Channel::Slack | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides) {
+    // Only sync for channels that support unified accounts (Slack excluded - uses legacy user storage)
+    if !matches!(task.channel, Channel::Discord | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides) {
         return;
     }
 
-    // Get the identifier from reply_to (Discord: reply_to[0], Slack: sender is in reply_to for lookup)
+    // Get the identifier from reply_to (Discord: user_id, Google*: email)
     let identifier = match task.reply_to.first() {
         Some(id) => id,
         None => {
