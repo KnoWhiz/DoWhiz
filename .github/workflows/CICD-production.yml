@@ -156,24 +156,32 @@ jobs:
           if [ -s /home/${{ secrets.PROD_AZURE_VM_USER }}/.nvm/nvm.sh ]; then
             source /home/${{ secrets.PROD_AZURE_VM_USER }}/.nvm/nvm.sh
           fi
-          restarted=0
-          for service in \
-            dw_worker \
-            dw_gateway \
-            dowhiz_rust_service \
-            dowhiz_inbound_gateway \
-            dowhiz_gateway \
-            dowhiz-rust-service \
-            dowhiz-inbound-gateway; do
+          APP_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
+
+          worker_running=0
+          for service in dw_worker dowhiz_rust_service dowhiz-rust-service; do
             if pm2 describe "$service" >/dev/null 2>&1; then
               pm2 restart "$service"
-              restarted=1
+              worker_running=1
             fi
           done
-
-          if [ "$restarted" -eq 0 ]; then
-            echo "No known DoWhiz PM2 services found to restart."
-            pm2 list || true
-            exit 1
+          if [ "$worker_running" -eq 0 ]; then
+            echo "No worker process found in PM2, starting dw_worker."
+            pm2 start "$APP_DIR/target/release/rust_service" --name dw_worker --cwd "$APP_DIR" -- --host 0.0.0.0 --port 9001
           fi
+
+          gateway_running=0
+          for service in dw_gateway dowhiz_inbound_gateway dowhiz_gateway dowhiz-inbound-gateway; do
+            if pm2 describe "$service" >/dev/null 2>&1; then
+              pm2 restart "$service"
+              gateway_running=1
+            fi
+          done
+          if [ "$gateway_running" -eq 0 ]; then
+            echo "No gateway process found in PM2, starting dw_gateway."
+            pm2 start "$APP_DIR/target/release/inbound_gateway" --name dw_gateway --cwd "$APP_DIR"
+          fi
+
+          pm2 save
+          pm2 list
           EOF
