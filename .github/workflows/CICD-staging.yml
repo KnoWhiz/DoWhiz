@@ -156,5 +156,24 @@ jobs:
           if [ -s /home/${{ secrets.STAGING_AZURE_VM_USER }}/.nvm/nvm.sh ]; then
             source /home/${{ secrets.STAGING_AZURE_VM_USER }}/.nvm/nvm.sh
           fi
-          pm2 restart dw_worker dw_gateway
+          restarted=0
+          for service in \
+            dw_worker \
+            dw_gateway \
+            dowhiz_rust_service \
+            dowhiz_inbound_gateway \
+            dowhiz_gateway \
+            dowhiz-rust-service \
+            dowhiz-inbound-gateway; do
+            if pm2 describe "$service" >/dev/null 2>&1; then
+              pm2 restart "$service"
+              restarted=1
+            fi
+          done
+
+          if [ "$restarted" -eq 0 ]; then
+            echo "No known DoWhiz PM2 services found to restart."
+            pm2 list || true
+            exit 1
+          fi
           EOF
