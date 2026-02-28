@@ -336,11 +336,17 @@ impl AccountStore {
     /// Verify an email token and link the email to the account
     pub fn verify_email_token(&self, token: &str) -> Result<AccountIdentifier, AccountStoreError> {
         let mut conn = self.conn()?;
+        let normalized_token = token.trim();
+        if normalized_token.is_empty() {
+            return Err(AccountStoreError::TokenInvalid);
+        }
 
         // Look up the token
         let row = conn.query_opt(
-            "SELECT token, account_id, email, expires_at FROM email_verification_tokens WHERE token = $1",
-            &[&token],
+            "SELECT token, account_id, email, expires_at
+             FROM email_verification_tokens
+             WHERE token::text = $1",
+            &[&normalized_token],
         )?;
 
         let verification = match row {
@@ -358,8 +364,8 @@ impl AccountStore {
         if Utc::now() > verification.expires_at {
             // Delete expired token
             conn.execute(
-                "DELETE FROM email_verification_tokens WHERE token = $1",
-                &[&token],
+                "DELETE FROM email_verification_tokens WHERE token::text = $1",
+                &[&normalized_token],
             )?;
             return Err(AccountStoreError::TokenInvalid);
         }
@@ -376,8 +382,8 @@ impl AccountStore {
 
         // Delete the used token
         conn.execute(
-            "DELETE FROM email_verification_tokens WHERE token = $1",
-            &[&token],
+            "DELETE FROM email_verification_tokens WHERE token::text = $1",
+            &[&normalized_token],
         )?;
 
         Ok(AccountIdentifier {
