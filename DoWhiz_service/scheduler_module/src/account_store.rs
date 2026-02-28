@@ -122,7 +122,7 @@ impl AccountStore {
         let row = conn.query_one(
             "INSERT INTO accounts (id, auth_user_id, created_at, tokens_to_hours)
              VALUES ($1, $2, NOW(), 0)
-             RETURNING id, auth_user_id, created_at, tokens_to_hours",
+             RETURNING id, auth_user_id, created_at, tokens_to_hours::float8",
             &[&id, &auth_user_id],
         )?;
         Ok(Account {
@@ -140,7 +140,7 @@ impl AccountStore {
     ) -> Result<Option<Account>, AccountStoreError> {
         let mut conn = self.conn()?;
         let row = conn.query_opt(
-            "SELECT id, auth_user_id, created_at, tokens_to_hours FROM accounts WHERE auth_user_id = $1",
+            "SELECT id, auth_user_id, created_at, tokens_to_hours::float8 FROM accounts WHERE auth_user_id = $1",
             &[&auth_user_id],
         )?;
         Ok(row.map(|r| Account {
@@ -155,7 +155,7 @@ impl AccountStore {
     pub fn get_account(&self, account_id: Uuid) -> Result<Option<Account>, AccountStoreError> {
         let mut conn = self.conn()?;
         let row = conn.query_opt(
-            "SELECT id, auth_user_id, created_at, tokens_to_hours FROM accounts WHERE id = $1",
+            "SELECT id, auth_user_id, created_at, tokens_to_hours::float8 FROM accounts WHERE id = $1",
             &[&account_id],
         )?;
         Ok(row.map(|r| Account {
@@ -174,7 +174,7 @@ impl AccountStore {
     ) -> Result<Option<Account>, AccountStoreError> {
         let mut conn = self.conn()?;
         let row = conn.query_opt(
-            "SELECT a.id, a.auth_user_id, a.created_at, a.tokens_to_hours
+            "SELECT a.id, a.auth_user_id, a.created_at, a.tokens_to_hours::float8
              FROM accounts a
              JOIN account_identifiers ai ON ai.account_id = a.id
              WHERE ai.identifier_type = $1 AND ai.identifier = $2 AND ai.verified = true",
