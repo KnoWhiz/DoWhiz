@@ -22,6 +22,8 @@ use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
+const DEFAULT_NGROK_HOOK_URL: &str =
+    "https://shayne-laminar-lillian.ngrok-free.dev/postmark/inbound";
 
 #[derive(Clone, Default)]
 struct NoopExecutor;
@@ -138,6 +140,28 @@ fn load_env_from_repo() {
             None => break,
         }
     }
+}
+
+fn resolve_postmark_hook_url() -> String {
+    if let Ok(value) = env::var("POSTMARK_TEST_HOOK_URL") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    if let Ok(value) = env::var("POSTMARK_INBOUND_HOOK_URL") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let lower = trimmed.to_ascii_lowercase();
+            if lower.contains("api.staging.dowhiz.com")
+                || lower.contains("api.production1.dowhiz.com")
+            {
+                return DEFAULT_NGROK_HOOK_URL.to_string();
+            }
+            return trimmed.to_string();
+        }
+    }
+    DEFAULT_NGROK_HOOK_URL.to_string()
 }
 
 fn env_with_scale_oliver(key: &str) -> Option<String> {
@@ -624,8 +648,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
 
     let token = env::var("POSTMARK_SERVER_TOKEN")
         .map_err(|_| "POSTMARK_SERVER_TOKEN must be set for live tests")?;
-    let public_url = env::var("POSTMARK_INBOUND_HOOK_URL")
-        .map_err(|_| "POSTMARK_INBOUND_HOOK_URL must be set (ngrok URL)")?;
+    let public_url = resolve_postmark_hook_url();
     let from_addr =
         env::var("POSTMARK_TEST_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
     let service_address = env::var("POSTMARK_TEST_SERVICE_ADDRESS")
