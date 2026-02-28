@@ -299,6 +299,7 @@ pub struct AccountResponse {
     pub account_id: Uuid,
     pub auth_user_id: Uuid,
     pub identifiers: Vec<IdentifierResponse>,
+    pub tokens_to_hours: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -408,6 +409,7 @@ pub async fn get_account(State(state): State<AuthState>, headers: HeaderMap) -> 
                     verified: i.verified,
                 })
                 .collect(),
+            tokens_to_hours: account.tokens_to_hours,
         }),
     )
         .into_response()

@@ -153,6 +153,90 @@
       .dashboard-section {
         margin-top: 2rem;
       }
+      .dashboard-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .dashboard-header h2 {
+        margin: 0;
+      }
+      .info-btn {
+        background: transparent;
+        border: 1px solid var(--border, #333);
+        border-radius: 8px;
+        padding: 0.5rem;
+        cursor: pointer;
+        color: var(--text-muted, #888);
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .info-btn:hover {
+        border-color: var(--accent, #38bdf8);
+        color: var(--accent, #38bdf8);
+      }
+      .settings-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+      }
+      .settings-modal-content {
+        background: var(--bg, #0a0a0a);
+        border: 1px solid var(--border, #333);
+        border-radius: 12px;
+        padding: 2rem;
+        max-width: 400px;
+        width: 90%;
+      }
+      .settings-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+      }
+      .settings-modal-header h3 {
+        margin: 0;
+      }
+      .settings-close-btn {
+        background: transparent;
+        border: none;
+        color: var(--text-muted, #888);
+        cursor: pointer;
+        font-size: 1.5rem;
+        line-height: 1;
+      }
+      .settings-close-btn:hover {
+        color: var(--text, #fff);
+      }
+      .settings-stat {
+        background: var(--surface, #1a1a1a);
+        border: 1px solid var(--border, #333);
+        border-radius: 8px;
+        padding: 1.5rem;
+        text-align: center;
+      }
+      .settings-stat-value {
+        font-size: 2.5rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #38bdf8, #6366f1);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .settings-stat-label {
+        color: var(--text-muted, #888);
+        margin-top: 0.5rem;
+        font-size: 0.9rem;
+      }
       .identifier-list {
         list-style: none;
         padding: 0;
@@ -590,10 +674,33 @@
           <!-- Dashboard (shown after auth) -->
           <div id="dashboard-container" class="hidden">
             <section class="legal-card dashboard-section">
-              <h2>Your Account</h2>
+              <div class="dashboard-header">
+                <h2>Your Account</h2>
+                <button id="info-btn" class="info-btn" title="Info">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                  </svg>
+                </button>
+              </div>
               <p>Account ID: <code id="account-id">Loading...</code></p>
               <p>Email: <code id="user-email">Loading...</code></p>
             </section>
+
+            <!-- Settings Modal -->
+            <div id="settings-modal" class="settings-modal hidden">
+              <div class="settings-modal-content">
+                <div class="settings-modal-header">
+                  <h3>Account Stats</h3>
+                  <button id="settings-close-btn" class="settings-close-btn">&times;</button>
+                </div>
+                <div class="settings-stat">
+                  <div id="oliver-hours" class="settings-stat-value">--</div>
+                  <div class="settings-stat-label">Total hours worked</div>
+                </div>
+              </div>
+            </div>
 
             <section class="legal-card dashboard-section">
               <h2>Linked Channels</h2>
@@ -1010,6 +1117,41 @@
         cachedIdentifiers = [];
         await supabase.auth.signOut();
         window.location.reload();
+      });
+
+      // Settings modal handlers
+      document.getElementById('info-btn').addEventListener('click', async () => {
+        const modal = document.getElementById('settings-modal');
+        const hoursEl = document.getElementById('oliver-hours');
+        hoursEl.textContent = '...';
+        modal.classList.remove('hidden');
+
+        // Fetch fresh account data
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          try {
+            const res = await fetch(`${DOWHIZ_API_URL}/auth/account`, {
+              headers: { 'Authorization': `Bearer ${session.access_token}` }
+            });
+            if (res.ok) {
+              const data = await res.json();
+              hoursEl.textContent = (data.tokens_to_hours || 0).toFixed(2);
+            }
+          } catch (err) {
+            console.error('Failed to fetch account stats:', err);
+            hoursEl.textContent = '0.00';
+          }
+        }
+      });
+
+      document.getElementById('settings-close-btn').addEventListener('click', () => {
+        document.getElementById('settings-modal').classList.add('hidden');
+      });
+
+      document.getElementById('settings-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'settings-modal') {
+          document.getElementById('settings-modal').classList.add('hidden');
+        }
       });
 
       passwordResetForm?.addEventListener('submit', async (e) => {
