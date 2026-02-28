@@ -15,10 +15,10 @@ use crate::slack_store::SlackStore;
 use crate::user_store::UserStore;
 use uuid::Uuid;
 
-use super::discord_context::build_discord_router_context;
-use super::persist_discord_ingest_context;
 use super::super::config::ServiceConfig;
 use super::super::BoxError;
+use super::discord_context::build_discord_router_context;
+use super::persist_discord_ingest_context;
 
 /// Read memo.md from a user's memory directory (local file)
 fn read_user_memo_local(memory_dir: &Path) -> Option<String> {
@@ -27,15 +27,15 @@ fn read_user_memo_local(memory_dir: &Path) -> Option<String> {
 }
 
 /// Read memo from Azure Blob Storage (unified account)
-fn read_user_memo_blob(
-    runtime: &tokio::runtime::Handle,
-    account_id: Uuid,
-) -> Option<String> {
+fn read_user_memo_blob(runtime: &tokio::runtime::Handle, account_id: Uuid) -> Option<String> {
     let blob_store = get_blob_store()?;
     match runtime.block_on(blob_store.read_memo(account_id)) {
         Ok(content) => Some(content),
         Err(e) => {
-            warn!("Failed to read memo from blob for account {}: {}", account_id, e);
+            warn!(
+                "Failed to read memo from blob for account {}: {}",
+                account_id, e
+            );
             None
         }
     }
@@ -124,7 +124,9 @@ pub(crate) fn try_quick_response_slack(
         } => {
             // Write memory update if present (to blob storage if account linked)
             if let Some(update) = memory_update {
-                if let Err(e) = write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update) {
+                if let Err(e) =
+                    write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update)
+                {
                     warn!("Failed to write memory update: {}", e);
                 } else if let Some(aid) = account_id {
                     info!("Updated memory for unified account {}", aid);
@@ -165,7 +167,10 @@ fn resolve_slack_bot_token(
     let emp_token_key = format!("{}_SLACK_BOT_TOKEN", emp_upper);
     if let Ok(token) = std::env::var(&emp_token_key) {
         if !token.trim().is_empty() {
-            info!("quick response using {} for employee {}", emp_token_key, config.employee_profile.id);
+            info!(
+                "quick response using {} for employee {}",
+                emp_token_key, config.employee_profile.id
+            );
             return Some(token);
         }
     }
@@ -189,7 +194,10 @@ fn resolve_discord_bot_token(config: &ServiceConfig) -> Option<String> {
     let emp_token_key = format!("{}_DISCORD_BOT_TOKEN", emp_upper);
     if let Ok(token) = std::env::var(&emp_token_key) {
         if !token.trim().is_empty() {
-            info!("quick response using {} for employee {}", emp_token_key, config.employee_profile.id);
+            info!(
+                "quick response using {} for employee {}",
+                emp_token_key, config.employee_profile.id
+            );
             return Some(token);
         }
     }
@@ -237,7 +245,9 @@ pub(crate) fn try_quick_response_bluebubbles(
         } => {
             // Write memory update if present (to blob storage if account linked)
             if let Some(update) = memory_update {
-                if let Err(e) = write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update) {
+                if let Err(e) =
+                    write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update)
+                {
                     warn!("Failed to write memory update: {}", e);
                 } else if let Some(aid) = account_id {
                     info!("Updated memory for unified account {}", aid);
@@ -315,7 +325,9 @@ pub(crate) fn try_quick_response_discord(
         } => {
             // Write memory update if present (to blob storage if account linked)
             if let Some(update) = memory_update {
-                if let Err(e) = write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update) {
+                if let Err(e) =
+                    write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update)
+                {
                     warn!("Failed to write memory update: {}", e);
                 } else if let Some(aid) = account_id {
                     info!("Updated memory for unified account {}", aid);
@@ -335,7 +347,10 @@ pub(crate) fn try_quick_response_discord(
                     raw_payload,
                     router_context.as_ref().map(|context| &context.snapshot),
                 ) {
-                    warn!("Failed to persist Discord context after quick reply: {}", err);
+                    warn!(
+                        "Failed to persist Discord context after quick reply: {}",
+                        err
+                    );
                 }
                 return Ok(true);
             }
@@ -378,7 +393,9 @@ pub(crate) fn try_quick_response_telegram(
         } => {
             // Write memory update if present (to blob storage if account linked)
             if let Some(update) = memory_update {
-                if let Err(e) = write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update) {
+                if let Err(e) =
+                    write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update)
+                {
                     warn!("Failed to write memory update: {}", e);
                 } else if let Some(aid) = account_id {
                     info!("Updated memory for unified account {}", aid);
@@ -530,7 +547,9 @@ pub(crate) fn try_quick_response_whatsapp(
         } => {
             // Write memory update if present (to blob storage if account linked)
             if let Some(update) = memory_update {
-                if let Err(e) = write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update) {
+                if let Err(e) =
+                    write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update)
+                {
                     warn!("Failed to write memory update: {}", e);
                 } else if let Some(aid) = account_id {
                     info!("Updated memory for unified account {}", aid);

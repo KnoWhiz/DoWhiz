@@ -67,18 +67,10 @@ pub fn contains_employee_mention(text: &str) -> bool {
     let filter = get_employee_filter();
 
     match filter.map(|s| s.as_str()) {
-        Some("oliver") | Some("little_bear") => {
-            OLIVER_PATTERNS.iter().any(|p| p.is_match(text))
-        }
-        Some("proto") | Some("boiled_egg") => {
-            PROTO_PATTERNS.iter().any(|p| p.is_match(text))
-        }
-        Some("maggie") | Some("mini_mouse") => {
-            MAGGIE_PATTERNS.iter().any(|p| p.is_match(text))
-        }
-        Some("devin") | Some("sticky_octopus") => {
-            DEVIN_PATTERNS.iter().any(|p| p.is_match(text))
-        }
+        Some("oliver") | Some("little_bear") => OLIVER_PATTERNS.iter().any(|p| p.is_match(text)),
+        Some("proto") | Some("boiled_egg") => PROTO_PATTERNS.iter().any(|p| p.is_match(text)),
+        Some("maggie") | Some("mini_mouse") => MAGGIE_PATTERNS.iter().any(|p| p.is_match(text)),
+        Some("devin") | Some("sticky_octopus") => DEVIN_PATTERNS.iter().any(|p| p.is_match(text)),
         None => {
             // No filter - check all patterns (backwards compatible)
             ALL_PATTERNS.iter().any(|p| p.is_match(text))

@@ -187,7 +187,8 @@ fn same_task_id_can_be_used_in_different_schedulers() {
     let workspace_db = temp.path().join("workspace_tasks.db");
     let user_db = temp.path().join("user_tasks.db");
 
-    let mut workspace_scheduler = Scheduler::load(&workspace_db, NoopExecutor::default()).expect("load workspace");
+    let mut workspace_scheduler =
+        Scheduler::load(&workspace_db, NoopExecutor::default()).expect("load workspace");
     let mut user_scheduler = Scheduler::load(&user_db, NoopExecutor::default()).expect("load user");
 
     // Add task to workspace scheduler (generates new ID)
@@ -244,8 +245,14 @@ fn execution_status_can_be_recorded_for_task() {
 
         // Record execution start and finish (this is what sync_task_status_to_user_storage does)
         let now = Utc::now();
-        let execution_id = scheduler.store.record_execution_start(specific_id, now).expect("record start");
-        scheduler.store.record_execution_finish(execution_id, now, "success", None).expect("record finish");
+        let execution_id = scheduler
+            .store
+            .record_execution_start(specific_id, now)
+            .expect("record start");
+        scheduler
+            .store
+            .record_execution_finish(execution_id, now, "success", None)
+            .expect("record finish");
     }
 
     // Verify execution status is persisted by loading tasks with status
@@ -313,9 +320,18 @@ fn full_discord_flow_task_sync_and_status_update() {
     let temp = TempDir::new().expect("tempdir");
 
     // Simulate Discord workspace and user storage paths
-    let workspace_dir = temp.path().join("workspaces").join("discord").join("guild123");
+    let workspace_dir = temp
+        .path()
+        .join("workspaces")
+        .join("discord")
+        .join("guild123");
     let workspace_db = workspace_dir.join("state").join("tasks.db");
-    let user_db = temp.path().join("users").join("account_abc").join("state").join("tasks.db");
+    let user_db = temp
+        .path()
+        .join("users")
+        .join("account_abc")
+        .join("state")
+        .join("tasks.db");
 
     fs::create_dir_all(workspace_db.parent().unwrap()).expect("create workspace dir");
     fs::create_dir_all(user_db.parent().unwrap()).expect("create user dir");
@@ -325,7 +341,8 @@ fn full_discord_flow_task_sync_and_status_update() {
 
     // Step 1: Create task in workspace scheduler (simulates discord.rs)
     let task_id = {
-        let mut workspace_scheduler = Scheduler::load(&workspace_db, NoopExecutor::default()).expect("load workspace");
+        let mut workspace_scheduler =
+            Scheduler::load(&workspace_db, NoopExecutor::default()).expect("load workspace");
         workspace_scheduler
             .add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task.clone()))
             .expect("add to workspace")
@@ -333,19 +350,27 @@ fn full_discord_flow_task_sync_and_status_update() {
 
     // Step 2: Create same task in user scheduler with same ID (simulates discord.rs account sync)
     {
-        let mut user_scheduler = Scheduler::load(&user_db, NoopExecutor::default()).expect("load user");
+        let mut user_scheduler =
+            Scheduler::load(&user_db, NoopExecutor::default()).expect("load user");
         user_scheduler
-            .add_one_shot_in_with_id(task_id, Duration::from_secs(0), TaskKind::RunTask(run_task.clone()))
+            .add_one_shot_in_with_id(
+                task_id,
+                Duration::from_secs(0),
+                TaskKind::RunTask(run_task.clone()),
+            )
             .expect("add to user");
     }
 
     // Verify both have the task with same ID
     {
         use super::store::SqliteSchedulerStore;
-        let workspace_store = SqliteSchedulerStore::new(workspace_db.clone()).expect("open workspace");
+        let workspace_store =
+            SqliteSchedulerStore::new(workspace_db.clone()).expect("open workspace");
         let user_store = SqliteSchedulerStore::new(user_db.clone()).expect("open user");
 
-        let workspace_tasks = workspace_store.list_tasks_with_status().expect("list workspace");
+        let workspace_tasks = workspace_store
+            .list_tasks_with_status()
+            .expect("list workspace");
         let user_tasks = user_store.list_tasks_with_status().expect("list user");
 
         assert_eq!(workspace_tasks.len(), 1);
@@ -363,17 +388,26 @@ fn full_discord_flow_task_sync_and_status_update() {
     let executed_at = Utc::now();
     {
         use super::store::SqliteSchedulerStore;
-        let workspace_store = SqliteSchedulerStore::new(workspace_db.clone()).expect("open workspace");
-        let execution_id = workspace_store.record_execution_start(task_id, executed_at).expect("record start");
-        workspace_store.record_execution_finish(execution_id, executed_at, "success", None).expect("record finish");
+        let workspace_store =
+            SqliteSchedulerStore::new(workspace_db.clone()).expect("open workspace");
+        let execution_id = workspace_store
+            .record_execution_start(task_id, executed_at)
+            .expect("record start");
+        workspace_store
+            .record_execution_finish(execution_id, executed_at, "success", None)
+            .expect("record finish");
     }
 
     // Step 4: Sync status to user storage (simulates sync_task_status_to_user_storage)
     {
         use super::store::SqliteSchedulerStore;
         let user_store = SqliteSchedulerStore::new(user_db.clone()).expect("open user");
-        let execution_id = user_store.record_execution_start(task_id, executed_at).expect("record start");
-        user_store.record_execution_finish(execution_id, executed_at, "success", None).expect("record finish");
+        let execution_id = user_store
+            .record_execution_start(task_id, executed_at)
+            .expect("record start");
+        user_store
+            .record_execution_finish(execution_id, executed_at, "success", None)
+            .expect("record finish");
     }
 
     // Verify both now have success status
@@ -382,10 +416,15 @@ fn full_discord_flow_task_sync_and_status_update() {
         let workspace_store = SqliteSchedulerStore::new(workspace_db).expect("open workspace");
         let user_store = SqliteSchedulerStore::new(user_db).expect("open user");
 
-        let workspace_tasks = workspace_store.list_tasks_with_status().expect("list workspace");
+        let workspace_tasks = workspace_store
+            .list_tasks_with_status()
+            .expect("list workspace");
         let user_tasks = user_store.list_tasks_with_status().expect("list user");
 
-        assert_eq!(workspace_tasks[0].execution_status, Some("success".to_string()));
+        assert_eq!(
+            workspace_tasks[0].execution_status,
+            Some("success".to_string())
+        );
         assert_eq!(user_tasks[0].execution_status, Some("success".to_string()));
     }
 }
@@ -395,9 +434,24 @@ fn full_slack_flow_task_sync_and_status_update() {
     let temp = TempDir::new().expect("tempdir");
 
     // Simulate Slack workspace (uses user paths) and account storage
-    let user_workspace_dir = temp.path().join("users").join("slack_user").join("workspaces").join("thread1");
-    let workspace_db = temp.path().join("users").join("slack_user").join("state").join("tasks.db");
-    let account_db = temp.path().join("users").join("account_xyz").join("state").join("tasks.db");
+    let user_workspace_dir = temp
+        .path()
+        .join("users")
+        .join("slack_user")
+        .join("workspaces")
+        .join("thread1");
+    let workspace_db = temp
+        .path()
+        .join("users")
+        .join("slack_user")
+        .join("state")
+        .join("tasks.db");
+    let account_db = temp
+        .path()
+        .join("users")
+        .join("account_xyz")
+        .join("state")
+        .join("tasks.db");
 
     fs::create_dir_all(workspace_db.parent().unwrap()).expect("create workspace dir");
     fs::create_dir_all(account_db.parent().unwrap()).expect("create account dir");
@@ -415,20 +469,30 @@ fn full_slack_flow_task_sync_and_status_update() {
 
     // Step 2: Create same task in account-level storage with same ID
     {
-        let mut account_scheduler = Scheduler::load(&account_db, NoopExecutor::default()).expect("load account");
+        let mut account_scheduler =
+            Scheduler::load(&account_db, NoopExecutor::default()).expect("load account");
         account_scheduler
-            .add_one_shot_in_with_id(task_id, Duration::from_secs(0), TaskKind::RunTask(run_task.clone()))
+            .add_one_shot_in_with_id(
+                task_id,
+                Duration::from_secs(0),
+                TaskKind::RunTask(run_task.clone()),
+            )
             .expect("add to account");
     }
 
     // Verify both have Slack channel type
     {
         use super::store::SqliteSchedulerStore;
-        let workspace_store = SqliteSchedulerStore::new(workspace_db.clone()).expect("open workspace");
+        let workspace_store =
+            SqliteSchedulerStore::new(workspace_db.clone()).expect("open workspace");
         let account_store = SqliteSchedulerStore::new(account_db.clone()).expect("open account");
 
-        let workspace_tasks = workspace_store.list_tasks_with_status().expect("list workspace");
-        let account_tasks = account_store.list_tasks_with_status().expect("list account");
+        let workspace_tasks = workspace_store
+            .list_tasks_with_status()
+            .expect("list workspace");
+        let account_tasks = account_store
+            .list_tasks_with_status()
+            .expect("list account");
 
         assert_eq!(workspace_tasks[0].channel, "slack");
         assert_eq!(account_tasks[0].channel, "slack");
@@ -440,17 +504,26 @@ fn full_slack_flow_task_sync_and_status_update() {
     let error_message = "Task failed: API timeout";
     {
         use super::store::SqliteSchedulerStore;
-        let workspace_store = SqliteSchedulerStore::new(workspace_db.clone()).expect("open workspace");
-        let execution_id = workspace_store.record_execution_start(task_id, executed_at).expect("record start");
-        workspace_store.record_execution_finish(execution_id, executed_at, "failed", Some(error_message)).expect("record finish");
+        let workspace_store =
+            SqliteSchedulerStore::new(workspace_db.clone()).expect("open workspace");
+        let execution_id = workspace_store
+            .record_execution_start(task_id, executed_at)
+            .expect("record start");
+        workspace_store
+            .record_execution_finish(execution_id, executed_at, "failed", Some(error_message))
+            .expect("record finish");
     }
 
     // Step 4: Sync failure status to account storage
     {
         use super::store::SqliteSchedulerStore;
         let account_store = SqliteSchedulerStore::new(account_db.clone()).expect("open account");
-        let execution_id = account_store.record_execution_start(task_id, executed_at).expect("record start");
-        account_store.record_execution_finish(execution_id, executed_at, "failed", Some(error_message)).expect("record finish");
+        let execution_id = account_store
+            .record_execution_start(task_id, executed_at)
+            .expect("record start");
+        account_store
+            .record_execution_finish(execution_id, executed_at, "failed", Some(error_message))
+            .expect("record finish");
     }
 
     // Verify both have failure status with error message
@@ -459,13 +532,29 @@ fn full_slack_flow_task_sync_and_status_update() {
         let workspace_store = SqliteSchedulerStore::new(workspace_db).expect("open workspace");
         let account_store = SqliteSchedulerStore::new(account_db).expect("open account");
 
-        let workspace_tasks = workspace_store.list_tasks_with_status().expect("list workspace");
-        let account_tasks = account_store.list_tasks_with_status().expect("list account");
+        let workspace_tasks = workspace_store
+            .list_tasks_with_status()
+            .expect("list workspace");
+        let account_tasks = account_store
+            .list_tasks_with_status()
+            .expect("list account");
 
-        assert_eq!(workspace_tasks[0].execution_status, Some("failed".to_string()));
-        assert_eq!(account_tasks[0].execution_status, Some("failed".to_string()));
-        assert_eq!(workspace_tasks[0].error_message, Some(error_message.to_string()));
-        assert_eq!(account_tasks[0].error_message, Some(error_message.to_string()));
+        assert_eq!(
+            workspace_tasks[0].execution_status,
+            Some("failed".to_string())
+        );
+        assert_eq!(
+            account_tasks[0].execution_status,
+            Some("failed".to_string())
+        );
+        assert_eq!(
+            workspace_tasks[0].error_message,
+            Some(error_message.to_string())
+        );
+        assert_eq!(
+            account_tasks[0].error_message,
+            Some(error_message.to_string())
+        );
     }
 }
 
@@ -486,18 +575,41 @@ fn multiple_tasks_sync_independently() {
     // Add both tasks to workspace
     let task_id_1 = {
         let mut scheduler = Scheduler::load(&workspace_db, NoopExecutor::default()).expect("load");
-        scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task_1.clone())).expect("add 1")
+        scheduler
+            .add_one_shot_in(
+                Duration::from_secs(0),
+                TaskKind::RunTask(run_task_1.clone()),
+            )
+            .expect("add 1")
     };
     let task_id_2 = {
         let mut scheduler = Scheduler::load(&workspace_db, NoopExecutor::default()).expect("load");
-        scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task_2.clone())).expect("add 2")
+        scheduler
+            .add_one_shot_in(
+                Duration::from_secs(0),
+                TaskKind::RunTask(run_task_2.clone()),
+            )
+            .expect("add 2")
     };
 
     // Sync both to user storage
     {
-        let mut user_scheduler = Scheduler::load(&user_db, NoopExecutor::default()).expect("load user");
-        user_scheduler.add_one_shot_in_with_id(task_id_1, Duration::from_secs(0), TaskKind::RunTask(run_task_1)).expect("sync 1");
-        user_scheduler.add_one_shot_in_with_id(task_id_2, Duration::from_secs(0), TaskKind::RunTask(run_task_2)).expect("sync 2");
+        let mut user_scheduler =
+            Scheduler::load(&user_db, NoopExecutor::default()).expect("load user");
+        user_scheduler
+            .add_one_shot_in_with_id(
+                task_id_1,
+                Duration::from_secs(0),
+                TaskKind::RunTask(run_task_1),
+            )
+            .expect("sync 1");
+        user_scheduler
+            .add_one_shot_in_with_id(
+                task_id_2,
+                Duration::from_secs(0),
+                TaskKind::RunTask(run_task_2),
+            )
+            .expect("sync 2");
     }
 
     // Mark task 1 as success, task 2 as failed
@@ -507,12 +619,20 @@ fn multiple_tasks_sync_independently() {
         let user_store = SqliteSchedulerStore::new(user_db.clone()).expect("open user");
 
         // Task 1: success
-        let exec_id_1 = user_store.record_execution_start(task_id_1, executed_at).expect("start 1");
-        user_store.record_execution_finish(exec_id_1, executed_at, "success", None).expect("finish 1");
+        let exec_id_1 = user_store
+            .record_execution_start(task_id_1, executed_at)
+            .expect("start 1");
+        user_store
+            .record_execution_finish(exec_id_1, executed_at, "success", None)
+            .expect("finish 1");
 
         // Task 2: failed
-        let exec_id_2 = user_store.record_execution_start(task_id_2, executed_at).expect("start 2");
-        user_store.record_execution_finish(exec_id_2, executed_at, "failed", Some("timeout")).expect("finish 2");
+        let exec_id_2 = user_store
+            .record_execution_start(task_id_2, executed_at)
+            .expect("start 2");
+        user_store
+            .record_execution_finish(exec_id_2, executed_at, "failed", Some("timeout"))
+            .expect("finish 2");
     }
 
     // Verify each task has correct status
@@ -523,8 +643,14 @@ fn multiple_tasks_sync_independently() {
 
         assert_eq!(tasks.len(), 2);
 
-        let task_1 = tasks.iter().find(|t| t.id == task_id_1.to_string()).expect("find task 1");
-        let task_2 = tasks.iter().find(|t| t.id == task_id_2.to_string()).expect("find task 2");
+        let task_1 = tasks
+            .iter()
+            .find(|t| t.id == task_id_1.to_string())
+            .expect("find task 1");
+        let task_2 = tasks
+            .iter()
+            .find(|t| t.id == task_id_2.to_string())
+            .expect("find task 2");
 
         assert_eq!(task_1.execution_status, Some("success".to_string()));
         assert_eq!(task_2.execution_status, Some("failed".to_string()));
@@ -544,7 +670,9 @@ fn run_task_channel_is_preserved_in_sync() {
         let db = temp.path().join("discord_tasks.db");
         let run_task = discord_run_task(&workspace_dir);
         let mut scheduler = Scheduler::load(&db, NoopExecutor::default()).expect("load");
-        scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task)).expect("add");
+        scheduler
+            .add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))
+            .expect("add");
 
         use super::store::SqliteSchedulerStore;
         let store = SqliteSchedulerStore::new(db).expect("open");
@@ -557,7 +685,9 @@ fn run_task_channel_is_preserved_in_sync() {
         let db = temp.path().join("slack_tasks.db");
         let run_task = slack_run_task(&workspace_dir);
         let mut scheduler = Scheduler::load(&db, NoopExecutor::default()).expect("load");
-        scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task)).expect("add");
+        scheduler
+            .add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))
+            .expect("add");
 
         use super::store::SqliteSchedulerStore;
         let store = SqliteSchedulerStore::new(db).expect("open");
@@ -572,7 +702,9 @@ fn run_task_channel_is_preserved_in_sync() {
         fs::create_dir_all(&mail_root).expect("mail");
         let run_task = base_run_task(&workspace_dir, &mail_root);
         let mut scheduler = Scheduler::load(&db, NoopExecutor::default()).expect("load");
-        scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task)).expect("add");
+        scheduler
+            .add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))
+            .expect("add");
 
         use super::store::SqliteSchedulerStore;
         let store = SqliteSchedulerStore::new(db).expect("open");

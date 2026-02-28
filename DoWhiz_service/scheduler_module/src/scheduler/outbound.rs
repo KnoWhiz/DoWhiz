@@ -58,7 +58,9 @@ pub(crate) fn execute_email_send(task: &SendReplyTask) -> Result<(), SchedulerEr
 ///
 /// Looks for `{EMPLOYEE}_SLACK_BOT_TOKEN` env var first (e.g., `OLIVER_SLACK_BOT_TOKEN`),
 /// then falls back to the global `SLACK_BOT_TOKEN`.
-fn resolve_slack_bot_token_for_employee(employee_id: Option<&str>) -> Result<String, SchedulerError> {
+fn resolve_slack_bot_token_for_employee(
+    employee_id: Option<&str>,
+) -> Result<String, SchedulerError> {
     if let Some(emp_id) = employee_id {
         let emp_upper = emp_id.to_uppercase().replace('-', "_");
         let emp_token_key = format!("{}_SLACK_BOT_TOKEN", emp_upper);
@@ -130,7 +132,9 @@ pub(crate) fn execute_slack_send(task: &SendReplyTask) -> Result<(), SchedulerEr
 ///
 /// Looks for `{EMPLOYEE}_DISCORD_BOT_TOKEN` env var first (e.g., `LITTLE_BEAR_DISCORD_BOT_TOKEN`),
 /// then falls back to the global `DISCORD_BOT_TOKEN`.
-fn resolve_discord_bot_token_for_employee(employee_id: Option<&str>) -> Result<String, SchedulerError> {
+fn resolve_discord_bot_token_for_employee(
+    employee_id: Option<&str>,
+) -> Result<String, SchedulerError> {
     if let Some(emp_id) = employee_id {
         let emp_upper = emp_id.to_uppercase().replace('-', "_");
         let emp_token_key = format!("{}_DISCORD_BOT_TOKEN", emp_upper);

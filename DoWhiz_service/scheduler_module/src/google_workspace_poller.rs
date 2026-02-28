@@ -442,20 +442,24 @@ impl GoogleWorkspacePoller {
             return Ok(vec![]);
         }
 
-        let adapter = GoogleSheetsInboundAdapter::new(
-            self.auth.clone(),
-            self.config.employee_emails.clone(),
-        );
+        let adapter =
+            GoogleSheetsInboundAdapter::new(self.auth.clone(), self.config.employee_emails.clone());
 
         // Try to use cached file list first
         let files = if let Some(cached_files) = self.file_cache.get_sheets() {
-            debug!("Using cached sheets file list ({} files)", cached_files.len());
+            debug!(
+                "Using cached sheets file list ({} files)",
+                cached_files.len()
+            );
             cached_files
         } else {
-            let fetched_files = adapter
-                .list_shared_spreadsheets()
-                .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list spreadsheets: {}", e)))?;
-            info!("Fetched {} shared spreadsheets (cache miss)", fetched_files.len());
+            let fetched_files = adapter.list_shared_spreadsheets().map_err(|e| {
+                SchedulerError::TaskFailed(format!("Failed to list spreadsheets: {}", e))
+            })?;
+            info!(
+                "Fetched {} shared spreadsheets (cache miss)",
+                fetched_files.len()
+            );
             self.file_cache.set_sheets(fetched_files.clone());
             fetched_files
         };
@@ -503,20 +507,24 @@ impl GoogleWorkspacePoller {
             return Ok(vec![]);
         }
 
-        let adapter = GoogleSlidesInboundAdapter::new(
-            self.auth.clone(),
-            self.config.employee_emails.clone(),
-        );
+        let adapter =
+            GoogleSlidesInboundAdapter::new(self.auth.clone(), self.config.employee_emails.clone());
 
         // Try to use cached file list first
         let files = if let Some(cached_files) = self.file_cache.get_slides() {
-            debug!("Using cached slides file list ({} files)", cached_files.len());
+            debug!(
+                "Using cached slides file list ({} files)",
+                cached_files.len()
+            );
             cached_files
         } else {
-            let fetched_files = adapter
-                .list_shared_presentations()
-                .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list presentations: {}", e)))?;
-            info!("Fetched {} shared presentations (cache miss)", fetched_files.len());
+            let fetched_files = adapter.list_shared_presentations().map_err(|e| {
+                SchedulerError::TaskFailed(format!("Failed to list presentations: {}", e))
+            })?;
+            info!(
+                "Fetched {} shared presentations (cache miss)",
+                fetched_files.len()
+            );
             self.file_cache.set_slides(fetched_files.clone());
             fetched_files
         };
@@ -542,7 +550,10 @@ impl GoogleWorkspacePoller {
             let comments = match adapter.list_comments(&file.id) {
                 Ok(c) => c,
                 Err(e) => {
-                    warn!("Failed to list comments for presentation {}: {}", file.id, e);
+                    warn!(
+                        "Failed to list comments for presentation {}: {}",
+                        file.id, e
+                    );
                     continue;
                 }
             };
@@ -584,7 +595,10 @@ impl GoogleWorkspacePoller {
                 .into_iter()
                 .filter(|f| f.file_type() == GoogleFileType::Docs)
                 .collect::<Vec<_>>();
-            info!("Fetched {} shared documents (cache miss)", fetched_files.len());
+            info!(
+                "Fetched {} shared documents (cache miss)",
+                fetched_files.len()
+            );
             self.file_cache.set_docs(fetched_files.clone());
             fetched_files
         };
@@ -643,21 +657,36 @@ impl GoogleWorkspacePoller {
         match file_type {
             WorkspaceFileType::Docs => {
                 // Build InboundMessage for Docs using the common ActionableComment type
-                self.build_docs_inbound_message(&file.id, file_name, actionable, owner_email.as_deref())
+                self.build_docs_inbound_message(
+                    &file.id,
+                    file_name,
+                    actionable,
+                    owner_email.as_deref(),
+                )
             }
             WorkspaceFileType::Sheets => {
                 let adapter = GoogleSheetsInboundAdapter::new(
                     self.auth.clone(),
                     self.config.employee_emails.clone(),
                 );
-                adapter.actionable_to_inbound_message_with_owner(&file.id, file_name, actionable, owner_email.as_deref())
+                adapter.actionable_to_inbound_message_with_owner(
+                    &file.id,
+                    file_name,
+                    actionable,
+                    owner_email.as_deref(),
+                )
             }
             WorkspaceFileType::Slides => {
                 let adapter = GoogleSlidesInboundAdapter::new(
                     self.auth.clone(),
                     self.config.employee_emails.clone(),
                 );
-                adapter.actionable_to_inbound_message_with_owner(&file.id, file_name, actionable, owner_email.as_deref())
+                adapter.actionable_to_inbound_message_with_owner(
+                    &file.id,
+                    file_name,
+                    actionable,
+                    owner_email.as_deref(),
+                )
             }
         }
     }
@@ -781,7 +810,10 @@ impl GoogleWorkspacePoller {
 
     /// List all monitored files of a given type.
     /// Used by push notification system to register watch channels.
-    pub fn list_files(&self, file_type: WorkspaceFileType) -> Result<Vec<DriveFile>, SchedulerError> {
+    pub fn list_files(
+        &self,
+        file_type: WorkspaceFileType,
+    ) -> Result<Vec<DriveFile>, SchedulerError> {
         match file_type {
             WorkspaceFileType::Docs => {
                 if let Some(cached) = self.file_cache.get_docs() {
@@ -794,7 +826,9 @@ impl GoogleWorkspacePoller {
                 );
                 let files = client
                     .list_shared_files()
-                    .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list documents: {}", e)))?
+                    .map_err(|e| {
+                        SchedulerError::TaskFailed(format!("Failed to list documents: {}", e))
+                    })?
                     .into_iter()
                     .filter(|f| f.file_type() == GoogleFileType::Docs)
                     .collect::<Vec<_>>();
@@ -809,9 +843,9 @@ impl GoogleWorkspacePoller {
                     self.auth.clone(),
                     self.config.employee_emails.clone(),
                 );
-                let files = adapter
-                    .list_shared_spreadsheets()
-                    .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list spreadsheets: {}", e)))?;
+                let files = adapter.list_shared_spreadsheets().map_err(|e| {
+                    SchedulerError::TaskFailed(format!("Failed to list spreadsheets: {}", e))
+                })?;
                 self.file_cache.set_sheets(files.clone());
                 Ok(files)
             }
@@ -823,9 +857,9 @@ impl GoogleWorkspacePoller {
                     self.auth.clone(),
                     self.config.employee_emails.clone(),
                 );
-                let files = adapter
-                    .list_shared_presentations()
-                    .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list presentations: {}", e)))?;
+                let files = adapter.list_shared_presentations().map_err(|e| {
+                    SchedulerError::TaskFailed(format!("Failed to list presentations: {}", e))
+                })?;
                 self.file_cache.set_slides(files.clone());
                 Ok(files)
             }
@@ -843,7 +877,11 @@ impl GoogleWorkspacePoller {
         let file = files.into_iter().find(|f| f.id == file_id);
 
         let Some(file) = file else {
-            debug!("File {} not found in {} file list", file_id, file_type.display_name());
+            debug!(
+                "File {} not found in {} file list",
+                file_id,
+                file_type.display_name()
+            );
             return Ok(vec![]);
         };
 
@@ -855,9 +893,9 @@ impl GoogleWorkspacePoller {
                     self.config.employee_emails.clone(),
                     contains_employee_mention,
                 );
-                let comments = client
-                    .list_comments(file_id)
-                    .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list comments: {}", e)))?;
+                let comments = client.list_comments(file_id).map_err(|e| {
+                    SchedulerError::TaskFailed(format!("Failed to list comments: {}", e))
+                })?;
                 let processed = self.store.get_processed_ids(file_id)?;
                 client.filter_actionable_comments(&comments, &processed)
             }
@@ -866,9 +904,9 @@ impl GoogleWorkspacePoller {
                     self.auth.clone(),
                     self.config.employee_emails.clone(),
                 );
-                let comments = adapter
-                    .list_comments(file_id)
-                    .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list comments: {}", e)))?;
+                let comments = adapter.list_comments(file_id).map_err(|e| {
+                    SchedulerError::TaskFailed(format!("Failed to list comments: {}", e))
+                })?;
                 let processed = self.store.get_processed_ids(file_id)?;
                 adapter.filter_actionable_comments(&comments, &processed)
             }
@@ -877,9 +915,9 @@ impl GoogleWorkspacePoller {
                     self.auth.clone(),
                     self.config.employee_emails.clone(),
                 );
-                let comments = adapter
-                    .list_comments(file_id)
-                    .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list comments: {}", e)))?;
+                let comments = adapter.list_comments(file_id).map_err(|e| {
+                    SchedulerError::TaskFailed(format!("Failed to list comments: {}", e))
+                })?;
                 let processed = self.store.get_processed_ids(file_id)?;
                 adapter.filter_actionable_comments(&comments, &processed)
             }

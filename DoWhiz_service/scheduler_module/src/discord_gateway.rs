@@ -163,7 +163,10 @@ impl EventHandler for DiscordEventHandler {
                             match blob_store.read_memo(aid).await {
                                 Ok(content) => Some(content),
                                 Err(e) => {
-                                    warn!("Failed to read memo from blob for account {}: {}", aid, e);
+                                    warn!(
+                                        "Failed to read memo from blob for account {}: {}",
+                                        aid, e
+                                    );
                                     fs::read_to_string(paths.memory_dir.join("memo.md")).ok()
                                 }
                             }
@@ -182,14 +185,17 @@ impl EventHandler for DiscordEventHandler {
             };
 
             let employee_name = self.state.config.employee_profile.display_name.as_deref();
-            let router_context =
-                match build_discord_router_context(&self.state.config, &inbound, &inbound.raw_payload) {
-                    Ok(context) => Some(context),
-                    Err(err) => {
-                        warn!("Failed to build Discord router context: {}", err);
-                        None
-                    }
-                };
+            let router_context = match build_discord_router_context(
+                &self.state.config,
+                &inbound,
+                &inbound.raw_payload,
+            ) {
+                Ok(context) => Some(context),
+                Err(err) => {
+                    warn!("Failed to build Discord router context: {}", err);
+                    None
+                }
+            };
             let router_message = router_context
                 .as_ref()
                 .map(|context| context.message.as_str())
@@ -200,7 +206,12 @@ impl EventHandler for DiscordEventHandler {
             match self
                 .state
                 .message_router
-                .classify(router_message, memory.as_deref(), employee_name, extra_context)
+                .classify(
+                    router_message,
+                    memory.as_deref(),
+                    employee_name,
+                    extra_context,
+                )
                 .await
             {
                 RouterDecision::Simple {
@@ -253,7 +264,10 @@ impl EventHandler for DiscordEventHandler {
                         &inbound.raw_payload,
                         router_context.as_ref().map(|context| &context.snapshot),
                     ) {
-                        warn!("Failed to persist Discord context after quick reply: {}", err);
+                        warn!(
+                            "Failed to persist Discord context after quick reply: {}",
+                            err
+                        );
                     }
                     return;
                 }
@@ -303,7 +317,9 @@ fn process_discord_message(
     let user = state
         .user_store
         .get_or_create_user("discord", &message.sender)?;
-    let user_paths = state.user_store.user_paths(&config.users_root, &user.user_id);
+    let user_paths = state
+        .user_store
+        .user_paths(&config.users_root, &user.user_id);
     state.user_store.ensure_user_dirs(&user_paths)?;
 
     // Create/get workspace for this user thread

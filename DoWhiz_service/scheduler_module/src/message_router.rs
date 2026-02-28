@@ -119,8 +119,8 @@ impl Default for RouterConfig {
                     .ok()
                     .map(|value| value.trim().to_string())
                     .filter(|value| !value.is_empty());
-                let openai_url = env::var("OPENAI_API_URL")
-                    .unwrap_or_else(|_| DEFAULT_OPENAI_URL.to_string());
+                let openai_url =
+                    env::var("OPENAI_API_URL").unwrap_or_else(|_| DEFAULT_OPENAI_URL.to_string());
                 (openai_api_key, openai_url, false)
             };
 
@@ -325,7 +325,8 @@ impl MessageRouter {
         if self.config.use_azure_auth {
             request_builder = request_builder.header("api-key", api_key);
         } else {
-            request_builder = request_builder.header("Authorization", format!("Bearer {}", api_key));
+            request_builder =
+                request_builder.header("Authorization", format!("Bearer {}", api_key));
         }
 
         let response = request_builder

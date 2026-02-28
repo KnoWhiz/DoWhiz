@@ -244,7 +244,9 @@ fn collect_discord_context_snapshot(
     let mut inline_channel_messages = if channel_messages.len() <= INLINE_CHANNEL_RECENT_COUNT {
         channel_messages.clone()
     } else {
-        channel_messages[channel_messages.len().saturating_sub(INLINE_CHANNEL_RECENT_COUNT)..]
+        channel_messages[channel_messages
+            .len()
+            .saturating_sub(INLINE_CHANNEL_RECENT_COUNT)..]
             .to_vec()
     };
     inline_channel_messages.sort_by_key(|entry| parse_timestamp(&entry.timestamp));

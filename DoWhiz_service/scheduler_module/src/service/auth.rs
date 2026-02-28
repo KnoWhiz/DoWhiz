@@ -4,7 +4,7 @@ use axum::response::{IntoResponse, Redirect};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use base64::Engine;
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::task;
@@ -40,8 +40,8 @@ pub struct AuthState {
 /// JWT Claims from Supabase token
 #[derive(Debug, Deserialize)]
 struct JwtClaims {
-    sub: Uuid,           // User ID
-    exp: usize,          // Expiration time
+    sub: Uuid,  // User ID
+    exp: usize, // Expiration time
     #[serde(default)]
     aud: Option<String>, // Audience (optional)
     #[serde(default)]
@@ -299,6 +299,7 @@ pub struct AccountResponse {
     pub account_id: Uuid,
     pub auth_user_id: Uuid,
     pub identifiers: Vec<IdentifierResponse>,
+    pub tokens_to_hours: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -408,6 +409,7 @@ pub async fn get_account(State(state): State<AuthState>, headers: HeaderMap) -> 
                     verified: i.verified,
                 })
                 .collect(),
+            tokens_to_hours: account.tokens_to_hours,
         }),
     )
         .into_response()
@@ -503,17 +505,16 @@ pub async fn link_identifier(
         let frontend_url = state.frontend_url.clone();
 
         // Create verification token
-        let token_result = task::spawn_blocking(move || {
-            store.create_email_verification_token(account_id, &email)
-        })
-        .await
-        .map_err(|e| {
-            error!("spawn_blocking panicked: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "Internal error" })),
-            )
-        });
+        let token_result =
+            task::spawn_blocking(move || store.create_email_verification_token(account_id, &email))
+                .await
+                .map_err(|e| {
+                    error!("spawn_blocking panicked: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": "Internal error" })),
+                    )
+                });
 
         let verification_token = match token_result {
             Ok(Ok(token)) => token,
@@ -1373,7 +1374,10 @@ pub async fn discord_oauth_callback(
         .get("https://discord.com/api/users/@me")
         .header(
             "Authorization",
-            format!("{} {}", discord_token.token_type, discord_token.access_token),
+            format!(
+                "{} {}",
+                discord_token.token_type, discord_token.access_token
+            ),
         )
         .send()
         .await;
@@ -1424,10 +1428,9 @@ pub async fn discord_oauth_callback(
     // Link Discord ID to account
     let store = state.account_store.clone();
     let discord_id = discord_user.id.clone();
-    let link_result = task::spawn_blocking(move || {
-        store.create_identifier(account.id, "discord", &discord_id)
-    })
-    .await;
+    let link_result =
+        task::spawn_blocking(move || store.create_identifier(account.id, "discord", &discord_id))
+            .await;
 
     match link_result {
         Ok(Ok(_identifier)) => {
@@ -1610,7 +1613,9 @@ pub async fn slack_oauth_callback(
 
     // Check if Slack returned an error
     if !slack_response.ok {
-        let error_msg = slack_response.error.unwrap_or_else(|| "unknown".to_string());
+        let error_msg = slack_response
+            .error
+            .unwrap_or_else(|| "unknown".to_string());
         error!("Slack OAuth error: {}", error_msg);
         return redirect_to(&format!(
             "/auth/index.html?slack=error&reason={}",
@@ -1655,10 +1660,8 @@ pub async fn slack_oauth_callback(
     // Link Slack ID to account
     let store = state.account_store.clone();
     let slack_id = slack_user.id.clone();
-    let link_result = task::spawn_blocking(move || {
-        store.create_identifier(account.id, "slack", &slack_id)
-    })
-    .await;
+    let link_result =
+        task::spawn_blocking(move || store.create_identifier(account.id, "slack", &slack_id)).await;
 
     match link_result {
         Ok(Ok(_identifier)) => {
@@ -1684,11 +1687,14 @@ pub async fn slack_oauth_callback(
 // ============================================================================
 
 /// Send a verification email with a magic link
-async fn send_verification_email(email: &str, verify_url: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn send_verification_email(
+    email: &str,
+    verify_url: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let postmark_token = std::env::var("POSTMARK_SERVER_TOKEN")
         .map_err(|_| "POSTMARK_SERVER_TOKEN not configured")?;
-    let from_email = std::env::var("POSTMARK_FROM_EMAIL")
-        .unwrap_or_else(|_| "noreply@dowhiz.com".to_string());
+    let from_email =
+        std::env::var("POSTMARK_FROM_EMAIL").unwrap_or_else(|_| "noreply@dowhiz.com".to_string());
 
     let html_body = format!(
         r#"<!DOCTYPE html>
@@ -1780,9 +1786,7 @@ pub async fn verify_email(
             error!("Failed to verify email: {}", e);
             redirect_to("/auth/index.html?email_verified=error&reason=database_error")
         }
-        Err(_) => {
-            redirect_to("/auth/index.html?email_verified=error&reason=internal_error")
-        }
+        Err(_) => redirect_to("/auth/index.html?email_verified=error&reason=internal_error"),
     }
 }
 
@@ -1939,15 +1943,16 @@ pub async fn get_account_tasks(
     // Get account by auth_user_id
     let account_id_for_identifiers = {
         let store_clone = state.account_store.clone();
-        let account_result = task::spawn_blocking(move || store_clone.get_account_by_auth_user(auth_user_id))
-            .await
-            .map_err(|e| {
-                error!("spawn_blocking panicked: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": "Internal error" })),
-                )
-            });
+        let account_result =
+            task::spawn_blocking(move || store_clone.get_account_by_auth_user(auth_user_id))
+                .await
+                .map_err(|e| {
+                    error!("spawn_blocking panicked: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": "Internal error" })),
+                    )
+                });
 
         match account_result {
             Ok(Ok(Some(acc))) => acc.id,
@@ -1982,8 +1987,8 @@ pub async fn get_account_tasks(
     // Get linked Slack identifiers for this account
     let account_id = account_id_for_identifiers;
     let store_for_identifiers = state.account_store.clone();
-    let identifiers_result = task::spawn_blocking(move || store_for_identifiers.list_identifiers(account_id))
-        .await;
+    let identifiers_result =
+        task::spawn_blocking(move || store_for_identifiers.list_identifiers(account_id)).await;
 
     if let Ok(Ok(identifiers)) = identifiers_result {
         let slack_identifiers: Vec<_> = identifiers
@@ -2010,17 +2015,27 @@ pub async fn get_account_tasks(
                         // Merge legacy tasks, preferring ones with execution_status set
                         // (legacy storage has the updated status for Slack tasks)
                         for legacy_task in legacy_tasks {
-                            if let Some(existing_idx) = tasks.iter().position(|t| t.id == legacy_task.id) {
+                            if let Some(existing_idx) =
+                                tasks.iter().position(|t| t.id == legacy_task.id)
+                            {
                                 // If legacy task has status and existing doesn't, use legacy
-                                if legacy_task.execution_status.is_some() && tasks[existing_idx].execution_status.is_none() {
+                                if legacy_task.execution_status.is_some()
+                                    && tasks[existing_idx].execution_status.is_none()
+                                {
                                     tasks[existing_idx] = legacy_task;
                                 }
                                 // If both have status, prefer the one that's not "pending"/"running"
                                 else if legacy_task.execution_status.is_some() {
-                                    let legacy_status = legacy_task.execution_status.as_deref().unwrap_or("");
-                                    let existing_status = tasks[existing_idx].execution_status.as_deref().unwrap_or("");
-                                    if (existing_status == "pending" || existing_status == "running")
-                                        && (legacy_status == "success" || legacy_status == "failed") {
+                                    let legacy_status =
+                                        legacy_task.execution_status.as_deref().unwrap_or("");
+                                    let existing_status = tasks[existing_idx]
+                                        .execution_status
+                                        .as_deref()
+                                        .unwrap_or("");
+                                    if (existing_status == "pending"
+                                        || existing_status == "running")
+                                        && (legacy_status == "success" || legacy_status == "failed")
+                                    {
                                         tasks[existing_idx] = legacy_task;
                                     }
                                 }

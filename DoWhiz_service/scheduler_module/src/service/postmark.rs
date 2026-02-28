@@ -94,6 +94,8 @@ pub(super) struct PostmarkAttachment {
     pub(super) name: String,
     #[serde(rename = "Content")]
     pub(super) content: String,
+    #[serde(rename = "StorageRef", default)]
+    pub(super) storage_ref: Option<String>,
     #[serde(rename = "ContentType")]
     #[allow(dead_code)]
     pub(super) content_type: String,

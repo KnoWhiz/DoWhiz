@@ -301,10 +301,30 @@ fn main() {
             let no_bold = args.iter().any(|a| a == "--no-bold");
             let no_italic = args.iter().any(|a| a == "--no-italic");
 
-            let bold_opt = if bold { Some(true) } else if no_bold { Some(false) } else { None };
-            let italic_opt = if italic { Some(true) } else if no_italic { Some(false) } else { None };
+            let bold_opt = if bold {
+                Some(true)
+            } else if no_bold {
+                Some(false)
+            } else {
+                None
+            };
+            let italic_opt = if italic {
+                Some(true)
+            } else if no_italic {
+                Some(false)
+            } else {
+                None
+            };
 
-            cmd_set_style(&args[2], &find, color.as_deref(), font.as_deref(), size, bold_opt, italic_opt)
+            cmd_set_style(
+                &args[2],
+                &find,
+                color.as_deref(),
+                font.as_deref(),
+                size,
+                bold_opt,
+                italic_opt,
+            )
         }
         "--help" | "-h" | "help" => {
             print_usage();
@@ -540,22 +560,36 @@ fn cmd_get_styles(doc_id: &str) -> Result<String, String> {
     let auth = get_auth()?;
     let adapter = GoogleDocsOutboundAdapter::new(auth);
 
-    let styles = adapter.get_document_styles(doc_id)
+    let styles = adapter
+        .get_document_styles(doc_id)
         .map_err(|e| format!("Failed to get document styles: {}", e))?;
 
     let mut output = String::new();
     output.push_str("Document Styles:\n\n");
 
     // Helper to format style info
-    fn format_style(name: &str, style: &Option<scheduler_module::adapters::google_docs::TextStyleInfo>) -> String {
+    fn format_style(
+        name: &str,
+        style: &Option<scheduler_module::adapters::google_docs::TextStyleInfo>,
+    ) -> String {
         match style {
             Some(s) => {
                 let mut parts = Vec::new();
-                if let Some(c) = &s.foreground_color { parts.push(format!("color={}", c)); }
-                if let Some(f) = &s.font_family { parts.push(format!("font=\"{}\"", f)); }
-                if let Some(sz) = s.font_size { parts.push(format!("size={}pt", sz)); }
-                if let Some(true) = s.bold { parts.push("bold".to_string()); }
-                if let Some(true) = s.italic { parts.push("italic".to_string()); }
+                if let Some(c) = &s.foreground_color {
+                    parts.push(format!("color={}", c));
+                }
+                if let Some(f) = &s.font_family {
+                    parts.push(format!("font=\"{}\"", f));
+                }
+                if let Some(sz) = s.font_size {
+                    parts.push(format!("size={}pt", sz));
+                }
+                if let Some(true) = s.bold {
+                    parts.push("bold".to_string());
+                }
+                if let Some(true) = s.italic {
+                    parts.push("italic".to_string());
+                }
                 if parts.is_empty() {
                     format!("{}: (default)\n", name)
                 } else {
@@ -577,19 +611,40 @@ fn cmd_get_styles(doc_id: &str) -> Result<String, String> {
 
     output.push_str("\n=== Actual Styles Found in Document ===\n");
     if let Some((text, style)) = &styles.heading_1_sample {
-        let preview = if text.len() > 40 { format!("{}...", &text[..40]) } else { text.clone() };
+        let preview = if text.len() > 40 {
+            format!("{}...", &text[..40])
+        } else {
+            text.clone()
+        };
         output.push_str(&format!("H1 Sample: \"{}\"\n", preview));
-        output.push_str(&format!("  -> {}\n", format_style("Style", &Some(style.clone())).trim()));
+        output.push_str(&format!(
+            "  -> {}\n",
+            format_style("Style", &Some(style.clone())).trim()
+        ));
     }
     if let Some((text, style)) = &styles.heading_2_sample {
-        let preview = if text.len() > 40 { format!("{}...", &text[..40]) } else { text.clone() };
+        let preview = if text.len() > 40 {
+            format!("{}...", &text[..40])
+        } else {
+            text.clone()
+        };
         output.push_str(&format!("H2 Sample: \"{}\"\n", preview));
-        output.push_str(&format!("  -> {}\n", format_style("Style", &Some(style.clone())).trim()));
+        output.push_str(&format!(
+            "  -> {}\n",
+            format_style("Style", &Some(style.clone())).trim()
+        ));
     }
     if let Some((text, style)) = &styles.heading_3_sample {
-        let preview = if text.len() > 40 { format!("{}...", &text[..40]) } else { text.clone() };
+        let preview = if text.len() > 40 {
+            format!("{}...", &text[..40])
+        } else {
+            text.clone()
+        };
         output.push_str(&format!("H3 Sample: \"{}\"\n", preview));
-        output.push_str(&format!("  -> {}\n", format_style("Style", &Some(style.clone())).trim()));
+        output.push_str(&format!(
+            "  -> {}\n",
+            format_style("Style", &Some(style.clone())).trim()
+        ));
     }
 
     output.push_str("\n=== Usage Tips ===\n");
@@ -616,17 +671,36 @@ fn cmd_set_style(
         return Err("At least one style property must be specified (--color, --font, --size, --bold, --italic)".to_string());
     }
 
-    adapter.set_text_style(doc_id, find, color, font, size, bold, italic)
+    adapter
+        .set_text_style(doc_id, find, color, font, size, bold, italic)
         .map_err(|e| format!("Failed to set style: {}", e))?;
 
     let mut applied = Vec::new();
-    if let Some(c) = color { applied.push(format!("color={}", c)); }
-    if let Some(f) = font { applied.push(format!("font=\"{}\"", f)); }
-    if let Some(s) = size { applied.push(format!("size={}pt", s)); }
-    if let Some(true) = bold { applied.push("bold".to_string()); }
-    if let Some(false) = bold { applied.push("no-bold".to_string()); }
-    if let Some(true) = italic { applied.push("italic".to_string()); }
-    if let Some(false) = italic { applied.push("no-italic".to_string()); }
+    if let Some(c) = color {
+        applied.push(format!("color={}", c));
+    }
+    if let Some(f) = font {
+        applied.push(format!("font=\"{}\"", f));
+    }
+    if let Some(s) = size {
+        applied.push(format!("size={}pt", s));
+    }
+    if let Some(true) = bold {
+        applied.push("bold".to_string());
+    }
+    if let Some(false) = bold {
+        applied.push("no-bold".to_string());
+    }
+    if let Some(true) = italic {
+        applied.push("italic".to_string());
+    }
+    if let Some(false) = italic {
+        applied.push("no-italic".to_string());
+    }
 
-    Ok(format!("Successfully applied style to \"{}\": {}", find, applied.join(", ")))
+    Ok(format!(
+        "Successfully applied style to \"{}\": {}",
+        find,
+        applied.join(", ")
+    ))
 }

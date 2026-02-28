@@ -38,10 +38,7 @@ impl GoogleSlidesOutboundAdapter {
     }
 
     /// Read presentation content as plain text.
-    pub fn read_presentation_content(
-        &self,
-        presentation_id: &str,
-    ) -> Result<String, AdapterError> {
+    pub fn read_presentation_content(&self, presentation_id: &str) -> Result<String, AdapterError> {
         self.comments_client
             .export_file_content(presentation_id, "text/plain")
     }
@@ -188,7 +185,10 @@ impl GoogleSlidesOutboundAdapter {
             .unwrap_or("unknown")
             .to_string();
 
-        info!("Created slide {} in presentation {}", slide_id, presentation_id);
+        info!(
+            "Created slide {} in presentation {}",
+            slide_id, presentation_id
+        );
         Ok(slide_id)
     }
 

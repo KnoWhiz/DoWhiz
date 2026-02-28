@@ -469,11 +469,15 @@ async fn test_read_memo_from_blob() {
     let _lock = TEST_MUTEX.lock().unwrap();
     dotenvy::dotenv().ok();
 
-    let service_url = std::env::var("SERVICE_URL").unwrap_or_else(|_| "http://localhost:9001".to_string());
-    let supabase_url = std::env::var("SUPABASE_PROJECT_URL").expect("SUPABASE_PROJECT_URL required");
+    let service_url =
+        std::env::var("SERVICE_URL").unwrap_or_else(|_| "http://localhost:9001".to_string());
+    let supabase_url =
+        std::env::var("SUPABASE_PROJECT_URL").expect("SUPABASE_PROJECT_URL required");
     let supabase_anon_key = std::env::var("SUPABASE_ANON_KEY").expect("SUPABASE_ANON_KEY required");
-    let test_email = std::env::var("TEST_EMAIL").unwrap_or_else(|_| "dylantang12@gmail.com".to_string());
-    let test_password = std::env::var("TEST_PASSWORD").unwrap_or_else(|_| "testpassword123".to_string());
+    let test_email =
+        std::env::var("TEST_EMAIL").unwrap_or_else(|_| "dylantang12@gmail.com".to_string());
+    let test_password =
+        std::env::var("TEST_PASSWORD").unwrap_or_else(|_| "testpassword123".to_string());
 
     let client = reqwest::Client::new();
     let blob_store = BlobStore::from_env().expect("BlobStore::from_env");
@@ -481,10 +485,16 @@ async fn test_read_memo_from_blob() {
     // Login and get account
     println!("Setting up account...");
     let login_resp = client
-        .post(format!("{}/auth/v1/token?grant_type=password", supabase_url))
+        .post(format!(
+            "{}/auth/v1/token?grant_type=password",
+            supabase_url
+        ))
         .header("apikey", &supabase_anon_key)
         .header("Content-Type", "application/json")
-        .body(format!(r#"{{"email": "{}", "password": "{}"}}"#, test_email, test_password))
+        .body(format!(
+            r#"{{"email": "{}", "password": "{}"}}"#,
+            test_email, test_password
+        ))
         .send()
         .await
         .expect("login request");
@@ -502,7 +512,8 @@ async fn test_read_memo_from_blob() {
         .await
         .expect("signup request");
 
-    let signup_body: DoWhizSignupResponse = signup_resp.json().await.expect("parse signup response");
+    let signup_body: DoWhizSignupResponse =
+        signup_resp.json().await.expect("parse signup response");
     let account_id = signup_body.account_id;
     println!("Account ID: {}", account_id);
 
@@ -543,12 +554,21 @@ async fn test_read_memo_from_blob() {
         .await
         .expect("read memo from blob");
 
-    assert_eq!(read_content, memo_content, "Read content should match written content");
+    assert_eq!(
+        read_content, memo_content,
+        "Read content should match written content"
+    );
     println!("✅ Memo read successfully matches original");
 
     // Step 3: Verify specific content
-    assert!(read_content.contains("Friend from phone app"), "Should contain phone app content");
-    assert!(read_content.contains("Another device"), "Should contain other device marker");
+    assert!(
+        read_content.contains("Friend from phone app"),
+        "Should contain phone app content"
+    );
+    assert!(
+        read_content.contains("Another device"),
+        "Should contain other device marker"
+    );
     println!("✅ Content verification passed");
 
     // Step 4: Write a new diff and verify it merges correctly
@@ -580,14 +600,23 @@ async fn test_read_memo_from_blob() {
         .await
         .expect("read final memo");
 
-    assert!(final_content.contains("Friend from phone app"), "Should still contain phone content");
-    assert!(final_content.contains("New contact from Zotero"), "Should contain new Zotero content");
+    assert!(
+        final_content.contains("Friend from phone app"),
+        "Should still contain phone content"
+    );
+    assert!(
+        final_content.contains("New contact from Zotero"),
+        "Should contain new Zotero content"
+    );
     println!("✅ Merged content verified");
 
     println!("Final memo:\n{}", final_content);
 
     // Cleanup
-    blob_store.delete_memo(account_id).await.expect("delete blob");
+    blob_store
+        .delete_memo(account_id)
+        .await
+        .expect("delete blob");
     println!("\n✅ Cleaned up blob");
 
     println!("\n========================================");

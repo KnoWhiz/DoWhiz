@@ -13,6 +13,7 @@ pub struct Account {
     pub id: Uuid,
     pub auth_user_id: Uuid,
     pub created_at: DateTime<Utc>,
+    pub tokens_to_hours: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -121,13 +122,14 @@ impl AccountStore {
         let row = conn.query_one(
             "INSERT INTO accounts (id, auth_user_id, created_at)
              VALUES ($1, $2, NOW())
-             RETURNING id, auth_user_id, created_at",
+             RETURNING id, auth_user_id, created_at, tokens_to_hours",
             &[&id, &auth_user_id],
         )?;
         Ok(Account {
             id: row.get(0),
             auth_user_id: row.get(1),
             created_at: row.get(2),
+            tokens_to_hours: row.get(3),
         })
     }
 
@@ -138,13 +140,14 @@ impl AccountStore {
     ) -> Result<Option<Account>, AccountStoreError> {
         let mut conn = self.conn()?;
         let row = conn.query_opt(
-            "SELECT id, auth_user_id, created_at FROM accounts WHERE auth_user_id = $1",
+            "SELECT id, auth_user_id, created_at, tokens_to_hours FROM accounts WHERE auth_user_id = $1",
             &[&auth_user_id],
         )?;
         Ok(row.map(|r| Account {
             id: r.get(0),
             auth_user_id: r.get(1),
             created_at: r.get(2),
+            tokens_to_hours: r.get(3),
         }))
     }
 
@@ -152,13 +155,14 @@ impl AccountStore {
     pub fn get_account(&self, account_id: Uuid) -> Result<Option<Account>, AccountStoreError> {
         let mut conn = self.conn()?;
         let row = conn.query_opt(
-            "SELECT id, auth_user_id, created_at FROM accounts WHERE id = $1",
+            "SELECT id, auth_user_id, created_at, tokens_to_hours FROM accounts WHERE id = $1",
             &[&account_id],
         )?;
         Ok(row.map(|r| Account {
             id: r.get(0),
             auth_user_id: r.get(1),
             created_at: r.get(2),
+            tokens_to_hours: r.get(3),
         }))
     }
 
@@ -170,7 +174,7 @@ impl AccountStore {
     ) -> Result<Option<Account>, AccountStoreError> {
         let mut conn = self.conn()?;
         let row = conn.query_opt(
-            "SELECT a.id, a.auth_user_id, a.created_at
+            "SELECT a.id, a.auth_user_id, a.created_at, a.tokens_to_hours
              FROM accounts a
              JOIN account_identifiers ai ON ai.account_id = a.id
              WHERE ai.identifier_type = $1 AND ai.identifier = $2 AND ai.verified = true",
@@ -180,6 +184,7 @@ impl AccountStore {
             id: r.get(0),
             auth_user_id: r.get(1),
             created_at: r.get(2),
+            tokens_to_hours: r.get(3),
         }))
     }
 
@@ -345,12 +350,21 @@ impl AccountStore {
 
     /// Verify an email token and link the email to the account
     pub fn verify_email_token(&self, token: &str) -> Result<AccountIdentifier, AccountStoreError> {
+        let normalized_token = token.trim();
+        if normalized_token.is_empty() {
+            return Err(AccountStoreError::TokenInvalid);
+        }
+        if Uuid::parse_str(normalized_token).is_err() {
+            return Err(AccountStoreError::TokenInvalid);
+        }
         let mut conn = self.conn()?;
 
         // Look up the token
         let row = conn.query_opt(
-            "SELECT token, account_id, email, expires_at FROM email_verification_tokens WHERE token = $1",
-            &[&token],
+            "SELECT token, account_id, email, expires_at
+             FROM email_verification_tokens
+             WHERE token::text = $1",
+            &[&normalized_token],
         )?;
 
         let verification = match row {
@@ -368,8 +382,8 @@ impl AccountStore {
         if Utc::now() > verification.expires_at {
             // Delete expired token
             conn.execute(
-                "DELETE FROM email_verification_tokens WHERE token = $1",
-                &[&token],
+                "DELETE FROM email_verification_tokens WHERE token::text = $1",
+                &[&normalized_token],
             )?;
             return Err(AccountStoreError::TokenInvalid);
         }
@@ -386,8 +400,8 @@ impl AccountStore {
 
         // Delete the used token
         conn.execute(
-            "DELETE FROM email_verification_tokens WHERE token = $1",
-            &[&token],
+            "DELETE FROM email_verification_tokens WHERE token::text = $1",
+            &[&normalized_token],
         )?;
 
         Ok(AccountIdentifier {

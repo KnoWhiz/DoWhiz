@@ -112,6 +112,44 @@ fn build_object_path(envelope_id: Uuid, received_at: DateTime<Utc>) -> String {
     format!("{}/{}/{}.bin", prefix, date, envelope_id)
 }
 
+fn resolve_attachment_path_prefix() -> String {
+    let base = resolve_raw_payload_path_prefix();
+    format!("{}/attachments", base)
+}
+
+fn sanitize_blob_segment(value: &str, fallback: &str) -> String {
+    let trimmed = value.trim();
+    let mut out = String::new();
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    let cleaned = out.trim_matches(&['.', '_', '-'][..]).to_string();
+    if cleaned.is_empty() {
+        fallback.to_string()
+    } else {
+        cleaned
+    }
+}
+
+fn build_attachment_object_path(
+    envelope_id: Uuid,
+    received_at: DateTime<Utc>,
+    attachment_index: usize,
+    file_name: &str,
+) -> String {
+    let date = received_at.format("%Y/%m/%d");
+    let prefix = resolve_attachment_path_prefix();
+    let file_token = sanitize_blob_segment(file_name, "attachment");
+    format!(
+        "{}/{}/{}/{:03}_{}",
+        prefix, date, envelope_id, attachment_index, file_token
+    )
+}
+
 fn build_object_url(base: &str, bucket: &str, path: &str) -> String {
     format!("{}/storage/v1/object/{}/{}", base, bucket, path)
 }
@@ -404,26 +442,16 @@ fn is_azure_blob_url(url: &str) -> bool {
     lower.contains("blob.core.windows.net") || lower.contains("sig=")
 }
 
-pub async fn upload_raw_payload_azure(
-    envelope_id: Uuid,
-    received_at: DateTime<Utc>,
-    raw_payload: &[u8],
-) -> Result<String, RawPayloadStoreError> {
-    if raw_payload.is_empty() {
-        return Err(RawPayloadStoreError::Storage(
-            "raw payload is empty".to_string(),
-        ));
-    }
+async fn upload_azure_bytes(path: &str, payload: &[u8]) -> Result<String, RawPayloadStoreError> {
     let container = resolve_azure_container()?;
     let container_sas_url = resolve_azure_container_sas_url()?;
-    let path = build_object_path(envelope_id, received_at);
-    let url = build_azure_blob_url(&container_sas_url, &path);
+    let url = build_azure_blob_url(&container_sas_url, path);
 
     let client = Client::new();
     let response = client
         .put(url)
         .header("x-ms-blob-type", "BlockBlob")
-        .body(raw_payload.to_vec())
+        .body(payload.to_vec())
         .send()
         .await?;
     if !response.status().is_success() {
@@ -434,7 +462,43 @@ pub async fn upload_raw_payload_azure(
             status, body
         )));
     }
-    Ok(to_azure_ref(&container, &path))
+    Ok(to_azure_ref(&container, path))
+}
+
+fn upload_azure_bytes_blocking(path: &str, payload: &[u8]) -> Result<String, RawPayloadStoreError> {
+    let container = resolve_azure_container()?;
+    let container_sas_url = resolve_azure_container_sas_url()?;
+    let url = build_azure_blob_url(&container_sas_url, path);
+
+    let client = reqwest::blocking::Client::new();
+    let response = client
+        .put(url)
+        .header("x-ms-blob-type", "BlockBlob")
+        .body(payload.to_vec())
+        .send()?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(RawPayloadStoreError::Storage(format!(
+            "upload failed (status {}): {}",
+            status, body
+        )));
+    }
+    Ok(to_azure_ref(&container, path))
+}
+
+pub async fn upload_raw_payload_azure(
+    envelope_id: Uuid,
+    received_at: DateTime<Utc>,
+    raw_payload: &[u8],
+) -> Result<String, RawPayloadStoreError> {
+    if raw_payload.is_empty() {
+        return Err(RawPayloadStoreError::Storage(
+            "raw payload is empty".to_string(),
+        ));
+    }
+    let path = build_object_path(envelope_id, received_at);
+    upload_azure_bytes(&path, raw_payload).await
 }
 
 pub fn upload_raw_payload_azure_blocking(
@@ -447,26 +511,40 @@ pub fn upload_raw_payload_azure_blocking(
             "raw payload is empty".to_string(),
         ));
     }
-    let container = resolve_azure_container()?;
-    let container_sas_url = resolve_azure_container_sas_url()?;
     let path = build_object_path(envelope_id, received_at);
-    let url = build_azure_blob_url(&container_sas_url, &path);
+    upload_azure_bytes_blocking(&path, raw_payload)
+}
 
-    let client = reqwest::blocking::Client::new();
-    let response = client
-        .put(url)
-        .header("x-ms-blob-type", "BlockBlob")
-        .body(raw_payload.to_vec())
-        .send()?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().unwrap_or_default();
-        return Err(RawPayloadStoreError::Storage(format!(
-            "upload failed (status {}): {}",
-            status, body
-        )));
+pub async fn upload_attachment_azure(
+    envelope_id: Uuid,
+    received_at: DateTime<Utc>,
+    attachment_index: usize,
+    file_name: &str,
+    bytes: &[u8],
+) -> Result<String, RawPayloadStoreError> {
+    if bytes.is_empty() {
+        return Err(RawPayloadStoreError::Storage(
+            "attachment payload is empty".to_string(),
+        ));
     }
-    Ok(to_azure_ref(&container, &path))
+    let path = build_attachment_object_path(envelope_id, received_at, attachment_index, file_name);
+    upload_azure_bytes(&path, bytes).await
+}
+
+pub fn upload_attachment_azure_blocking(
+    envelope_id: Uuid,
+    received_at: DateTime<Utc>,
+    attachment_index: usize,
+    file_name: &str,
+    bytes: &[u8],
+) -> Result<String, RawPayloadStoreError> {
+    if bytes.is_empty() {
+        return Err(RawPayloadStoreError::Storage(
+            "attachment payload is empty".to_string(),
+        ));
+    }
+    let path = build_attachment_object_path(envelope_id, received_at, attachment_index, file_name);
+    upload_azure_bytes_blocking(&path, bytes)
 }
 
 #[cfg(test)]
@@ -524,7 +602,10 @@ mod tests {
         env::remove_var("AZURE_STORAGE_ACCOUNT");
         env::remove_var("SCALE_OLIVER_AZURE_STORAGE_ACCOUNT");
         env::set_var("AZURE_STORAGE_CONTAINER_INGEST", "ingestion-raw");
-        env::set_var("SCALE_OLIVER_AZURE_STORAGE_CONTAINER_INGEST", "ingestion-raw");
+        env::set_var(
+            "SCALE_OLIVER_AZURE_STORAGE_CONTAINER_INGEST",
+            "ingestion-raw",
+        );
         env::set_var("AZURE_STORAGE_SAS_TOKEN", "sig=test");
         env::set_var("SCALE_OLIVER_AZURE_STORAGE_SAS_TOKEN", "sig=test");
         env::remove_var("AZURE_STORAGE_CONTAINER_SAS_URL");
@@ -573,7 +654,9 @@ mod tests {
             None => env::remove_var("AZURE_STORAGE_CONNECTION_STRING_INGEST"),
         }
         match original_prefixed_conn {
-            Some(value) => env::set_var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING_INGEST", value),
+            Some(value) => {
+                env::set_var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING_INGEST", value)
+            }
             None => env::remove_var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING_INGEST"),
         }
         match original_container_sas_url {

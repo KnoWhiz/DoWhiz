@@ -105,8 +105,8 @@ pub async fn run_server(
     let slack_redirect_uri = std::env::var("SLACK_AUTH_REDIRECT_URI").ok();
 
     // Frontend URL for OAuth redirects
-    let frontend_url = std::env::var("FRONTEND_URL")
-        .unwrap_or_else(|_| "http://localhost:5173".to_string());
+    let frontend_url =
+        std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:5173".to_string());
 
     let auth_state = AuthState {
         account_store,

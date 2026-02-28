@@ -38,10 +38,7 @@ impl GoogleSheetsOutboundAdapter {
     }
 
     /// Read spreadsheet content as CSV.
-    pub fn read_spreadsheet_content(
-        &self,
-        spreadsheet_id: &str,
-    ) -> Result<String, AdapterError> {
+    pub fn read_spreadsheet_content(&self, spreadsheet_id: &str) -> Result<String, AdapterError> {
         self.comments_client
             .export_file_content(spreadsheet_id, "text/csv")
     }
@@ -91,7 +88,10 @@ impl GoogleSheetsOutboundAdapter {
             )));
         }
 
-        info!("Updated values in spreadsheet {} at {}", spreadsheet_id, range);
+        info!(
+            "Updated values in spreadsheet {} at {}",
+            spreadsheet_id, range
+        );
         Ok(())
     }
 
@@ -188,7 +188,10 @@ impl GoogleSheetsOutboundAdapter {
             )));
         }
 
-        info!("Appended rows to spreadsheet {} at {}", spreadsheet_id, range);
+        info!(
+            "Appended rows to spreadsheet {} at {}",
+            spreadsheet_id, range
+        );
         Ok(())
     }
 
