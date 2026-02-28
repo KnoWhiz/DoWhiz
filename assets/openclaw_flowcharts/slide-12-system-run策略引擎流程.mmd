@@ -1,0 +1,18 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#F6F8FA', 'primaryBorderColor': '#4B5563', 'lineColor': '#374151', 'textColor': '#111827', 'fontSize': '19px'}}}%%
+flowchart LR
+    A[收到命令执行请求] --> B[解析命令结构]
+    B --> C[允许名单分析与匹配]
+    C --> D[联合策略求值]
+    D --> E{策略是否允许}
+    E -- 否 --> F[回传拒绝事件与原因]
+    E -- 是 --> G{是否需要人工审批}
+    G -- 是 --> H[等待审批决策]
+    H --> I{审批结果}
+    I -- 拒绝 --> F
+    I -- 通过 --> J[选择执行通道]
+    G -- 否 --> J
+    J --> K{是否记录长期放行}
+    K -- 是 --> L[写入允许名单并记录使用]
+    K -- 否 --> M[直接执行命令]
+    L --> M
+    M --> N[回传执行完成事件]
