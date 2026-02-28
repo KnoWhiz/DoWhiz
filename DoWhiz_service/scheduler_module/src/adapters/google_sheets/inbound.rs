@@ -33,21 +33,16 @@ impl GoogleSheetsInboundAdapter {
     pub fn list_shared_spreadsheets(
         &self,
     ) -> Result<Vec<super::super::google_common::DriveFile>, AdapterError> {
-        self.comments_client
-            .list_shared_files()
-            .map(|files| {
-                files
-                    .into_iter()
-                    .filter(|f| f.file_type() == GoogleFileType::Sheets)
-                    .collect()
-            })
+        self.comments_client.list_shared_files().map(|files| {
+            files
+                .into_iter()
+                .filter(|f| f.file_type() == GoogleFileType::Sheets)
+                .collect()
+        })
     }
 
     /// List comments on a specific spreadsheet.
-    pub fn list_comments(
-        &self,
-        spreadsheet_id: &str,
-    ) -> Result<Vec<GoogleComment>, AdapterError> {
+    pub fn list_comments(&self, spreadsheet_id: &str) -> Result<Vec<GoogleComment>, AdapterError> {
         self.comments_client.list_comments(spreadsheet_id)
     }
 
@@ -68,7 +63,12 @@ impl GoogleSheetsInboundAdapter {
         spreadsheet_name: &str,
         actionable: &ActionableComment,
     ) -> InboundMessage {
-        self.actionable_to_inbound_message_with_owner(spreadsheet_id, spreadsheet_name, actionable, None)
+        self.actionable_to_inbound_message_with_owner(
+            spreadsheet_id,
+            spreadsheet_name,
+            actionable,
+            None,
+        )
     }
 
     /// Convert an ActionableComment to an InboundMessage with owner email.
@@ -148,10 +148,7 @@ impl GoogleSheetsInboundAdapter {
     }
 
     /// Read spreadsheet content as CSV for agent context.
-    pub fn read_spreadsheet_content(
-        &self,
-        spreadsheet_id: &str,
-    ) -> Result<String, AdapterError> {
+    pub fn read_spreadsheet_content(&self, spreadsheet_id: &str) -> Result<String, AdapterError> {
         self.comments_client
             .export_file_content(spreadsheet_id, "text/csv")
     }
@@ -172,8 +169,7 @@ impl GoogleSheetsInboundAdapter {
         // Use raw URL - the ! character is valid in URL paths
         let base_url = format!(
             "https://sheets.googleapis.com/v4/spreadsheets/{}/values/{}",
-            spreadsheet_id,
-            range
+            spreadsheet_id, range
         );
 
         let response = client

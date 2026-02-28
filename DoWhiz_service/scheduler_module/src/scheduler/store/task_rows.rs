@@ -77,7 +77,12 @@ impl SqliteSchedulerStore {
     ) -> Result<(), SchedulerError> {
         // For Discord, reply_to is [user_id, channel_id] - use to[1] for channel_id
         // Fall back to to[0] for backwards compatibility with old tasks
-        let discord_channel_id = send.to.get(1).or(send.to.first()).cloned().unwrap_or_default();
+        let discord_channel_id = send
+            .to
+            .get(1)
+            .or(send.to.first())
+            .cloned()
+            .unwrap_or_default();
         let thread_id = send.in_reply_to.clone();
         let workspace_dir = send
             .archive_root
@@ -318,8 +323,8 @@ impl SqliteSchedulerStore {
                 },
             )
             .optional()?;
-        let (discord_channel_id, thread_id, text_path, workspace_dir, employee_id) =
-            row.ok_or_else(|| {
+        let (discord_channel_id, thread_id, text_path, workspace_dir, employee_id) = row
+            .ok_or_else(|| {
                 SchedulerError::Storage(format!(
                     "missing send_discord_tasks row for task {}",
                     task_id

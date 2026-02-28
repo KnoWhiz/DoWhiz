@@ -351,7 +351,12 @@ impl GoogleDocsPoller {
             for actionable in actionable_items {
                 // Convert to inbound message using the new method
                 let doc_name = doc.name.as_deref().unwrap_or("Untitled");
-                let message = adapter.actionable_to_inbound_message_with_owner(&doc.id, doc_name, &actionable, owner_email);
+                let message = adapter.actionable_to_inbound_message_with_owner(
+                    &doc.id,
+                    doc_name,
+                    &actionable,
+                    owner_email,
+                );
 
                 // Create workspace for this task (use tracking_id for unique workspace)
                 let workspace_dir = self.create_workspace(&doc.id, &actionable.tracking_id)?;
@@ -436,17 +441,18 @@ impl GoogleDocsPoller {
         scheduler: &mut Scheduler<E>,
         collaboration_store: &CollaborationStore,
     ) -> Result<usize, SchedulerError> {
-        let adapter = GoogleDocsInboundAdapter::new(
-            self.auth.clone(),
-            self.config.employee_emails.clone(),
-        );
+        let adapter =
+            GoogleDocsInboundAdapter::new(self.auth.clone(), self.config.employee_emails.clone());
 
         // List all shared documents
-        let documents = adapter.list_shared_documents().map_err(|e| {
-            SchedulerError::TaskFailed(format!("Failed to list documents: {}", e))
-        })?;
+        let documents = adapter
+            .list_shared_documents()
+            .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list documents: {}", e)))?;
 
-        debug!("Found {} shared documents (with collaboration support)", documents.len());
+        debug!(
+            "Found {} shared documents (with collaboration support)",
+            documents.len()
+        );
 
         let mut tasks_created = 0;
 
@@ -458,11 +464,8 @@ impl GoogleDocsPoller {
                 .and_then(|owners| owners.first())
                 .and_then(|o| o.email_address.as_deref());
 
-            self.store.register_document(
-                &doc.id,
-                doc.name.as_deref(),
-                owner_email,
-            )?;
+            self.store
+                .register_document(&doc.id, doc.name.as_deref(), owner_email)?;
 
             // Look up existing collaboration session for this document (any user)
             let existing_session = collaboration_store
@@ -495,7 +498,12 @@ impl GoogleDocsPoller {
             for actionable in actionable_items {
                 // Convert to inbound message using the new method
                 let doc_name = doc.name.as_deref().unwrap_or("Untitled");
-                let message = adapter.actionable_to_inbound_message_with_owner(&doc.id, doc_name, &actionable, owner_email);
+                let message = adapter.actionable_to_inbound_message_with_owner(
+                    &doc.id,
+                    doc_name,
+                    &actionable,
+                    owner_email,
+                );
 
                 // Determine workspace directory
                 let workspace_dir = if let Some(ref session) = existing_session {
@@ -503,10 +511,7 @@ impl GoogleDocsPoller {
                     if let Some(ref ws_path) = session.workspace_path {
                         let ws = PathBuf::from(ws_path);
                         if ws.exists() {
-                            info!(
-                                "Reusing collaboration session workspace: {}",
-                                ws.display()
-                            );
+                            info!("Reusing collaboration session workspace: {}", ws.display());
                             ws
                         } else {
                             self.create_workspace(&doc.id, &actionable.tracking_id)?
@@ -523,7 +528,8 @@ impl GoogleDocsPoller {
 
                 // Add message to collaboration session if exists
                 if let Some(ref session) = existing_session {
-                    let comment_content: &str = actionable.triggering_reply
+                    let comment_content: &str = actionable
+                        .triggering_reply
                         .as_ref()
                         .map(|r| r.content.as_str())
                         .unwrap_or(&actionable.comment.content);
@@ -554,12 +560,11 @@ impl GoogleDocsPoller {
                 // Fetch and save document content for agent context
                 match adapter.read_document_content(&doc.id) {
                     Ok(doc_content) => {
-                        let doc_content_path = workspace_dir.join("incoming_email").join("document_content.txt");
+                        let doc_content_path = workspace_dir
+                            .join("incoming_email")
+                            .join("document_content.txt");
                         if let Err(e) = fs::write(&doc_content_path, &doc_content) {
-                            warn!(
-                                "Failed to save document content for {}: {}",
-                                doc.id, e
-                            );
+                            warn!("Failed to save document content for {}: {}", doc.id, e);
                         } else {
                             info!(
                                 "Saved document content ({} chars) to {}",
@@ -569,10 +574,7 @@ impl GoogleDocsPoller {
                         }
                     }
                     Err(e) => {
-                        warn!(
-                            "Failed to fetch document content for {}: {}",
-                            doc.id, e
-                        );
+                        warn!("Failed to fetch document content for {}: {}", doc.id, e);
                     }
                 }
 
@@ -601,11 +603,20 @@ impl GoogleDocsPoller {
                 scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
 
                 // Mark as processed using the tracking_id
-                self.store.mark_processed_id(&doc.id, &actionable.tracking_id)?;
+                self.store
+                    .mark_processed_id(&doc.id, &actionable.tracking_id)?;
 
                 tasks_created += 1;
-                let item_type = if actionable.triggering_reply.is_some() { "reply" } else { "comment" };
-                let session_info = if existing_session.is_some() { " (with collaboration session)" } else { "" };
+                let item_type = if actionable.triggering_reply.is_some() {
+                    "reply"
+                } else {
+                    "comment"
+                };
+                let session_info = if existing_session.is_some() {
+                    " (with collaboration session)"
+                } else {
+                    ""
+                };
                 info!(
                     "Created task for Google Docs {} {} on {} ({}){}",
                     item_type, actionable.tracking_id, doc_name, doc.id, session_info
@@ -666,7 +677,10 @@ impl GoogleDocsPoller {
             session.id,
             session.primary_channel,
             document_id,
-            session.original_request.as_deref().unwrap_or("(not recorded)"),
+            session
+                .original_request
+                .as_deref()
+                .unwrap_or("(not recorded)"),
             current_comment,
         );
         let _ = fs::write(collab_dir.join("context_summary.md"), &summary);
@@ -723,10 +737,7 @@ impl GoogleDocsPoller {
             .as_deref()
             .unwrap_or("");
         let comment_id = &actionable.comment.id;
-        let reply_id = actionable
-            .triggering_reply
-            .as_ref()
-            .map(|r| r.id.as_str());
+        let reply_id = actionable.triggering_reply.as_ref().map(|r| r.id.as_str());
 
         let metadata = serde_json::json!({
             "document_id": document_id,

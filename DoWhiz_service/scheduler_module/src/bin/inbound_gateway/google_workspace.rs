@@ -56,7 +56,10 @@ pub(super) fn spawn_google_workspace_poller(state: Arc<GatewayState>) {
     if docs_enabled {
         let state_docs = Arc::clone(&state);
         let config_docs = poller_config.clone();
-        let change_rx = state.drive_change_notifier.as_ref().map(|tx| tx.subscribe());
+        let change_rx = state
+            .drive_change_notifier
+            .as_ref()
+            .map(|tx| tx.subscribe());
         std::thread::spawn(move || {
             run_workspace_poller(
                 state_docs,
@@ -71,7 +74,10 @@ pub(super) fn spawn_google_workspace_poller(state: Arc<GatewayState>) {
     if sheets_enabled {
         let state_sheets = Arc::clone(&state);
         let config_sheets = poller_config.clone();
-        let change_rx = state.drive_change_notifier.as_ref().map(|tx| tx.subscribe());
+        let change_rx = state
+            .drive_change_notifier
+            .as_ref()
+            .map(|tx| tx.subscribe());
         std::thread::spawn(move || {
             run_workspace_poller(
                 state_sheets,
@@ -112,7 +118,11 @@ fn run_workspace_poller(
     let poller = match GoogleWorkspacePoller::new(config) {
         Ok(p) => p,
         Err(err) => {
-            error!("Failed to create {} poller: {}", file_type.display_name(), err);
+            error!(
+                "Failed to create {} poller: {}",
+                file_type.display_name(),
+                err
+            );
             return;
         }
     };
@@ -129,7 +139,11 @@ fn run_workspace_poller(
         match poll_workspace_comments(&poller, &state, file_type) {
             Ok(count) => {
                 if count > 0 {
-                    info!("{} polling enqueued {} items", file_type.display_name(), count);
+                    info!(
+                        "{} polling enqueued {} items",
+                        file_type.display_name(),
+                        count
+                    );
                 }
             }
             Err(err) => {
@@ -144,7 +158,9 @@ fn run_workspace_poller(
                 if let Ok(files) = poller.list_files(file_type) {
                     for file in files {
                         // Skip files that are already monitored or previously failed
-                        if monitored_files.contains(&file.id) || failed_watch_files.contains(&file.id) {
+                        if monitored_files.contains(&file.id)
+                            || failed_watch_files.contains(&file.id)
+                        {
                             continue;
                         }
                         match manager.watch_file(&file.id) {
@@ -188,9 +204,7 @@ fn run_workspace_poller(
 
             if let Ok(rt) = rt {
                 let timeout = Duration::from_secs(poll_interval);
-                let result = rt.block_on(async {
-                    tokio::time::timeout(timeout, rx.recv()).await
-                });
+                let result = rt.block_on(async { tokio::time::timeout(timeout, rx.recv()).await });
 
                 match result {
                     Ok(Ok(file_id)) => {

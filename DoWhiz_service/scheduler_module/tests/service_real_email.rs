@@ -1,4 +1,5 @@
-use lettre::message::header::{HeaderName, HeaderValue};
+use lettre::message::header::{ContentType, HeaderName, HeaderValue};
+use lettre::message::{Attachment as LettreAttachment, MultiPart, SinglePart};
 use lettre::Transport;
 use rusqlite::OptionalExtension;
 use scheduler_module::employee_config::{
@@ -22,6 +23,10 @@ use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
+const DEFAULT_NGROK_HOOK_URL: &str =
+    "https://shayne-laminar-lillian.ngrok-free.dev/postmark/inbound";
+const E2E_ATTACHMENT_NAME: &str = "e2e_note.txt";
+const E2E_ATTACHMENT_CONTENT: &[u8] = b"dowhiz-e2e-attachment";
 
 #[derive(Clone, Default)]
 struct NoopExecutor;
@@ -87,6 +92,44 @@ fn load_employee_for_address(
     Ok((employee, directory, config_path))
 }
 
+fn attach_inbound_alias(
+    employee_profile: &mut EmployeeProfile,
+    employee_directory: &mut EmployeeDirectory,
+    inbound_address: &str,
+) {
+    let Some(alias) = normalize_email(inbound_address) else {
+        return;
+    };
+    if alias.is_empty() {
+        return;
+    }
+
+    if employee_profile.address_set.insert(alias.clone()) {
+        employee_profile.addresses.push(alias.clone());
+    }
+
+    if let Some(profile) = employee_directory
+        .employee_by_id
+        .get_mut(&employee_profile.id)
+    {
+        if profile.address_set.insert(alias.clone()) {
+            profile.addresses.push(alias.clone());
+        }
+    }
+
+    if let Some(profile) = employee_directory
+        .employees
+        .iter_mut()
+        .find(|profile| profile.id == employee_profile.id)
+    {
+        if profile.address_set.insert(alias.clone()) {
+            profile.addresses.push(alias.clone());
+        }
+    }
+
+    employee_directory.service_addresses.insert(alias);
+}
+
 fn load_env_from_repo() {
     let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     loop {
@@ -100,6 +143,28 @@ fn load_env_from_repo() {
             None => break,
         }
     }
+}
+
+fn resolve_postmark_hook_url() -> String {
+    if let Ok(value) = env::var("POSTMARK_TEST_HOOK_URL") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    if let Ok(value) = env::var("POSTMARK_INBOUND_HOOK_URL") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let lower = trimmed.to_ascii_lowercase();
+            if lower.contains("api.staging.dowhiz.com")
+                || lower.contains("api.production1.dowhiz.com")
+            {
+                return DEFAULT_NGROK_HOOK_URL.to_string();
+            }
+            return trimmed.to_string();
+        }
+    }
+    DEFAULT_NGROK_HOOK_URL.to_string()
 }
 
 fn env_with_scale_oliver(key: &str) -> Option<String> {
@@ -205,6 +270,65 @@ tenant_id = "default"
         employee_id = employee_id,
     );
     fs::write(path, contents)?;
+    Ok(())
+}
+
+fn write_employee_config_with_inbound_alias(
+    source_path: &Path,
+    target_path: &Path,
+    employee_id: &str,
+    inbound_address: &str,
+) -> Result<(), BoxError> {
+    let Some(alias) = normalize_email(inbound_address) else {
+        return Err(format!("invalid inbound alias address: {}", inbound_address).into());
+    };
+
+    let content = fs::read_to_string(source_path)?;
+    let mut parsed: toml::Value = toml::from_str(&content)?;
+    let employees = parsed
+        .get_mut("employees")
+        .and_then(|value| value.as_array_mut())
+        .ok_or("employee config missing [employees] array")?;
+
+    let mut updated = false;
+    for employee in employees {
+        let id = employee
+            .get("id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        if id != employee_id {
+            continue;
+        }
+        let Some(addresses) = employee
+            .get_mut("addresses")
+            .and_then(|value| value.as_array_mut())
+        else {
+            return Err(format!("employee '{}' missing addresses", employee_id).into());
+        };
+        let exists = addresses.iter().any(|value| {
+            value
+                .as_str()
+                .map(|existing| existing.eq_ignore_ascii_case(&alias))
+                .unwrap_or(false)
+        });
+        if !exists {
+            addresses.push(toml::Value::String(alias.clone()));
+        }
+        updated = true;
+        break;
+    }
+
+    if !updated {
+        return Err(format!(
+            "employee '{}' not found in {}",
+            employee_id,
+            source_path.display()
+        )
+        .into());
+    }
+
+    let rendered = toml::to_string_pretty(&parsed)?;
+    fs::write(target_path, rendered)?;
     Ok(())
 }
 
@@ -408,10 +532,19 @@ fn send_smtp_inbound(
             original_to.to_string(),
         ));
     }
-    let message = builder.body("Rust service live email test.".to_string())?;
+    let message = builder.multipart(
+        MultiPart::mixed()
+            .singlepart(SinglePart::plain(
+                "Rust service live email test.".to_string(),
+            ))
+            .singlepart(LettreAttachment::new(E2E_ATTACHMENT_NAME.to_string()).body(
+                E2E_ATTACHMENT_CONTENT.to_vec(),
+                ContentType::parse("text/plain; charset=utf-8")?,
+            )),
+    )?;
 
-    let smtp_host = env::var("POSTMARK_SMTP_HOST")
-        .unwrap_or_else(|_| "inbound.postmarkapp.com".to_string());
+    let smtp_host =
+        env::var("POSTMARK_SMTP_HOST").unwrap_or_else(|_| "inbound.postmarkapp.com".to_string());
     let smtp_port = env::var("POSTMARK_SMTP_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
@@ -527,14 +660,11 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
 
     let token = env::var("POSTMARK_SERVER_TOKEN")
         .map_err(|_| "POSTMARK_SERVER_TOKEN must be set for live tests")?;
-    let public_url = env::var("POSTMARK_INBOUND_HOOK_URL")
-        .map_err(|_| "POSTMARK_INBOUND_HOOK_URL must be set (ngrok URL)")?;
+    let public_url = resolve_postmark_hook_url();
     let from_addr =
         env::var("POSTMARK_TEST_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
     let service_address = env::var("POSTMARK_TEST_SERVICE_ADDRESS")
         .unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
-    let (employee_profile, employee_directory, employee_config_path) =
-        load_employee_for_address(&service_address)?;
     let gateway_bind_host = env::var("GATEWAY_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
     let gateway_health_host = if gateway_bind_host == "0.0.0.0" {
         "127.0.0.1".to_string()
@@ -555,6 +685,13 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
     if inbound_address.is_empty() {
         return Err("Postmark server does not have an inbound address configured".into());
     }
+    let (mut employee_profile, mut employee_directory, employee_config_path) =
+        load_employee_for_address(&service_address)?;
+    attach_inbound_alias(
+        &mut employee_profile,
+        &mut employee_directory,
+        &inbound_address,
+    );
     let previous_hook = server_info
         .get("InboundHookUrl")
         .and_then(|value| value.as_str())
@@ -590,6 +727,10 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         );
         return Ok(());
     }
+    if let Some(test_queue_name) = env_with_scale_oliver("SERVICE_BUS_TEST_QUEUE_NAME") {
+        env::set_var("SERVICE_BUS_QUEUE_NAME", &test_queue_name);
+        env::set_var("SCALE_OLIVER_SERVICE_BUS_QUEUE_NAME", &test_queue_name);
+    }
     env::set_var("SCALE_OLIVER_INGESTION_QUEUE_BACKEND", "servicebus");
     env::set_var("SCALE_OLIVER_RAW_PAYLOAD_STORAGE_BACKEND", "azure");
     let temp = TempDir::new()?;
@@ -608,11 +749,18 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
 
     let codex_disabled = !env_enabled("RUN_CODEX_E2E");
     let employee_id = employee_profile.id.clone();
+    let effective_employee_config_path = state_dir.join("employee.live.toml");
+    write_employee_config_with_inbound_alias(
+        &employee_config_path,
+        &effective_employee_config_path,
+        &employee_id,
+        &inbound_address,
+    )?;
     let config = ServiceConfig {
         host: test_host.clone(),
         port,
         employee_id: employee_id.clone(),
-        employee_config_path: employee_config_path.clone(),
+        employee_config_path: effective_employee_config_path.clone(),
         employee_profile,
         employee_directory,
         workspace_root: workspace_root.clone(),
@@ -652,12 +800,12 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         &gateway_config_path,
         &gateway_bind_host,
         gateway_port,
-        &service_address,
+        &inbound_address,
         &employee_id,
     )?;
     let _gateway = spawn_gateway(
         &gateway_config_path,
-        &employee_config_path,
+        &effective_employee_config_path,
         &gateway_bind_host,
         gateway_port,
     )?;
@@ -722,6 +870,59 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
     let reply_path = workspace.join("reply_email_draft.html");
     if !reply_path.exists() {
         return Err("reply_email_draft.html not written by run_task".into());
+    }
+    let inbound_attachment_path = workspace
+        .join("incoming_attachments")
+        .join(E2E_ATTACHMENT_NAME);
+    if !inbound_attachment_path.exists() {
+        return Err(format!(
+            "expected inbound attachment at {}",
+            inbound_attachment_path.display()
+        )
+        .into());
+    }
+    let inbound_attachment_bytes = fs::read(&inbound_attachment_path)?;
+    if inbound_attachment_bytes != E2E_ATTACHMENT_CONTENT {
+        return Err("workspace attachment bytes mismatch".into());
+    }
+
+    let payload_path = workspace
+        .join("incoming_email")
+        .join("postmark_payload.json");
+    let payload_bytes = fs::read(&payload_path)?;
+    let payload_json: Value = serde_json::from_slice(&payload_bytes)?;
+    let attachments = payload_json
+        .get("Attachments")
+        .and_then(Value::as_array)
+        .ok_or("postmark payload missing Attachments array")?;
+    let attachment = attachments
+        .iter()
+        .find(|value| {
+            value
+                .get("Name")
+                .and_then(Value::as_str)
+                .map(|name| name == E2E_ATTACHMENT_NAME)
+                .unwrap_or(false)
+        })
+        .ok_or("postmark payload missing expected attachment entry")?;
+    let storage_ref = attachment
+        .get("StorageRef")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or("attachment missing StorageRef")?;
+    if !storage_ref.starts_with("azure://") {
+        return Err(format!("unexpected StorageRef format: {}", storage_ref).into());
+    }
+    let content = attachment
+        .get("Content")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if !content.is_empty() {
+        return Err("attachment Content should be empty after blob offload".into());
+    }
+    let blob_bytes = scheduler_module::raw_payload_store::download_raw_payload(storage_ref)?;
+    if blob_bytes != E2E_ATTACHMENT_CONTENT {
+        return Err("blob attachment bytes mismatch".into());
     }
 
     let reply_subject = format!("Re: {}", subject);

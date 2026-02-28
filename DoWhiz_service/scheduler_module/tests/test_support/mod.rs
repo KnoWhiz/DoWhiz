@@ -16,9 +16,7 @@ pub fn start_mockito_server(test_name: &str) -> Option<mockito::ServerGuard> {
     match server {
         Ok(server) => Some(server),
         Err(_) => {
-            eprintln!(
-                "Skipping {test_name}; unable to start mockito server in this environment."
-            );
+            eprintln!("Skipping {test_name}; unable to start mockito server in this environment.");
             None
         }
     }

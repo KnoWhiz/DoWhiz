@@ -81,9 +81,7 @@ value = "still"
     assert!(updated.contains("model = \"gpt-5.3-codex\""));
     assert!(!updated.contains("model = \"old-model\""));
     assert!(!updated.contains("model = \"override-model\""));
-    assert!(updated.contains(
-        "https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1"
-    ));
+    assert!(updated.contains("https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1"));
     assert!(!updated.contains("https://old.azure.com/openai/v1"));
     assert!(!updated.contains("https://example.azure.com/openai/v1"));
 }

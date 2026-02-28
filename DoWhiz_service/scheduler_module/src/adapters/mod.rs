@@ -19,9 +19,7 @@ pub use bluebubbles::{
     BlueBubblesWebhook,
 };
 pub use discord::{DiscordInboundAdapter, DiscordOutboundAdapter};
-pub use google_common::{
-    ActionableComment, GoogleComment, GoogleCommentsClient, GoogleFileType,
-};
+pub use google_common::{ActionableComment, GoogleComment, GoogleCommentsClient, GoogleFileType};
 pub use google_docs::{
     contains_employee_mention, extract_employee_name, format_edit_proposal, GoogleDocsComment,
     GoogleDocsInboundAdapter, GoogleDocsOutboundAdapter,

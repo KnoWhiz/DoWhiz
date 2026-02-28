@@ -13,6 +13,7 @@ use crate::collaboration_store::CollaborationStore;
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
 use crate::index_store::IndexStore;
 use crate::mailbox;
+use crate::raw_payload_store;
 use crate::user_store::{extract_emails, UserStore};
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
 
@@ -145,7 +146,8 @@ pub fn process_inbound_payload(
         );
 
         // Use employee-specific OAuth credentials
-        let auth_config = GoogleAuthConfig::from_env_for_employee(Some(&config.employee_profile.id));
+        let auth_config =
+            GoogleAuthConfig::from_env_for_employee(Some(&config.employee_profile.id));
         if let Ok(auth) = GoogleAuth::new(auth_config) {
             match auth.get_access_token() {
                 Ok(token) => {
@@ -172,7 +174,10 @@ pub fn process_inbound_payload(
                     "context": artifact.context_snippet,
                     "source": "email_extraction"
                 });
-                if let Err(e) = std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap_or_default()) {
+                if let Err(e) = std::fs::write(
+                    &meta_path,
+                    serde_json::to_string_pretty(&meta).unwrap_or_default(),
+                ) {
                     warn!("failed to write google_docs_metadata.json: {}", e);
                 }
                 break; // Only write first Google Docs artifact
@@ -366,13 +371,55 @@ fn write_inbound_payload(
         for attachment in attachments {
             let name = sanitize_token(&attachment.name, "attachment");
             let target = incoming_attachments.join(name);
-            let data = BASE64_STANDARD
-                .decode(attachment.content.as_bytes())
-                .unwrap_or_default();
+            let data = resolve_attachment_bytes(attachment)?;
             std::fs::write(target, data)?;
         }
     }
     Ok(())
+}
+
+fn resolve_attachment_bytes(
+    attachment: &super::postmark::PostmarkAttachment,
+) -> Result<Vec<u8>, BoxError> {
+    resolve_attachment_bytes_with_downloader(attachment, raw_payload_store::download_raw_payload)
+}
+
+fn resolve_attachment_bytes_with_downloader<F>(
+    attachment: &super::postmark::PostmarkAttachment,
+    mut downloader: F,
+) -> Result<Vec<u8>, BoxError>
+where
+    F: FnMut(&str) -> Result<Vec<u8>, raw_payload_store::RawPayloadStoreError>,
+{
+    let content = attachment.content.trim();
+    if !content.is_empty() {
+        match BASE64_STANDARD.decode(content.as_bytes()) {
+            Ok(bytes) => return Ok(bytes),
+            Err(err) => {
+                warn!(
+                    "failed to decode attachment '{}' base64 content: {}",
+                    attachment.name, err
+                );
+            }
+        }
+    }
+
+    if let Some(storage_ref) = attachment
+        .storage_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let bytes = downloader(storage_ref).map_err(|err| {
+            format!(
+                "failed to download attachment '{}' from '{}': {}",
+                attachment.name, storage_ref, err
+            )
+        })?;
+        return Ok(bytes);
+    }
+
+    Ok(Vec::new())
 }
 
 fn build_inbound_entry_name(payload: &PostmarkInbound, seq: u64) -> String {
@@ -512,5 +559,52 @@ mod tests {
             .join(entry_path)
             .join("attachments_manifest.json")
             .exists());
+    }
+
+    #[test]
+    fn resolve_attachment_bytes_prefers_base64_content() {
+        let attachment = super::super::postmark::PostmarkAttachment {
+            name: "report.txt".to_string(),
+            content: BASE64_STANDARD.encode("hello"),
+            storage_ref: Some("azure://container/path".to_string()),
+            content_type: "text/plain".to_string(),
+        };
+        let bytes = resolve_attachment_bytes_with_downloader(&attachment, |_ref| {
+            Ok("fallback".as_bytes().to_vec())
+        })
+        .expect("bytes");
+        assert_eq!(bytes, b"hello");
+    }
+
+    #[test]
+    fn resolve_attachment_bytes_uses_storage_ref_when_content_missing() {
+        let attachment = super::super::postmark::PostmarkAttachment {
+            name: "report.txt".to_string(),
+            content: String::new(),
+            storage_ref: Some("azure://container/path".to_string()),
+            content_type: "text/plain".to_string(),
+        };
+        let bytes = resolve_attachment_bytes_with_downloader(&attachment, |reference| {
+            assert_eq!(reference, "azure://container/path");
+            Ok("blob-data".as_bytes().to_vec())
+        })
+        .expect("bytes");
+        assert_eq!(bytes, b"blob-data");
+    }
+
+    #[test]
+    fn resolve_attachment_bytes_falls_back_to_storage_ref_on_invalid_base64() {
+        let attachment = super::super::postmark::PostmarkAttachment {
+            name: "report.txt".to_string(),
+            content: "%%%invalid%%%".to_string(),
+            storage_ref: Some("azure://container/path".to_string()),
+            content_type: "text/plain".to_string(),
+        };
+        let bytes = resolve_attachment_bytes_with_downloader(&attachment, |reference| {
+            assert_eq!(reference, "azure://container/path");
+            Ok("blob-data".as_bytes().to_vec())
+        })
+        .expect("bytes");
+        assert_eq!(bytes, b"blob-data");
     }
 }

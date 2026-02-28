@@ -128,7 +128,8 @@ impl WatchChannel {
     /// Check if the channel needs renewal.
     pub fn needs_renewal(&self) -> bool {
         let now = Utc::now();
-        let renewal_time = self.expires_at - chrono::Duration::seconds(CHANNEL_RENEWAL_BUFFER_SECS as i64);
+        let renewal_time =
+            self.expires_at - chrono::Duration::seconds(CHANNEL_RENEWAL_BUFFER_SECS as i64);
         now >= renewal_time
     }
 
@@ -179,17 +180,22 @@ impl GoogleDriveChangesManager {
 
     /// Register a watch channel for a file.
     pub fn watch_file(&self, file_id: &str) -> Result<WatchChannel, AdapterError> {
-        let webhook_url = self.config.webhook_url.as_ref()
-            .ok_or_else(|| AdapterError::ConfigError("Webhook URL not configured".to_string()))?;
+        let webhook_url =
+            self.config.webhook_url.as_ref().ok_or_else(|| {
+                AdapterError::ConfigError("Webhook URL not configured".to_string())
+            })?;
 
-        let access_token = self.auth
+        let access_token = self
+            .auth
             .get_access_token()
             .map_err(|e| AdapterError::ConfigError(e.to_string()))?;
 
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(API_TIMEOUT_SECS))
             .build()
-            .map_err(|e| AdapterError::ConfigError(format!("Failed to create HTTP client: {}", e)))?;
+            .map_err(|e| {
+                AdapterError::ConfigError(format!("Failed to create HTTP client: {}", e))
+            })?;
 
         let channel_id = Uuid::new_v4().to_string();
         let expiration_ms = (SystemTime::now()
@@ -223,20 +229,29 @@ impl GoogleDriveChangesManager {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().unwrap_or_default();
-            error!("Failed to create watch channel for {}: {} - {}", file_id, status, body);
-            return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+            error!(
+                "Failed to create watch channel for {}: {} - {}",
+                file_id, status, body
+            );
+            return Err(AdapterError::SendError(format!(
+                "HTTP {}: {}",
+                status, body
+            )));
         }
 
         let watch_response: WatchChannelResponse = response
             .json()
             .map_err(|e| AdapterError::ParseError(e.to_string()))?;
 
-        let expires_at = watch_response.expiration
+        let expires_at = watch_response
+            .expiration
             .as_ref()
             .and_then(|e| e.parse::<i64>().ok())
             .map(|ms| DateTime::from_timestamp_millis(ms))
             .flatten()
-            .unwrap_or_else(|| Utc::now() + chrono::Duration::seconds(self.config.channel_expiration_secs as i64));
+            .unwrap_or_else(|| {
+                Utc::now() + chrono::Duration::seconds(self.config.channel_expiration_secs as i64)
+            });
 
         let channel = WatchChannel {
             id: watch_response.id,
@@ -254,7 +269,10 @@ impl GoogleDriveChangesManager {
             resource_map.insert(watch_response.resource_id, file_id.to_string());
         }
 
-        info!("Created watch channel {} for file {}, expires at {}", channel.id, file_id, expires_at);
+        info!(
+            "Created watch channel {} for file {}, expires at {}",
+            channel.id, file_id, expires_at
+        );
 
         Ok(channel)
     }
@@ -262,7 +280,9 @@ impl GoogleDriveChangesManager {
     /// Stop watching a file.
     pub fn stop_watching(&self, file_id: &str) -> Result<(), AdapterError> {
         let channel = {
-            let channels = self.channels.lock()
+            let channels = self
+                .channels
+                .lock()
                 .map_err(|_| AdapterError::ConfigError("Failed to lock channels".to_string()))?;
             channels.get(file_id).cloned()
         };
@@ -272,14 +292,17 @@ impl GoogleDriveChangesManager {
             return Ok(());
         };
 
-        let access_token = self.auth
+        let access_token = self
+            .auth
             .get_access_token()
             .map_err(|e| AdapterError::ConfigError(e.to_string()))?;
 
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(API_TIMEOUT_SECS))
             .build()
-            .map_err(|e| AdapterError::ConfigError(format!("Failed to create HTTP client: {}", e)))?;
+            .map_err(|e| {
+                AdapterError::ConfigError(format!("Failed to create HTTP client: {}", e))
+            })?;
 
         let url = "https://www.googleapis.com/drive/v3/channels/stop";
 
@@ -299,7 +322,10 @@ impl GoogleDriveChangesManager {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().unwrap_or_default();
-            warn!("Failed to stop watch channel {} for {}: {} - {}", channel.id, file_id, status, body);
+            warn!(
+                "Failed to stop watch channel {} for {}: {} - {}",
+                channel.id, file_id, status, body
+            );
             // Don't return error - channel may have already expired
         }
 
@@ -321,7 +347,10 @@ impl GoogleDriveChangesManager {
     pub fn handle_notification(&self, notification: &ChangeNotification) -> Option<String> {
         // Ignore sync notifications (sent when channel is created)
         if notification.resource_state == "sync" {
-            debug!("Ignoring sync notification for channel {}", notification.channel_id);
+            debug!(
+                "Ignoring sync notification for channel {}",
+                notification.channel_id
+            );
             return None;
         }
 
@@ -349,9 +378,12 @@ impl GoogleDriveChangesManager {
     /// Renew channels that are about to expire.
     pub fn renew_expiring_channels(&self) -> Result<Vec<String>, AdapterError> {
         let files_to_renew: Vec<String> = {
-            let channels = self.channels.lock()
+            let channels = self
+                .channels
+                .lock()
                 .map_err(|_| AdapterError::ConfigError("Failed to lock channels".to_string()))?;
-            channels.values()
+            channels
+                .values()
                 .filter(|c| c.needs_renewal())
                 .map(|c| c.file_id.clone())
                 .collect()
@@ -380,7 +412,8 @@ impl GoogleDriveChangesManager {
 
     /// Get all active channels.
     pub fn get_active_channels(&self) -> Vec<WatchChannel> {
-        self.channels.lock()
+        self.channels
+            .lock()
             .map(|c| c.values().cloned().collect())
             .unwrap_or_default()
     }
@@ -395,7 +428,10 @@ mod tests {
         let config = GoogleDriveChangesConfig::default();
         assert!(!config.enabled);
         assert!(config.webhook_url.is_none());
-        assert_eq!(config.channel_expiration_secs, DEFAULT_CHANNEL_EXPIRATION_SECS);
+        assert_eq!(
+            config.channel_expiration_secs,
+            DEFAULT_CHANNEL_EXPIRATION_SECS
+        );
     }
 
     #[test]

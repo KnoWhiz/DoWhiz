@@ -45,17 +45,20 @@ static GOOGLE_DOCS_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::ne
     vec![
         // Google Docs
         (
-            Regex::new(r"https://docs\.google\.com/document/d/([a-zA-Z0-9_-]+)(?:/[^\s]*)?").unwrap(),
+            Regex::new(r"https://docs\.google\.com/document/d/([a-zA-Z0-9_-]+)(?:/[^\s]*)?")
+                .unwrap(),
             "google_docs",
         ),
         // Google Sheets
         (
-            Regex::new(r"https://docs\.google\.com/spreadsheets/d/([a-zA-Z0-9_-]+)(?:/[^\s]*)?").unwrap(),
+            Regex::new(r"https://docs\.google\.com/spreadsheets/d/([a-zA-Z0-9_-]+)(?:/[^\s]*)?")
+                .unwrap(),
             "google_sheets",
         ),
         // Google Slides
         (
-            Regex::new(r"https://docs\.google\.com/presentation/d/([a-zA-Z0-9_-]+)(?:/[^\s]*)?").unwrap(),
+            Regex::new(r"https://docs\.google\.com/presentation/d/([a-zA-Z0-9_-]+)(?:/[^\s]*)?")
+                .unwrap(),
             "google_slides",
         ),
         // Google Drive file (generic)
@@ -127,7 +130,8 @@ static GITHUB_ISSUE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 
 // GitHub Repository pattern (only matches tree/blob paths, not PR/issues)
 static GITHUB_REPO_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"https://github\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)/(?:tree|blob)/[^\s]+").unwrap()
+    Regex::new(r"https://github\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)/(?:tree|blob)/[^\s]+")
+        .unwrap()
 });
 
 impl ArtifactExtractor for GitHubExtractor {
@@ -141,7 +145,8 @@ impl ArtifactExtractor for GitHubExtractor {
 
         // Extract PRs
         for cap in GITHUB_PR_PATTERN.captures_iter(text) {
-            if let (Some(full_match), Some(repo), Some(num)) = (cap.get(0), cap.get(1), cap.get(2)) {
+            if let (Some(full_match), Some(repo), Some(num)) = (cap.get(0), cap.get(1), cap.get(2))
+            {
                 let artifact_id = format!("{}#{}", repo.as_str(), num.as_str());
                 if seen_ids.contains(&artifact_id) {
                     continue;
@@ -162,7 +167,8 @@ impl ArtifactExtractor for GitHubExtractor {
 
         // Extract Issues
         for cap in GITHUB_ISSUE_PATTERN.captures_iter(text) {
-            if let (Some(full_match), Some(repo), Some(num)) = (cap.get(0), cap.get(1), cap.get(2)) {
+            if let (Some(full_match), Some(repo), Some(num)) = (cap.get(0), cap.get(1), cap.get(2))
+            {
                 let artifact_id = format!("{}#{}", repo.as_str(), num.as_str());
                 if seen_ids.contains(&artifact_id) {
                     continue;
@@ -216,9 +222,13 @@ pub struct NotionExtractor;
 static NOTION_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
         // Notion page with ID in URL
-        Regex::new(r"https://(?:www\.)?notion\.so/(?:[a-zA-Z0-9_-]+/)?([a-zA-Z0-9]+(?:-[a-f0-9]{32})?)").unwrap(),
+        Regex::new(
+            r"https://(?:www\.)?notion\.so/(?:[a-zA-Z0-9_-]+/)?([a-zA-Z0-9]+(?:-[a-f0-9]{32})?)",
+        )
+        .unwrap(),
         // Notion.site pages
-        Regex::new(r"https://[a-zA-Z0-9_-]+\.notion\.site/([a-zA-Z0-9_-]+(?:-[a-f0-9]{32})?)").unwrap(),
+        Regex::new(r"https://[a-zA-Z0-9_-]+\.notion\.site/([a-zA-Z0-9_-]+(?:-[a-f0-9]{32})?)")
+            .unwrap(),
     ]
 });
 
@@ -320,7 +330,8 @@ pub struct FigmaExtractor;
 static FIGMA_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
         // Figma file
-        Regex::new(r"https://(?:www\.)?figma\.com/(?:file|design)/([a-zA-Z0-9]+)(?:/[^\s]*)?").unwrap(),
+        Regex::new(r"https://(?:www\.)?figma\.com/(?:file|design)/([a-zA-Z0-9]+)(?:/[^\s]*)?")
+            .unwrap(),
         // Figma prototype
         Regex::new(r"https://(?:www\.)?figma\.com/proto/([a-zA-Z0-9]+)(?:/[^\s]*)?").unwrap(),
     ]
@@ -552,7 +563,8 @@ mod tests {
 
     #[test]
     fn test_google_docs_extraction() {
-        let text = "Please review this document: https://docs.google.com/document/d/1abc123xyz/edit";
+        let text =
+            "Please review this document: https://docs.google.com/document/d/1abc123xyz/edit";
         let artifacts = GoogleDocsExtractor.extract(text);
 
         assert_eq!(artifacts.len(), 1);
@@ -563,7 +575,8 @@ mod tests {
 
     #[test]
     fn test_google_sheets_extraction() {
-        let text = "Check out the spreadsheet: https://docs.google.com/spreadsheets/d/sheet123/edit#gid=0";
+        let text =
+            "Check out the spreadsheet: https://docs.google.com/spreadsheets/d/sheet123/edit#gid=0";
         let artifacts = GoogleDocsExtractor.extract(text);
 
         assert_eq!(artifacts.len(), 1);

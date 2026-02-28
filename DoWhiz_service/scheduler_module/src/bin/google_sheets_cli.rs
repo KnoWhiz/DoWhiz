@@ -240,10 +240,16 @@ fn cmd_get_metadata(spreadsheet_id: &str) -> Result<String, String> {
         output.push_str(&format!("\nSheets ({}):\n", sheets.len()));
         for sheet in sheets {
             if let Some(props) = sheet.get("properties") {
-                let title = props.get("title").and_then(|t| t.as_str()).unwrap_or("Untitled");
+                let title = props
+                    .get("title")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("Untitled");
                 let sheet_id = props.get("sheetId").and_then(|i| i.as_i64()).unwrap_or(0);
                 let index = props.get("index").and_then(|i| i.as_i64()).unwrap_or(0);
-                output.push_str(&format!("  - {} (id={}, index={})\n", title, sheet_id, index));
+                output.push_str(&format!(
+                    "  - {} (id={}, index={})\n",
+                    title, sheet_id, index
+                ));
             }
         }
     }
@@ -267,7 +273,11 @@ fn cmd_list_comments(spreadsheet_id: &str) -> Result<String, String> {
             .as_ref()
             .and_then(|a| a.display_name.as_deref())
             .unwrap_or("Unknown");
-        let resolved = if comment.resolved == Some(true) { " [RESOLVED]" } else { "" };
+        let resolved = if comment.resolved == Some(true) {
+            " [RESOLVED]"
+        } else {
+            ""
+        };
         output.push_str(&format!(
             "- [{}]{} {}: {}\n",
             comment.id, resolved, author, comment.content
@@ -290,7 +300,11 @@ fn cmd_list_comments(spreadsheet_id: &str) -> Result<String, String> {
     Ok(output)
 }
 
-fn cmd_reply_comment(spreadsheet_id: &str, comment_id: &str, message: &str) -> Result<String, String> {
+fn cmd_reply_comment(
+    spreadsheet_id: &str,
+    comment_id: &str,
+    message: &str,
+) -> Result<String, String> {
     let auth = get_auth()?;
     let adapter = GoogleSheetsOutboundAdapter::new(auth);
 
@@ -327,7 +341,10 @@ fn cmd_append_rows(spreadsheet_id: &str, range: &str, json: &str) -> Result<Stri
         .append_rows(spreadsheet_id, range, values)
         .map_err(|e| format!("Failed to append rows: {}", e))?;
 
-    Ok(format!("Successfully appended {} row(s) to {}", row_count, range))
+    Ok(format!(
+        "Successfully appended {} row(s) to {}",
+        row_count, range
+    ))
 }
 
 fn cmd_batch_update(spreadsheet_id: &str, json: &str) -> Result<String, String> {

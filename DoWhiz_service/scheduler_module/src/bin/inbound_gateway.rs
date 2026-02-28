@@ -102,7 +102,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 (Some(manager), Some(tx))
             }
             Err(e) => {
-                warn!("Google Drive push notifications disabled: failed to initialize auth: {}", e);
+                warn!(
+                    "Google Drive push notifications disabled: failed to initialize auth: {}",
+                    e
+                );
                 (None, None)
             }
         }

@@ -143,8 +143,12 @@ fn email_verification_success() {
     assert!(matches!(result, Err(AccountStoreError::TokenInvalid)));
 
     // Email should now be listed in account identifiers
-    let identifiers = store.list_identifiers(account_id).expect("list identifiers");
-    assert!(identifiers.iter().any(|id| id.identifier == test_email && id.verified));
+    let identifiers = store
+        .list_identifiers(account_id)
+        .expect("list identifiers");
+    assert!(identifiers
+        .iter()
+        .any(|id| id.identifier == test_email && id.verified));
 
     // Account should be findable by the email identifier
     let found_account = store
@@ -163,8 +167,8 @@ fn email_verification_invalid_token() {
         return;
     };
 
-    // Try to verify a non-existent token
-    let fake_token = Uuid::new_v4().to_string();
+    // Try to verify a token in an invalid format
+    let fake_token = "definitely-not-a-valid-token";
     let result = store.verify_email_token(&fake_token);
 
     assert!(matches!(result, Err(AccountStoreError::TokenInvalid)));
@@ -192,7 +196,9 @@ fn email_verification_links_to_account() {
         .create_email_verification_token(account_id, &test_email)
         .expect("create token");
 
-    let _identifier = store.verify_email_token(&token.token).expect("verify token");
+    let _identifier = store
+        .verify_email_token(&token.token)
+        .expect("verify token");
 
     // After verification, email should be linked and verified
     let found = store
@@ -221,13 +227,17 @@ fn email_verification_multiple_emails_same_account() {
     let token1 = store
         .create_email_verification_token(account_id, &email1)
         .expect("create token 1");
-    store.verify_email_token(&token1.token).expect("verify token 1");
+    store
+        .verify_email_token(&token1.token)
+        .expect("verify token 1");
 
     // Verify second email
     let token2 = store
         .create_email_verification_token(account_id, &email2)
         .expect("create token 2");
-    store.verify_email_token(&token2.token).expect("verify token 2");
+    store
+        .verify_email_token(&token2.token)
+        .expect("verify token 2");
 
     // Both emails should be linked to the same account
     let found1 = store
@@ -243,7 +253,9 @@ fn email_verification_multiple_emails_same_account() {
     assert_eq!(found2.unwrap().id, account_id);
 
     // List identifiers should show both
-    let identifiers = store.list_identifiers(account_id).expect("list identifiers");
+    let identifiers = store
+        .list_identifiers(account_id)
+        .expect("list identifiers");
     assert!(identifiers.iter().any(|id| id.identifier == email1));
     assert!(identifiers.iter().any(|id| id.identifier == email2));
 
@@ -267,7 +279,9 @@ fn email_verification_unlink_email() {
     let token = store
         .create_email_verification_token(account_id, &test_email)
         .expect("create token");
-    store.verify_email_token(&token.token).expect("verify token");
+    store
+        .verify_email_token(&token.token)
+        .expect("verify token");
 
     // Verify it's linked
     let found = store
@@ -335,7 +349,9 @@ fn email_verification_token_consumed_after_use() {
         .expect("create token");
 
     // First verification should succeed
-    let identifier = store.verify_email_token(&token.token).expect("first verify");
+    let identifier = store
+        .verify_email_token(&token.token)
+        .expect("first verify");
     assert_eq!(identifier.identifier, test_email);
 
     // Second verification should fail (token consumed)
@@ -365,7 +381,9 @@ fn email_verification_identifier_is_marked_verified() {
     let token = store
         .create_email_verification_token(account_id, &test_email)
         .expect("create token");
-    let identifier = store.verify_email_token(&token.token).expect("verify token");
+    let identifier = store
+        .verify_email_token(&token.token)
+        .expect("verify token");
 
     // The returned identifier should be marked as verified
     assert!(identifier.verified);
@@ -423,7 +441,10 @@ fn email_verification_token_is_uuid_format() {
         .expect("create verification token");
 
     // Token should be a valid UUID
-    assert!(Uuid::parse_str(&token.token).is_ok(), "Token should be a valid UUID");
+    assert!(
+        Uuid::parse_str(&token.token).is_ok(),
+        "Token should be a valid UUID"
+    );
 
     // Cleanup
     cleanup_test_token_and_email(&store, account_id, &token.token, &test_email);
@@ -453,8 +474,12 @@ fn email_verification_tokens_are_unique() {
     assert_ne!(token1.token, token2.token);
 
     // Both tokens should be valid
-    let id1 = store.verify_email_token(&token1.token).expect("verify token 1");
-    let id2 = store.verify_email_token(&token2.token).expect("verify token 2");
+    let id1 = store
+        .verify_email_token(&token1.token)
+        .expect("verify token 1");
+    let id2 = store
+        .verify_email_token(&token2.token)
+        .expect("verify token 2");
 
     assert_eq!(id1.identifier, email1);
     assert_eq!(id2.identifier, email2);
@@ -479,7 +504,9 @@ fn email_verification_relink_same_email() {
     let token1 = store
         .create_email_verification_token(account_id, &test_email)
         .expect("create token 1");
-    store.verify_email_token(&token1.token).expect("verify token 1");
+    store
+        .verify_email_token(&token1.token)
+        .expect("verify token 1");
 
     // Verify it's linked
     let found = store
@@ -502,7 +529,9 @@ fn email_verification_relink_same_email() {
     let token2 = store
         .create_email_verification_token(account_id, &test_email)
         .expect("create token 2");
-    store.verify_email_token(&token2.token).expect("verify token 2");
+    store
+        .verify_email_token(&token2.token)
+        .expect("verify token 2");
 
     // Should be linked again
     let found_again = store
@@ -532,7 +561,9 @@ fn email_verification_special_characters_in_email() {
     let token = store
         .create_email_verification_token(account_id, &test_email)
         .expect("create token");
-    let identifier = store.verify_email_token(&token.token).expect("verify token");
+    let identifier = store
+        .verify_email_token(&token.token)
+        .expect("verify token");
 
     assert_eq!(identifier.identifier, test_email);
 
@@ -564,7 +595,9 @@ fn email_verification_long_email_address() {
     let token = store
         .create_email_verification_token(account_id, &test_email)
         .expect("create token");
-    let identifier = store.verify_email_token(&token.token).expect("verify token");
+    let identifier = store
+        .verify_email_token(&token.token)
+        .expect("verify token");
 
     assert_eq!(identifier.identifier, test_email);
 
@@ -588,7 +621,9 @@ fn email_verification_preserves_email_case() {
     let token = store
         .create_email_verification_token(account_id, &test_email)
         .expect("create token");
-    let identifier = store.verify_email_token(&token.token).expect("verify token");
+    let identifier = store
+        .verify_email_token(&token.token)
+        .expect("verify token");
 
     // The stored identifier should match exactly what was provided
     assert_eq!(identifier.identifier, test_email);

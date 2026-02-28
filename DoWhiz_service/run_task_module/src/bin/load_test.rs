@@ -66,10 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let skills_src = manifest_dir.join("..").join("skills");
-    let employee_dir = manifest_dir
-        .join("..")
-        .join("employees")
-        .join(&employee_id);
+    let employee_dir = manifest_dir.join("..").join("employees").join(&employee_id);
 
     let mut params_list = Vec::with_capacity(count);
     for idx in 0..count {
@@ -137,7 +134,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let elapsed = start.elapsed();
-    let ok = *successes.lock().unwrap_or_else(|poison| poison.into_inner());
+    let ok = *successes
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     let errs = failures.lock().unwrap_or_else(|poison| poison.into_inner());
     println!(
         "load_test finished: total={} ok={} failed={} elapsed={:?}",
@@ -189,9 +188,7 @@ fn write_sample_email(workspace: &Path, idx: usize) -> std::io::Result<()> {
 
 fn write_sample_memory(workspace: &Path, idx: usize) -> std::io::Result<()> {
     let memo_path = workspace.join("memory").join("memo.md");
-    let body = format!(
-        "# Memory\n\n- User: load_test_user_{idx}\n- Preference: concise replies\n"
-    );
+    let body = format!("# Memory\n\n- User: load_test_user_{idx}\n- Preference: concise replies\n");
     fs::write(memo_path, body)
 }
 

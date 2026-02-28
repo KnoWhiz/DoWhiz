@@ -34,7 +34,10 @@ fn sync_blob_memo_to_workspace(account_id: Uuid, workspace_memory_dir: &Path) ->
     let memo_content = match rt.block_on(blob_store.read_memo(account_id)) {
         Ok(content) => content,
         Err(e) => {
-            warn!("Failed to read memo from blob for account {}: {}", account_id, e);
+            warn!(
+                "Failed to read memo from blob for account {}: {}",
+                account_id, e
+            );
             return None;
         }
     };
@@ -142,7 +145,10 @@ impl TaskExecutor for ModuleExecutor {
                 // Sync memo to workspace: prefer Azure Blob if account exists, else local storage
                 let original_memo_snapshot = if let Some(account_id) = account_id {
                     // User has a unified account - try to sync from Azure Blob
-                    info!("Found unified account {} for channel {:?}, syncing from Azure Blob", account_id, task.channel);
+                    info!(
+                        "Found unified account {} for channel {:?}, syncing from Azure Blob",
+                        account_id, task.channel
+                    );
                     match sync_blob_memo_to_workspace(account_id, &workspace_memory_dir) {
                         Some(content) => {
                             // Successfully synced from blob - use blob content as snapshot
@@ -150,10 +156,16 @@ impl TaskExecutor for ModuleExecutor {
                         }
                         None => {
                             // Blob sync failed - fall back to local storage
-                            warn!("Blob sync failed for account {}, falling back to local storage", account_id);
+                            warn!(
+                                "Blob sync failed for account {}, falling back to local storage",
+                                account_id
+                            );
                             if let Some(user_memory_dir) = user_memory_dir.as_ref() {
                                 let snapshot = snapshot_memo_content(user_memory_dir);
-                                if let Err(e) = sync_user_memory_to_workspace(user_memory_dir, &workspace_memory_dir) {
+                                if let Err(e) = sync_user_memory_to_workspace(
+                                    user_memory_dir,
+                                    &workspace_memory_dir,
+                                ) {
                                     warn!("Local memory sync also failed: {}", e);
                                 }
                                 snapshot
@@ -169,9 +181,10 @@ impl TaskExecutor for ModuleExecutor {
                         .and_then(|dir| snapshot_memo_content(dir));
 
                     if let Some(user_memory_dir) = user_memory_dir.as_ref() {
-                        sync_user_memory_to_workspace(user_memory_dir, &workspace_memory_dir).map_err(
-                            |err| SchedulerError::TaskFailed(format!("memory sync failed: {}", err)),
-                        )?;
+                        sync_user_memory_to_workspace(user_memory_dir, &workspace_memory_dir)
+                            .map_err(|err| {
+                                SchedulerError::TaskFailed(format!("memory sync failed: {}", err))
+                            })?;
                     } else {
                         warn!(
                             "unable to resolve user memory dir for workspace {}",

@@ -9,10 +9,10 @@ mod telegram;
 mod whatsapp;
 
 pub(super) use bluebubbles::process_bluebubbles_event;
-pub(super) use discord::process_discord_inbound_message;
 pub(crate) use discord::persist_discord_ingest_context;
-pub(crate) use discord_context::build_discord_router_context;
+pub(super) use discord::process_discord_inbound_message;
 pub(crate) use discord_context::build_discord_message_text_with_quote;
+pub(crate) use discord_context::build_discord_router_context;
 pub(crate) use discord_context::hydrate_discord_context_files;
 pub(super) use google_workspace::process_google_workspace_message;
 pub(super) use quick_responses::{

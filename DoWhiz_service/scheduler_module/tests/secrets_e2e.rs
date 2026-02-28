@@ -307,9 +307,7 @@ fn secrets_persist_across_workspaces_and_load(
     ]);
     let _unset = EnvUnsetGuard::remove(&[env_key]);
 
-    let Some(ingestion_db_url) =
-        test_support::require_supabase_db_url("secrets_e2e")
-    else {
+    let Some(ingestion_db_url) = test_support::require_supabase_db_url("secrets_e2e") else {
         return Ok(());
     };
     let (employee_profile, employee_directory) = test_employee_directory();

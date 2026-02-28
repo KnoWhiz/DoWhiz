@@ -73,13 +73,19 @@ pub(super) fn spawn_ingestion_consumer(
                     &item.envelope,
                 ) {
                     Ok(_) => {
-                        info!("ingestion processed successfully for employee={}", employee_id);
+                        info!(
+                            "ingestion processed successfully for employee={}",
+                            employee_id
+                        );
                         if let Err(err) = queue.mark_done(&item.id) {
                             warn!("failed to mark envelope done: {}", err);
                         }
                     }
                     Err(err) => {
-                        warn!("ingestion processing failed for employee={}: {}", employee_id, err);
+                        warn!(
+                            "ingestion processing failed for employee={}: {}",
+                            employee_id, err
+                        );
                         if let Err(mark_err) = queue.mark_failed(&item.id, &err.to_string()) {
                             warn!("failed to mark envelope failed: {}", mark_err);
                         }
@@ -143,7 +149,14 @@ fn process_ingestion_envelope(
             if raw_payload.is_empty() {
                 return Err("missing slack raw payload".into());
             }
-            process_slack_event(config, user_store, index_store, slack_store, account_store, &raw_payload)
+            process_slack_event(
+                config,
+                user_store,
+                index_store,
+                slack_store,
+                account_store,
+                &raw_payload,
+            )
         }
         Channel::BlueBubbles => {
             let message = envelope.to_inbound_message();
@@ -192,7 +205,14 @@ fn process_ingestion_envelope(
         Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
             let message = envelope.to_inbound_message();
             let raw_payload = envelope.raw_payload_bytes();
-            process_google_workspace_message(config, user_store, index_store, account_store, &message, &raw_payload)
+            process_google_workspace_message(
+                config,
+                user_store,
+                index_store,
+                account_store,
+                &message,
+                &raw_payload,
+            )
         }
         Channel::Telegram => {
             let message = envelope.to_inbound_message();

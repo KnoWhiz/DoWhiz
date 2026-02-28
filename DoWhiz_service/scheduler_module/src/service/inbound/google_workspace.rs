@@ -95,7 +95,11 @@ pub(crate) fn process_google_workspace_message(
                 );
                 owner.to_string()
             } else {
-                format!("{}_{}@local", channel_prefix, message.sender.replace(' ', "_"))
+                format!(
+                    "{}_{}@local",
+                    channel_prefix,
+                    message.sender.replace(' ', "_")
+                )
             }
         }
     };
@@ -253,44 +257,44 @@ pub(crate) fn process_google_workspace_message(
     match account_store.get_account_by_identifier("email", &user_email) {
         Ok(Some(account)) => {
             info!("Found account {} for email {}", account.id, user_email);
-        let account_tasks_dir = config.users_root.join(account.id.to_string()).join("state");
-        if let Err(err) = std::fs::create_dir_all(&account_tasks_dir) {
-            warn!(
-                "failed to create account tasks dir for account {}: {}",
-                account.id, err
-            );
-        } else {
-            let account_tasks_db_path = account_tasks_dir.join("tasks.db");
-            match Scheduler::load(&account_tasks_db_path, ModuleExecutor::default()) {
-                Ok(mut account_scheduler) => {
-                    // Use the same task_id so we can update status at completion
-                    match account_scheduler.add_one_shot_in_with_id(
-                        task_id,
-                        Duration::from_secs(0),
-                        TaskKind::RunTask(run_task_for_account),
-                    ) {
-                        Ok(()) => {
-                            info!(
+            let account_tasks_dir = config.users_root.join(account.id.to_string()).join("state");
+            if let Err(err) = std::fs::create_dir_all(&account_tasks_dir) {
+                warn!(
+                    "failed to create account tasks dir for account {}: {}",
+                    account.id, err
+                );
+            } else {
+                let account_tasks_db_path = account_tasks_dir.join("tasks.db");
+                match Scheduler::load(&account_tasks_db_path, ModuleExecutor::default()) {
+                    Ok(mut account_scheduler) => {
+                        // Use the same task_id so we can update status at completion
+                        match account_scheduler.add_one_shot_in_with_id(
+                            task_id,
+                            Duration::from_secs(0),
+                            TaskKind::RunTask(run_task_for_account),
+                        ) {
+                            Ok(()) => {
+                                info!(
                                 "also enqueued task to account-level storage account={} task_id={} channel={}",
                                 account.id, task_id, channel_display_name(&channel)
                             );
-                        }
-                        Err(err) => {
-                            warn!(
-                                "failed to add task to account scheduler for account {}: {}",
-                                account.id, err
-                            );
+                            }
+                            Err(err) => {
+                                warn!(
+                                    "failed to add task to account scheduler for account {}: {}",
+                                    account.id, err
+                                );
+                            }
                         }
                     }
-                }
-                Err(err) => {
-                    warn!(
-                        "failed to load account scheduler for account {}: {}",
-                        account.id, err
-                    );
+                    Err(err) => {
+                        warn!(
+                            "failed to load account scheduler for account {}: {}",
+                            account.id, err
+                        );
+                    }
                 }
             }
-        }
         }
         Ok(None) => {
             info!(
@@ -717,9 +721,13 @@ mod tests {
         let seq = thread_state.last_email_seq;
 
         let incoming_dir = run_task.workspace_dir.join("incoming_email");
-        assert!(incoming_dir.join(format!("{:05}_gdocs_comment.json", seq)).exists());
+        assert!(incoming_dir
+            .join(format!("{:05}_gdocs_comment.json", seq))
+            .exists());
         assert!(incoming_dir.join(format!("{:05}_email.html", seq)).exists());
-        assert!(incoming_dir.join(format!("{:05}_gdocs_meta.json", seq)).exists());
+        assert!(incoming_dir
+            .join(format!("{:05}_gdocs_meta.json", seq))
+            .exists());
 
         Ok(())
     }

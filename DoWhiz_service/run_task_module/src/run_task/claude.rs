@@ -162,7 +162,10 @@ fn prepare_claude_env(
             api_key.to_string(),
         ),
         // Use DoWhiz-specific Claude home to avoid affecting user's ~/.claude config
-        ("CLAUDE_HOME".to_string(), claude_home.to_string_lossy().into_owned()),
+        (
+            "CLAUDE_HOME".to_string(),
+            claude_home.to_string_lossy().into_owned(),
+        ),
         ("CLAUDE_CODE_USE_FOUNDRY".to_string(), "1".to_string()),
         ("ANTHROPIC_FOUNDRY_RESOURCE".to_string(), foundry_resource),
         ("ANTHROPIC_FOUNDRY_API_KEY".to_string(), api_key.to_string()),
@@ -178,7 +181,9 @@ fn prepare_claude_env(
 fn dowhiz_claude_home() -> Result<std::path::PathBuf, RunTaskError> {
     let home = env::var("HOME").map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
     // Use ~/.dowhiz/claude instead of ~/.claude to avoid overwriting user's config
-    let claude_home = std::path::PathBuf::from(home).join(".dowhiz").join("claude");
+    let claude_home = std::path::PathBuf::from(home)
+        .join(".dowhiz")
+        .join("claude");
     Ok(claude_home)
 }
 
@@ -327,8 +332,14 @@ fn extract_claude_text(raw: &str) -> (String, Vec<String>) {
         // Handle both old and new Claude stream-json formats
         if matches!(
             event_type,
-            "text_delta" | "message_delta" | "content_block_delta" | "message_stop" | "result"
-            | "assistant" | "text" | "message"
+            "text_delta"
+                | "message_delta"
+                | "content_block_delta"
+                | "message_stop"
+                | "result"
+                | "assistant"
+                | "text"
+                | "message"
         ) {
             if let Some(fragment) = extract_claude_fragment(&event) {
                 text.push_str(&fragment);
