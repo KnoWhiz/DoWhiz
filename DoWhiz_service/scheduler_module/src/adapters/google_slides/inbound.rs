@@ -33,21 +33,16 @@ impl GoogleSlidesInboundAdapter {
     pub fn list_shared_presentations(
         &self,
     ) -> Result<Vec<super::super::google_common::DriveFile>, AdapterError> {
-        self.comments_client
-            .list_shared_files()
-            .map(|files| {
-                files
-                    .into_iter()
-                    .filter(|f| f.file_type() == GoogleFileType::Slides)
-                    .collect()
-            })
+        self.comments_client.list_shared_files().map(|files| {
+            files
+                .into_iter()
+                .filter(|f| f.file_type() == GoogleFileType::Slides)
+                .collect()
+        })
     }
 
     /// List comments on a specific presentation.
-    pub fn list_comments(
-        &self,
-        presentation_id: &str,
-    ) -> Result<Vec<GoogleComment>, AdapterError> {
+    pub fn list_comments(&self, presentation_id: &str) -> Result<Vec<GoogleComment>, AdapterError> {
         self.comments_client.list_comments(presentation_id)
     }
 
@@ -68,7 +63,12 @@ impl GoogleSlidesInboundAdapter {
         presentation_name: &str,
         actionable: &ActionableComment,
     ) -> InboundMessage {
-        self.actionable_to_inbound_message_with_owner(presentation_id, presentation_name, actionable, None)
+        self.actionable_to_inbound_message_with_owner(
+            presentation_id,
+            presentation_name,
+            actionable,
+            None,
+        )
     }
 
     /// Convert an ActionableComment to an InboundMessage with owner email.
@@ -148,10 +148,7 @@ impl GoogleSlidesInboundAdapter {
     }
 
     /// Read presentation content as plain text for agent context.
-    pub fn read_presentation_content(
-        &self,
-        presentation_id: &str,
-    ) -> Result<String, AdapterError> {
+    pub fn read_presentation_content(&self, presentation_id: &str) -> Result<String, AdapterError> {
         self.comments_client
             .export_file_content(presentation_id, "text/plain")
     }

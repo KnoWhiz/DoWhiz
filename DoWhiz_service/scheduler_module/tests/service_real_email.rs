@@ -87,6 +87,44 @@ fn load_employee_for_address(
     Ok((employee, directory, config_path))
 }
 
+fn attach_inbound_alias(
+    employee_profile: &mut EmployeeProfile,
+    employee_directory: &mut EmployeeDirectory,
+    inbound_address: &str,
+) {
+    let Some(alias) = normalize_email(inbound_address) else {
+        return;
+    };
+    if alias.is_empty() {
+        return;
+    }
+
+    if employee_profile.address_set.insert(alias.clone()) {
+        employee_profile.addresses.push(alias.clone());
+    }
+
+    if let Some(profile) = employee_directory
+        .employee_by_id
+        .get_mut(&employee_profile.id)
+    {
+        if profile.address_set.insert(alias.clone()) {
+            profile.addresses.push(alias.clone());
+        }
+    }
+
+    if let Some(profile) = employee_directory
+        .employees
+        .iter_mut()
+        .find(|profile| profile.id == employee_profile.id)
+    {
+        if profile.address_set.insert(alias.clone()) {
+            profile.addresses.push(alias.clone());
+        }
+    }
+
+    employee_directory.service_addresses.insert(alias);
+}
+
 fn load_env_from_repo() {
     let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     loop {
@@ -205,6 +243,65 @@ tenant_id = "default"
         employee_id = employee_id,
     );
     fs::write(path, contents)?;
+    Ok(())
+}
+
+fn write_employee_config_with_inbound_alias(
+    source_path: &Path,
+    target_path: &Path,
+    employee_id: &str,
+    inbound_address: &str,
+) -> Result<(), BoxError> {
+    let Some(alias) = normalize_email(inbound_address) else {
+        return Err(format!("invalid inbound alias address: {}", inbound_address).into());
+    };
+
+    let content = fs::read_to_string(source_path)?;
+    let mut parsed: toml::Value = toml::from_str(&content)?;
+    let employees = parsed
+        .get_mut("employees")
+        .and_then(|value| value.as_array_mut())
+        .ok_or("employee config missing [employees] array")?;
+
+    let mut updated = false;
+    for employee in employees {
+        let id = employee
+            .get("id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        if id != employee_id {
+            continue;
+        }
+        let Some(addresses) = employee
+            .get_mut("addresses")
+            .and_then(|value| value.as_array_mut())
+        else {
+            return Err(format!("employee '{}' missing addresses", employee_id).into());
+        };
+        let exists = addresses.iter().any(|value| {
+            value
+                .as_str()
+                .map(|existing| existing.eq_ignore_ascii_case(&alias))
+                .unwrap_or(false)
+        });
+        if !exists {
+            addresses.push(toml::Value::String(alias.clone()));
+        }
+        updated = true;
+        break;
+    }
+
+    if !updated {
+        return Err(format!(
+            "employee '{}' not found in {}",
+            employee_id,
+            source_path.display()
+        )
+        .into());
+    }
+
+    let rendered = toml::to_string_pretty(&parsed)?;
+    fs::write(target_path, rendered)?;
     Ok(())
 }
 
@@ -410,8 +507,8 @@ fn send_smtp_inbound(
     }
     let message = builder.body("Rust service live email test.".to_string())?;
 
-    let smtp_host = env::var("POSTMARK_SMTP_HOST")
-        .unwrap_or_else(|_| "inbound.postmarkapp.com".to_string());
+    let smtp_host =
+        env::var("POSTMARK_SMTP_HOST").unwrap_or_else(|_| "inbound.postmarkapp.com".to_string());
     let smtp_port = env::var("POSTMARK_SMTP_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
@@ -533,8 +630,6 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         env::var("POSTMARK_TEST_FROM").unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
     let service_address = env::var("POSTMARK_TEST_SERVICE_ADDRESS")
         .unwrap_or_else(|_| "oliver@dowhiz.com".to_string());
-    let (employee_profile, employee_directory, employee_config_path) =
-        load_employee_for_address(&service_address)?;
     let gateway_bind_host = env::var("GATEWAY_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
     let gateway_health_host = if gateway_bind_host == "0.0.0.0" {
         "127.0.0.1".to_string()
@@ -555,6 +650,13 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
     if inbound_address.is_empty() {
         return Err("Postmark server does not have an inbound address configured".into());
     }
+    let (mut employee_profile, mut employee_directory, employee_config_path) =
+        load_employee_for_address(&service_address)?;
+    attach_inbound_alias(
+        &mut employee_profile,
+        &mut employee_directory,
+        &inbound_address,
+    );
     let previous_hook = server_info
         .get("InboundHookUrl")
         .and_then(|value| value.as_str())
@@ -590,6 +692,10 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         );
         return Ok(());
     }
+    if let Some(test_queue_name) = env_with_scale_oliver("SERVICE_BUS_TEST_QUEUE_NAME") {
+        env::set_var("SERVICE_BUS_QUEUE_NAME", &test_queue_name);
+        env::set_var("SCALE_OLIVER_SERVICE_BUS_QUEUE_NAME", &test_queue_name);
+    }
     env::set_var("SCALE_OLIVER_INGESTION_QUEUE_BACKEND", "servicebus");
     env::set_var("SCALE_OLIVER_RAW_PAYLOAD_STORAGE_BACKEND", "azure");
     let temp = TempDir::new()?;
@@ -608,11 +714,18 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
 
     let codex_disabled = !env_enabled("RUN_CODEX_E2E");
     let employee_id = employee_profile.id.clone();
+    let effective_employee_config_path = state_dir.join("employee.live.toml");
+    write_employee_config_with_inbound_alias(
+        &employee_config_path,
+        &effective_employee_config_path,
+        &employee_id,
+        &inbound_address,
+    )?;
     let config = ServiceConfig {
         host: test_host.clone(),
         port,
         employee_id: employee_id.clone(),
-        employee_config_path: employee_config_path.clone(),
+        employee_config_path: effective_employee_config_path.clone(),
         employee_profile,
         employee_directory,
         workspace_root: workspace_root.clone(),
@@ -652,12 +765,12 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         &gateway_config_path,
         &gateway_bind_host,
         gateway_port,
-        &service_address,
+        &inbound_address,
         &employee_id,
     )?;
     let _gateway = spawn_gateway(
         &gateway_config_path,
-        &employee_config_path,
+        &effective_employee_config_path,
         &gateway_bind_host,
         gateway_port,
     )?;

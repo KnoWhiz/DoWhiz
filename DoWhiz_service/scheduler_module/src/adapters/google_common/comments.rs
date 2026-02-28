@@ -90,7 +90,12 @@ impl GoogleCommentsClient {
         for attempt in 0..MAX_RETRIES {
             if attempt > 0 {
                 let backoff = Duration::from_millis(INITIAL_BACKOFF_MS * 2u64.pow(attempt - 1));
-                warn!("Retrying list_shared_files (attempt {}/{}), backoff {:?}", attempt + 1, MAX_RETRIES, backoff);
+                warn!(
+                    "Retrying list_shared_files (attempt {}/{}), backoff {:?}",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    backoff
+                );
                 std::thread::sleep(backoff);
             }
 
@@ -111,13 +116,19 @@ impl GoogleCommentsClient {
                     if is_retryable_status(status) && attempt < MAX_RETRIES - 1 {
                         let body = response.text().unwrap_or_default();
                         warn!("Retryable HTTP error listing files: {} - {}", status, body);
-                        last_error = Some(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                        last_error = Some(AdapterError::SendError(format!(
+                            "HTTP {}: {}",
+                            status, body
+                        )));
                         continue;
                     }
 
                     let body = response.text().unwrap_or_default();
                     error!("Failed to list files: {} - {}", status, body);
-                    return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                    return Err(AdapterError::SendError(format!(
+                        "HTTP {}: {}",
+                        status, body
+                    )));
                 }
                 Err(e) => {
                     if is_retryable_error(&e) && attempt < MAX_RETRIES - 1 {
@@ -130,7 +141,8 @@ impl GoogleCommentsClient {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| AdapterError::SendError("Max retries exceeded".to_string())))
+        Err(last_error
+            .unwrap_or_else(|| AdapterError::SendError("Max retries exceeded".to_string())))
     }
 
     /// List comments on a specific file.
@@ -152,7 +164,12 @@ impl GoogleCommentsClient {
         for attempt in 0..MAX_RETRIES {
             if attempt > 0 {
                 let backoff = Duration::from_millis(INITIAL_BACKOFF_MS * 2u64.pow(attempt - 1));
-                warn!("Retrying list_comments for {} (attempt {}/{})", file_id, attempt + 1, MAX_RETRIES);
+                warn!(
+                    "Retrying list_comments for {} (attempt {}/{})",
+                    file_id,
+                    attempt + 1,
+                    MAX_RETRIES
+                );
                 std::thread::sleep(backoff);
             }
 
@@ -172,18 +189,33 @@ impl GoogleCommentsClient {
                     let status = response.status();
                     if is_retryable_status(status) && attempt < MAX_RETRIES - 1 {
                         let body = response.text().unwrap_or_default();
-                        warn!("Retryable HTTP error listing comments for {}: {} - {}", file_id, status, body);
-                        last_error = Some(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                        warn!(
+                            "Retryable HTTP error listing comments for {}: {} - {}",
+                            file_id, status, body
+                        );
+                        last_error = Some(AdapterError::SendError(format!(
+                            "HTTP {}: {}",
+                            status, body
+                        )));
                         continue;
                     }
 
                     let body = response.text().unwrap_or_default();
-                    error!("Failed to list comments for {}: {} - {}", file_id, status, body);
-                    return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                    error!(
+                        "Failed to list comments for {}: {} - {}",
+                        file_id, status, body
+                    );
+                    return Err(AdapterError::SendError(format!(
+                        "HTTP {}: {}",
+                        status, body
+                    )));
                 }
                 Err(e) => {
                     if is_retryable_error(&e) && attempt < MAX_RETRIES - 1 {
-                        warn!("Retryable network error listing comments for {}: {}", file_id, e);
+                        warn!(
+                            "Retryable network error listing comments for {}: {}",
+                            file_id, e
+                        );
                         last_error = Some(AdapterError::SendError(e.to_string()));
                         continue;
                     }
@@ -192,7 +224,8 @@ impl GoogleCommentsClient {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| AdapterError::SendError("Max retries exceeded".to_string())))
+        Err(last_error
+            .unwrap_or_else(|| AdapterError::SendError("Max retries exceeded".to_string())))
     }
 
     /// Post a reply to a comment.
@@ -221,7 +254,13 @@ impl GoogleCommentsClient {
         for attempt in 0..MAX_RETRIES {
             if attempt > 0 {
                 let backoff = Duration::from_millis(INITIAL_BACKOFF_MS * 2u64.pow(attempt - 1));
-                warn!("Retrying reply_to_comment {} on {} (attempt {}/{})", comment_id, file_id, attempt + 1, MAX_RETRIES);
+                warn!(
+                    "Retrying reply_to_comment {} on {} (attempt {}/{})",
+                    comment_id,
+                    file_id,
+                    attempt + 1,
+                    MAX_RETRIES
+                );
                 std::thread::sleep(backoff);
             }
 
@@ -247,18 +286,33 @@ impl GoogleCommentsClient {
                     let status = response.status();
                     if is_retryable_status(status) && attempt < MAX_RETRIES - 1 {
                         let body = response.text().unwrap_or_default();
-                        warn!("Retryable HTTP error replying to comment {} on {}: {} - {}", comment_id, file_id, status, body);
-                        last_error = Some(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                        warn!(
+                            "Retryable HTTP error replying to comment {} on {}: {} - {}",
+                            comment_id, file_id, status, body
+                        );
+                        last_error = Some(AdapterError::SendError(format!(
+                            "HTTP {}: {}",
+                            status, body
+                        )));
                         continue;
                     }
 
                     let body = response.text().unwrap_or_default();
-                    error!("Failed to reply to comment {} on {}: {} - {}", comment_id, file_id, status, body);
-                    return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                    error!(
+                        "Failed to reply to comment {} on {}: {} - {}",
+                        comment_id, file_id, status, body
+                    );
+                    return Err(AdapterError::SendError(format!(
+                        "HTTP {}: {}",
+                        status, body
+                    )));
                 }
                 Err(e) => {
                     if is_retryable_error(&e) && attempt < MAX_RETRIES - 1 {
-                        warn!("Retryable network error replying to comment {} on {}: {}", comment_id, file_id, e);
+                        warn!(
+                            "Retryable network error replying to comment {} on {}: {}",
+                            comment_id, file_id, e
+                        );
                         last_error = Some(AdapterError::SendError(e.to_string()));
                         continue;
                     }
@@ -267,7 +321,8 @@ impl GoogleCommentsClient {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| AdapterError::SendError("Max retries exceeded".to_string())))
+        Err(last_error
+            .unwrap_or_else(|| AdapterError::SendError("Max retries exceeded".to_string())))
     }
 
     /// Filter comments to find actionable ones.
@@ -308,7 +363,12 @@ impl GoogleCommentsClient {
         for attempt in 0..MAX_RETRIES {
             if attempt > 0 {
                 let backoff = Duration::from_millis(INITIAL_BACKOFF_MS * 2u64.pow(attempt - 1));
-                warn!("Retrying export_file_content for {} (attempt {}/{})", file_id, attempt + 1, MAX_RETRIES);
+                warn!(
+                    "Retrying export_file_content for {} (attempt {}/{})",
+                    file_id,
+                    attempt + 1,
+                    MAX_RETRIES
+                );
                 std::thread::sleep(backoff);
             }
 
@@ -327,14 +387,23 @@ impl GoogleCommentsClient {
                     let status = response.status();
                     if is_retryable_status(status) && attempt < MAX_RETRIES - 1 {
                         let body = response.text().unwrap_or_default();
-                        warn!("Retryable HTTP error exporting file {}: {} - {}", file_id, status, body);
-                        last_error = Some(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                        warn!(
+                            "Retryable HTTP error exporting file {}: {} - {}",
+                            file_id, status, body
+                        );
+                        last_error = Some(AdapterError::SendError(format!(
+                            "HTTP {}: {}",
+                            status, body
+                        )));
                         continue;
                     }
 
                     let body = response.text().unwrap_or_default();
                     error!("Failed to export file {}: {} - {}", file_id, status, body);
-                    return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+                    return Err(AdapterError::SendError(format!(
+                        "HTTP {}: {}",
+                        status, body
+                    )));
                 }
                 Err(e) => {
                     if is_retryable_error(&e) && attempt < MAX_RETRIES - 1 {
@@ -347,7 +416,8 @@ impl GoogleCommentsClient {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| AdapterError::SendError("Max retries exceeded".to_string())))
+        Err(last_error
+            .unwrap_or_else(|| AdapterError::SendError("Max retries exceeded".to_string())))
     }
 }
 
@@ -369,11 +439,7 @@ pub fn filter_actionable_comments(
         if !processed_ids.contains(&comment_tracking_id) {
             // Skip comments from our own accounts.
             // Check both the `me` field (authenticated user) and email address.
-            let is_from_self = comment
-                .author
-                .as_ref()
-                .map(|a| a.me)
-                .unwrap_or(false);
+            let is_from_self = comment.author.as_ref().map(|a| a.me).unwrap_or(false);
             let is_from_employee = comment
                 .author
                 .as_ref()
@@ -399,11 +465,7 @@ pub fn filter_actionable_comments(
 
                 // Skip replies from our own accounts.
                 // Check both the `me` field (authenticated user) and email address.
-                let is_from_self = reply
-                    .author
-                    .as_ref()
-                    .map(|a| a.me)
-                    .unwrap_or(false);
+                let is_from_self = reply.author.as_ref().map(|a| a.me).unwrap_or(false);
                 let is_from_employee = reply
                     .author
                     .as_ref()

@@ -6,6 +6,8 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
@@ -464,6 +466,205 @@ fn contains_no_reply_marker(value: &str) -> bool {
     })
 }
 
+fn build_queue_payload(channel: Channel, message: &InboundMessage) -> IngestionPayload {
+    let mut payload = IngestionPayload::from_inbound(message);
+    if channel == Channel::Email {
+        // Keep queue envelopes small; email attachment bytes are loaded from raw payload/blob.
+        payload.attachments.clear();
+    }
+    payload
+}
+
+async fn rewrite_email_payload_attachments_to_blob_refs(
+    envelope_id: Uuid,
+    received_at: chrono::DateTime<chrono::Utc>,
+    raw_payload: &[u8],
+) -> Vec<u8> {
+    let mut payload_json: serde_json::Value = match serde_json::from_slice(raw_payload) {
+        Ok(value) => value,
+        Err(err) => {
+            warn!(
+                "gateway failed to parse email raw payload for attachment offload: {}",
+                err
+            );
+            return raw_payload.to_vec();
+        }
+    };
+    let Some(attachments) = payload_json
+        .get_mut("Attachments")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return raw_payload.to_vec();
+    };
+
+    for (index, attachment) in attachments.iter_mut().enumerate() {
+        let Some(obj) = attachment.as_object_mut() else {
+            continue;
+        };
+        let content = obj
+            .get("Content")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if content.is_empty() {
+            continue;
+        }
+        let file_name = obj
+            .get("Name")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("attachment");
+
+        let decoded = match BASE64_STANDARD.decode(content.as_bytes()) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                warn!(
+                    "gateway failed to decode email attachment '{}' for blob offload: {}",
+                    file_name, err
+                );
+                continue;
+            }
+        };
+        if decoded.is_empty() {
+            continue;
+        }
+
+        match raw_payload_store::upload_attachment_azure(
+            envelope_id,
+            received_at,
+            index,
+            file_name,
+            &decoded,
+        )
+        .await
+        {
+            Ok(storage_ref) => {
+                obj.insert(
+                    "StorageRef".to_string(),
+                    serde_json::Value::String(storage_ref),
+                );
+                obj.insert(
+                    "Content".to_string(),
+                    serde_json::Value::String(String::new()),
+                );
+                obj.insert(
+                    "ContentLength".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(decoded.len())),
+                );
+            }
+            Err(err) => {
+                warn!(
+                    "gateway failed to upload email attachment '{}' to blob: {}",
+                    file_name, err
+                );
+            }
+        }
+    }
+
+    serde_json::to_vec(&payload_json).unwrap_or_else(|err| {
+        warn!(
+            "gateway failed to serialize rewritten email raw payload; using original: {}",
+            err
+        );
+        raw_payload.to_vec()
+    })
+}
+
+fn rewrite_email_payload_attachments_to_blob_refs_blocking(
+    envelope_id: Uuid,
+    received_at: chrono::DateTime<chrono::Utc>,
+    raw_payload: &[u8],
+) -> Vec<u8> {
+    let mut payload_json: serde_json::Value = match serde_json::from_slice(raw_payload) {
+        Ok(value) => value,
+        Err(err) => {
+            warn!(
+                "gateway failed to parse email raw payload for attachment offload: {}",
+                err
+            );
+            return raw_payload.to_vec();
+        }
+    };
+    let Some(attachments) = payload_json
+        .get_mut("Attachments")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return raw_payload.to_vec();
+    };
+
+    for (index, attachment) in attachments.iter_mut().enumerate() {
+        let Some(obj) = attachment.as_object_mut() else {
+            continue;
+        };
+        let content = obj
+            .get("Content")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if content.is_empty() {
+            continue;
+        }
+        let file_name = obj
+            .get("Name")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("attachment");
+
+        let decoded = match BASE64_STANDARD.decode(content.as_bytes()) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                warn!(
+                    "gateway failed to decode email attachment '{}' for blob offload: {}",
+                    file_name, err
+                );
+                continue;
+            }
+        };
+        if decoded.is_empty() {
+            continue;
+        }
+
+        match raw_payload_store::upload_attachment_azure_blocking(
+            envelope_id,
+            received_at,
+            index,
+            file_name,
+            &decoded,
+        ) {
+            Ok(storage_ref) => {
+                obj.insert(
+                    "StorageRef".to_string(),
+                    serde_json::Value::String(storage_ref),
+                );
+                obj.insert(
+                    "Content".to_string(),
+                    serde_json::Value::String(String::new()),
+                );
+                obj.insert(
+                    "ContentLength".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(decoded.len())),
+                );
+            }
+            Err(err) => {
+                warn!(
+                    "gateway failed to upload email attachment '{}' to blob: {}",
+                    file_name, err
+                );
+            }
+        }
+    }
+
+    serde_json::to_vec(&payload_json).unwrap_or_else(|err| {
+        warn!(
+            "gateway failed to serialize rewritten email raw payload; using original: {}",
+            err
+        );
+        raw_payload.to_vec()
+    })
+}
+
 pub(super) async fn build_envelope(
     route: RouteDecision,
     channel: Channel,
@@ -473,6 +674,7 @@ pub(super) async fn build_envelope(
 ) -> Result<IngestionEnvelope, RawPayloadStoreError> {
     let envelope_id = Uuid::new_v4();
     let received_at = Utc::now();
+    let queue_payload = build_queue_payload(channel, message);
     let dedupe_key = build_dedupe_key(
         &route.tenant_id,
         &route.employee_id,
@@ -480,12 +682,21 @@ pub(super) async fn build_envelope(
         external_message_id.as_deref(),
         raw_payload,
     );
+    let stored_payload_bytes = if channel == Channel::Email {
+        rewrite_email_payload_attachments_to_blob_refs(envelope_id, received_at, raw_payload).await
+    } else {
+        raw_payload.to_vec()
+    };
     let raw_payload_ref = if raw_payload.is_empty() {
         None
     } else {
         Some(
-            raw_payload_store::upload_raw_payload_azure(envelope_id, received_at, raw_payload)
-                .await?,
+            raw_payload_store::upload_raw_payload_azure(
+                envelope_id,
+                received_at,
+                &stored_payload_bytes,
+            )
+            .await?,
         )
     };
     Ok(IngestionEnvelope {
@@ -496,7 +707,7 @@ pub(super) async fn build_envelope(
         channel,
         external_message_id,
         dedupe_key,
-        payload: IngestionPayload::from_inbound(message),
+        payload: queue_payload,
         raw_payload_ref,
     })
 }
@@ -504,6 +715,7 @@ pub(super) async fn build_envelope(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scheduler_module::channel::Attachment;
 
     #[test]
     fn payload_contains_no_reply_marker_detects_from() {
@@ -526,6 +738,56 @@ mod tests {
             serde_json::from_str(r#"{"From":"user@example.com"}"#).expect("payload");
         assert!(!payload_contains_no_reply_marker(&payload));
     }
+
+    #[test]
+    fn build_queue_payload_clears_email_attachments() {
+        let message = InboundMessage {
+            channel: Channel::Email,
+            sender: "a@example.com".to_string(),
+            sender_name: None,
+            recipient: "svc@example.com".to_string(),
+            subject: Some("s".to_string()),
+            text_body: Some("t".to_string()),
+            html_body: None,
+            thread_id: "thread-1".to_string(),
+            message_id: Some("m1".to_string()),
+            attachments: vec![Attachment {
+                name: "a.txt".to_string(),
+                content_type: "text/plain".to_string(),
+                content: "Zm9v".to_string(),
+            }],
+            reply_to: vec!["a@example.com".to_string()],
+            raw_payload: br#"{}"#.to_vec(),
+            metadata: ChannelMetadata::default(),
+        };
+        let payload = build_queue_payload(Channel::Email, &message);
+        assert!(payload.attachments.is_empty());
+    }
+
+    #[test]
+    fn build_queue_payload_keeps_non_email_attachments() {
+        let message = InboundMessage {
+            channel: Channel::Slack,
+            sender: "U123".to_string(),
+            sender_name: None,
+            recipient: "C456".to_string(),
+            subject: None,
+            text_body: Some("hello".to_string()),
+            html_body: None,
+            thread_id: "thread-1".to_string(),
+            message_id: Some("m1".to_string()),
+            attachments: vec![Attachment {
+                name: "file.pdf".to_string(),
+                content_type: "application/pdf".to_string(),
+                content: "placeholder".to_string(),
+            }],
+            reply_to: vec!["C456".to_string()],
+            raw_payload: br#"{}"#.to_vec(),
+            metadata: ChannelMetadata::default(),
+        };
+        let payload = build_queue_payload(Channel::Slack, &message);
+        assert_eq!(payload.attachments.len(), 1);
+    }
 }
 
 pub(super) fn build_envelope_blocking(
@@ -537,6 +799,7 @@ pub(super) fn build_envelope_blocking(
 ) -> Result<IngestionEnvelope, RawPayloadStoreError> {
     let envelope_id = Uuid::new_v4();
     let received_at = Utc::now();
+    let queue_payload = build_queue_payload(channel, message);
     let dedupe_key = build_dedupe_key(
         &route.tenant_id,
         &route.employee_id,
@@ -544,13 +807,22 @@ pub(super) fn build_envelope_blocking(
         external_message_id.as_deref(),
         raw_payload,
     );
+    let stored_payload_bytes = if channel == Channel::Email {
+        rewrite_email_payload_attachments_to_blob_refs_blocking(
+            envelope_id,
+            received_at,
+            raw_payload,
+        )
+    } else {
+        raw_payload.to_vec()
+    };
     let raw_payload_ref = if raw_payload.is_empty() {
         None
     } else {
         Some(raw_payload_store::upload_raw_payload_azure_blocking(
             envelope_id,
             received_at,
-            raw_payload,
+            &stored_payload_bytes,
         )?)
     };
     Ok(IngestionEnvelope {
@@ -561,7 +833,7 @@ pub(super) fn build_envelope_blocking(
         channel,
         external_message_id,
         dedupe_key,
-        payload: IngestionPayload::from_inbound(message),
+        payload: queue_payload,
         raw_payload_ref,
     })
 }

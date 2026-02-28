@@ -77,10 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let end = Utc::now();
-    let duration_ms = end
-        .signed_duration_since(start)
-        .num_milliseconds()
-        .max(0) as f64;
+    let duration_ms = end.signed_duration_since(start).num_milliseconds().max(0) as f64;
     println!("END_UTC={}", end.to_rfc3339());
     println!("SEND_DURATION_SECONDS={:.3}", duration_ms / 1000.0);
     println!("SENT={count}");

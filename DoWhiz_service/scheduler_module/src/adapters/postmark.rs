@@ -309,6 +309,8 @@ pub struct PostmarkAttachment {
     pub name: String,
     #[serde(rename = "Content")]
     pub content: String,
+    #[serde(rename = "StorageRef", default)]
+    pub storage_ref: Option<String>,
     #[serde(rename = "ContentType")]
     pub content_type: String,
 }

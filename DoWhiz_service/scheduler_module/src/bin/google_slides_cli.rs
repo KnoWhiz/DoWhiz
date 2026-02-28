@@ -282,10 +282,14 @@ fn cmd_get_presentation(presentation_id: &str) -> Result<String, String> {
                     for elem in elements {
                         if let Some(shape) = elem.get("shape") {
                             if let Some(text) = shape.get("text") {
-                                if let Some(elements) = text.get("textElements").and_then(|e| e.as_array()) {
+                                if let Some(elements) =
+                                    text.get("textElements").and_then(|e| e.as_array())
+                                {
                                     for te in elements {
                                         if let Some(tr) = te.get("textRun") {
-                                            if let Some(content) = tr.get("content").and_then(|c| c.as_str()) {
+                                            if let Some(content) =
+                                                tr.get("content").and_then(|c| c.as_str())
+                                            {
                                                 let preview = content.trim();
                                                 if !preview.is_empty() && preview.len() > 1 {
                                                     let short = if preview.len() > 40 {
@@ -328,7 +332,11 @@ fn cmd_list_comments(presentation_id: &str) -> Result<String, String> {
             .as_ref()
             .and_then(|a| a.display_name.as_deref())
             .unwrap_or("Unknown");
-        let resolved = if comment.resolved == Some(true) { " [RESOLVED]" } else { "" };
+        let resolved = if comment.resolved == Some(true) {
+            " [RESOLVED]"
+        } else {
+            ""
+        };
         output.push_str(&format!(
             "- [{}]{} {}: {}\n",
             comment.id, resolved, author, comment.content
@@ -351,7 +359,11 @@ fn cmd_list_comments(presentation_id: &str) -> Result<String, String> {
     Ok(output)
 }
 
-fn cmd_reply_comment(presentation_id: &str, comment_id: &str, message: &str) -> Result<String, String> {
+fn cmd_reply_comment(
+    presentation_id: &str,
+    comment_id: &str,
+    message: &str,
+) -> Result<String, String> {
     let auth = get_auth()?;
     let adapter = GoogleSlidesOutboundAdapter::new(auth);
 

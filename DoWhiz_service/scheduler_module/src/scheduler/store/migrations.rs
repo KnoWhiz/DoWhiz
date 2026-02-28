@@ -212,10 +212,7 @@ pub(super) fn ensure_run_task_task_columns(conn: &Connection) -> Result<(), Sche
         )?;
     }
     if !columns.contains("employee_id") {
-        conn.execute(
-            "ALTER TABLE run_task_tasks ADD COLUMN employee_id TEXT",
-            [],
-        )?;
+        conn.execute("ALTER TABLE run_task_tasks ADD COLUMN employee_id TEXT", [])?;
     }
     Ok(())
 }

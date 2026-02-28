@@ -331,7 +331,10 @@ fn ensure_codex_config(workspace_dir: &Path) -> Result<(), RunTaskError> {
     ensure_codex_config_at(&config_dir, workspace_dir)
 }
 
-fn ensure_codex_config_at(config_dir: &Path, trust_workspace_dir: &Path) -> Result<(), RunTaskError> {
+fn ensure_codex_config_at(
+    config_dir: &Path,
+    trust_workspace_dir: &Path,
+) -> Result<(), RunTaskError> {
     let config_path = config_dir.join("config.toml");
     let config_dir = config_path.parent().ok_or(RunTaskError::InvalidPath {
         label: "codex_config_dir",

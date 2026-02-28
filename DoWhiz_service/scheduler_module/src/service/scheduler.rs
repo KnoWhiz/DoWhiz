@@ -34,7 +34,10 @@ struct RunningThreadGuard {
 
 impl RunningThreadGuard {
     fn new(running_threads: Arc<Mutex<HashSet<String>>>, key: String) -> Self {
-        Self { running_threads, key }
+        Self {
+            running_threads,
+            key,
+        }
     }
 }
 
@@ -461,10 +464,7 @@ fn execute_due_task(
                 .lock()
                 .expect("running thread lock poisoned");
             if running.contains(&key) {
-                let log_key = format!(
-                    "thread_busy:{}@{}",
-                    task_ref.task_id, task_ref.user_id
-                );
+                let log_key = format!("thread_busy:{}@{}", task_ref.task_id, task_ref.user_id);
                 if should_log_busy(&log_key) {
                     info!(
                         "scheduler deferred run_task task_id={} user_id={} workspace_dir={} (thread busy)",

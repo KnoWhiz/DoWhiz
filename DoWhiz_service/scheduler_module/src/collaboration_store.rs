@@ -264,7 +264,10 @@ impl CollaborationStore {
     }
 
     /// Get a session by ID.
-    pub fn get_session(&self, session_id: &str) -> Result<CollaborationSession, CollaborationStoreError> {
+    pub fn get_session(
+        &self,
+        session_id: &str,
+    ) -> Result<CollaborationSession, CollaborationStoreError> {
         let conn = self.open()?;
         self.get_session_internal(&conn, session_id)
     }
@@ -301,24 +304,38 @@ impl CollaborationStore {
             .optional()?;
 
         match row {
-            Some((id, user_id, thread_id, primary_channel, artifact_type, artifact_id,
-                  artifact_title, original_request, status, created_at, last_activity_at, workspace_path)) => {
-                Ok(CollaborationSession {
-                    id,
-                    user_id,
-                    thread_id,
-                    primary_channel,
-                    artifact_type,
-                    artifact_id,
-                    artifact_title,
-                    original_request,
-                    status: status.parse().map_err(CollaborationStoreError::StatusParse)?,
-                    created_at: parse_datetime(&created_at)?,
-                    last_activity_at: parse_datetime(&last_activity_at)?,
-                    workspace_path,
-                })
-            }
-            None => Err(CollaborationStoreError::SessionNotFound(session_id.to_string())),
+            Some((
+                id,
+                user_id,
+                thread_id,
+                primary_channel,
+                artifact_type,
+                artifact_id,
+                artifact_title,
+                original_request,
+                status,
+                created_at,
+                last_activity_at,
+                workspace_path,
+            )) => Ok(CollaborationSession {
+                id,
+                user_id,
+                thread_id,
+                primary_channel,
+                artifact_type,
+                artifact_id,
+                artifact_title,
+                original_request,
+                status: status
+                    .parse()
+                    .map_err(CollaborationStoreError::StatusParse)?,
+                created_at: parse_datetime(&created_at)?,
+                last_activity_at: parse_datetime(&last_activity_at)?,
+                workspace_path,
+            }),
+            None => Err(CollaborationStoreError::SessionNotFound(
+                session_id.to_string(),
+            )),
         }
     }
 
@@ -347,8 +364,10 @@ impl CollaborationStore {
         };
 
         let session_id: Option<String> = if let Some(uid) = user_id {
-            conn.query_row(query, params![artifact_type, artifact_id, uid], |row| row.get(0))
-                .optional()?
+            conn.query_row(query, params![artifact_type, artifact_id, uid], |row| {
+                row.get(0)
+            })
+            .optional()?
         } else {
             conn.query_row(query, params![artifact_type, artifact_id], |row| row.get(0))
                 .optional()?
@@ -493,7 +512,10 @@ impl CollaborationStore {
     }
 
     /// Get all messages for a session, ordered by timestamp.
-    pub fn get_messages(&self, session_id: &str) -> Result<Vec<CollaborationMessage>, CollaborationStoreError> {
+    pub fn get_messages(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<CollaborationMessage>, CollaborationStoreError> {
         let conn = self.open()?;
         let mut stmt = conn.prepare(
             "SELECT id, session_id, source_channel, external_message_id, sender_id,
@@ -519,8 +541,17 @@ impl CollaborationStore {
 
         let mut messages = Vec::new();
         for row in rows {
-            let (id, session_id, source_channel, external_message_id, sender_id,
-                 content_preview, has_attachments, attachment_manifest, timestamp) = row?;
+            let (
+                id,
+                session_id,
+                source_channel,
+                external_message_id,
+                sender_id,
+                content_preview,
+                has_attachments,
+                attachment_manifest,
+                timestamp,
+            ) = row?;
             messages.push(CollaborationMessage {
                 id,
                 session_id,
@@ -551,7 +582,15 @@ impl CollaborationStore {
         role: ArtifactRole,
     ) -> Result<CollaborationArtifact, CollaborationStoreError> {
         let conn = self.open()?;
-        self.add_artifact_internal(&conn, session_id, artifact_type, artifact_id, artifact_url, artifact_title, role)
+        self.add_artifact_internal(
+            &conn,
+            session_id,
+            artifact_type,
+            artifact_id,
+            artifact_url,
+            artifact_title,
+            role,
+        )
     }
 
     fn add_artifact_internal(
@@ -599,7 +638,10 @@ impl CollaborationStore {
     }
 
     /// Get all artifacts for a session.
-    pub fn get_artifacts(&self, session_id: &str) -> Result<Vec<CollaborationArtifact>, CollaborationStoreError> {
+    pub fn get_artifacts(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<CollaborationArtifact>, CollaborationStoreError> {
         let conn = self.open()?;
         let mut stmt = conn.prepare(
             "SELECT id, session_id, artifact_type, artifact_id, artifact_url, artifact_title, role, created_at
@@ -623,7 +665,16 @@ impl CollaborationStore {
 
         let mut artifacts = Vec::new();
         for row in rows {
-            let (id, session_id, artifact_type, artifact_id, artifact_url, artifact_title, role, created_at) = row?;
+            let (
+                id,
+                session_id,
+                artifact_type,
+                artifact_id,
+                artifact_url,
+                artifact_title,
+                role,
+                created_at,
+            ) = row?;
             artifacts.push(CollaborationArtifact {
                 id,
                 session_id,
@@ -812,7 +863,16 @@ mod tests {
         let (_temp, store) = test_store();
 
         let session = store
-            .create_session("user-123", "thread-456", "slack", None, None, None, None, None)
+            .create_session(
+                "user-123",
+                "thread-456",
+                "slack",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .expect("create");
 
         let found = store
@@ -832,7 +892,16 @@ mod tests {
         let (_temp, store) = test_store();
 
         let session = store
-            .create_session("user-123", "thread-456", "email", None, None, None, None, None)
+            .create_session(
+                "user-123",
+                "thread-456",
+                "email",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .expect("create");
 
         // Add email message
@@ -872,7 +941,16 @@ mod tests {
         let (_temp, store) = test_store();
 
         let session = store
-            .create_session("user-123", "thread-456", "email", None, None, None, None, None)
+            .create_session(
+                "user-123",
+                "thread-456",
+                "email",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .expect("create");
 
         store
@@ -910,7 +988,16 @@ mod tests {
         let (_temp, store) = test_store();
 
         let session = store
-            .create_session("user-123", "thread-456", "email", None, None, None, None, None)
+            .create_session(
+                "user-123",
+                "thread-456",
+                "email",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .expect("create");
 
         assert_eq!(session.status, SessionStatus::Active);

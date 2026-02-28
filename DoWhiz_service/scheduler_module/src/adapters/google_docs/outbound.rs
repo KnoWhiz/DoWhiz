@@ -721,7 +721,11 @@ impl GoogleDocsOutboundAdapter {
         let mut styles = DocumentStyles::default();
 
         // Get named styles (heading styles defined in the document)
-        if let Some(named_styles) = doc.get("namedStyles").and_then(|ns| ns.get("styles")).and_then(|s| s.as_array()) {
+        if let Some(named_styles) = doc
+            .get("namedStyles")
+            .and_then(|ns| ns.get("styles"))
+            .and_then(|s| s.as_array())
+        {
             for style in named_styles {
                 if let Some(name) = style.get("namedStyleType").and_then(|n| n.as_str()) {
                     let text_style = style.get("textStyle");
@@ -733,9 +737,12 @@ impl GoogleDocsOutboundAdapter {
                             .and_then(|fc| fc.get("color"))
                             .and_then(|c| c.get("rgbColor"))
                             .map(|rgb| {
-                                let r = (rgb.get("red").and_then(|v| v.as_f64()).unwrap_or(0.0) * 255.0) as u8;
-                                let g = (rgb.get("green").and_then(|v| v.as_f64()).unwrap_or(0.0) * 255.0) as u8;
-                                let b = (rgb.get("blue").and_then(|v| v.as_f64()).unwrap_or(0.0) * 255.0) as u8;
+                                let r = (rgb.get("red").and_then(|v| v.as_f64()).unwrap_or(0.0)
+                                    * 255.0) as u8;
+                                let g = (rgb.get("green").and_then(|v| v.as_f64()).unwrap_or(0.0)
+                                    * 255.0) as u8;
+                                let b = (rgb.get("blue").and_then(|v| v.as_f64()).unwrap_or(0.0)
+                                    * 255.0) as u8;
                                 format!("#{:02X}{:02X}{:02X}", r, g, b)
                             }),
                         font_family: text_style
@@ -776,7 +783,11 @@ impl GoogleDocsOutboundAdapter {
         }
 
         // Also scan document body for actual styles used (in case they differ from named styles)
-        if let Some(body) = doc.get("body").and_then(|b| b.get("content")).and_then(|c| c.as_array()) {
+        if let Some(body) = doc
+            .get("body")
+            .and_then(|b| b.get("content"))
+            .and_then(|c| c.as_array())
+        {
             for element in body {
                 if let Some(paragraph) = element.get("paragraph") {
                     let para_style = paragraph.get("paragraphStyle");
@@ -788,7 +799,9 @@ impl GoogleDocsOutboundAdapter {
                     if let Some(elements) = paragraph.get("elements").and_then(|e| e.as_array()) {
                         for elem in elements {
                             if let Some(text_run) = elem.get("textRun") {
-                                if let Some(content) = text_run.get("content").and_then(|c| c.as_str()) {
+                                if let Some(content) =
+                                    text_run.get("content").and_then(|c| c.as_str())
+                                {
                                     let content_trimmed = content.trim();
                                     if !content_trimmed.is_empty() && content_trimmed.len() > 1 {
                                         if let Some(text_style) = text_run.get("textStyle") {
@@ -798,9 +811,24 @@ impl GoogleDocsOutboundAdapter {
                                                     .and_then(|fc| fc.get("color"))
                                                     .and_then(|c| c.get("rgbColor"))
                                                     .map(|rgb| {
-                                                        let r = (rgb.get("red").and_then(|v| v.as_f64()).unwrap_or(0.0) * 255.0) as u8;
-                                                        let g = (rgb.get("green").and_then(|v| v.as_f64()).unwrap_or(0.0) * 255.0) as u8;
-                                                        let b = (rgb.get("blue").and_then(|v| v.as_f64()).unwrap_or(0.0) * 255.0) as u8;
+                                                        let r = (rgb
+                                                            .get("red")
+                                                            .and_then(|v| v.as_f64())
+                                                            .unwrap_or(0.0)
+                                                            * 255.0)
+                                                            as u8;
+                                                        let g = (rgb
+                                                            .get("green")
+                                                            .and_then(|v| v.as_f64())
+                                                            .unwrap_or(0.0)
+                                                            * 255.0)
+                                                            as u8;
+                                                        let b = (rgb
+                                                            .get("blue")
+                                                            .and_then(|v| v.as_f64())
+                                                            .unwrap_or(0.0)
+                                                            * 255.0)
+                                                            as u8;
                                                         format!("#{:02X}{:02X}{:02X}", r, g, b)
                                                     }),
                                                 font_family: text_style
@@ -812,21 +840,40 @@ impl GoogleDocsOutboundAdapter {
                                                     .get("fontSize")
                                                     .and_then(|fs| fs.get("magnitude"))
                                                     .and_then(|m| m.as_f64()),
-                                                bold: text_style.get("bold").and_then(|b| b.as_bool()),
-                                                italic: text_style.get("italic").and_then(|i| i.as_bool()),
+                                                bold: text_style
+                                                    .get("bold")
+                                                    .and_then(|b| b.as_bool()),
+                                                italic: text_style
+                                                    .get("italic")
+                                                    .and_then(|i| i.as_bool()),
                                                 alignment: None,
                                             };
 
                                             // Store sample for each heading type
                                             match named_style {
-                                                Some("HEADING_1") if styles.heading_1_sample.is_none() => {
-                                                    styles.heading_1_sample = Some((content_trimmed.to_string(), style_info));
+                                                Some("HEADING_1")
+                                                    if styles.heading_1_sample.is_none() =>
+                                                {
+                                                    styles.heading_1_sample = Some((
+                                                        content_trimmed.to_string(),
+                                                        style_info,
+                                                    ));
                                                 }
-                                                Some("HEADING_2") if styles.heading_2_sample.is_none() => {
-                                                    styles.heading_2_sample = Some((content_trimmed.to_string(), style_info));
+                                                Some("HEADING_2")
+                                                    if styles.heading_2_sample.is_none() =>
+                                                {
+                                                    styles.heading_2_sample = Some((
+                                                        content_trimmed.to_string(),
+                                                        style_info,
+                                                    ));
                                                 }
-                                                Some("HEADING_3") if styles.heading_3_sample.is_none() => {
-                                                    styles.heading_3_sample = Some((content_trimmed.to_string(), style_info));
+                                                Some("HEADING_3")
+                                                    if styles.heading_3_sample.is_none() =>
+                                                {
+                                                    styles.heading_3_sample = Some((
+                                                        content_trimmed.to_string(),
+                                                        style_info,
+                                                    ));
                                                 }
                                                 _ => {}
                                             }
@@ -874,33 +921,42 @@ impl GoogleDocsOutboundAdapter {
                     u8::from_str_radix(&hex[2..4], 16),
                     u8::from_str_radix(&hex[4..6], 16),
                 ) {
-                    text_style.insert("foregroundColor".to_string(), serde_json::json!({
-                        "color": {
-                            "rgbColor": {
-                                "red": r as f64 / 255.0,
-                                "green": g as f64 / 255.0,
-                                "blue": b as f64 / 255.0
+                    text_style.insert(
+                        "foregroundColor".to_string(),
+                        serde_json::json!({
+                            "color": {
+                                "rgbColor": {
+                                    "red": r as f64 / 255.0,
+                                    "green": g as f64 / 255.0,
+                                    "blue": b as f64 / 255.0
+                                }
                             }
-                        }
-                    }));
+                        }),
+                    );
                     fields.push("foregroundColor");
                 }
             }
         }
 
         if let Some(font) = font_family {
-            text_style.insert("weightedFontFamily".to_string(), serde_json::json!({
-                "fontFamily": font,
-                "weight": 400
-            }));
+            text_style.insert(
+                "weightedFontFamily".to_string(),
+                serde_json::json!({
+                    "fontFamily": font,
+                    "weight": 400
+                }),
+            );
             fields.push("weightedFontFamily");
         }
 
         if let Some(size) = font_size {
-            text_style.insert("fontSize".to_string(), serde_json::json!({
-                "magnitude": size,
-                "unit": "PT"
-            }));
+            text_style.insert(
+                "fontSize".to_string(),
+                serde_json::json!({
+                    "magnitude": size,
+                    "unit": "PT"
+                }),
+            );
             fields.push("fontSize");
         }
 
@@ -915,25 +971,27 @@ impl GoogleDocsOutboundAdapter {
         }
 
         if fields.is_empty() {
-            return Err(AdapterError::ConfigError("No style properties specified".to_string()));
+            return Err(AdapterError::ConfigError(
+                "No style properties specified".to_string(),
+            ));
         }
 
-        let requests = vec![
-            serde_json::json!({
-                "updateTextStyle": {
-                    "range": {
-                        "startIndex": start_idx,
-                        "endIndex": end_idx
-                    },
-                    "textStyle": text_style,
-                    "fields": fields.join(",")
-                }
-            })
-        ];
+        let requests = vec![serde_json::json!({
+            "updateTextStyle": {
+                "range": {
+                    "startIndex": start_idx,
+                    "endIndex": end_idx
+                },
+                "textStyle": text_style,
+                "fields": fields.join(",")
+            }
+        })];
 
         self.apply_document_edit(document_id, requests)?;
-        info!("Applied style to '{}' at indices {}-{}: fields={:?}",
-              text_to_style, start_idx, end_idx, fields);
+        info!(
+            "Applied style to '{}' at indices {}-{}: fields={:?}",
+            text_to_style, start_idx, end_idx, fields
+        );
         Ok(())
     }
 }
