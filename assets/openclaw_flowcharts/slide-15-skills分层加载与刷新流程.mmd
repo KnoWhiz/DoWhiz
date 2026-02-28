@@ -1,0 +1,12 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#F6F8FA', 'primaryBorderColor': '#4B5563', 'lineColor': '#374151', 'textColor': '#111827', 'fontSize': '19px'}}}%%
+flowchart LR
+    A[收集技能来源目录] --> B[按优先级合并同名技能]
+    B --> C[读取技能元数据]
+    C --> D[按系统环境配置条件门控]
+    D --> E[生成会话技能快照]
+    E --> F[注入本轮系统提示]
+    F --> G[执行代理回合]
+
+    H[监听技能描述文件变化] --> I[提升快照版本]
+    J[远端节点能力变化] --> I
+    I --> E
