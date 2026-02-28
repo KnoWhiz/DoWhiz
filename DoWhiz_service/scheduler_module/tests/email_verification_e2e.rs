@@ -167,8 +167,8 @@ fn email_verification_invalid_token() {
         return;
     };
 
-    // Try to verify a non-existent token
-    let fake_token = Uuid::new_v4().to_string();
+    // Try to verify a token in an invalid format
+    let fake_token = "definitely-not-a-valid-token";
     let result = store.verify_email_token(&fake_token);
 
     assert!(matches!(result, Err(AccountStoreError::TokenInvalid)));

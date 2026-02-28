@@ -335,11 +335,14 @@ impl AccountStore {
 
     /// Verify an email token and link the email to the account
     pub fn verify_email_token(&self, token: &str) -> Result<AccountIdentifier, AccountStoreError> {
-        let mut conn = self.conn()?;
         let normalized_token = token.trim();
         if normalized_token.is_empty() {
             return Err(AccountStoreError::TokenInvalid);
         }
+        if Uuid::parse_str(normalized_token).is_err() {
+            return Err(AccountStoreError::TokenInvalid);
+        }
+        let mut conn = self.conn()?;
 
         // Look up the token
         let row = conn.query_opt(
