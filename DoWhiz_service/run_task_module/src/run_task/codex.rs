@@ -14,7 +14,7 @@ use super::errors::RunTaskError;
 use super::github_auth::{ensure_github_cli_auth, resolve_github_auth};
 use super::prompt::{build_prompt, load_memory_context};
 use super::scheduled::{extract_scheduled_tasks, extract_scheduler_actions};
-use super::types::{RunTaskOutput, RunTaskRequest};
+use super::types::{RunTaskOutput, RunTaskRequest, TokenUsage};
 use super::utils::{run_command_with_timeout, run_task_timeout, tail_string};
 use super::workspace::{canonicalize_dir, workspace_path_in_container};
 
@@ -188,7 +188,8 @@ pub(super) fn run_codex_task(
         cmd.arg("--entrypoint")
             .arg("codex")
             .arg(&docker_image)
-            .arg("exec");
+            .arg("exec")
+            .arg("--json");
         if bypass_sandbox {
             cmd.arg("--yolo");
         }
@@ -219,7 +220,7 @@ pub(super) fn run_codex_task(
         }
     } else {
         let mut cmd = Command::new("codex");
-        cmd.arg("exec");
+        cmd.arg("exec").arg("--json");
         if bypass_sandbox {
             cmd.arg("--yolo");
         }
@@ -290,6 +291,7 @@ pub(super) fn run_codex_task(
     combined_output.push_str(&String::from_utf8_lossy(&output.stderr));
     let (scheduled_tasks, scheduled_tasks_error) = extract_scheduled_tasks(&combined_output);
     let (scheduler_actions, scheduler_actions_error) = extract_scheduler_actions(&combined_output);
+    let token_usage = extract_token_usage(&combined_output);
     let output_tail = tail_string(&combined_output, 2000);
 
     if !output.status.success() {
@@ -322,6 +324,7 @@ pub(super) fn run_codex_task(
         scheduled_tasks_error,
         scheduler_actions,
         scheduler_actions_error,
+        token_usage,
     })
 }
 
@@ -434,4 +437,87 @@ fn update_config_block(existing: &str, block: &str) -> String {
     updated.push_str(block.trim_end());
     updated.push('\n');
     updated
+}
+
+/// Parse token usage from Codex JSON output (JSONL format)
+/// Looks for: {"type":"turn.completed","usage":{"input_tokens":N,"output_tokens":M}}
+fn extract_token_usage(output: &str) -> Option<TokenUsage> {
+    #[derive(serde::Deserialize)]
+    struct TurnCompleted {
+        #[serde(rename = "type")]
+        event_type: String,
+        usage: Option<TokenUsage>,
+    }
+
+    for line in output.lines() {
+        if line.contains("\"turn.completed\"") {
+            if let Ok(event) = serde_json::from_str::<TurnCompleted>(line) {
+                if event.event_type == "turn.completed" {
+                    return event.usage;
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_token_usage_success() {
+        let output = r#"{"type":"thread.started","thread_id":"abc123"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"4"}}
+{"type":"turn.completed","usage":{"input_tokens":8980,"cached_input_tokens":0,"output_tokens":90}}"#;
+
+        let usage = extract_token_usage(output);
+        assert!(usage.is_some());
+        let usage = usage.unwrap();
+        assert_eq!(usage.input_tokens, 8980);
+        assert_eq!(usage.cached_input_tokens, 0);
+        assert_eq!(usage.output_tokens, 90);
+    }
+
+    #[test]
+    fn test_extract_token_usage_no_turn_completed() {
+        let output = r#"{"type":"thread.started","thread_id":"abc123"}
+{"type":"turn.started"}
+{"type":"error","message":"Something went wrong"}"#;
+
+        let usage = extract_token_usage(output);
+        assert!(usage.is_none());
+    }
+
+    #[test]
+    fn test_extract_token_usage_no_usage_field() {
+        let output = r#"{"type":"turn.completed"}"#;
+
+        let usage = extract_token_usage(output);
+        assert!(usage.is_none());
+    }
+
+    #[test]
+    fn test_extract_token_usage_empty_output() {
+        let usage = extract_token_usage("");
+        assert!(usage.is_none());
+    }
+
+    #[test]
+    fn test_extract_token_usage_with_errors_in_output() {
+        // Real-world output with errors before success
+        let output = r#"{"type":"thread.started","thread_id":"019ca608-b971-71a3-abfd-4cf287a3acdf"}
+{"type":"turn.started"}
+{"type":"error","message":"Reconnecting... 1/5"}
+{"type":"error","message":"Reconnecting... 2/5"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Done"}}
+{"type":"turn.completed","usage":{"input_tokens":1000,"output_tokens":50}}"#;
+
+        let usage = extract_token_usage(output);
+        assert!(usage.is_some());
+        let usage = usage.unwrap();
+        assert_eq!(usage.input_tokens, 1000);
+        assert_eq!(usage.output_tokens, 50);
+    }
 }

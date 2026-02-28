@@ -1,6 +1,15 @@
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+/// Token usage from Codex JSON output
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub cached_input_tokens: u64,
+    pub output_tokens: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct RunTaskParams {
     pub workspace_dir: PathBuf,
@@ -95,4 +104,5 @@ pub struct RunTaskOutput {
     pub scheduled_tasks_error: Option<String>,
     pub scheduler_actions: Vec<SchedulerActionRequest>,
     pub scheduler_actions_error: Option<String>,
+    pub token_usage: Option<TokenUsage>,
 }

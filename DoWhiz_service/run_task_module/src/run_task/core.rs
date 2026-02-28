@@ -34,6 +34,7 @@ pub fn run_task(params: &RunTaskParams) -> Result<RunTaskOutput, RunTaskError> {
             scheduled_tasks_error: None,
             scheduler_actions: Vec::new(),
             scheduler_actions_error: None,
+            token_usage: None,
         });
     }
 

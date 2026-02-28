@@ -105,6 +105,7 @@ pub(super) fn run_claude_task(
         scheduled_tasks_error,
         scheduler_actions,
         scheduler_actions_error,
+        token_usage: None, // TODO: Extract from Claude API response
     })
 }
 
