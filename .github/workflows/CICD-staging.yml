@@ -143,8 +143,8 @@ jobs:
           ssh -F ~/.ssh/config azureproduction << 'EOF'
           mkdir -p /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
           cat << 'ENVEOF' > /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/.env
-          ${{ secrets.COMMON_ENV }}
-          ${{ secrets.STAGING_SPECIFIC_ENV }}
+          ${{ secrets.ENV_COMMON }}
+          ${{ secrets.ENV_STAGING }}
           ENVEOF
           chmod 600 /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/.env
           EOF
