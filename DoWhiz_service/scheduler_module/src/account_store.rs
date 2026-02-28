@@ -120,8 +120,8 @@ impl AccountStore {
         let mut conn = self.conn()?;
         let id = Uuid::new_v4();
         let row = conn.query_one(
-            "INSERT INTO accounts (id, auth_user_id, created_at)
-             VALUES ($1, $2, NOW())
+            "INSERT INTO accounts (id, auth_user_id, created_at, tokens_to_hours)
+             VALUES ($1, $2, NOW(), 0)
              RETURNING id, auth_user_id, created_at, tokens_to_hours",
             &[&id, &auth_user_id],
         )?;
@@ -310,7 +310,10 @@ impl AccountStore {
     pub fn add_tokens(&self, account_id: Uuid, tokens: i64) -> Result<(), AccountStoreError> {
         let mut conn = self.conn()?;
         conn.execute(
-            "UPDATE accounts SET tokens = COALESCE(tokens, 0) + $1 WHERE id = $2",
+            "UPDATE accounts
+             SET tokens = COALESCE(tokens, 0) + $1,
+                 tokens_to_hours = (COALESCE(tokens, 0) + $1)::numeric / 6000000
+             WHERE id = $2",
             &[&tokens, &account_id],
         )?;
         Ok(())
