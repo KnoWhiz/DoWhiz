@@ -1,7 +1,7 @@
 use std::path::Path;
 use tracing::{info, warn};
 
-use crate::account_store::lookup_account_by_channel;
+use crate::account_store::{get_global_account_store, lookup_account_by_channel};
 use crate::blob_store::get_blob_store;
 use crate::channel::Channel;
 use crate::memory_diff::compute_memory_diff;
@@ -207,6 +207,26 @@ impl TaskExecutor for ModuleExecutor {
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
+
+                // Track token usage for accounts
+                if let Some(account_id) = account_id {
+                    if let Some(ref usage) = output.token_usage {
+                        let total_tokens = (usage.input_tokens + usage.output_tokens) as i64;
+                        if let Some(store) = get_global_account_store() {
+                            if let Err(e) = store.add_tokens(account_id, total_tokens) {
+                                warn!(
+                                    "Failed to update token usage for account {}: {}",
+                                    account_id, e
+                                );
+                            } else {
+                                info!(
+                                    "Recorded {} tokens for account {} (input: {}, output: {})",
+                                    total_tokens, account_id, usage.input_tokens, usage.output_tokens
+                                );
+                            }
+                        }
+                    }
+                }
 
                 // After task completes, compute diff and submit to queue instead of direct sync
                 if let Some(user_memory_dir) = user_memory_dir.as_ref() {

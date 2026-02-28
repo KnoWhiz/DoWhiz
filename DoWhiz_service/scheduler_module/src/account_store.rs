@@ -301,6 +301,16 @@ impl AccountStore {
         Ok(())
     }
 
+    /// Add tokens to an account's running total
+    pub fn add_tokens(&self, account_id: Uuid, tokens: i64) -> Result<(), AccountStoreError> {
+        let mut conn = self.conn()?;
+        conn.execute(
+            "UPDATE accounts SET tokens = COALESCE(tokens, 0) + $1 WHERE id = $2",
+            &[&tokens, &account_id],
+        )?;
+        Ok(())
+    }
+
     /// Create an email verification token (expires in 24 hours)
     pub fn create_email_verification_token(
         &self,
