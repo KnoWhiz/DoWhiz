@@ -1,4 +1,5 @@
-use lettre::message::header::{HeaderName, HeaderValue};
+use lettre::message::header::{ContentType, HeaderName, HeaderValue};
+use lettre::message::{Attachment as LettreAttachment, MultiPart, SinglePart};
 use lettre::Transport;
 use rusqlite::OptionalExtension;
 use scheduler_module::employee_config::{
@@ -24,6 +25,8 @@ use tokio::sync::oneshot;
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 const DEFAULT_NGROK_HOOK_URL: &str =
     "https://shayne-laminar-lillian.ngrok-free.dev/postmark/inbound";
+const E2E_ATTACHMENT_NAME: &str = "e2e_note.txt";
+const E2E_ATTACHMENT_CONTENT: &[u8] = b"dowhiz-e2e-attachment";
 
 #[derive(Clone, Default)]
 struct NoopExecutor;
@@ -529,7 +532,16 @@ fn send_smtp_inbound(
             original_to.to_string(),
         ));
     }
-    let message = builder.body("Rust service live email test.".to_string())?;
+    let message = builder.multipart(
+        MultiPart::mixed()
+            .singlepart(SinglePart::plain(
+                "Rust service live email test.".to_string(),
+            ))
+            .singlepart(LettreAttachment::new(E2E_ATTACHMENT_NAME.to_string()).body(
+                E2E_ATTACHMENT_CONTENT.to_vec(),
+                ContentType::parse("text/plain; charset=utf-8")?,
+            )),
+    )?;
 
     let smtp_host =
         env::var("POSTMARK_SMTP_HOST").unwrap_or_else(|_| "inbound.postmarkapp.com".to_string());
@@ -858,6 +870,59 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
     let reply_path = workspace.join("reply_email_draft.html");
     if !reply_path.exists() {
         return Err("reply_email_draft.html not written by run_task".into());
+    }
+    let inbound_attachment_path = workspace
+        .join("incoming_attachments")
+        .join(E2E_ATTACHMENT_NAME);
+    if !inbound_attachment_path.exists() {
+        return Err(format!(
+            "expected inbound attachment at {}",
+            inbound_attachment_path.display()
+        )
+        .into());
+    }
+    let inbound_attachment_bytes = fs::read(&inbound_attachment_path)?;
+    if inbound_attachment_bytes != E2E_ATTACHMENT_CONTENT {
+        return Err("workspace attachment bytes mismatch".into());
+    }
+
+    let payload_path = workspace
+        .join("incoming_email")
+        .join("postmark_payload.json");
+    let payload_bytes = fs::read(&payload_path)?;
+    let payload_json: Value = serde_json::from_slice(&payload_bytes)?;
+    let attachments = payload_json
+        .get("Attachments")
+        .and_then(Value::as_array)
+        .ok_or("postmark payload missing Attachments array")?;
+    let attachment = attachments
+        .iter()
+        .find(|value| {
+            value
+                .get("Name")
+                .and_then(Value::as_str)
+                .map(|name| name == E2E_ATTACHMENT_NAME)
+                .unwrap_or(false)
+        })
+        .ok_or("postmark payload missing expected attachment entry")?;
+    let storage_ref = attachment
+        .get("StorageRef")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or("attachment missing StorageRef")?;
+    if !storage_ref.starts_with("azure://") {
+        return Err(format!("unexpected StorageRef format: {}", storage_ref).into());
+    }
+    let content = attachment
+        .get("Content")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if !content.is_empty() {
+        return Err("attachment Content should be empty after blob offload".into());
+    }
+    let blob_bytes = scheduler_module::raw_payload_store::download_raw_payload(storage_ref)?;
+    if blob_bytes != E2E_ATTACHMENT_CONTENT {
+        return Err("blob attachment bytes mismatch".into());
     }
 
     let reply_subject = format!("Re: {}", subject);
