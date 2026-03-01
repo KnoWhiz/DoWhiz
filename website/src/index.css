@@ -391,6 +391,8 @@ ul {
   width: 40px;
   height: 40px;
   padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
   border-radius: 50%;
   border: 1px solid var(--glass-border);
   background: rgba(255, 255, 255, 0.02);
@@ -455,13 +457,23 @@ ul {
   left: 0;
   width: 100%;
   z-index: 1000;
+  isolation: isolate;
   background: rgba(5, 5, 5, 0.7);
   backdrop-filter: var(--glass-blur);
   border-bottom: 1px solid var(--glass-border);
   transition: background 0.3s;
 }
 
+.navbar a,
+.navbar button {
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .nav-content {
+  position: relative;
+  z-index: 1;
   height: 80px;
   display: flex;
   align-items: center;
@@ -588,6 +600,14 @@ ul {
   margin-left: auto;
   margin-right: auto;
   font-weight: 400;
+}
+
+.hero-subtitle-desktop {
+  display: block;
+}
+
+.hero-subtitle-mobile {
+  display: none;
 }
 
 .role-link {
@@ -2049,6 +2069,7 @@ ul {
 
   .navbar {
     backdrop-filter: none;
+    z-index: 4000;
   }
 
   .feature-card {
@@ -2099,37 +2120,94 @@ ul {
 
   /* Navbar Mobile Optimizations */
   .nav-content {
+    min-height: 126px;
     height: auto;
-    padding: 1rem 0;
-    flex-wrap: wrap;
-    gap: 1rem;
+    padding: 0.75rem 0 0.65rem;
+    display: grid;
+    grid-template-areas:
+      "brand"
+      "actions"
+      "links";
+    grid-template-columns: 1fr;
+    gap: 0.55rem;
+    align-items: center;
   }
 
   .nav-links {
+    grid-area: links;
+    display: flex;
+    width: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding: 0.05rem 0.05rem 0.25rem;
+    gap: 0.45rem;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+  }
+
+  .nav-links::-webkit-scrollbar {
     display: none;
   }
 
+  .nav-btn {
+    flex: 0 0 auto;
+    font-size: 0.82rem;
+    padding: 0.42rem 0.8rem;
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  [data-theme="light"] .nav-btn {
+    background: rgba(0, 0, 0, 0.03);
+  }
+
+  .nav-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
   .nav-actions {
+    grid-area: actions;
     width: 100%;
-    justify-content: space-between;
+    justify-content: center;
     gap: 0.5rem;
+    margin-left: 0;
   }
 
   .social-links {
+    width: 100%;
+    justify-content: center;
     gap: 0.5rem;
   }
 
   .logo {
-    width: 100%;
+    grid-area: brand;
+    width: auto;
     text-align: center;
-    margin-bottom: 0.5rem;
-    justify-self: center;
+    margin: 0 auto;
+    justify-content: center;
+    font-size: 2rem;
   }
 
   /* Compact Buttons for Mobile */
   .btn-small {
-    padding: 0.5rem 0.8rem;
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border-radius: 50%;
+    justify-content: center;
     font-size: 0.8rem;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .user-profile-btn {
+    width: 42px;
+    height: 42px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .social-links .btn-small svg {
@@ -2142,11 +2220,29 @@ ul {
     display: none;
   }
 
-  .btn-small {
-    padding: 0.6rem;
-    border-radius: 50%;
-    /* Make them circular */
-    justify-content: center;
+  .hero-section {
+    min-height: min(100vh, 860px);
+    height: auto;
+    padding-top: 9.75rem;
+  }
+
+  .hero-title {
+    font-size: clamp(2.1rem, 10.5vw, 2.9rem);
+    line-height: 1.06;
+    margin-bottom: 1rem;
+  }
+
+  .hero-subtitle-desktop {
+    display: none;
+  }
+
+  .hero-subtitle-mobile {
+    display: block;
+    max-width: 34ch;
+    font-size: 1.02rem;
+    line-height: 1.55;
+    margin: 0 auto 1.8rem;
+    padding: 0 1rem;
   }
 
   /* Card Spacing */
