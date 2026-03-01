@@ -26,6 +26,7 @@ use tracing::{info, warn};
 use scheduler_module::account_store::AccountStore;
 use scheduler_module::blob_store::get_blob_store;
 use scheduler_module::employee_config::load_employee_directory;
+use scheduler_module::env_alias::apply_deploy_target_overrides;
 use scheduler_module::google_auth::GoogleAuth;
 use scheduler_module::google_drive_changes::{GoogleDriveChangesConfig, GoogleDriveChangesManager};
 use scheduler_module::ingestion_queue::{
@@ -51,6 +52,8 @@ use state::{build_address_map, GatewayConfig, GatewayState};
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt().with_target(false).init();
     dotenvy::dotenv().ok();
+    apply_deploy_target_overrides()
+        .map_err(|err| -> Box<dyn std::error::Error + Send + Sync> { err.into() })?;
 
     let config_path = resolve_gateway_config_path()?;
     let config_file: GatewayConfigFile = load_gateway_config(&config_path)?;
