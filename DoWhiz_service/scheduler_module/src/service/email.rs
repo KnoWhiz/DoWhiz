@@ -10,6 +10,9 @@ use tracing::{error, info, warn};
 use crate::artifact_extractor::extract_artifacts_from_email;
 use crate::channel::{Channel, ExtractedArtifactRef};
 use crate::collaboration_store::CollaborationStore;
+use crate::github_inbound::{
+    extract_github_sender_login_from_postmark_payload, is_github_notifications_postmark_payload,
+};
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
 use crate::index_store::IndexStore;
 use crate::mailbox;
@@ -43,12 +46,12 @@ pub fn process_inbound_payload(
         info!("skipping blacklisted sender: {}", sender);
         return Ok(());
     }
-    let user_email = payload.from.as_deref().unwrap_or("").trim();
-    let user_email = extract_emails(user_email)
-        .into_iter()
-        .next()
-        .ok_or_else(|| "missing sender email".to_string())?;
-    let user = user_store.get_or_create_user("email", &user_email)?;
+    let requester = resolve_inbound_requester(payload, raw_payload)?;
+    info!(
+        "resolved inbound requester identifier_type={} identifier={}",
+        requester.identifier_type, requester.identifier
+    );
+    let user = user_store.get_or_create_user(requester.identifier_type, &requester.identifier)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     user_store.ensure_user_dirs(&user_paths)?;
 
@@ -244,6 +247,39 @@ fn is_blacklisted_sender(sender: &str, service_addresses: &HashSet<String>) -> b
 
 fn is_blacklisted_address(address: &str, service_addresses: &HashSet<String>) -> bool {
     mailbox::is_service_address(address, service_addresses)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InboundRequester {
+    identifier_type: &'static str,
+    identifier: String,
+}
+
+fn resolve_inbound_requester(
+    payload: &PostmarkInbound,
+    raw_payload: &[u8],
+) -> Result<InboundRequester, BoxError> {
+    if let Some(github_login) = extract_github_sender_login_from_postmark_payload(raw_payload) {
+        return Ok(InboundRequester {
+            identifier_type: "github",
+            identifier: github_login,
+        });
+    }
+    if is_github_notifications_postmark_payload(raw_payload) {
+        warn!(
+            "github notification email did not include a deterministic sender login; falling back to From address"
+        );
+    }
+
+    let user_email = payload.from.as_deref().unwrap_or("").trim();
+    let user_email = extract_emails(user_email)
+        .into_iter()
+        .next()
+        .ok_or_else(|| "missing sender email".to_string())?;
+    Ok(InboundRequester {
+        identifier_type: "email",
+        identifier: user_email,
+    })
 }
 
 fn thread_key(payload: &PostmarkInbound, raw_payload: &[u8]) -> String {
@@ -472,6 +508,41 @@ mod tests {
     use std::collections::HashSet;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn resolve_inbound_requester_uses_github_sender_for_notifications() {
+        let raw = br#"{
+  "From": "Bingran You <notifications@github.com>",
+  "Headers": [{"Name": "X-GitHub-Sender", "Value": "bingran-you"}],
+  "TextBody": "bingran-you left a comment (KnoWhiz/DoWhiz#568)"
+}"#;
+        let payload: PostmarkInbound = serde_json::from_slice(raw).expect("payload");
+        let requester = resolve_inbound_requester(&payload, raw).expect("requester");
+        assert_eq!(
+            requester,
+            InboundRequester {
+                identifier_type: "github",
+                identifier: "bingran-you".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_inbound_requester_falls_back_to_email() {
+        let raw = br#"{
+  "From": "Alice <alice@example.com>",
+  "TextBody": "hello"
+}"#;
+        let payload: PostmarkInbound = serde_json::from_slice(raw).expect("payload");
+        let requester = resolve_inbound_requester(&payload, raw).expect("requester");
+        assert_eq!(
+            requester,
+            InboundRequester {
+                identifier_type: "email",
+                identifier: "alice@example.com".to_string(),
+            }
+        );
+    }
 
     #[test]
     fn create_workspace_hydrates_past_emails() {

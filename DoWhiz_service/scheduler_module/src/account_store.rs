@@ -469,41 +469,91 @@ pub fn channel_to_identifier_type(channel: &crate::channel::Channel) -> &'static
     }
 }
 
+fn identifier_lookup_candidates(identifier_type: &str, identifier: &str) -> Vec<String> {
+    let trimmed = identifier.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let mut candidates = vec![trimmed.to_string()];
+    match identifier_type {
+        "email" | "github" => {
+            let lower = trimmed.to_ascii_lowercase();
+            if lower != trimmed {
+                candidates.push(lower);
+            }
+        }
+        "slack" => {
+            let upper = trimmed.to_ascii_uppercase();
+            if upper != trimmed {
+                candidates.push(upper);
+            }
+        }
+        "phone" => {
+            if let Some(normalized) = crate::user_store::normalize_phone(trimmed) {
+                if normalized != trimmed {
+                    candidates.push(normalized);
+                }
+            }
+        }
+        _ => {}
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    candidates
+        .into_iter()
+        .filter(|value| seen.insert(value.clone()))
+        .collect()
+}
+
+/// Look up account by identifier type and identifier.
+/// Returns the account_id if found and verified, None otherwise.
+pub fn lookup_account_by_identifier(identifier_type: &str, identifier: &str) -> Option<Uuid> {
+    let store = get_global_account_store()?;
+    let candidates = identifier_lookup_candidates(identifier_type, identifier);
+    if candidates.is_empty() {
+        return None;
+    }
+
+    for candidate in candidates {
+        match store.get_account_by_identifier(identifier_type, &candidate) {
+            Ok(Some(account)) => {
+                tracing::debug!(
+                    "Found account {} for {}:{}",
+                    account.id,
+                    identifier_type,
+                    candidate
+                );
+                return Some(account.id);
+            }
+            Ok(None) => {
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Error looking up account for {}:{}: {}",
+                    identifier_type,
+                    candidate,
+                    e
+                );
+            }
+        }
+    }
+
+    tracing::debug!(
+        "No account found for {}:{}, using local storage",
+        identifier_type,
+        identifier
+    );
+    None
+}
+
 /// Look up account by channel and identifier
 /// Returns the account_id if found and verified, None otherwise
 pub fn lookup_account_by_channel(
     channel: &crate::channel::Channel,
     identifier: &str,
 ) -> Option<Uuid> {
-    let store = get_global_account_store()?;
     let identifier_type = channel_to_identifier_type(channel);
-
-    match store.get_account_by_identifier(identifier_type, identifier) {
-        Ok(Some(account)) => {
-            tracing::debug!(
-                "Found account {} for {}:{}",
-                account.id,
-                identifier_type,
-                identifier
-            );
-            Some(account.id)
-        }
-        Ok(None) => {
-            tracing::debug!(
-                "No account found for {}:{}, using local storage",
-                identifier_type,
-                identifier
-            );
-            None
-        }
-        Err(e) => {
-            tracing::warn!(
-                "Error looking up account for {}:{}: {}, using local storage",
-                identifier_type,
-                identifier,
-                e
-            );
-            None
-        }
-    }
+    lookup_account_by_identifier(identifier_type, identifier)
 }
