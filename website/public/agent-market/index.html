@@ -13,12 +13,12 @@
     <link rel="canonical" href="https://dowhiz.com/agent-market/" />
     <link rel="stylesheet" href="/agent-market.css" />
     <script src="/theme.js"></script>
-    <title>Agent Market Deploy | DoWhiz</title>
+    <title>Deployment | DoWhiz</title>
   </head>
   <body>
     <div class="page">
       <header class="page-header">
-        <a class="brand" href="/">Do<span class="accent">Whiz</span></a>
+        <a class="brand" href="/">Do<span class="text-gradient">Whiz</span></a>
         <nav class="header-links">
           <a href="/">Home</a>
           <a href="/integrations/">Integrations</a>
@@ -31,7 +31,7 @@
       <main>
         <section class="hero">
           <article class="hero-copy">
-            <div class="eyebrow">Agent Market MVP</div>
+            <div class="eyebrow">Deployment</div>
             <h1>Deploy your own OpenClaw on DoWhiz.</h1>
             <p class="lead">
               Upload your skills, env keys, and private data folder snapshot. DoWhiz will start
@@ -41,7 +41,7 @@
             <div class="chips">
               <span class="chip">Automated intake</span>
               <span class="chip">Provisioning ETA: ~24h</span>
-              <span class="chip">Agent Market MVP</span>
+              <span class="chip">Deployment</span>
             </div>
           </article>
           <aside class="hero-meta">
@@ -84,6 +84,17 @@
                   type="email"
                   autocomplete="email"
                   required
+                />
+              </div>
+              <div class="field">
+                <label for="agent-hourly-rate">Agent piecework hourly rate (USD/hour)</label>
+                <input
+                  id="agent-hourly-rate"
+                  name="agent_hourly_rate_usd"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="e.g. 120"
                 />
               </div>
               <div class="field">
@@ -444,6 +455,7 @@
             const formData = new FormData();
             formData.append('full_name', getFormValue('full-name'));
             formData.append('work_email', getFormValue('work-email'));
+            formData.append('agent_hourly_rate_usd', getFormValue('agent-hourly-rate'));
             formData.append('team_name', getFormValue('team-name'));
             formData.append('azure_region', getFormValue('region'));
             formData.append('agent_name', getFormValue('agent-name'));
