@@ -124,6 +124,7 @@ pub enum FakeCodexMode {
     NoOutput,
     Fail,
     GithubEnvCheck,
+    X402EnvCheck,
     EnsureNoYolo,
     EnsureYolo,
     EnsureAddDir,
@@ -178,6 +179,42 @@ fi
 echo "<html><body>Test reply</body></html>" > reply_email_draft.html
 mkdir -p reply_email_attachments
 echo "attachment" > reply_email_attachments/attachment.txt
+"#
+        }
+        FakeCodexMode::X402EnvCheck => {
+            r#"#!/bin/sh
+set -e
+check_env() {
+  key="$1"
+  eval "value=\${$key}"
+  if [ -z "$value" ]; then
+    echo "missing $key" >&2
+    exit 3
+  fi
+}
+check_exact_env() {
+  key="$1"
+  expected_key="EXPECTED_${key}"
+  eval "expected=\${$expected_key}"
+  if [ -n "$expected" ]; then
+    eval "actual=\${$key}"
+    if [ "$actual" != "$expected" ]; then
+      echo "unexpected $key: expected '$expected' got '$actual'" >&2
+      exit 3
+    fi
+  fi
+}
+check_env "GOATX402_API_URL"
+check_env "GOATX402_MERCHANT_ID"
+check_env "GOATX402_API_KEY"
+check_env "GOATX402_API_SECRET"
+check_exact_env "GOATX402_API_URL"
+check_exact_env "GOATX402_MERCHANT_ID"
+check_exact_env "GOATX402_API_KEY"
+check_exact_env "GOATX402_API_SECRET"
+echo "<html><body>x402 payment route ready; simulated tx submitted</body></html>" > reply_email_draft.html
+mkdir -p reply_email_attachments
+echo "mock_tx_hash=0xabc123" > reply_email_attachments/x402_receipt.txt
 "#
         }
         FakeCodexMode::EnsureNoYolo => {

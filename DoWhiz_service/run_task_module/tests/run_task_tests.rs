@@ -396,6 +396,119 @@ MAGGIE_GITHUB_PERSONAL_ACCESS_TOKEN="pat-test-token"
 
 #[test]
 #[cfg(unix)]
+fn run_task_maps_x402_env_from_dotenv() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("codex_task_x402_env").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let env_path = temp.path.join(".env");
+    fs::write(
+        &env_path,
+        r#"GOATX402_API_URL="https://x402-api.example.test"
+GOATX402_MERCHANT_ID="dowhiz_agent"
+GOATX402_API_KEY="key_direct"
+GOATX402_API_SECRET="secret_direct"
+"#,
+    )
+    .unwrap();
+
+    let home_dir = temp.path.join("home");
+    let bin_dir = temp.path.join("bin");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_fake_codex(&bin_dir, FakeCodexMode::X402EnvCheck).unwrap();
+
+    let _unset = EnvUnsetGuard::remove(&[
+        "GOATX402_API_URL",
+        "GOATX402_MERCHANT_ID",
+        "GOATX402_API_KEY",
+        "GOATX402_API_SECRET",
+        "OLIVER_GOATX402_API_URL",
+        "OLIVER_GOATX402_MERCHANT_ID",
+        "OLIVER_GOATX402_API_KEY",
+        "OLIVER_GOATX402_API_SECRET",
+    ]);
+
+    let old_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), old_path);
+    let _env = EnvGuard::set(&[
+        ("HOME", home_dir.to_str().unwrap()),
+        ("PATH", &new_path),
+        ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("GH_AUTH_DISABLED", "1"),
+        ("EXPECTED_GOATX402_API_URL", "https://x402-api.example.test"),
+        ("EXPECTED_GOATX402_MERCHANT_ID", "dowhiz_agent"),
+        ("EXPECTED_GOATX402_API_KEY", "key_direct"),
+        ("EXPECTED_GOATX402_API_SECRET", "secret_direct"),
+    ]);
+
+    let params = build_params(&workspace);
+    let result = run_task(&params);
+    assert!(result.is_ok(), "expected GOATX402_* env to reach codex");
+}
+
+#[test]
+#[cfg(unix)]
+fn run_task_maps_employee_prefixed_x402_env_from_dotenv() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("codex_task_x402_prefixed_env").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let env_path = temp.path.join(".env");
+    fs::write(
+        &env_path,
+        r#"OLIVER_GOATX402_API_URL="https://x402-prefixed.example.test"
+OLIVER_GOATX402_MERCHANT_ID="dowhiz_agent_prefixed"
+OLIVER_GOATX402_API_KEY="key_prefixed"
+OLIVER_GOATX402_API_SECRET="secret_prefixed"
+"#,
+    )
+    .unwrap();
+
+    let home_dir = temp.path.join("home");
+    let bin_dir = temp.path.join("bin");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_fake_codex(&bin_dir, FakeCodexMode::X402EnvCheck).unwrap();
+
+    let _unset = EnvUnsetGuard::remove(&[
+        "GOATX402_API_URL",
+        "GOATX402_MERCHANT_ID",
+        "GOATX402_API_KEY",
+        "GOATX402_API_SECRET",
+        "OLIVER_GOATX402_API_URL",
+        "OLIVER_GOATX402_MERCHANT_ID",
+        "OLIVER_GOATX402_API_KEY",
+        "OLIVER_GOATX402_API_SECRET",
+    ]);
+
+    let old_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), old_path);
+    let _env = EnvGuard::set(&[
+        ("HOME", home_dir.to_str().unwrap()),
+        ("PATH", &new_path),
+        ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("GH_AUTH_DISABLED", "1"),
+        ("EMPLOYEE_ID", "little_bear"),
+        (
+            "EXPECTED_GOATX402_API_URL",
+            "https://x402-prefixed.example.test",
+        ),
+        ("EXPECTED_GOATX402_MERCHANT_ID", "dowhiz_agent_prefixed"),
+        ("EXPECTED_GOATX402_API_KEY", "key_prefixed"),
+        ("EXPECTED_GOATX402_API_SECRET", "secret_prefixed"),
+    ]);
+
+    let params = build_params(&workspace);
+    let result = run_task(&params);
+    assert!(
+        result.is_ok(),
+        "expected prefixed OLIVER_GOATX402_* env to reach codex"
+    );
+}
+
+#[test]
+#[cfg(unix)]
 fn run_task_reports_missing_env() {
     let _lock = ENV_MUTEX.lock().unwrap();
     let temp = TempDir::new("codex_task_missing_env").unwrap();
