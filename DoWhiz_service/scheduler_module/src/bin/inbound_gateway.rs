@@ -32,6 +32,7 @@ use scheduler_module::google_drive_changes::{GoogleDriveChangesConfig, GoogleDri
 use scheduler_module::ingestion_queue::{
     build_servicebus_queue_from_env, resolve_ingestion_queue_backend, IngestionQueue,
 };
+use scheduler_module::service::agent_market::{agent_market_router, AgentMarketState};
 use scheduler_module::service::auth::{auth_router, AuthState};
 
 use config::{
@@ -186,6 +187,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         user_store: None, // Task lookups not available in inbound gateway
         users_root: None,
     };
+    let agent_market_state = AgentMarketState::from_env();
     // Instantiate router in inbound_gateway to solve two ports, one tunnel issue
     let app = Router::new()
         .route("/health", get(health))
@@ -202,6 +204,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         )
         .with_state(state)
         .merge(auth_router(auth_state))
+        .merge(agent_market_router(agent_market_state))
         .layer(DefaultBodyLimit::max(max_body_bytes));
 
     let addr: std::net::SocketAddr = format!("{}:{}", host, port).parse()?;

@@ -234,7 +234,10 @@ impl TaskExecutor for ModuleExecutor {
                             } else {
                                 info!(
                                     "Recorded {} tokens for account {} (input: {}, output: {})",
-                                    total_tokens, account_id, usage.input_tokens, usage.output_tokens
+                                    total_tokens,
+                                    account_id,
+                                    usage.input_tokens,
+                                    usage.output_tokens
                                 );
                             }
                         }

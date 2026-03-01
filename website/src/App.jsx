@@ -973,6 +973,7 @@ function App() {
               <a href="#workflows" className="nav-btn">Workflows</a>
               <a href="#safety" className="nav-btn">Safety</a>
               <a href="#features" className="nav-btn">Features</a>
+              <a href="/agent-market/" className="nav-btn">Agent Market</a>
               <a href="#faq" className="nav-btn">FAQ</a>
               <a href="#blog" className="nav-btn">Blog</a>
             </div>

@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Request automated OpenClaw deployment on DoWhiz by uploading skills, env keys, and private data folders."
+    />
+    <link rel="icon" type="image/svg+xml" href="/do-whiz-mark.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="canonical" href="https://dowhiz.com/agent-market/" />
+    <link rel="stylesheet" href="/agent-market.css" />
+    <script src="/theme.js"></script>
+    <title>Agent Market Deploy | DoWhiz</title>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-header">
+        <a class="brand" href="/">Do<span class="accent">Whiz</span></a>
+        <nav class="header-links">
+          <a href="/">Home</a>
+          <a href="/integrations/">Integrations</a>
+          <a href="/trust-safety/">Trust &amp; Safety</a>
+          <a href="/help-center/">Help Center</a>
+          <a href="/help-center/">Contact</a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero">
+          <article class="hero-copy">
+            <div class="eyebrow">Agent Market MVP</div>
+            <h1>Deploy your own OpenClaw on DoWhiz.</h1>
+            <p class="lead">
+              Upload your skills, env keys, and private data folder snapshot. DoWhiz will start
+              provisioning automatically after intake, and your OpenClaw is typically ready within 24
+              hours.
+            </p>
+            <div class="chips">
+              <span class="chip">Automated intake</span>
+              <span class="chip">Provisioning ETA: ~24h</span>
+              <span class="chip">Agent Market MVP</span>
+            </div>
+          </article>
+          <aside class="hero-meta">
+            <h2>Deployment flow</h2>
+            <div class="step-list">
+              <div class="step">
+                <strong>1. Submit deployment package</strong>
+                <span>Upload skills, env keys, and private data folders.</span>
+              </div>
+              <div class="step">
+                <strong>2. Validation + queue</strong>
+                <span>DoWhiz validates the package and starts deployment orchestration.</span>
+              </div>
+              <div class="step">
+                <strong>3. Provisioning</strong>
+                <span>Your OpenClaw environment is prepared and activated on DoWhiz.</span>
+              </div>
+            </div>
+            <p class="warning">
+              Sensitive info warning: upload only the minimum secrets/data required for this
+              deployment.
+            </p>
+          </aside>
+        </section>
+
+        <form id="agent-market-form" class="market-form" novalidate>
+          <section class="form-card">
+            <h2>Operator Profile</h2>
+            <p>Tell us who owns this OpenClaw deployment request.</p>
+            <div class="input-grid">
+              <div class="field">
+                <label for="full-name">Full name</label>
+                <input id="full-name" name="full_name" type="text" autocomplete="name" required />
+              </div>
+              <div class="field">
+                <label for="work-email">Work email</label>
+                <input
+                  id="work-email"
+                  name="work_email"
+                  type="email"
+                  autocomplete="email"
+                  required
+                />
+              </div>
+              <div class="field">
+                <label for="team-name">Company or team</label>
+                <input id="team-name" name="team_name" type="text" />
+              </div>
+              <div class="field">
+                <label for="region">Preferred Azure region</label>
+                <select id="region" name="azure_region" required>
+                  <option value="">Select a region</option>
+                  <option value="eastus">eastus</option>
+                  <option value="westus2">westus2</option>
+                  <option value="centralus">centralus</option>
+                  <option value="westeurope">westeurope</option>
+                  <option value="southeastasia">southeastasia</option>
+                  <option value="other">other</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="agent-name">Agent name</label>
+                <input id="agent-name" name="agent_name" type="text" required />
+              </div>
+              <div class="field">
+                <label for="wallet-id">x402 wallet (optional)</label>
+                <input id="wallet-id" name="wallet_id" type="text" />
+              </div>
+              <div class="field">
+                <label for="contact-channel">Primary contact channel</label>
+                <input
+                  id="contact-channel"
+                  name="contact_channel"
+                  type="text"
+                  placeholder="Email / Telegram / Slack / Discord"
+                  required
+                />
+              </div>
+              <div class="field">
+                <label for="workspace-paths">Previous workspace folders</label>
+                <input
+                  id="workspace-paths"
+                  name="workspace_paths"
+                  type="text"
+                  placeholder="Comma-separated paths or workspace IDs"
+                  required
+                />
+              </div>
+              <div class="field full">
+                <label for="use-case">Primary tasks this agent should run</label>
+                <textarea
+                  id="use-case"
+                  name="use_case"
+                  placeholder="Describe target users, task types, and expected outputs."
+                  required
+                ></textarea>
+              </div>
+            </div>
+          </section>
+
+          <section class="form-card">
+            <h2>Uploads</h2>
+            <p>Select your skills and private data folders for deployment.</p>
+            <div class="upload-grid">
+              <article class="upload-box">
+                <h3>Skills files</h3>
+                <p>Upload skill files (e.g. .md, .json, .yaml, .zip).</p>
+                <input id="skills-files" name="skills_files" type="file" multiple required />
+                <div id="skills-meta" class="file-meta">No files selected.</div>
+                <div id="skills-list" class="file-list">
+                  <span class="empty-files">No files selected.</span>
+                </div>
+              </article>
+              <article class="upload-box">
+                <h3>Private data folders</h3>
+                <p>Choose one or more folders. Browser keeps relative paths via folder upload.</p>
+                <input
+                  id="private-data-files"
+                  name="private_data_files"
+                  type="file"
+                  webkitdirectory
+                  directory
+                  multiple
+                  required
+                />
+                <div id="private-meta" class="file-meta">No files selected.</div>
+                <div id="private-list" class="file-list">
+                  <span class="empty-files">No files selected.</span>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="form-card">
+            <div class="env-header">
+              <div>
+                <h2>Environment Keys</h2>
+                <p>Add env key name + value pairs for the requested deployment.</p>
+              </div>
+              <button id="add-env-row" type="button" class="ghost-btn">Add env key</button>
+            </div>
+            <div id="env-list" class="env-list"></div>
+            <p class="env-help">
+              Format rule: key must match <code>[A-Z][A-Z0-9_]*</code>. Example:
+              <code>OPENAI_API_KEY</code>.
+            </p>
+          </section>
+
+          <section class="form-card">
+            <h2>Review &amp; Send</h2>
+            <p>
+              Submitting starts DoWhiz deployment intake immediately.
+            </p>
+            <div class="checklist">
+              <label class="check">
+                <input id="confirm-ownership" type="checkbox" required />
+                <span>I confirm I am allowed to share these files and secrets for DoWhiz deployment.</span>
+              </label>
+              <label class="check">
+                <input id="confirm-mvp" type="checkbox" required />
+                <span>I understand provisioning may take up to 24 hours after submission.</span>
+              </label>
+            </div>
+            <div class="actions">
+              <button id="submit-btn" class="submit-btn" type="submit">
+                Start OpenClaw Deployment
+              </button>
+              <button id="reset-btn" class="ghost-btn" type="button">Reset form</button>
+              <span id="status-line" class="status-line" aria-live="polite"></span>
+            </div>
+          </section>
+        </form>
+      </main>
+
+      <footer class="page-footer">
+        <a class="back-link" href="/">Back to DoWhiz</a>
+        <span>Need help? Visit the Help Center.</span>
+      </footer>
+    </div>
+
+    <script>
+      (function () {
+        const MAX_TOTAL_UPLOAD_BYTES = 10 * 1024 * 1024;
+        const API_BASE_URL =
+          window.location.hostname === 'localhost'
+            ? 'http://localhost:9001'
+            : 'https://api.production1.dowhiz.com/service';
+        const DEPLOY_ENDPOINT = `${API_BASE_URL}/api/agent-market/deploy`;
+
+        const form = document.getElementById('agent-market-form');
+        const submitBtn = document.getElementById('submit-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const statusLine = document.getElementById('status-line');
+        const addEnvRowBtn = document.getElementById('add-env-row');
+        const envList = document.getElementById('env-list');
+
+        const skillsInput = document.getElementById('skills-files');
+        const privateInput = document.getElementById('private-data-files');
+        const skillsMeta = document.getElementById('skills-meta');
+        const privateMeta = document.getElementById('private-meta');
+        const skillsList = document.getElementById('skills-list');
+        const privateList = document.getElementById('private-list');
+
+        function setStatus(message, type) {
+          statusLine.textContent = message || '';
+          statusLine.className = 'status-line';
+          if (type) {
+            statusLine.classList.add(type);
+          }
+        }
+
+        function formatBytes(bytes) {
+          if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
+          const units = ['B', 'KB', 'MB', 'GB'];
+          let value = bytes;
+          let idx = 0;
+          while (value >= 1024 && idx < units.length - 1) {
+            value /= 1024;
+            idx += 1;
+          }
+          return `${value.toFixed(value >= 100 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+        }
+
+        function toArray(input) {
+          return Array.from(input?.files || []);
+        }
+
+        function renderFileList(files, metaElement, listElement) {
+          if (!files.length) {
+            metaElement.textContent = 'No files selected.';
+            listElement.innerHTML = '<span class="empty-files">No files selected.</span>';
+            return;
+          }
+
+          const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+          metaElement.textContent = `${files.length} file(s) selected, total ${formatBytes(totalSize)}.`;
+          listElement.innerHTML = '';
+          files.forEach((file) => {
+            const relativePath = file.webkitRelativePath || file.name;
+            const row = document.createElement('div');
+            row.className = 'file-item';
+            row.textContent = `${relativePath} (${formatBytes(file.size)})`;
+            listElement.appendChild(row);
+          });
+        }
+
+        function createEnvRow(defaults) {
+          const row = document.createElement('div');
+          row.className = 'env-row';
+          row.innerHTML = `
+            <input type="text" class="env-key" placeholder="KEY_NAME" required />
+            <input type="password" class="env-value" placeholder="Secret value" required />
+            <button type="button" class="toggle-env">Show</button>
+            <button type="button" class="remove-env">Remove</button>
+          `;
+          if (defaults?.key) {
+            row.querySelector('.env-key').value = defaults.key;
+          }
+          if (defaults?.value) {
+            row.querySelector('.env-value').value = defaults.value;
+          }
+          return row;
+        }
+
+        function initializeEnvRows() {
+          envList.innerHTML = '';
+          envList.appendChild(createEnvRow({ key: '', value: '' }));
+        }
+
+        function collectEnvEntries() {
+          const rows = Array.from(envList.querySelectorAll('.env-row'));
+          const entries = [];
+          const seen = new Set();
+
+          for (const row of rows) {
+            const keyInput = row.querySelector('.env-key');
+            const valueInput = row.querySelector('.env-value');
+            const keyRaw = (keyInput.value || '').trim();
+            const valueRaw = valueInput.value || '';
+
+            if (!keyRaw && !valueRaw) {
+              continue;
+            }
+            if (!keyRaw || !valueRaw) {
+              throw new Error('Each env row needs both key and value.');
+            }
+
+            const key = keyRaw.toUpperCase();
+            if (!/^[A-Z][A-Z0-9_]*$/.test(key)) {
+              throw new Error(`Invalid env key format: ${keyRaw}`);
+            }
+            if (seen.has(key)) {
+              throw new Error(`Duplicate env key: ${key}`);
+            }
+            seen.add(key);
+            entries.push({ key, value: valueRaw });
+          }
+
+          if (!entries.length) {
+            throw new Error('At least one env key is required.');
+          }
+          return entries;
+        }
+
+        function getFormValue(id) {
+          const element = document.getElementById(id);
+          return (element?.value || '').trim();
+        }
+
+        addEnvRowBtn.addEventListener('click', () => {
+          envList.appendChild(createEnvRow({ key: '', value: '' }));
+        });
+
+        envList.addEventListener('click', (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) {
+            return;
+          }
+          const row = target.closest('.env-row');
+          if (!row) {
+            return;
+          }
+
+          if (target.classList.contains('remove-env')) {
+            const rowCount = envList.querySelectorAll('.env-row').length;
+            if (rowCount <= 1) {
+              setStatus('At least one env row is required.', 'error');
+              return;
+            }
+            row.remove();
+            return;
+          }
+
+          if (target.classList.contains('toggle-env')) {
+            const valueInput = row.querySelector('.env-value');
+            if (!(valueInput instanceof HTMLInputElement)) {
+              return;
+            }
+            const shouldShow = valueInput.type === 'password';
+            valueInput.type = shouldShow ? 'text' : 'password';
+            target.textContent = shouldShow ? 'Hide' : 'Show';
+          }
+        });
+
+        skillsInput.addEventListener('change', () => {
+          renderFileList(toArray(skillsInput), skillsMeta, skillsList);
+        });
+
+        privateInput.addEventListener('change', () => {
+          renderFileList(toArray(privateInput), privateMeta, privateList);
+        });
+
+        resetBtn.addEventListener('click', () => {
+          form.reset();
+          initializeEnvRows();
+          renderFileList([], skillsMeta, skillsList);
+          renderFileList([], privateMeta, privateList);
+          setStatus('Form reset.');
+        });
+
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          setStatus('');
+
+          if (!form.reportValidity()) {
+            return;
+          }
+
+          const skillsFiles = toArray(skillsInput);
+          const privateFiles = toArray(privateInput);
+
+          if (!skillsFiles.length) {
+            setStatus('Upload at least one skills file.', 'error');
+            return;
+          }
+          if (!privateFiles.length) {
+            setStatus('Upload at least one private data folder/file.', 'error');
+            return;
+          }
+
+          const combinedBytes = [...skillsFiles, ...privateFiles].reduce(
+            (sum, file) => sum + file.size,
+            0
+          );
+          if (combinedBytes > MAX_TOTAL_UPLOAD_BYTES) {
+            setStatus(
+              `Total upload size ${formatBytes(combinedBytes)} exceeds limit ${formatBytes(
+                MAX_TOTAL_UPLOAD_BYTES
+              )}.`,
+              'error'
+            );
+            return;
+          }
+
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Submitting...';
+
+          try {
+            const envKeys = collectEnvEntries();
+            const formData = new FormData();
+            formData.append('full_name', getFormValue('full-name'));
+            formData.append('work_email', getFormValue('work-email'));
+            formData.append('team_name', getFormValue('team-name'));
+            formData.append('azure_region', getFormValue('region'));
+            formData.append('agent_name', getFormValue('agent-name'));
+            formData.append('wallet_id', getFormValue('wallet-id'));
+            formData.append('contact_channel', getFormValue('contact-channel'));
+            formData.append('workspace_paths', getFormValue('workspace-paths'));
+            formData.append('use_case', getFormValue('use-case'));
+            formData.append('env_keys_json', JSON.stringify(envKeys));
+
+            skillsFiles.forEach((file) => {
+              const fileName = file.webkitRelativePath || file.name;
+              formData.append('skills_files', file, fileName);
+            });
+            privateFiles.forEach((file) => {
+              const fileName = file.webkitRelativePath || file.name;
+              formData.append('private_data_files', file, fileName);
+            });
+
+            setStatus('Uploading package and starting deployment intake...');
+            const response = await fetch(DEPLOY_ENDPOINT, {
+              method: 'POST',
+              body: formData
+            });
+
+            let responsePayload = null;
+            try {
+              responsePayload = await response.json();
+            } catch (parseError) {
+              responsePayload = null;
+            }
+
+            if (!response.ok) {
+              const errorMessage =
+                responsePayload?.error ||
+                'Deployment intake is temporarily unavailable. Please retry in a few minutes.';
+              throw new Error(errorMessage);
+            }
+
+            const requestId = responsePayload?.request_id;
+            const etaHours = responsePayload?.eta_hours || 24;
+            const requestSuffix = requestId ? ` (request: ${requestId})` : '';
+            setStatus(
+              `Deployment request accepted${requestSuffix}. Provisioning is in progress and is usually ready within ${etaHours} hours.`,
+              'success'
+            );
+          } catch (error) {
+            const message =
+              error instanceof Error
+                ? error.message
+                : 'Failed to submit deployment request. Please retry.';
+            setStatus(message, 'error');
+          } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Start OpenClaw Deployment';
+          }
+        });
+
+        initializeEnvRows();
+      })();
+    </script>
+  </body>
+</html>
