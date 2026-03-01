@@ -87,6 +87,14 @@ fn has_discord_routes(config: &GatewayConfig) -> bool {
             .any(|route| route.channel == Channel::Discord)
 }
 
+fn should_enqueue_discord_message(
+    is_direct_message: bool,
+    is_mention: bool,
+    is_reply_to_bot: bool,
+) -> bool {
+    is_direct_message || is_mention || is_reply_to_bot
+}
+
 pub(super) async fn spawn_discord_gateway(state: Arc<GatewayState>) {
     if !has_discord_routes(&state.config) {
         info!("discord gateway: no Discord routes configured, skipping");
@@ -202,6 +210,18 @@ mod tests {
 
         assert!(has_discord_routes(&config));
     }
+
+    #[test]
+    fn should_enqueue_discord_message_allows_direct_messages_without_mentions() {
+        assert!(should_enqueue_discord_message(true, false, false));
+    }
+
+    #[test]
+    fn should_enqueue_discord_message_requires_signal_in_guild_channels() {
+        assert!(!should_enqueue_discord_message(false, false, false));
+        assert!(should_enqueue_discord_message(false, true, false));
+        assert!(should_enqueue_discord_message(false, false, true));
+    }
 }
 
 struct DiscordIngressState {
@@ -242,8 +262,11 @@ impl serenity::all::EventHandler for DiscordIngressHandler {
             .as_ref()
             .map(|ref_msg| self.inner.bot_user_ids.contains(&ref_msg.author.id.get()))
             .unwrap_or(false);
+        let is_direct_message = msg.guild_id.is_none();
 
-        if !is_mention && !is_reply_to_bot {
+        // In DMs, users typically send plain text without mentioning the bot.
+        // Mention/reply gating is only needed in guild channels.
+        if !should_enqueue_discord_message(is_direct_message, is_mention, is_reply_to_bot) {
             return;
         }
 
@@ -254,8 +277,11 @@ impl serenity::all::EventHandler for DiscordIngressHandler {
         };
 
         info!(
-            "discord gateway routing message to employee={} (bot was mentioned/replied)",
-            self.inner.employee_id
+            "discord gateway routing message to employee={} (dm={}, mention={}, reply_to_bot={})",
+            self.inner.employee_id,
+            is_direct_message,
+            is_mention,
+            is_reply_to_bot
         );
 
         let external_message_id = inbound.message_id.clone();
