@@ -966,7 +966,7 @@ function App() {
         {/* Navigation */}
         <nav className="navbar">
           <div className="container nav-content">
-            <a href="#" className="logo">Do<span className="text-gradient">Whiz</span></a>
+            <a href="/" className="logo">Do<span className="text-gradient">Whiz</span></a>
             <div className="nav-links">
               <a href="#roles" className="nav-btn">Team</a>
               <a href="#how-it-works" className="nav-btn">How it works</a>
@@ -997,7 +997,8 @@ function App() {
                 </a>
                 {user ? (
                   <div className="user-menu-container" ref={userMenuRef}>
-                    <div
+                    <button
+                      type="button"
                       className="user-profile-btn"
                       onClick={() => setShowUserMenu(!showUserMenu)}
                       aria-label={user.user_metadata?.full_name || user.email || 'User menu'}
@@ -1008,7 +1009,7 @@ function App() {
                         alt={user.user_metadata?.full_name || user.email}
                         className="user-avatar"
                       />
-                    </div>
+                    </button>
                     {showUserMenu && (
                       <div className="user-dropdown">
                         <a
@@ -1062,8 +1063,11 @@ function App() {
               Run Work Across Your Tools<br />
               <span className="text-gradient">with Multi-Channel Digital Employees</span>
             </h1>
-            <p className="hero-subtitle">
+            <p className="hero-subtitle hero-subtitle-desktop">
               Collaborate with <a href="#roles" className="role-link">Oliver 🧸</a> (Generalist), <a href="#roles" className="role-link">Maggie 🐭</a> (TPM), <a href="#roles" className="role-link">Devin 🐙</a> (Coder), <a href="#roles" className="role-link">Lumio 🐉</a> (CEO), <a href="#roles" className="role-link">Claw 🦞</a> (Workflow Specialist), <a href="#roles" className="role-link">Jeffery 🐦</a> (DeepTutor), <a href="#roles" className="role-link">Anna 🐘</a> (Role Design), and <a href="#roles" className="role-link">Rachel 👾</a> (GTM Specialist), each focused on different functions and connected by shared memory.
+            </p>
+            <p className="hero-subtitle hero-subtitle-mobile">
+              Collaborate with specialized digital employees across operations, delivery, coding, docs, and GTM, all connected by shared memory.
             </p>
             <div className="hero-cta">
               <a className="btn btn-primary" href={WAITLIST_FORM_URL} target="_blank" rel="noopener noreferrer">
