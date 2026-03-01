@@ -1,3 +1,4 @@
+pub mod agent_market;
 pub mod auth;
 mod config;
 mod email;

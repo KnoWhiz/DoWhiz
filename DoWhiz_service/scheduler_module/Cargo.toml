@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = "0.7"
+axum = { version = "0.7", features = ["multipart"] }
 azure_core = { version = "0.21", features = ["enable_reqwest"] }
 azure_messaging_servicebus = "0.21"
 azure_storage = "0.20"
