@@ -82,7 +82,7 @@ pub(super) fn build_prompt(
 Account Registration Notice:
 - This user does not have a DoWhiz unified account linked.
 - At the END of your reply (after completing the task), add a brief note like:
-  "💡 Tip: Link your DoWhiz account to sync your preferences and project info across all channels (email, Google Docs, Slack, etc.). Visit https://dowhiz.com/link to get started."
+  "💡 Tip: Link your DoWhiz account to sync your preferences and project info across all channels (email, Google Docs, Slack, etc.). Visit https://www.dowhiz.com/auth/index.html to get started."
 - Only mention this once - do not repeat in subsequent messages.
 "#
     } else {
@@ -322,7 +322,7 @@ mod tests {
         );
 
         assert!(prompt.contains("Account Registration Notice"));
-        assert!(prompt.contains("dowhiz.com/link"));
+        assert!(prompt.contains("www.dowhiz.com/auth/index.html"));
 
         // Second call should NOT include the notice (already prompted)
         let prompt2 = build_prompt(
