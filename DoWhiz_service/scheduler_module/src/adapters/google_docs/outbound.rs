@@ -994,6 +994,113 @@ impl GoogleDocsOutboundAdapter {
         );
         Ok(())
     }
+
+    /// Insert an inline image at a specific index in the document.
+    ///
+    /// The image URL must be publicly accessible. For private images, first upload
+    /// to Google Cloud Storage or Azure Blob and use a signed URL.
+    ///
+    /// # Arguments
+    /// * `document_id` - The Google Docs document ID
+    /// * `image_url` - Publicly accessible URL to the image
+    /// * `index` - The document index where the image should be inserted
+    /// * `width_pt` - Optional width in points (72 points = 1 inch)
+    /// * `height_pt` - Optional height in points
+    ///
+    /// # Returns
+    /// The object ID of the inserted image
+    pub fn insert_image(
+        &self,
+        document_id: &str,
+        image_url: &str,
+        index: i64,
+        width_pt: Option<f64>,
+        height_pt: Option<f64>,
+    ) -> Result<String, AdapterError> {
+        let mut request = serde_json::json!({
+            "insertInlineImage": {
+                "uri": image_url,
+                "location": {
+                    "index": index
+                }
+            }
+        });
+
+        // Add objectSize if dimensions are specified
+        if width_pt.is_some() || height_pt.is_some() {
+            let mut size = serde_json::Map::new();
+            if let Some(w) = width_pt {
+                size.insert(
+                    "width".to_string(),
+                    serde_json::json!({ "magnitude": w, "unit": "PT" }),
+                );
+            }
+            if let Some(h) = height_pt {
+                size.insert(
+                    "height".to_string(),
+                    serde_json::json!({ "magnitude": h, "unit": "PT" }),
+                );
+            }
+            request["insertInlineImage"]["objectSize"] = serde_json::Value::Object(size);
+        }
+
+        self.apply_document_edit(document_id, vec![request])?;
+
+        info!(
+            "Inserted image from {} at index {} in document {}",
+            image_url, index, document_id
+        );
+
+        // Note: Google Docs API doesn't return the object ID for inserted images
+        // in the batchUpdate response. We return a placeholder.
+        Ok(format!("image_at_index_{}", index))
+    }
+
+    /// Insert an image after a specific text anchor.
+    ///
+    /// Finds the specified text in the document and inserts the image right after it.
+    pub fn insert_image_after_text(
+        &self,
+        document_id: &str,
+        image_url: &str,
+        after_text: &str,
+        width_pt: Option<f64>,
+        height_pt: Option<f64>,
+    ) -> Result<String, AdapterError> {
+        let position = self.find_text_position(document_id, after_text)?;
+
+        let (_, end_idx) = position.ok_or_else(|| {
+            AdapterError::SendError(format!("Anchor text not found: '{}'", after_text))
+        })?;
+
+        self.insert_image(document_id, image_url, end_idx, width_pt, height_pt)
+    }
+
+    /// Get the end index of the document (for appending content).
+    pub fn get_document_end_index(&self, document_id: &str) -> Result<i64, AdapterError> {
+        let doc = self.get_document_structure(document_id)?;
+
+        // The body.content array has the document content
+        // The last element's endIndex gives us the document end
+        let body = doc
+            .get("body")
+            .and_then(|b| b.get("content"))
+            .and_then(|c| c.as_array())
+            .ok_or_else(|| AdapterError::ParseError("Invalid document structure".to_string()))?;
+
+        // Find the maximum endIndex
+        let mut max_index = 1i64; // Documents start at index 1
+        for element in body {
+            if let Some(end_idx) = element.get("endIndex").and_then(|i| i.as_i64()) {
+                if end_idx > max_index {
+                    max_index = end_idx;
+                }
+            }
+        }
+
+        // Subtract 1 because the endIndex is exclusive
+        Ok(max_index - 1)
+    }
 }
 
 impl OutboundAdapter for GoogleDocsOutboundAdapter {

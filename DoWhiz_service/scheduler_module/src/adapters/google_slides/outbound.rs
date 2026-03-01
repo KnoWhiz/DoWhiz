@@ -212,6 +212,83 @@ impl GoogleSlidesOutboundAdapter {
         Ok(())
     }
 
+    /// Insert an image into a slide.
+    ///
+    /// The image URL must be publicly accessible. For private images, first upload
+    /// to Google Cloud Storage or Azure Blob and use a signed URL.
+    ///
+    /// Constraints:
+    /// - Image must be < 50MB
+    /// - Image must be < 25 megapixels
+    /// - Supported formats: PNG, JPEG, GIF
+    pub fn insert_image(
+        &self,
+        presentation_id: &str,
+        image_url: &str,
+        page_id: &str,
+        x_pt: f64,
+        y_pt: f64,
+        width_pt: Option<f64>,
+        height_pt: Option<f64>,
+    ) -> Result<String, AdapterError> {
+        // Generate a unique object ID for the image
+        let object_id = format!("img_{}", uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string());
+
+        // Convert points to EMU (English Metric Units) - Google Slides uses EMU
+        // 1 point = 914400 / 72 EMU = 12700 EMU
+        let emu_per_pt = 12700.0;
+
+        let translate_x = (x_pt * emu_per_pt) as i64;
+        let translate_y = (y_pt * emu_per_pt) as i64;
+
+        let mut request = serde_json::json!({
+            "createImage": {
+                "objectId": object_id,
+                "url": image_url,
+                "elementProperties": {
+                    "pageObjectId": page_id,
+                    "transform": {
+                        "scaleX": 1.0,
+                        "scaleY": 1.0,
+                        "translateX": translate_x,
+                        "translateY": translate_y,
+                        "unit": "EMU"
+                    }
+                }
+            }
+        });
+
+        // Add size if specified
+        if let (Some(w), Some(h)) = (width_pt, height_pt) {
+            let width_emu = (w * emu_per_pt) as i64;
+            let height_emu = (h * emu_per_pt) as i64;
+            request["createImage"]["elementProperties"]["size"] = serde_json::json!({
+                "width": { "magnitude": width_emu, "unit": "EMU" },
+                "height": { "magnitude": height_emu, "unit": "EMU" }
+            });
+        }
+
+        let response = self.batch_update(presentation_id, vec![request])?;
+
+        // Extract the created image ID from response
+        let created_id = response
+            .get("replies")
+            .and_then(|r| r.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|reply| reply.get("createImage"))
+            .and_then(|ci| ci.get("objectId"))
+            .and_then(|id| id.as_str())
+            .unwrap_or(&object_id)
+            .to_string();
+
+        info!(
+            "Inserted image {} into slide {} of presentation {}",
+            created_id, page_id, presentation_id
+        );
+
+        Ok(created_id)
+    }
+
     /// Get presentation metadata.
     pub fn get_presentation(
         &self,

@@ -222,6 +222,69 @@ google-docs insert-text <document_id> --after="anchor text" --text="text to inse
 google-docs delete-text <document_id> --find="text to delete"
 ```
 
+### Insert Images
+
+#### Image Search (Unsplash)
+
+Search for stock images to insert into documents:
+
+```bash
+# Search for images
+google-docs search-image --query="professional workspace" --count=5
+
+# Filter by orientation
+google-docs search-image --query="nature landscape" --orientation=landscape
+google-docs search-image --query="person portrait" --orientation=portrait
+```
+
+The search returns image URLs that can be used directly with `insert-image`.
+
+**Orientations:**
+- `landscape` - Wide images (good for full-width document images)
+- `portrait` - Tall images (good for sidebar or profile photos)
+- `squarish` - Square-ish images (good for icons, thumbnails)
+
+#### Insert Image Commands
+
+```bash
+# Insert image after specific text
+google-docs insert-image <document_id> --url="https://example.com/image.png" --after="anchor text"
+
+# Insert image at specific index position
+google-docs insert-image <document_id> --url="https://example.com/image.png" --index=50
+
+# Insert image at end of document (default if no --after or --index specified)
+google-docs insert-image <document_id> --url="https://example.com/image.png"
+
+# Insert image with specific dimensions (in points, 72pt = 1 inch)
+google-docs insert-image <document_id> --url="https://..." --after="Chapter 1" --width=300 --height=200
+```
+
+#### Recommended Workflow
+
+1. **Search for relevant images:**
+   ```bash
+   google-docs search-image --query="team collaboration" --orientation=landscape
+   ```
+
+2. **Choose an image and copy its URL from the search results**
+
+3. **Insert the image after relevant content:**
+   ```bash
+   google-docs insert-image <doc_id> --url="<URL>" --after="Team Overview" --width=400
+   ```
+
+**Image Requirements:**
+- URL must be **publicly accessible** (Google Docs fetches the image from the URL)
+- For private images: Upload to Azure Blob Storage with SAS URL or Google Cloud Storage with signed URL
+- Supported formats: PNG, JPEG, GIF, BMP
+- Image size: Keep reasonable (< 10MB recommended)
+
+**Image Placement Tips:**
+- Use `--after` to place images near related content
+- Common image widths: 200pt (small), 300pt (medium), 400pt (large), 500pt (full-width)
+- Images are inserted inline with text flow
+
 ### Suggesting Mode Operations
 
 ```bash
