@@ -9,7 +9,7 @@ use super::constants::{
     CODEX_SANDBOX_MODE, DOCKER_CODEX_HOME_DIR, DOCKER_WORKSPACE_DIR,
 };
 use super::docker::{docker_cli_available, ensure_docker_image_available};
-use super::env::{env_enabled, read_env_list, read_env_trimmed};
+use super::env::{env_enabled, normalize_env_prefix, read_env_list, read_env_trimmed};
 use super::errors::RunTaskError;
 use super::github_auth::{ensure_github_cli_auth, resolve_github_auth};
 use super::prompt::{build_prompt, load_memory_context};
@@ -17,6 +17,31 @@ use super::scheduled::{extract_scheduled_tasks, extract_scheduler_actions};
 use super::types::{RunTaskOutput, RunTaskRequest, TokenUsage};
 use super::utils::{run_command_with_timeout, run_task_timeout, tail_string};
 use super::workspace::{canonicalize_dir, workspace_path_in_container};
+
+const PAYMENT_ENV_KEYS: &[&str] = &[
+    "GOATX402_API_URL",
+    "GOATX402_MERCHANT_ID",
+    "GOATX402_API_KEY",
+    "GOATX402_API_SECRET",
+    "GOATX402_WALLET_ADDRESS",
+    "GOATX402_AGENT_ID",
+    "GOATX402_CHAIN_ID",
+    "GOATX402_RPC_URL",
+    "GOATX402_EXPLORER_URL",
+    "GOATX402_USDC_ADDRESS",
+    "GOATX402_USDT_ADDRESS",
+    "GOAT_WALLET_ADDRESS",
+    "GOAT_AGENT_ID",
+    "GOAT_CHAIN_ID",
+    "GOAT_RPC_URL",
+    "GOAT_EXPLORER_URL",
+    "GOAT_USDC_ADDRESS",
+    "GOAT_USDT_ADDRESS",
+    "X402_API_URL",
+    "X402_MERCHANT_ID",
+    "X402_API_KEY",
+    "X402_API_SECRET",
+];
 
 pub(super) fn run_codex_task(
     request: RunTaskRequest<'_>,
@@ -93,6 +118,7 @@ pub(super) fn run_codex_task(
         ensure_codex_config(request.workspace_dir)?;
     }
     ensure_github_cli_auth(&github_auth)?;
+    let payment_env_overrides = collect_payment_env_overrides();
 
     let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
     let prompt = build_prompt(
@@ -166,6 +192,9 @@ pub(super) fn run_codex_task(
                     e
                 );
             }
+        }
+        for (key, value) in &payment_env_overrides {
+            cmd.arg("-e").arg(format!("{}={}", key, value));
         }
         for (key, value) in &github_auth.env_overrides {
             cmd.arg("-e").arg(format!("{}={}", key, value));
@@ -268,6 +297,9 @@ pub(super) fn run_codex_task(
                     e
                 );
             }
+        }
+        for (key, value) in &payment_env_overrides {
+            cmd.env(key, value);
         }
         for (key, value) in github_auth.env_overrides {
             cmd.env(key, value);
@@ -389,6 +421,47 @@ fn codex_bypass_sandbox() -> bool {
     matches!(env::var("CODEX_BYPASS_SANDBOX"), Ok(value) if value.trim() == "1")
 }
 
+fn employee_id_default_env_prefix(employee_id: &str) -> Option<&'static str> {
+    let normalized = employee_id.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "little_bear" => Some("OLIVER"),
+        "mini_mouse" => Some("MAGGIE"),
+        "sticky_octopus" => Some("DEVIN"),
+        "boiled_egg" => Some("PROTO"),
+        _ => None,
+    }
+}
+
+fn resolve_payment_env_prefix() -> Option<String> {
+    read_env_trimmed("EMPLOYEE_PAYMENT_ENV_PREFIX")
+        .or_else(|| read_env_trimmed("PAYMENT_ENV_PREFIX"))
+        .or_else(|| read_env_trimmed("EMPLOYEE_GITHUB_ENV_PREFIX"))
+        .or_else(|| read_env_trimmed("GITHUB_ENV_PREFIX"))
+        .or_else(|| {
+            read_env_trimmed("EMPLOYEE_ID").and_then(|id| {
+                employee_id_default_env_prefix(&id)
+                    .map(|value| value.to_string())
+                    .or_else(|| Some(normalize_env_prefix(&id)))
+            })
+        })
+}
+
+fn collect_payment_env_overrides() -> Vec<(String, String)> {
+    let prefix = resolve_payment_env_prefix();
+    PAYMENT_ENV_KEYS
+        .iter()
+        .filter_map(|key| {
+            read_env_trimmed(key)
+                .or_else(|| {
+                    prefix
+                        .as_ref()
+                        .and_then(|prefix| read_env_trimmed(&format!("{}_{}", prefix, key)))
+                })
+                .map(|value| ((*key).to_string(), value))
+        })
+        .collect()
+}
+
 fn codex_add_dirs(workspace_dir: &Path, use_docker: bool) -> Result<Vec<String>, RunTaskError> {
     let mut add_dirs = Vec::new();
     if use_docker {
@@ -467,6 +540,50 @@ fn extract_token_usage(output: &str) -> Option<TokenUsage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+    }
+
+    struct EnvVarGuard {
+        key: String,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &str, value: &str) -> Self {
+            let previous = env::var(key).ok();
+            env::set_var(key, value);
+            Self {
+                key: key.to_string(),
+                previous,
+            }
+        }
+
+        fn unset(key: &str) -> Self {
+            let previous = env::var(key).ok();
+            env::remove_var(key);
+            Self {
+                key: key.to_string(),
+                previous,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.take() {
+                env::set_var(&self.key, previous);
+            } else {
+                env::remove_var(&self.key);
+            }
+        }
+    }
 
     #[test]
     fn test_extract_token_usage_success() {
@@ -522,5 +639,44 @@ mod tests {
         let usage = usage.unwrap();
         assert_eq!(usage.input_tokens, 1000);
         assert_eq!(usage.output_tokens, 50);
+    }
+
+    #[test]
+    fn test_collect_payment_env_overrides_uses_employee_prefix_fallback() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset("GOATX402_API_URL"),
+            EnvVarGuard::unset("GOATX402_API_KEY"),
+            EnvVarGuard::unset("EMPLOYEE_PAYMENT_ENV_PREFIX"),
+            EnvVarGuard::unset("PAYMENT_ENV_PREFIX"),
+            EnvVarGuard::unset("EMPLOYEE_GITHUB_ENV_PREFIX"),
+            EnvVarGuard::unset("GITHUB_ENV_PREFIX"),
+            EnvVarGuard::set("EMPLOYEE_ID", "little_bear"),
+            EnvVarGuard::set("OLIVER_GOATX402_API_URL", "https://example.x402.test"),
+            EnvVarGuard::set("OLIVER_GOATX402_API_KEY", "api-key-prefixed"),
+        ];
+
+        let overrides = collect_payment_env_overrides();
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "GOATX402_API_URL" && v == "https://example.x402.test"));
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "GOATX402_API_KEY" && v == "api-key-prefixed"));
+    }
+
+    #[test]
+    fn test_collect_payment_env_overrides_prefers_unprefixed_values() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set("EMPLOYEE_PAYMENT_ENV_PREFIX", "OLIVER"),
+            EnvVarGuard::set("GOATX402_API_KEY", "api-key-global"),
+            EnvVarGuard::set("OLIVER_GOATX402_API_KEY", "api-key-prefixed"),
+        ];
+
+        let overrides = collect_payment_env_overrides();
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "GOATX402_API_KEY" && v == "api-key-global"));
     }
 }

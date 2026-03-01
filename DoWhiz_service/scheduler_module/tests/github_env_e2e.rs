@@ -174,6 +174,55 @@ mkdir -p reply_email_attachments
     Ok(())
 }
 
+fn write_fake_codex_x402(bin_dir: &Path) -> io::Result<()> {
+    let script = r#"#!/bin/sh
+set -e
+check_env() {
+  key="$1"
+  eval "value=\${$key}"
+  if [ -z "$value" ]; then
+    echo "missing $key" >&2
+    exit 3
+  fi
+}
+check_exact_env() {
+  key="$1"
+  expected_key="EXPECTED_${key}"
+  eval "expected=\${$expected_key}"
+  if [ -n "$expected" ]; then
+    eval "actual=\${$key}"
+    if [ "$actual" != "$expected" ]; then
+      echo "unexpected $key: expected '$expected' got '$actual'" >&2
+      exit 3
+    fi
+  fi
+}
+check_env "GOATX402_API_URL"
+check_env "GOATX402_MERCHANT_ID"
+check_env "GOATX402_API_KEY"
+check_env "GOATX402_API_SECRET"
+check_exact_env "GOATX402_API_URL"
+check_exact_env "GOATX402_MERCHANT_ID"
+check_exact_env "GOATX402_API_KEY"
+check_exact_env "GOATX402_API_SECRET"
+cat > reply_email_draft.html <<EOF
+<html><body>x402 route ready</body></html>
+EOF
+mkdir -p reply_email_attachments
+echo "mock_tx_hash=0xabc123" > reply_email_attachments/x402_receipt.txt
+"#;
+    let path = bin_dir.join("codex");
+    fs::write(&path, script)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&path)?.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms)?;
+    }
+    Ok(())
+}
+
 fn write_fake_gh(bin_dir: &Path) -> io::Result<()> {
     let script = r#"#!/bin/sh
 set -e
@@ -477,6 +526,316 @@ fn email_flow_injects_employee_github_env() {
     assert!(
         workspace.join("reply_email_draft.html").exists(),
         "reply draft should be written"
+    );
+
+    let errors = executor
+        .errors
+        .lock()
+        .expect("errors lock poisoned")
+        .clone();
+    assert!(errors.is_empty(), "expected no executor errors");
+}
+
+#[test]
+fn email_flow_injects_x402_env() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path();
+    let users_root = root.join("users");
+    let state_root = root.join("state");
+    let bin_root = root.join("bin");
+    let home_root = root.join("home");
+    fs::create_dir_all(&users_root).expect("users root");
+    fs::create_dir_all(&state_root).expect("state root");
+    fs::create_dir_all(&bin_root).expect("bin root");
+    fs::create_dir_all(&home_root).expect("home root");
+
+    fs::write(
+        root.join(".env"),
+        "GOATX402_API_URL=https://x402-api.example.test\nGOATX402_MERCHANT_ID=dowhiz_agent\nGOATX402_API_KEY=key_direct\nGOATX402_API_SECRET=secret_direct\n",
+    )
+    .expect("write .env");
+
+    write_fake_codex_x402(&bin_root).expect("write fake codex");
+    write_fake_gh(&bin_root).expect("write fake gh");
+
+    let _unset_guard = EnvUnsetGuard::remove(&[
+        "GOATX402_API_URL",
+        "GOATX402_MERCHANT_ID",
+        "GOATX402_API_KEY",
+        "GOATX402_API_SECRET",
+        "OLIVER_GOATX402_API_URL",
+        "OLIVER_GOATX402_MERCHANT_ID",
+        "OLIVER_GOATX402_API_KEY",
+        "OLIVER_GOATX402_API_SECRET",
+        "EMPLOYEE_PAYMENT_ENV_PREFIX",
+        "PAYMENT_ENV_PREFIX",
+    ]);
+    let original_path = env::var("PATH").unwrap_or_default();
+    let path_value = format!("{}:{}", bin_root.display(), original_path);
+    let _path_guard = EnvGuard::set("PATH", path_value);
+    let _api_guard = EnvGuard::set("AZURE_OPENAI_API_KEY_BACKUP", "test-key");
+    let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");
+    let _home_guard = EnvGuard::set("HOME", &home_root);
+    let _expected_url_guard =
+        EnvGuard::set("EXPECTED_GOATX402_API_URL", "https://x402-api.example.test");
+    let _expected_merchant_guard = EnvGuard::set("EXPECTED_GOATX402_MERCHANT_ID", "dowhiz_agent");
+    let _expected_key_guard = EnvGuard::set("EXPECTED_GOATX402_API_KEY", "key_direct");
+    let _expected_secret_guard = EnvGuard::set("EXPECTED_GOATX402_API_SECRET", "secret_direct");
+
+    let _docker_guard = EnvUnsetGuard::remove(&[
+        "RUN_TASK_DOCKER_IMAGE",
+        "RUN_TASK_USE_DOCKER",
+        "RUN_TASK_DOCKERFILE",
+        "RUN_TASK_DOCKER_AUTO_BUILD",
+        "RUN_TASK_DOCKER_REQUIRED",
+        "RUN_TASK_DOCKER_BUILD_CONTEXT",
+        "RUN_TASK_DOCKER_NETWORK",
+        "RUN_TASK_DOCKER_DNS",
+        "RUN_TASK_DOCKER_DNS_SEARCH",
+    ]);
+    let Some(ingestion_db_url) =
+        test_support::require_supabase_db_url("email_flow_injects_x402_env")
+    else {
+        return;
+    };
+    let (employee_profile, employee_directory) = test_employee_directory();
+    let config = ServiceConfig {
+        host: "127.0.0.1".to_string(),
+        port: 0,
+        employee_id: employee_profile.id.clone(),
+        employee_config_path: root.join("employee.toml"),
+        employee_profile,
+        employee_directory,
+        workspace_root: root.join("workspaces"),
+        scheduler_state_path: state_root.join("tasks.db"),
+        processed_ids_path: state_root.join("processed_ids.txt"),
+        ingestion_db_url,
+        ingestion_poll_interval: Duration::from_millis(50),
+        users_root: users_root.clone(),
+        users_db_path: state_root.join("users.db"),
+        task_index_path: state_root.join("task_index.db"),
+        codex_model: "gpt-5.3-codex".to_string(),
+        codex_disabled: false,
+        scheduler_poll_interval: Duration::from_millis(50),
+        scheduler_max_concurrency: 1,
+        scheduler_user_max_concurrency: 1,
+        inbound_body_max_bytes: DEFAULT_INBOUND_BODY_MAX_BYTES,
+        skills_source_dir: None,
+        slack_bot_token: None,
+        slack_bot_user_id: None,
+        slack_store_path: state_root.join("slack.db"),
+        slack_client_id: None,
+        slack_client_secret: None,
+        slack_redirect_uri: None,
+        discord_bot_token: None,
+        discord_bot_user_id: None,
+        google_docs_enabled: false,
+        bluebubbles_url: None,
+        bluebubbles_password: None,
+        telegram_bot_token: None,
+        whatsapp_access_token: None,
+        whatsapp_phone_number_id: None,
+        whatsapp_verify_token: None,
+    };
+
+    let user_store = UserStore::new(&config.users_db_path).expect("user store");
+    let index_store = IndexStore::new(&config.task_index_path).expect("index store");
+
+    let inbound_raw = r#"{
+  "From": "Alice <alice@example.com>",
+  "To": "Service <service@example.com>",
+  "Subject": "Need x402 paid endpoint",
+  "TextBody": "Please wire x402 into the API route.",
+  "Headers": [{"Name": "Message-ID", "Value": "<msg-x402-1@example.com>"}]
+}"#;
+    let payload: PostmarkInbound = serde_json::from_str(inbound_raw).expect("parse inbound");
+    process_inbound_payload(
+        &config,
+        &user_store,
+        &index_store,
+        &payload,
+        inbound_raw.as_bytes(),
+    )
+    .expect("process inbound");
+
+    let user = user_store
+        .get_or_create_user("email", "alice@example.com")
+        .expect("user lookup");
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+
+    let executor = RecordingExecutor::default();
+    let mut scheduler =
+        Scheduler::load(&user_paths.tasks_db_path, executor.clone()).expect("load scheduler");
+    scheduler.tick().expect("tick run_task");
+
+    let workspace = first_workspace_dir(&user_paths.workspaces_root);
+    assert!(
+        workspace.join("reply_email_draft.html").exists(),
+        "reply draft should be written"
+    );
+    assert!(
+        workspace
+            .join("reply_email_attachments")
+            .join("x402_receipt.txt")
+            .exists(),
+        "x402 receipt should be written"
+    );
+
+    let errors = executor
+        .errors
+        .lock()
+        .expect("errors lock poisoned")
+        .clone();
+    assert!(errors.is_empty(), "expected no executor errors");
+}
+
+#[test]
+fn email_flow_injects_employee_prefixed_x402_env() {
+    let temp = TempDir::new().expect("tempdir");
+    let root = temp.path();
+    let users_root = root.join("users");
+    let state_root = root.join("state");
+    let bin_root = root.join("bin");
+    let home_root = root.join("home");
+    fs::create_dir_all(&users_root).expect("users root");
+    fs::create_dir_all(&state_root).expect("state root");
+    fs::create_dir_all(&bin_root).expect("bin root");
+    fs::create_dir_all(&home_root).expect("home root");
+
+    fs::write(
+        root.join(".env"),
+        "OLIVER_GOATX402_API_URL=https://x402-api-prefixed.example.test\nOLIVER_GOATX402_MERCHANT_ID=dowhiz_agent_prefixed\nOLIVER_GOATX402_API_KEY=key_prefixed\nOLIVER_GOATX402_API_SECRET=secret_prefixed\n",
+    )
+    .expect("write .env");
+
+    write_fake_codex_x402(&bin_root).expect("write fake codex");
+    write_fake_gh(&bin_root).expect("write fake gh");
+
+    let _unset_guard = EnvUnsetGuard::remove(&[
+        "GOATX402_API_URL",
+        "GOATX402_MERCHANT_ID",
+        "GOATX402_API_KEY",
+        "GOATX402_API_SECRET",
+        "OLIVER_GOATX402_API_URL",
+        "OLIVER_GOATX402_MERCHANT_ID",
+        "OLIVER_GOATX402_API_KEY",
+        "OLIVER_GOATX402_API_SECRET",
+        "EMPLOYEE_PAYMENT_ENV_PREFIX",
+        "PAYMENT_ENV_PREFIX",
+    ]);
+    let _employee_guard = EnvGuard::set("EMPLOYEE_ID", "little_bear");
+    let original_path = env::var("PATH").unwrap_or_default();
+    let path_value = format!("{}:{}", bin_root.display(), original_path);
+    let _path_guard = EnvGuard::set("PATH", path_value);
+    let _api_guard = EnvGuard::set("AZURE_OPENAI_API_KEY_BACKUP", "test-key");
+    let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");
+    let _home_guard = EnvGuard::set("HOME", &home_root);
+    let _expected_url_guard = EnvGuard::set(
+        "EXPECTED_GOATX402_API_URL",
+        "https://x402-api-prefixed.example.test",
+    );
+    let _expected_merchant_guard =
+        EnvGuard::set("EXPECTED_GOATX402_MERCHANT_ID", "dowhiz_agent_prefixed");
+    let _expected_key_guard = EnvGuard::set("EXPECTED_GOATX402_API_KEY", "key_prefixed");
+    let _expected_secret_guard = EnvGuard::set("EXPECTED_GOATX402_API_SECRET", "secret_prefixed");
+
+    let _docker_guard = EnvUnsetGuard::remove(&[
+        "RUN_TASK_DOCKER_IMAGE",
+        "RUN_TASK_USE_DOCKER",
+        "RUN_TASK_DOCKERFILE",
+        "RUN_TASK_DOCKER_AUTO_BUILD",
+        "RUN_TASK_DOCKER_REQUIRED",
+        "RUN_TASK_DOCKER_BUILD_CONTEXT",
+        "RUN_TASK_DOCKER_NETWORK",
+        "RUN_TASK_DOCKER_DNS",
+        "RUN_TASK_DOCKER_DNS_SEARCH",
+    ]);
+    let Some(ingestion_db_url) =
+        test_support::require_supabase_db_url("email_flow_injects_employee_prefixed_x402_env")
+    else {
+        return;
+    };
+    let (employee_profile, employee_directory) = test_employee_directory();
+    let config = ServiceConfig {
+        host: "127.0.0.1".to_string(),
+        port: 0,
+        employee_id: employee_profile.id.clone(),
+        employee_config_path: root.join("employee.toml"),
+        employee_profile,
+        employee_directory,
+        workspace_root: root.join("workspaces"),
+        scheduler_state_path: state_root.join("tasks.db"),
+        processed_ids_path: state_root.join("processed_ids.txt"),
+        ingestion_db_url,
+        ingestion_poll_interval: Duration::from_millis(50),
+        users_root: users_root.clone(),
+        users_db_path: state_root.join("users.db"),
+        task_index_path: state_root.join("task_index.db"),
+        codex_model: "gpt-5.3-codex".to_string(),
+        codex_disabled: false,
+        scheduler_poll_interval: Duration::from_millis(50),
+        scheduler_max_concurrency: 1,
+        scheduler_user_max_concurrency: 1,
+        inbound_body_max_bytes: DEFAULT_INBOUND_BODY_MAX_BYTES,
+        skills_source_dir: None,
+        slack_bot_token: None,
+        slack_bot_user_id: None,
+        slack_store_path: state_root.join("slack.db"),
+        slack_client_id: None,
+        slack_client_secret: None,
+        slack_redirect_uri: None,
+        discord_bot_token: None,
+        discord_bot_user_id: None,
+        google_docs_enabled: false,
+        bluebubbles_url: None,
+        bluebubbles_password: None,
+        telegram_bot_token: None,
+        whatsapp_access_token: None,
+        whatsapp_phone_number_id: None,
+        whatsapp_verify_token: None,
+    };
+
+    let user_store = UserStore::new(&config.users_db_path).expect("user store");
+    let index_store = IndexStore::new(&config.task_index_path).expect("index store");
+
+    let inbound_raw = r#"{
+  "From": "Alice <alice@example.com>",
+  "To": "Service <service@example.com>",
+  "Subject": "Need prefixed x402 env",
+  "TextBody": "Please run with employee-prefixed x402 keys.",
+  "Headers": [{"Name": "Message-ID", "Value": "<msg-x402-2@example.com>"}]
+}"#;
+    let payload: PostmarkInbound = serde_json::from_str(inbound_raw).expect("parse inbound");
+    process_inbound_payload(
+        &config,
+        &user_store,
+        &index_store,
+        &payload,
+        inbound_raw.as_bytes(),
+    )
+    .expect("process inbound");
+
+    let user = user_store
+        .get_or_create_user("email", "alice@example.com")
+        .expect("user lookup");
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+
+    let executor = RecordingExecutor::default();
+    let mut scheduler =
+        Scheduler::load(&user_paths.tasks_db_path, executor.clone()).expect("load scheduler");
+    scheduler.tick().expect("tick run_task");
+
+    let workspace = first_workspace_dir(&user_paths.workspaces_root);
+    assert!(
+        workspace.join("reply_email_draft.html").exists(),
+        "reply draft should be written"
+    );
+    assert!(
+        workspace
+            .join("reply_email_attachments")
+            .join("x402_receipt.txt")
+            .exists(),
+        "x402 receipt should be written"
     );
 
     let errors = executor

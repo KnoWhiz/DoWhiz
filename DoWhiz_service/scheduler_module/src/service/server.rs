@@ -20,6 +20,7 @@ use crate::user_store::UserStore;
 use crate::{ModuleExecutor, Scheduler};
 use tokio::task;
 
+use super::agent_market::{agent_market_router, AgentMarketState};
 use super::auth::{auth_router, AuthState};
 
 use super::config::ServiceConfig;
@@ -122,6 +123,7 @@ pub async fn run_server(
         user_store: Some(user_store.clone()),
         users_root: Some(config.users_root.clone()),
     };
+    let agent_market_state = AgentMarketState::from_env();
 
     let host: IpAddr = config
         .host
@@ -137,6 +139,7 @@ pub async fn run_server(
         .route("/slack/oauth/callback", get(slack_oauth_callback))
         .with_state(state)
         .merge(auth_router(auth_state))
+        .merge(agent_market_router(agent_market_state))
         .layer(DefaultBodyLimit::max(config.inbound_body_max_bytes))
         .layer(
             CorsLayer::new()
