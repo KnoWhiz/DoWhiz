@@ -775,9 +775,16 @@
                   </svg>
                   Connect Slack
                 </button>
+                <button id="github-connect-btn" class="auth-btn auth-btn-oauth" style="display: flex; align-items: center; gap: 0.5rem;">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 0C5.37 0 0 5.37 0 12a12 12 0 0 0 8.2 11.4c.6.1.8-.2.8-.6v-2.2c-3.3.7-4-1.4-4-1.4-.6-1.4-1.3-1.8-1.3-1.8-1.1-.8.1-.8.1-.8 1.2.1 1.9 1.3 1.9 1.3 1.1 1.9 2.9 1.3 3.6 1 .1-.8.4-1.3.8-1.7-2.7-.3-5.5-1.3-5.5-6a4.7 4.7 0 0 1 1.3-3.3c-.1-.3-.6-1.5.1-3.2 0 0 1-.3 3.4 1.3a11.7 11.7 0 0 1 6.2 0c2.4-1.6 3.4-1.3 3.4-1.3.7 1.7.2 2.9.1 3.2a4.7 4.7 0 0 1 1.3 3.3c0 4.7-2.8 5.7-5.5 6 .4.4.8 1 .8 2.1v3.1c0 .4.2.7.8.6A12 12 0 0 0 24 12C24 5.37 18.63 0 12 0z"/>
+                  </svg>
+                  Connect GitHub
+                </button>
               </div>
               <span id="discord-oauth-status" style="display: block; margin-top: 0.5rem; font-size: 0.9rem;"></span>
               <span id="slack-oauth-status" style="display: block; margin-top: 0.25rem; font-size: 0.9rem;"></span>
+              <span id="github-connect-status" style="display: block; margin-top: 0.25rem; font-size: 0.9rem;"></span>
             </section>
 
             <section class="legal-card dashboard-section">
@@ -789,6 +796,7 @@
                   <option value="phone">Phone (SMS)</option>
                   <option value="discord">Discord</option>
                   <option value="slack">Slack</option>
+                  <option value="github">GitHub</option>
                   <option value="telegram">Telegram</option>
                 </select>
                 <input type="text" id="link-identifier" class="auth-input" placeholder="e.g., you@example.com" required />
@@ -1478,6 +1486,25 @@
         window.history.replaceState({}, document.title, window.location.pathname);
       }
 
+      // GitHub manual connect shortcut button
+      document.getElementById('github-connect-btn').addEventListener('click', async () => {
+        const githubStatus = document.getElementById('github-connect-status');
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (!session) {
+          githubStatus.textContent = 'Please sign in first';
+          githubStatus.style.color = '#ef4444';
+          return;
+        }
+
+        updateLinkFormForChannel('github');
+        const identifierInput = document.getElementById('link-identifier');
+        identifierInput.value = '';
+        identifierInput.focus();
+        githubStatus.textContent = 'Enter your GitHub username below, then click "Link Channel".';
+        githubStatus.style.color = 'var(--text-muted, #888)';
+      });
+
       // Check for email verification token (from magic link in email)
       const verifyEmailToken = urlParams.get('verify_email');
       if (verifyEmailToken) {
@@ -1522,17 +1549,27 @@
           placeholder: 'e.g., U08ABC1D2EF',
           help: 'Enter your Slack Member ID. To find it: Click your profile picture → Profile → click the ⋮ menu → Copy member ID'
         },
+        github: {
+          placeholder: 'e.g., octocat',
+          help: 'Enter your GitHub username (without @). We recommend using lowercase to match GitHub notification routing.'
+        },
         telegram: {
           placeholder: 'e.g., 123456789',
           help: 'Enter your Telegram numeric user ID. To find it: Message @userinfobot on Telegram and it will reply with your ID'
         }
       };
 
-      // Update placeholder when channel type changes
-      document.getElementById('link-type').addEventListener('change', (e) => {
-        const info = channelInfo[e.target.value];
+      function updateLinkFormForChannel(channelType) {
+        const info = channelInfo[channelType];
+        if (!info) return;
+        document.getElementById('link-type').value = channelType;
         document.getElementById('link-identifier').placeholder = info.placeholder;
         document.getElementById('link-help').textContent = info.help;
+      }
+
+      // Update placeholder when channel type changes
+      document.getElementById('link-type').addEventListener('change', (e) => {
+        updateLinkFormForChannel(e.target.value);
       });
 
       // Link new channel
@@ -1544,7 +1581,19 @@
         if (!session) return showLinkMessage('Please sign in first');
 
         const identifierType = document.getElementById('link-type').value;
-        const identifier = document.getElementById('link-identifier').value;
+        const rawIdentifier = document.getElementById('link-identifier').value;
+        let identifier = rawIdentifier.trim();
+
+        if (!identifier) {
+          return showLinkMessage('Please enter an identifier');
+        }
+
+        if (identifierType === 'github') {
+          identifier = identifier.replace(/^@+/, '').toLowerCase();
+          if (!identifier) {
+            return showLinkMessage('Please enter a valid GitHub username');
+          }
+        }
 
         try {
           const res = await fetch(`${DOWHIZ_API_URL}/auth/link`, {
@@ -1571,12 +1620,23 @@
             showLinkMessage('Channel linked successfully!', 'success');
           }
 
+          if (identifierType === 'github') {
+            const githubStatus = document.getElementById('github-connect-status');
+            githubStatus.textContent = 'GitHub connected successfully!';
+            githubStatus.style.color = '#22c55e';
+          }
+
           document.getElementById('link-identifier').value = '';
           await loadIdentifiers(session.access_token);
           // Refresh tasks to include the new channel
           await loadTasks(session.access_token);
         } catch (err) {
           showLinkMessage(err.message);
+          if (identifierType === 'github') {
+            const githubStatus = document.getElementById('github-connect-status');
+            githubStatus.textContent = `Failed to connect GitHub: ${err.message}`;
+            githubStatus.style.color = '#ef4444';
+          }
         }
       });
 
