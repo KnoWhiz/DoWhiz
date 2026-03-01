@@ -1,9 +1,14 @@
 use std::path::Path;
 use tracing::{info, warn};
 
-use crate::account_store::{get_global_account_store, lookup_account_by_channel};
+use crate::account_store::{
+    get_global_account_store, lookup_account_by_channel, lookup_account_by_identifier,
+};
 use crate::blob_store::get_blob_store;
 use crate::channel::Channel;
+use crate::github_inbound::{
+    extract_github_sender_login_from_postmark_payload, is_github_notifications_postmark_payload,
+};
 use crate::memory_diff::compute_memory_diff;
 use crate::memory_queue::{global_memory_queue, MemoryWriteRequest};
 use crate::memory_store::{
@@ -71,6 +76,105 @@ use super::outbound::{
 use super::types::{SchedulerError, TaskExecution, TaskKind};
 use super::utils::load_google_access_token_from_service_env;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GitHubInboundContext {
+    is_github_notification: bool,
+    sender_login: Option<String>,
+}
+
+fn load_github_inbound_context(task: &super::types::RunTaskTask) -> GitHubInboundContext {
+    if task.channel != Channel::Email {
+        return GitHubInboundContext {
+            is_github_notification: false,
+            sender_login: None,
+        };
+    }
+    let payload_path = task
+        .workspace_dir
+        .join(&task.input_email_dir)
+        .join("postmark_payload.json");
+    let payload = match std::fs::read(payload_path) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return GitHubInboundContext {
+                is_github_notification: false,
+                sender_login: None,
+            };
+        }
+    };
+    GitHubInboundContext {
+        is_github_notification: is_github_notifications_postmark_payload(&payload),
+        sender_login: extract_github_sender_login_from_postmark_payload(&payload),
+    }
+}
+
+fn resolve_account_for_run_task(
+    task: &super::types::RunTaskTask,
+    github_sender: Option<&str>,
+) -> Option<Uuid> {
+    if let Some(identifier) = task.reply_to.first() {
+        if let Some(account_id) = lookup_account_by_channel(&task.channel, identifier) {
+            return Some(account_id);
+        }
+    }
+
+    if task.channel == Channel::Email {
+        if let Some(github_sender) = github_sender {
+            return lookup_account_by_identifier("github", github_sender);
+        }
+    }
+
+    None
+}
+
+fn write_github_link_required_reply(
+    task: &super::types::RunTaskTask,
+    github_sender: &str,
+) -> Result<(), SchedulerError> {
+    let reply_path = task.workspace_dir.join("reply_email_draft.html");
+    let attachments_dir = task.workspace_dir.join("reply_email_attachments");
+    std::fs::create_dir_all(&attachments_dir)?;
+
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html>
+<body>
+  <p>Hi there,</p>
+  <p>I received a GitHub request from <strong>@{github_sender}</strong>.</p>
+  <p>Before I can execute GitHub-driven tasks, please link this GitHub account to your DoWhiz account and make sure the account has available balance.</p>
+  <p>You can link it from the DoWhiz auth page by adding identifier type <code>github</code> with identifier <code>{github_sender}</code>.</p>
+  <p>After linking, send the request again and I will continue right away.</p>
+  <p>Thanks!</p>
+</body>
+</html>
+"#
+    );
+    std::fs::write(reply_path, html)?;
+    Ok(())
+}
+
+fn write_github_sender_parse_failed_reply(
+    task: &super::types::RunTaskTask,
+) -> Result<(), SchedulerError> {
+    let reply_path = task.workspace_dir.join("reply_email_draft.html");
+    let attachments_dir = task.workspace_dir.join("reply_email_attachments");
+    std::fs::create_dir_all(&attachments_dir)?;
+
+    let html = r#"<!DOCTYPE html>
+<html>
+<body>
+  <p>Hi there,</p>
+  <p>I received a GitHub notification email, but I could not deterministically extract the requesting GitHub login from the message payload.</p>
+  <p>For security, I did not execute the task. Please resend from the original GitHub notification format (the one that includes lines like <code>&lt;login&gt; left a comment</code> or <code>&lt;login&gt; created an issue</code>).</p>
+  <p>After that, I can reliably identify the requester and continue.</p>
+  <p>Thanks!</p>
+</body>
+</html>
+"#;
+    std::fs::write(reply_path, html)?;
+    Ok(())
+}
+
 pub trait TaskExecutor {
     fn execute(&self, task: &TaskKind) -> Result<TaskExecution, SchedulerError>;
 }
@@ -132,15 +236,34 @@ impl TaskExecutor for ModuleExecutor {
                 Ok(TaskExecution::empty())
             }
             TaskKind::RunTask(task) => {
+                let github_inbound = load_github_inbound_context(task);
+                let account_id =
+                    resolve_account_for_run_task(task, github_inbound.sender_login.as_deref());
+
+                if task.channel == Channel::Email && github_inbound.is_github_notification {
+                    match github_inbound.sender_login.as_deref() {
+                        Some(github_sender) if account_id.is_none() => {
+                            write_github_link_required_reply(task, github_sender)?;
+                            info!(
+                                "skipping run_task for github notification sender={} (no linked github account)",
+                                github_sender
+                            );
+                            return Ok(TaskExecution::empty());
+                        }
+                        Some(_) => {}
+                        None => {
+                            write_github_sender_parse_failed_reply(task)?;
+                            info!(
+                                "skipping run_task for github notification: unable to extract sender login"
+                            );
+                            return Ok(TaskExecution::empty());
+                        }
+                    }
+                }
+
                 let workspace_memory_dir = task.workspace_dir.join(&task.memory_dir);
                 let user_memory_dir = resolve_user_memory_dir(task);
                 let user_secrets_path = resolve_user_secrets_path(task);
-
-                // Try to look up unified account by channel identifier
-                let account_id = task
-                    .reply_to
-                    .first()
-                    .and_then(|identifier| lookup_account_by_channel(&task.channel, identifier));
 
                 // Sync memo to workspace: prefer Azure Blob if account exists, else local storage
                 let original_memo_snapshot = if let Some(account_id) = account_id {
@@ -259,11 +382,6 @@ impl TaskExecutor for ModuleExecutor {
                                     .unwrap_or("unknown")
                                     .to_string();
 
-                                // Try to look up unified account by channel identifier
-                                let account_id = task.reply_to.first().and_then(|identifier| {
-                                    lookup_account_by_channel(&task.channel, identifier)
-                                });
-
                                 let request = MemoryWriteRequest {
                                     account_id,
                                     user_id: user_id.clone(),
@@ -317,5 +435,119 @@ impl TaskExecutor for ModuleExecutor {
             }
             TaskKind::Noop => Ok(TaskExecution::empty()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::types::RunTaskTask;
+    use super::*;
+    use crate::channel::Channel;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn sample_email_task(workspace_dir: PathBuf) -> RunTaskTask {
+        RunTaskTask {
+            workspace_dir,
+            input_email_dir: PathBuf::from("incoming_email"),
+            input_attachments_dir: PathBuf::from("incoming_attachments"),
+            memory_dir: PathBuf::from("memory"),
+            reference_dir: PathBuf::from("references"),
+            model_name: "gpt-5.3-codex".to_string(),
+            runner: "codex".to_string(),
+            codex_disabled: true,
+            reply_to: vec!["reply@example.com".to_string()],
+            reply_from: Some("service@example.com".to_string()),
+            archive_root: None,
+            thread_id: Some("thread-1".to_string()),
+            thread_epoch: Some(1),
+            thread_state_path: None,
+            channel: Channel::Email,
+            slack_team_id: None,
+            employee_id: Some("little_bear".to_string()),
+        }
+    }
+
+    #[test]
+    fn load_github_inbound_context_reads_postmark_payload() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path().to_path_buf();
+        let incoming_email = workspace.join("incoming_email");
+        fs::create_dir_all(&incoming_email).expect("incoming_email");
+        fs::write(
+            incoming_email.join("postmark_payload.json"),
+            r#"{
+  "From": "notifications@github.com",
+  "Headers": [{"Name": "X-GitHub-Sender", "Value": "bingran-you"}]
+}"#,
+        )
+        .expect("postmark_payload.json");
+
+        let task = sample_email_task(workspace);
+        let context = load_github_inbound_context(&task);
+        assert_eq!(
+            context,
+            GitHubInboundContext {
+                is_github_notification: true,
+                sender_login: Some("bingran-you".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn load_github_inbound_context_detects_unparseable_github_notification() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path().to_path_buf();
+        let incoming_email = workspace.join("incoming_email");
+        fs::create_dir_all(&incoming_email).expect("incoming_email");
+        fs::write(
+            incoming_email.join("postmark_payload.json"),
+            r#"{
+  "From": "notifications@github.com",
+  "TextBody": "No activity line here"
+}"#,
+        )
+        .expect("postmark_payload.json");
+
+        let task = sample_email_task(workspace);
+        let context = load_github_inbound_context(&task);
+        assert_eq!(
+            context,
+            GitHubInboundContext {
+                is_github_notification: true,
+                sender_login: None,
+            }
+        );
+    }
+
+    #[test]
+    fn write_github_link_required_reply_writes_template() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path().to_path_buf();
+        let task = sample_email_task(workspace.clone());
+
+        write_github_link_required_reply(&task, "bingran-you").expect("write template");
+
+        let reply_path = workspace.join("reply_email_draft.html");
+        let body = fs::read_to_string(reply_path).expect("reply body");
+        assert!(body.contains("@bingran-you"));
+        assert!(body.contains("identifier type <code>github</code>"));
+        assert!(workspace.join("reply_email_attachments").is_dir());
+    }
+
+    #[test]
+    fn write_github_sender_parse_failed_reply_writes_template() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path().to_path_buf();
+        let task = sample_email_task(workspace.clone());
+
+        write_github_sender_parse_failed_reply(&task).expect("write template");
+
+        let reply_path = workspace.join("reply_email_draft.html");
+        let body = fs::read_to_string(reply_path).expect("reply body");
+        assert!(body.contains("could not deterministically extract"));
+        assert!(body.contains("did not execute the task"));
+        assert!(workspace.join("reply_email_attachments").is_dir());
     }
 }
