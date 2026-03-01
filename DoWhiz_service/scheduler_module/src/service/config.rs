@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::employee_config::{load_employee_directory, EmployeeDirectory, EmployeeProfile};
+use crate::env_alias::apply_deploy_target_overrides;
 use crate::ingestion_queue::resolve_ingestion_queue_backend;
 
 use super::BoxError;
@@ -68,6 +69,8 @@ pub struct ServiceConfig {
 impl ServiceConfig {
     pub fn from_env() -> Result<Self, BoxError> {
         dotenvy::dotenv().ok();
+        apply_deploy_target_overrides()
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
         let host = env::var("RUST_SERVICE_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
         let port = env::var("RUST_SERVICE_PORT")
