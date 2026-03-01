@@ -312,7 +312,7 @@ impl AccountStore {
         conn.execute(
             "UPDATE accounts
              SET tokens = COALESCE(tokens, 0) + $1,
-                 tokens_to_hours = (COALESCE(tokens, 0) + $1)::numeric / 6000000
+                 tokens_to_hours = (COALESCE(tokens, 0) + $1)::numeric / 20000000
              WHERE id = $2",
             &[&tokens, &account_id],
         )?;
