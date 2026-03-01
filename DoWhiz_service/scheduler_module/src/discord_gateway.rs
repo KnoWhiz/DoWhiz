@@ -93,6 +93,14 @@ impl DiscordEventHandler {
     }
 }
 
+fn should_enqueue_discord_message(
+    is_direct_message: bool,
+    is_mention: bool,
+    is_reply_to_bot: bool,
+) -> bool {
+    is_direct_message || is_mention || is_reply_to_bot
+}
+
 #[async_trait]
 impl EventHandler for DiscordEventHandler {
     async fn ready(&self, _ctx: Context, ready: Ready) {
@@ -112,9 +120,10 @@ impl EventHandler for DiscordEventHandler {
             }
         };
 
-        // Only respond to:
-        // 1. Messages that @ mention the bot
-        // 2. Messages that are replies to the bot's messages
+        // Enqueue messages for:
+        // 1. DM or group DM conversations (no guild_id)
+        // 2. Guild messages that @ mention the bot
+        // 3. Guild messages that reply to the bot
         let is_mention = msg
             .mentions
             .iter()
@@ -124,16 +133,18 @@ impl EventHandler for DiscordEventHandler {
             .as_ref()
             .map(|ref_msg| self.adapter.bot_user_ids.contains(&ref_msg.author.id.get()))
             .unwrap_or(false);
+        let is_direct_message = msg.guild_id.is_none();
 
-        if !is_mention && !is_reply_to_bot {
+        if !should_enqueue_discord_message(is_direct_message, is_mention, is_reply_to_bot) {
             return;
         }
 
         let msg_len = inbound.text_body.as_ref().map(|t| t.len()).unwrap_or(0);
         info!(
-            "Discord message from {} in channel {:?} (mention={}, reply_to_bot={}, len={}): {:?}",
+            "Discord message from {} in channel {:?} (dm={}, mention={}, reply_to_bot={}, len={}): {:?}",
             inbound.sender,
             inbound.metadata.discord_channel_id,
+            is_direct_message,
             is_mention,
             is_reply_to_bot,
             msg_len,
@@ -570,4 +581,21 @@ pub async fn start_discord_client(
     client.start().await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_enqueue_discord_message;
+
+    #[test]
+    fn should_enqueue_discord_message_allows_direct_messages_without_mentions() {
+        assert!(should_enqueue_discord_message(true, false, false));
+    }
+
+    #[test]
+    fn should_enqueue_discord_message_requires_signal_in_guild_channels() {
+        assert!(!should_enqueue_discord_message(false, false, false));
+        assert!(should_enqueue_discord_message(false, true, false));
+        assert!(should_enqueue_discord_message(false, false, true));
+    }
 }
