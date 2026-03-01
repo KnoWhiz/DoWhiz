@@ -9,6 +9,7 @@ pub mod google_common;
 pub mod google_docs;
 pub mod google_sheets;
 pub mod google_slides;
+pub mod image_search;
 pub mod postmark;
 pub mod slack;
 pub mod telegram;
@@ -37,3 +38,4 @@ pub use telegram::{
 pub use whatsapp::{
     send_quick_whatsapp_response, WhatsAppInboundAdapter, WhatsAppOutboundAdapter, WhatsAppWebhook,
 };
+pub use image_search::{ImageResult, ImageUrls, SearchResponse, UnsplashClient};

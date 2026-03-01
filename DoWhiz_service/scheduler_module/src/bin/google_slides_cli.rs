@@ -38,6 +38,10 @@ Edit Operations:
   insert-image <id> --url="https://..." --page-id="slide_id" [--x=0] [--y=0] [--width=200] [--height=200]
   batch-update <id> <json>               Send batch update requests
 
+Smart Layout:
+  find-space <id> <slide_id> [--min-width=100] [--min-height=100]  Find available space on slide
+  search-image --query="keyword" [--count=5] [--orientation=landscape|portrait|squarish]
+
 Examples:
   google-slides list-presentations
   google-slides read-presentation 1abc...
@@ -52,6 +56,7 @@ Environment Variables:
   GOOGLE_CLIENT_ID       - Google OAuth client ID
   GOOGLE_CLIENT_SECRET   - Google OAuth client secret
   GOOGLE_REFRESH_TOKEN   - Google OAuth refresh token
+  UNSPLASH_ACCESS_KEY    - (optional) Unsplash API key for image search
 
 Predefined Layouts:
   BLANK, TITLE, TITLE_AND_BODY, TITLE_AND_TWO_COLUMNS, TITLE_ONLY,
@@ -248,6 +253,26 @@ fn main() {
                 exit(1);
             }
             cmd_batch_update(&args[2], &args[3])
+        }
+        "find-space" => {
+            if args.len() < 4 {
+                eprintln!("Error: presentation ID and slide ID required");
+                print_usage();
+                exit(1);
+            }
+            let min_width = parse_arg(&args, "--min-width").and_then(|s| s.parse().ok()).unwrap_or(100.0);
+            let min_height = parse_arg(&args, "--min-height").and_then(|s| s.parse().ok()).unwrap_or(100.0);
+            cmd_find_space(&args[2], &args[3], min_width, min_height)
+        }
+        "search-image" => {
+            let query = parse_arg(&args, "--query").unwrap_or_default();
+            if query.is_empty() {
+                eprintln!("Error: --query is required");
+                exit(1);
+            }
+            let count = parse_arg(&args, "--count").and_then(|s| s.parse().ok());
+            let orientation = parse_arg(&args, "--orientation");
+            cmd_search_image(&query, count, orientation.as_deref())
         }
         "--help" | "-h" | "help" => {
             print_usage();
@@ -769,4 +794,249 @@ fn cmd_batch_update(presentation_id: &str, json: &str) -> Result<String, String>
         .map_err(|e| format!("Failed to batch update: {}", e))?;
 
     Ok(serde_json::to_string_pretty(&response).unwrap_or_else(|_| "Success".to_string()))
+}
+
+/// Find available space on a slide for image placement.
+/// Returns recommended positions where an image can be placed without overlapping existing content.
+fn cmd_find_space(
+    presentation_id: &str,
+    slide_id: &str,
+    min_width: f64,
+    min_height: f64,
+) -> Result<String, String> {
+    let auth = get_auth()?;
+    let adapter = GoogleSlidesOutboundAdapter::new(auth);
+
+    let presentation = adapter
+        .get_presentation(presentation_id)
+        .map_err(|e| format!("Failed to get presentation: {}", e))?;
+
+    // Get slide dimensions (default to standard 16:9)
+    let page_size = presentation.get("pageSize");
+    let slide_width = page_size
+        .and_then(|ps| ps.get("width"))
+        .map(|w| extract_dimension(Some(w)))
+        .unwrap_or(720.0); // 10 inches in points
+    let slide_height = page_size
+        .and_then(|ps| ps.get("height"))
+        .map(|h| extract_dimension(Some(h)))
+        .unwrap_or(405.0); // 5.625 inches in points
+
+    // Find the target slide
+    let slides = presentation.get("slides").and_then(|s| s.as_array());
+    let target_slide = slides.and_then(|slides| {
+        slides.iter().find(|s| {
+            s.get("objectId")
+                .and_then(|id| id.as_str())
+                .map(|id| id == slide_id)
+                .unwrap_or(false)
+        })
+    });
+
+    let Some(slide) = target_slide else {
+        return Err(format!("Slide {} not found in presentation", slide_id));
+    };
+
+    // Collect all element bounding boxes
+    let mut occupied_regions: Vec<(f64, f64, f64, f64)> = Vec::new();
+
+    if let Some(elements) = slide.get("pageElements").and_then(|e| e.as_array()) {
+        for elem in elements {
+            let (x, y, w, h) = extract_element_bounds(elem);
+            if w > 0.0 && h > 0.0 {
+                occupied_regions.push((x, y, w, h));
+            }
+        }
+    }
+
+    let mut output = String::new();
+    output.push_str(&format!("=== Available Space Analysis for Slide {} ===\n\n", slide_id));
+    output.push_str(&format!("Slide size: {:.0} x {:.0} pt ({:.1}\" x {:.1}\")\n",
+        slide_width, slide_height,
+        slide_width / 72.0, slide_height / 72.0
+    ));
+    output.push_str(&format!("Minimum space requested: {:.0} x {:.0} pt\n\n", min_width, min_height));
+
+    output.push_str(&format!("Existing elements: {}\n", occupied_regions.len()));
+    for (i, (x, y, w, h)) in occupied_regions.iter().enumerate() {
+        output.push_str(&format!("  {}. ({:.0}, {:.0}) size {:.0}x{:.0}\n", i + 1, x, y, w, h));
+    }
+    output.push_str("\n");
+
+    // Find available spaces using a simple grid-based approach
+    let grid_step = 50.0; // 50 points step
+    let margin = 20.0; // margin from edges
+    let mut available_positions: Vec<(f64, f64, f64, f64)> = Vec::new();
+
+    // Check various positions
+    let positions_to_check = vec![
+        // Bottom right (common for images)
+        (slide_width - min_width - margin, slide_height - min_height - margin),
+        // Bottom left
+        (margin, slide_height - min_height - margin),
+        // Top right
+        (slide_width - min_width - margin, margin),
+        // Center bottom
+        ((slide_width - min_width) / 2.0, slide_height - min_height - margin),
+        // Center
+        ((slide_width - min_width) / 2.0, (slide_height - min_height) / 2.0),
+    ];
+
+    for (check_x, check_y) in positions_to_check {
+        if check_x < margin || check_y < margin {
+            continue;
+        }
+
+        let mut overlaps = false;
+        for (ox, oy, ow, oh) in &occupied_regions {
+            // Check for overlap
+            let rect1_right = check_x + min_width;
+            let rect1_bottom = check_y + min_height;
+            let rect2_right = ox + ow;
+            let rect2_bottom = oy + oh;
+
+            if check_x < rect2_right
+                && rect1_right > *ox
+                && check_y < rect2_bottom
+                && rect1_bottom > *oy
+            {
+                overlaps = true;
+                break;
+            }
+        }
+
+        if !overlaps {
+            available_positions.push((check_x, check_y, min_width, min_height));
+        }
+    }
+
+    // Also try grid search for more options
+    let mut y = margin;
+    while y + min_height <= slide_height - margin && available_positions.len() < 10 {
+        let mut x = margin;
+        while x + min_width <= slide_width - margin {
+            let mut overlaps = false;
+            for (ox, oy, ow, oh) in &occupied_regions {
+                let rect1_right = x + min_width;
+                let rect1_bottom = y + min_height;
+                let rect2_right = ox + ow;
+                let rect2_bottom = oy + oh;
+
+                if x < rect2_right
+                    && rect1_right > *ox
+                    && y < rect2_bottom
+                    && rect1_bottom > *oy
+                {
+                    overlaps = true;
+                    break;
+                }
+            }
+
+            if !overlaps {
+                // Check if this position is not too close to existing positions
+                let mut too_close = false;
+                for (px, py, _, _) in &available_positions {
+                    if (x - px).abs() < grid_step && (y - py).abs() < grid_step {
+                        too_close = true;
+                        break;
+                    }
+                }
+                if !too_close {
+                    available_positions.push((x, y, min_width, min_height));
+                }
+            }
+            x += grid_step;
+        }
+        y += grid_step;
+    }
+
+    if available_positions.is_empty() {
+        output.push_str("⚠️ No available space found for the requested size.\n");
+        output.push_str("Consider:\n");
+        output.push_str("  - Using a smaller image size\n");
+        output.push_str("  - Removing or repositioning existing elements\n");
+        output.push_str("  - Creating a new slide\n");
+    } else {
+        output.push_str(&format!("✓ Found {} available positions:\n\n", available_positions.len()));
+        for (i, (x, y, w, h)) in available_positions.iter().take(5).enumerate() {
+            let location = if *y > slide_height * 0.6 {
+                if *x > slide_width * 0.6 { "bottom-right" }
+                else if *x < slide_width * 0.4 { "bottom-left" }
+                else { "bottom-center" }
+            } else if *y < slide_height * 0.4 {
+                if *x > slide_width * 0.6 { "top-right" }
+                else if *x < slide_width * 0.4 { "top-left" }
+                else { "top-center" }
+            } else {
+                "center"
+            };
+
+            output.push_str(&format!(
+                "{}. Position: ({:.0}, {:.0}) - {} area\n",
+                i + 1, x, y, location
+            ));
+            output.push_str(&format!(
+                "   Command: google-slides insert-image {} --url=\"<URL>\" --page-id={} --x={:.0} --y={:.0} --width={:.0} --height={:.0}\n\n",
+                presentation_id, slide_id, x, y, w, h
+            ));
+        }
+
+        output.push_str("Tip: The first position is usually the best choice.\n");
+    }
+
+    Ok(output)
+}
+
+fn cmd_search_image(
+    query: &str,
+    count: Option<u32>,
+    orientation: Option<&str>,
+) -> Result<String, String> {
+    dotenvy::dotenv().ok();
+
+    let client = scheduler_module::adapters::image_search::UnsplashClient::from_env()?;
+
+    let results = client
+        .search_images(query, count, orientation)
+        .map_err(|e| format!("Failed to search images: {}", e))?;
+
+    if results.results.is_empty() {
+        return Ok(format!("No images found for query: {}", query));
+    }
+
+    let mut output = String::new();
+    output.push_str(&format!(
+        "Found {} images for \"{}\" (showing {}):\n\n",
+        results.total,
+        query,
+        results.results.len()
+    ));
+
+    for (i, image) in results.results.iter().enumerate() {
+        let description = image.get_description();
+        let desc_preview = if description.len() > 60 {
+            format!("{}...", &description[..60])
+        } else {
+            description.clone()
+        };
+
+        output.push_str(&format!("{}. {}\n", i + 1, desc_preview));
+        output.push_str(&format!("   ID: {}\n", image.id));
+        output.push_str(&format!("   Size: {}x{} ({})\n",
+            image.width,
+            image.height,
+            if image.width > image.height { "landscape" }
+            else if image.height > image.width { "portrait" }
+            else { "square" }
+        ));
+        output.push_str(&format!("   URL (regular): {}\n", image.urls.regular));
+        output.push_str(&format!("   Attribution: {}\n", image.get_attribution()));
+        output.push_str("\n");
+    }
+
+    output.push_str("Usage:\n");
+    output.push_str("  1. First find available space: google-slides find-space <id> <slide_id>\n");
+    output.push_str("  2. Then insert the image: google-slides insert-image <id> --url=\"<URL>\" --page-id=<slide_id> --x=<x> --y=<y>\n");
+
+    Ok(output)
 }

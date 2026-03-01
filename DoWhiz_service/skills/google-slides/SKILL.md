@@ -235,6 +235,59 @@ google-slides analyze-slide <presentation_id> <slide_object_id>
 
 ## Inserting Images
 
+### Smart Image Placement Workflow
+
+**IMPORTANT:** Always use the smart placement workflow to avoid overlapping content:
+
+```bash
+# Step 1: Search for images (using Unsplash)
+google-slides search-image --query="professional meeting" --count=5 --orientation=landscape
+
+# Step 2: Find available space on the slide
+google-slides find-space <presentation_id> <slide_id> --min-width=200 --min-height=150
+
+# Step 3: Insert the image at the recommended position
+google-slides insert-image <presentation_id> \
+  --url="<URL from search results>" \
+  --page-id="<slide_id>" \
+  --x=<x from find-space> --y=<y from find-space> \
+  --width=200 --height=150
+```
+
+### Image Search
+
+Use Unsplash to find relevant stock images:
+
+```bash
+# Search for images
+google-slides search-image --query="technology innovation" --count=5
+
+# Filter by orientation
+google-slides search-image --query="nature landscape" --orientation=landscape
+google-slides search-image --query="portrait photo" --orientation=portrait
+google-slides search-image --query="app icon" --orientation=squarish
+```
+
+**Orientations:**
+- `landscape` - Wide images (good for backgrounds, headers)
+- `portrait` - Tall images (good for sidebars, full-slide portraits)
+- `squarish` - Square-ish images (good for icons, thumbnails)
+
+### Finding Available Space
+
+Before inserting an image, check for available space:
+
+```bash
+# Find space for a 200x150 pt image
+google-slides find-space <presentation_id> <slide_id> --min-width=200 --min-height=150
+
+# Output shows recommended positions that don't overlap existing content
+```
+
+The `find-space` command analyzes existing elements and suggests positions where the image won't overlap text or other content.
+
+### Direct Image Insertion
+
 ```bash
 # Insert an image from a public URL
 google-slides insert-image <presentation_id> \
@@ -257,6 +310,17 @@ google-slides insert-image <presentation_id> \
 If you need to insert a private/local image:
 1. Upload to a public storage (Azure Blob with SAS URL, Google Cloud Storage signed URL)
 2. Use the generated public URL with `insert-image`
+
+### Image Placement Best Practices
+
+1. **Always check available space first** - Use `find-space` before inserting
+2. **Match image orientation to available space** - Use landscape for wide areas, portrait for tall areas
+3. **Consider content hierarchy** - Place images after or beside related text
+4. **Use appropriate sizes:**
+   - Small icons: 50-100 pt
+   - Inline images: 150-250 pt
+   - Feature images: 300-400 pt
+   - Full-width: 600+ pt
 
 ## Notes
 
