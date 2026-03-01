@@ -40,3 +40,14 @@ DoWhiz_service/.env.production
 CLAUDE.md
 **/CLAUDE.md
 /.playwright-cli
+
+# Log files
+*.log
+DoWhiz_service/*.log
+DoWhiz_service/**/*.log
+
+# Binary files
+DoWhiz_service/bin/
+
+# Shell scripts (local only)
+DoWhiz_service/start_all.sh

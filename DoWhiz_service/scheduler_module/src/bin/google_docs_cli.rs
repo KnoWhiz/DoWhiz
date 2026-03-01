@@ -26,6 +26,10 @@ Direct Edit Operations:
   apply-edit <doc_id> --find="text" --replace="new text"
   insert-text <doc_id> --after="anchor" --text="text to insert"
   delete-text <doc_id> --find="text to delete"
+  insert-image <doc_id> --url="https://..." [--after="anchor text"] [--index=1] [--width=200] [--height=150]
+
+Image Search (Unsplash):
+  search-image --query="landscape mountains" [--count=5] [--orientation=landscape|portrait|squarish]
 
 Style Operations:
   get-styles <doc_id>                Get existing styles from document (headings, fonts, colors)
@@ -44,6 +48,7 @@ Environment Variables:
   GOOGLE_CLIENT_SECRET   - Google OAuth client secret
   GOOGLE_REFRESH_TOKEN   - Google OAuth refresh token
   EMPLOYEE_ID            - (optional) Employee ID for per-employee tokens
+  UNSPLASH_ACCESS_KEY    - (optional) Unsplash API key for image search
 
 Note: In sandbox environments without network access, set GOOGLE_ACCESS_TOKEN
       to a pre-generated token. This avoids the need for OAuth token refresh.
@@ -217,6 +222,23 @@ fn main() {
             }
             cmd_delete_text(&args[2], &find)
         }
+        "insert-image" => {
+            if args.len() < 3 {
+                eprintln!("Error: document ID required");
+                print_usage();
+                exit(1);
+            }
+            let url = parse_arg(&args, "--url").unwrap_or_default();
+            if url.is_empty() {
+                eprintln!("Error: --url is required");
+                exit(1);
+            }
+            let after = parse_arg(&args, "--after");
+            let index = parse_arg(&args, "--index").and_then(|s| s.parse().ok());
+            let width = parse_arg(&args, "--width").and_then(|s| s.parse().ok());
+            let height = parse_arg(&args, "--height").and_then(|s| s.parse().ok());
+            cmd_insert_image(&args[2], &url, after.as_deref(), index, width, height)
+        }
         "mark-deletion" => {
             if args.len() < 3 {
                 eprintln!("Error: document ID required");
@@ -325,6 +347,16 @@ fn main() {
                 bold_opt,
                 italic_opt,
             )
+        }
+        "search-image" => {
+            let query = parse_arg(&args, "--query").unwrap_or_default();
+            if query.is_empty() {
+                eprintln!("Error: --query is required");
+                exit(1);
+            }
+            let count = parse_arg(&args, "--count").and_then(|s| s.parse().ok());
+            let orientation = parse_arg(&args, "--orientation");
+            cmd_search_image(&query, count, orientation.as_deref())
         }
         "--help" | "-h" | "help" => {
             print_usage();
@@ -487,6 +519,51 @@ fn cmd_delete_text(doc_id: &str, find: &str) -> Result<String, String> {
         .map_err(|e| format!("Failed to apply deletion: {}", e))?;
 
     Ok(format!("Successfully deleted \"{}\"", find))
+}
+
+fn cmd_insert_image(
+    doc_id: &str,
+    url: &str,
+    after: Option<&str>,
+    index: Option<i64>,
+    width: Option<f64>,
+    height: Option<f64>,
+) -> Result<String, String> {
+    let auth = get_auth()?;
+    let adapter = GoogleDocsOutboundAdapter::new(auth);
+
+    let result = if let Some(after_text) = after {
+        // Insert after specific text
+        adapter
+            .insert_image_after_text(doc_id, url, after_text, width, height)
+            .map_err(|e| format!("Failed to insert image: {}", e))?
+    } else if let Some(idx) = index {
+        // Insert at specific index
+        adapter
+            .insert_image(doc_id, url, idx, width, height)
+            .map_err(|e| format!("Failed to insert image: {}", e))?
+    } else {
+        // Insert at end of document
+        let end_idx = adapter
+            .get_document_end_index(doc_id)
+            .map_err(|e| format!("Failed to get document end index: {}", e))?;
+        adapter
+            .insert_image(doc_id, url, end_idx, width, height)
+            .map_err(|e| format!("Failed to insert image: {}", e))?
+    };
+
+    let location = if let Some(after_text) = after {
+        format!("after \"{}\"", after_text)
+    } else if let Some(idx) = index {
+        format!("at index {}", idx)
+    } else {
+        "at end of document".to_string()
+    };
+
+    Ok(format!(
+        "Successfully inserted image {} (id={})",
+        location, result
+    ))
 }
 
 fn cmd_mark_deletion(doc_id: &str, find: &str) -> Result<String, String> {
@@ -703,4 +780,57 @@ fn cmd_set_style(
         find,
         applied.join(", ")
     ))
+}
+
+fn cmd_search_image(
+    query: &str,
+    count: Option<u32>,
+    orientation: Option<&str>,
+) -> Result<String, String> {
+    dotenvy::dotenv().ok();
+
+    let client = scheduler_module::adapters::image_search::UnsplashClient::from_env()?;
+
+    let results = client
+        .search_images(query, count, orientation)
+        .map_err(|e| format!("Failed to search images: {}", e))?;
+
+    if results.results.is_empty() {
+        return Ok(format!("No images found for query: {}", query));
+    }
+
+    let mut output = String::new();
+    output.push_str(&format!(
+        "Found {} images for \"{}\" (showing {}):\n\n",
+        results.total,
+        query,
+        results.results.len()
+    ));
+
+    for (i, image) in results.results.iter().enumerate() {
+        let description = image.get_description();
+        let desc_preview = if description.len() > 60 {
+            format!("{}...", &description[..60])
+        } else {
+            description.clone()
+        };
+
+        output.push_str(&format!("{}. {}\n", i + 1, desc_preview));
+        output.push_str(&format!("   ID: {}\n", image.id));
+        output.push_str(&format!("   Size: {}x{} ({})\n",
+            image.width,
+            image.height,
+            if image.width > image.height { "landscape" }
+            else if image.height > image.width { "portrait" }
+            else { "square" }
+        ));
+        output.push_str(&format!("   URL (regular): {}\n", image.urls.regular));
+        output.push_str(&format!("   Attribution: {}\n", image.get_attribution()));
+        output.push_str("\n");
+    }
+
+    output.push_str("Usage: Copy the URL and use insert-image to add to document:\n");
+    output.push_str("  google-docs insert-image <doc_id> --url=\"<URL>\" --after=\"anchor text\"\n");
+
+    Ok(output)
 }
