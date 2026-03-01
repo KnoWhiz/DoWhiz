@@ -26,6 +26,7 @@ Direct Edit Operations:
   apply-edit <doc_id> --find="text" --replace="new text"
   insert-text <doc_id> --after="anchor" --text="text to insert"
   delete-text <doc_id> --find="text to delete"
+  insert-image <doc_id> --url="https://..." [--after="anchor text"] [--index=1] [--width=200] [--height=150]
 
 Style Operations:
   get-styles <doc_id>                Get existing styles from document (headings, fonts, colors)
@@ -216,6 +217,23 @@ fn main() {
                 exit(1);
             }
             cmd_delete_text(&args[2], &find)
+        }
+        "insert-image" => {
+            if args.len() < 3 {
+                eprintln!("Error: document ID required");
+                print_usage();
+                exit(1);
+            }
+            let url = parse_arg(&args, "--url").unwrap_or_default();
+            if url.is_empty() {
+                eprintln!("Error: --url is required");
+                exit(1);
+            }
+            let after = parse_arg(&args, "--after");
+            let index = parse_arg(&args, "--index").and_then(|s| s.parse().ok());
+            let width = parse_arg(&args, "--width").and_then(|s| s.parse().ok());
+            let height = parse_arg(&args, "--height").and_then(|s| s.parse().ok());
+            cmd_insert_image(&args[2], &url, after.as_deref(), index, width, height)
         }
         "mark-deletion" => {
             if args.len() < 3 {
@@ -487,6 +505,51 @@ fn cmd_delete_text(doc_id: &str, find: &str) -> Result<String, String> {
         .map_err(|e| format!("Failed to apply deletion: {}", e))?;
 
     Ok(format!("Successfully deleted \"{}\"", find))
+}
+
+fn cmd_insert_image(
+    doc_id: &str,
+    url: &str,
+    after: Option<&str>,
+    index: Option<i64>,
+    width: Option<f64>,
+    height: Option<f64>,
+) -> Result<String, String> {
+    let auth = get_auth()?;
+    let adapter = GoogleDocsOutboundAdapter::new(auth);
+
+    let result = if let Some(after_text) = after {
+        // Insert after specific text
+        adapter
+            .insert_image_after_text(doc_id, url, after_text, width, height)
+            .map_err(|e| format!("Failed to insert image: {}", e))?
+    } else if let Some(idx) = index {
+        // Insert at specific index
+        adapter
+            .insert_image(doc_id, url, idx, width, height)
+            .map_err(|e| format!("Failed to insert image: {}", e))?
+    } else {
+        // Insert at end of document
+        let end_idx = adapter
+            .get_document_end_index(doc_id)
+            .map_err(|e| format!("Failed to get document end index: {}", e))?;
+        adapter
+            .insert_image(doc_id, url, end_idx, width, height)
+            .map_err(|e| format!("Failed to insert image: {}", e))?
+    };
+
+    let location = if let Some(after_text) = after {
+        format!("after \"{}\"", after_text)
+    } else if let Some(idx) = index {
+        format!("at index {}", idx)
+    } else {
+        "at end of document".to_string()
+    };
+
+    Ok(format!(
+        "Successfully inserted image {} (id={})",
+        location, result
+    ))
 }
 
 fn cmd_mark_deletion(doc_id: &str, find: &str) -> Result<String, String> {

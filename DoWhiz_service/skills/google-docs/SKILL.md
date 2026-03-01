@@ -222,6 +222,28 @@ google-docs insert-text <document_id> --after="anchor text" --text="text to inse
 google-docs delete-text <document_id> --find="text to delete"
 ```
 
+### Insert Images
+
+```bash
+# Insert image after specific text
+google-docs insert-image <document_id> --url="https://example.com/image.png" --after="anchor text"
+
+# Insert image at specific index position
+google-docs insert-image <document_id> --url="https://example.com/image.png" --index=50
+
+# Insert image at end of document (default if no --after or --index specified)
+google-docs insert-image <document_id> --url="https://example.com/image.png"
+
+# Insert image with specific dimensions (in points, 72pt = 1 inch)
+google-docs insert-image <document_id> --url="https://..." --after="Chapter 1" --width=300 --height=200
+```
+
+**Image Requirements:**
+- URL must be **publicly accessible** (Google Docs fetches the image from the URL)
+- For private images: Upload to Azure Blob Storage with SAS URL or Google Cloud Storage with signed URL
+- Supported formats: PNG, JPEG, GIF, BMP
+- Image size: Keep reasonable (< 10MB recommended)
+
 ### Suggesting Mode Operations
 
 ```bash
