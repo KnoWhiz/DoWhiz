@@ -1,2 +1,0 @@
-[2m2026-02-18T07:03:02.782904Z[0m [32m INFO[0m ingestion gateway config path=/home/liuxt/deeptutor/DoWhiz/DoWhiz_service/gateway.toml, host=0.0.0.0, port=9100, db_path=/home/liuxt/deeptutor/DoWhiz/DoWhiz_service/.workspace/boiled_egg/state/ingestion.db
-[2m2026-02-18T07:03:02.783752Z[0m [32m INFO[0m ingestion gateway listening on 0.0.0.0:9100
