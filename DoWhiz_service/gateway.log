@@ -1,0 +1,237 @@
+[2m2026-02-26T06:54:26.027222Z[0m [32m INFO[0m Google Drive push notifications enabled, webhook_url=https://climbing-donors-searching-solve.trycloudflare.com/webhooks/google-drive-changes
+[2m2026-02-26T06:54:26.027283Z[0m [32m INFO[0m ingestion gateway config path=gateway.toml, host=0.0.0.0, port=9100, backend=servicebus
+[2m2026-02-26T06:54:26.027290Z[0m [32m INFO[0m discord gateway: no Discord bot tokens configured, skipping
+[2m2026-02-26T06:54:26.027522Z[0m [32m INFO[0m Starting Google Workspace poller: docs=true, sheets=true, slides=true, interval=30s, push_notifications=true
+[2m2026-02-26T06:54:26.033746Z[0m [32m INFO[0m Google Docs poller thread started
+[2m2026-02-26T06:54:26.033934Z[0m [32m INFO[0m Google Sheets poller thread started
+[2m2026-02-26T06:54:26.033935Z[0m [32m INFO[0m Google Slides poller thread started
+[2m2026-02-26T06:54:26.153739Z[0m [32m INFO[0m BlobStore not available (missing AZURE_STORAGE_CONNECTION_STRING), using local storage only
+[2m2026-02-26T06:54:26.153928Z[0m [32m INFO[0m ingestion gateway listening on 0.0.0.0:9100
+[2m2026-02-26T06:54:26.995500Z[0m [32m INFO[0m Fetched 1 shared spreadsheets (cache miss)
+[2m2026-02-26T06:54:27.020475Z[0m [32m INFO[0m Fetched 4 shared documents (cache miss)
+[2m2026-02-26T06:54:27.038852Z[0m [32m INFO[0m Fetched 1 shared presentations (cache miss)
+[2m2026-02-26T06:54:27.855819Z[0m [32m INFO[0m Registering watch channel for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T06:54:28.209138Z[0m [32m INFO[0m Created watch channel 2843886b-61ce-434b-8b1d-95ad58ba8d99 for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, expires at 2026-02-26 07:54:27 UTC
+[2m2026-02-26T06:54:28.210645Z[0m [32m INFO[0m Registered watch channel for Google Sheets file: DoWhiz_test (1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A)
+[2m2026-02-26T06:54:29.265847Z[0m [32m INFO[0m Registering watch channel for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T06:54:29.798640Z[0m [32m INFO[0m Created watch channel c20aad20-25e7-4b12-8ab6-944363ad7af9 for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, expires at 2026-02-26 07:54:29 UTC
+[2m2026-02-26T06:54:29.801386Z[0m [32m INFO[0m Registered watch channel for Google Docs file: DoWhiz_test (1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc)
+[2m2026-02-26T06:54:29.840783Z[0m [32m INFO[0m Registering watch channel for file 1uDdfGnr1eqfmOVWNkBisDxA_zVXxgj-M-c3H7wZWXdg
+[2m2026-02-26T06:54:30.437815Z[0m [32m INFO[0m Created watch channel 4e43f8f3-638c-46a0-b2b3-a216f59e899a for file 1uDdfGnr1eqfmOVWNkBisDxA_zVXxgj-M-c3H7wZWXdg, expires at 2026-02-26 07:54:29 UTC
+[2m2026-02-26T06:54:30.440029Z[0m [32m INFO[0m Registered watch channel for Google Docs file: Copy of Multiplexing Paper response (1uDdfGnr1eqfmOVWNkBisDxA_zVXxgj-M-c3H7wZWXdg)
+[2m2026-02-26T06:54:30.486501Z[0m [32m INFO[0m Registering watch channel for file 1AEfOk2ED67Kmv_KK9EHno7I0-XAcU8ws96EN2mlI7hQ
+[2m2026-02-26T06:54:30.925464Z[0m [32m INFO[0m Created watch channel 5e8306ce-b353-4e27-a3eb-2050b40f6313 for file 1AEfOk2ED67Kmv_KK9EHno7I0-XAcU8ws96EN2mlI7hQ, expires at 2026-02-26 07:54:30 UTC
+[2m2026-02-26T06:54:30.929239Z[0m [32m INFO[0m Registered watch channel for Google Docs file: Multiplexing Paper response (1AEfOk2ED67Kmv_KK9EHno7I0-XAcU8ws96EN2mlI7hQ)
+[2m2026-02-26T06:54:30.973486Z[0m [32m INFO[0m Registering watch channel for file 1c8OJx6emM76s5UNxC9_vASWX_1enbcWU1-SZQLGbFzU
+[2m2026-02-26T06:54:31.373629Z[0m [32m INFO[0m Created watch channel 8d96143c-8da9-4907-b311-79187495b7fa for file 1c8OJx6emM76s5UNxC9_vASWX_1enbcWU1-SZQLGbFzU, expires at 2026-02-26 07:54:30 UTC
+[2m2026-02-26T06:54:31.375557Z[0m [32m INFO[0m Registered watch channel for Google Docs file: Copy of FLD1 (1c8OJx6emM76s5UNxC9_vASWX_1enbcWU1-SZQLGbFzU)
+[2m2026-02-26T06:59:23.071549Z[0m [32m INFO[0m Fetched 1 shared presentations (cache miss)
+[2m2026-02-26T06:59:24.114462Z[0m [32m INFO[0m Fetched 1 shared spreadsheets (cache miss)
+[2m2026-02-26T06:59:39.336328Z[0m [32m INFO[0m Fetched 4 shared documents (cache miss)
+[2m2026-02-26T07:00:10.427317Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:00:10.427412Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:00:10.427520Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:00:10.440280Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:00:10.440322Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:00:10.821435Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:00:11.669470Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:00:13.470843Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:00:24.774241Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:00:24.774340Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:00:24.774444Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:00:24.774445Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:00:24.857096Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:00:24.857142Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:00:25.194348Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:00:25.259985Z[0m [32m INFO[0m Found actionable comment: '@proto@dowhiz.com change the font color to blue'
+[2m2026-02-26T07:00:26.147201Z[0m [32m INFO[0m Created task for Google Docs comment comment:AAAB0vvIE_k on DoWhiz_test (1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc) [push notification]
+[2m2026-02-26T07:00:27.919463Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:01:21.528122Z[0m [32m INFO[0m Found actionable comment: '@proto@dowhiz.com add another similar page introdu'
+[2m2026-02-26T07:01:22.364808Z[0m [32m INFO[0m Created task for Google Slides comment comment:AAAB1IwpJjI on DoWhiz_test (1YcKiDcEVwlb1rJZpP8MzLO9MrQYG_MpLeLOR5uIxXJc)
+[2m2026-02-26T07:01:22.383228Z[0m [32m INFO[0m Google Slides polling enqueued 1 items
+[2m2026-02-26T07:01:29.913971Z[0m [33m WARN[0m Retryable network error listing comments for 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: error sending request for url (https://www.googleapis.com/drive/v3/files/1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc/comments?fields=comments(id,content,htmlContent,resolved,author,createdTime,modifiedTime,replies,anchor,quotedFileContent)): error trying to connect: tcp connect error: Network is unreachable (os error 101)
+[2m2026-02-26T07:01:29.914038Z[0m [33m WARN[0m Retrying list_comments for 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc (attempt 2/3)
+[2m2026-02-26T07:01:54.239643Z[0m [32m INFO[0m Found actionable comment: 'count the ratio of marriage using excel function @'
+[2m2026-02-26T07:01:55.006492Z[0m [32m INFO[0m Created task for Google Sheets comment comment:AAAB1I-5fmM on DoWhiz_test (1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A)
+[2m2026-02-26T07:01:55.022612Z[0m [32m INFO[0m Google Sheets polling enqueued 1 items
+[2m2026-02-26T07:03:11.265903Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:03:11.266260Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:03:11.266449Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:03:11.266490Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:03:11.277319Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:03:11.277436Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:03:11.863357Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:03:13.367273Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:03:35.128805Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:03:35.128890Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:03:35.128972Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:03:35.129086Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:03:35.177814Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:03:35.177945Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:03:35.624140Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:03:37.289254Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:04:17.486882Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:04:17.487024Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:04:17.487286Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:04:17.487340Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:04:17.514786Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:04:17.514823Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:04:18.840397Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:04:19.012379Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:04:20.299289Z[0m [32m INFO[0m Fetched 1 shared presentations (cache miss)
+[2m2026-02-26T07:04:50.055005Z[0m [32m INFO[0m Fetched 4 shared documents (cache miss)
+[2m2026-02-26T07:04:50.057277Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:04:50.057327Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:04:50.057415Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:04:50.076857Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:04:50.076903Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:04:50.754446Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:04:51.599754Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:04:52.892813Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:06:11.987818Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:06:11.987915Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:06:11.988074Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:06:11.988272Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:06:12.117753Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:06:12.117805Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:06:12.580061Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:06:13.992676Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:07:17.720222Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:07:17.720264Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:07:17.720365Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:07:17.777571Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:07:17.777607Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:07:18.145290Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:07:18.670977Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:07:19.968016Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:09:16.306511Z[0m [32m INFO[0m Fetched 1 shared presentations (cache miss)
+[2m2026-02-26T07:09:18.264399Z[0m [32m INFO[0m Fetched 1 shared spreadsheets (cache miss)
+[2m2026-02-26T07:09:55.826411Z[0m [32m INFO[0m Fetched 4 shared documents (cache miss)
+[2m2026-02-26T07:14:13.455842Z[0m [32m INFO[0m Fetched 1 shared presentations (cache miss)
+[2m2026-02-26T07:14:15.247333Z[0m [32m INFO[0m Fetched 1 shared spreadsheets (cache miss)
+[2m2026-02-26T07:15:05.719200Z[0m [32m INFO[0m Fetched 4 shared documents (cache miss)
+[2m2026-02-26T07:19:09.718512Z[0m [32m INFO[0m Fetched 1 shared presentations (cache miss)
+[2m2026-02-26T07:19:12.057687Z[0m [32m INFO[0m Fetched 1 shared spreadsheets (cache miss)
+[2m2026-02-26T07:20:16.395991Z[0m [32m INFO[0m Fetched 4 shared documents (cache miss)
+[2m2026-02-26T07:24:06.772450Z[0m [32m INFO[0m Fetched 1 shared presentations (cache miss)
+[2m2026-02-26T07:24:10.740603Z[0m [32m INFO[0m Fetched 1 shared spreadsheets (cache miss)
+[2m2026-02-26T07:25:25.765325Z[0m [32m INFO[0m Fetched 4 shared documents (cache miss)
+[2m2026-02-26T07:28:25.807633Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:28:25.811713Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:28:25.811832Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:28:25.811912Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:28:31.482084Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:28:31.482152Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:28:31.482244Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:28:31.482248Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:28:31.811711Z[0m [32m INFO[0m Found actionable comment: 'count the ratio of marriage using excel function @'
+[2m2026-02-26T07:28:32.609281Z[0m [32m INFO[0m Created task for Google Sheets comment comment:AAAB1I-5fmU on DoWhiz_test (1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A) [push notification]
+[2m2026-02-26T07:28:39.435936Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:28:39.436028Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:28:39.436171Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:28:39.436235Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:29:02.998196Z[0m [32m INFO[0m Fetched 1 shared presentations (cache miss)
+[2m2026-02-26T07:29:03.452892Z[0m [32m INFO[0m Found actionable comment: '@proto@dowhiz.com add another similar page introdu'
+[2m2026-02-26T07:29:04.261946Z[0m [32m INFO[0m Created task for Google Slides comment comment:AAAB1IwpJjQ on DoWhiz_test (1YcKiDcEVwlb1rJZpP8MzLO9MrQYG_MpLeLOR5uIxXJc)
+[2m2026-02-26T07:29:04.279892Z[0m [32m INFO[0m Google Slides polling enqueued 1 items
+[2m2026-02-26T07:29:09.762753Z[0m [32m INFO[0m Fetched 1 shared spreadsheets (cache miss)
+[2m2026-02-26T07:29:23.482095Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:29:23.482147Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:29:23.482239Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:29:23.482238Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:29:28.541667Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:29:28.541751Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:29:28.541866Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:29:28.541902Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:29:29.255372Z[0m [32m INFO[0m Found actionable comment: 'change the color to brown @proto@dowhiz.com'
+[2m2026-02-26T07:29:30.289183Z[0m [32m INFO[0m Created task for Google Docs comment comment:AAAB0vvIFAA on DoWhiz_test (1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc) [push notification]
+[2m2026-02-26T07:29:30.525967Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:29:30.526018Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:29:30.526061Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:29:32.073688Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:30:34.213692Z[0m [32m INFO[0m Fetched 4 shared documents (cache miss)
+[2m2026-02-26T07:31:27.107696Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:31:27.112182Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:31:27.112468Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:31:27.112471Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:32:12.870480Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:32:12.870596Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:32:12.870758Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:32:12.871634Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:32:39.481272Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:32:39.481319Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:32:39.481378Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:32:39.481365Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:34:06.285687Z[0m [32m INFO[0m Fetched 1 shared presentations (cache miss)
+[2m2026-02-26T07:34:07.224690Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:34:07.224764Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:34:07.224929Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:34:07.224963Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:35:14.858402Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:35:14.858455Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:35:14.858552Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:35:14.858552Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:35:40.652635Z[0m [32m INFO[0m Change notification for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc: state=update
+[2m2026-02-26T07:35:40.652754Z[0m [32m INFO[0m Google Drive change detected for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, triggering immediate poll
+[2m2026-02-26T07:35:40.653017Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:35:40.653026Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:38:24.935080Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:38:24.935149Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:38:24.935289Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:38:24.935315Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:38:30.971114Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:38:30.971174Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:38:30.971308Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:38:30.971364Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:38:31.346879Z[0m [32m INFO[0m Found actionable comment: 'count the ratio of marriage using excel function @'
+[2m2026-02-26T07:38:32.148084Z[0m [32m INFO[0m Created task for Google Sheets comment comment:AAAB1KCpe0A on DoWhiz_test (1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A) [push notification]
+[2m2026-02-26T07:38:32.788187Z[0m [32m INFO[0m Found actionable comment: '@proto@dowhiz.com add another similar page introdu'
+[2m2026-02-26T07:38:33.548478Z[0m [32m INFO[0m Created task for Google Slides comment comment:AAAB1IwpJjU on DoWhiz_test (1YcKiDcEVwlb1rJZpP8MzLO9MrQYG_MpLeLOR5uIxXJc)
+[2m2026-02-26T07:38:33.569657Z[0m [32m INFO[0m Google Slides polling enqueued 1 items
+[2m2026-02-26T07:39:02.208338Z[0m [32m INFO[0m Fetched 1 shared spreadsheets (cache miss)
+[2m2026-02-26T07:39:03.161152Z[0m [32m INFO[0m Fetched 1 shared presentations (cache miss)
+[2m2026-02-26T07:39:58.369356Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:39:58.369473Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:39:58.369623Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:39:58.369623Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:41:01.288730Z[0m [32m INFO[0m Fetched 4 shared documents (cache miss)
+[2m2026-02-26T07:41:26.000765Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:41:26.000898Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:41:26.001160Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:41:26.001207Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:41:27.222380Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:41:27.222471Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:41:27.222541Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:41:27.921381Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:41:41.579877Z[0m [32m INFO[0m Change notification for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A: state=update
+[2m2026-02-26T07:41:41.580036Z[0m [32m INFO[0m Google Drive change detected for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, triggering immediate poll
+[2m2026-02-26T07:41:41.580174Z[0m [32m INFO[0m Google Sheets immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:41:41.580302Z[0m [32m INFO[0m Google Docs immediate poll triggered for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:43:59.922174Z[0m [32m INFO[0m Fetched 1 shared presentations (cache miss)
+[2m2026-02-26T07:44:10.505399Z[0m [32m INFO[0m Fetched 1 shared spreadsheets (cache miss)
+[2m2026-02-26T07:46:19.285223Z[0m [32m INFO[0m Fetched 4 shared documents (cache miss)
+[2m2026-02-26T07:48:56.747380Z[0m [32m INFO[0m Fetched 1 shared presentations (cache miss)
+[2m2026-02-26T07:49:07.700379Z[0m [32m INFO[0m Fetched 1 shared spreadsheets (cache miss)
+[2m2026-02-26T07:49:38.610843Z[0m [32m INFO[0m Stopped watch channel 4e43f8f3-638c-46a0-b2b3-a216f59e899a for file 1uDdfGnr1eqfmOVWNkBisDxA_zVXxgj-M-c3H7wZWXdg
+[2m2026-02-26T07:49:38.655175Z[0m [32m INFO[0m Registering watch channel for file 1uDdfGnr1eqfmOVWNkBisDxA_zVXxgj-M-c3H7wZWXdg
+[2m2026-02-26T07:49:39.097528Z[0m [32m INFO[0m Created watch channel 7824b6d9-6f95-4e13-8533-819bf584cb1e for file 1uDdfGnr1eqfmOVWNkBisDxA_zVXxgj-M-c3H7wZWXdg, expires at 2026-02-26 08:49:38 UTC
+[2m2026-02-26T07:49:39.098888Z[0m [32m INFO[0m Renewed watch channel for file 1uDdfGnr1eqfmOVWNkBisDxA_zVXxgj-M-c3H7wZWXdg
+[2m2026-02-26T07:49:39.354052Z[0m [32m INFO[0m Stopped watch channel 2843886b-61ce-434b-8b1d-95ad58ba8d99 for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:49:39.398961Z[0m [32m INFO[0m Registering watch channel for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:49:39.773441Z[0m [32m INFO[0m Created watch channel 71e80ad1-2f51-499a-b0b5-b2533b9d62cc for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A, expires at 2026-02-26 08:49:39 UTC
+[2m2026-02-26T07:49:39.775854Z[0m [32m INFO[0m Renewed watch channel for file 1dAzBesk0yFaHMtd4UAFerWAro7ENg_e_gOUOKYi1I5A
+[2m2026-02-26T07:49:40.113063Z[0m [32m INFO[0m Stopped watch channel 5e8306ce-b353-4e27-a3eb-2050b40f6313 for file 1AEfOk2ED67Kmv_KK9EHno7I0-XAcU8ws96EN2mlI7hQ
+[2m2026-02-26T07:49:40.152419Z[0m [32m INFO[0m Registering watch channel for file 1AEfOk2ED67Kmv_KK9EHno7I0-XAcU8ws96EN2mlI7hQ
+[2m2026-02-26T07:49:40.588355Z[0m [32m INFO[0m Created watch channel 71387fb7-3292-42ce-b2cd-55ea543f4868 for file 1AEfOk2ED67Kmv_KK9EHno7I0-XAcU8ws96EN2mlI7hQ, expires at 2026-02-26 08:49:40 UTC
+[2m2026-02-26T07:49:40.591082Z[0m [32m INFO[0m Renewed watch channel for file 1AEfOk2ED67Kmv_KK9EHno7I0-XAcU8ws96EN2mlI7hQ
+[2m2026-02-26T07:49:40.920240Z[0m [32m INFO[0m Stopped watch channel c20aad20-25e7-4b12-8ab6-944363ad7af9 for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:49:40.963651Z[0m [32m INFO[0m Registering watch channel for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:49:41.382425Z[0m [32m INFO[0m Created watch channel a786a2ec-673a-4bbe-b9bd-6c68f99a77f5 for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc, expires at 2026-02-26 08:49:40 UTC
+[2m2026-02-26T07:49:41.384834Z[0m [32m INFO[0m Renewed watch channel for file 1lkQLGy4_sVTNpMogVJcDnqCZnBS_AUcdBJh_sTINaGc
+[2m2026-02-26T07:49:41.634615Z[0m [32m INFO[0m Stopped watch channel 8d96143c-8da9-4907-b311-79187495b7fa for file 1c8OJx6emM76s5UNxC9_vASWX_1enbcWU1-SZQLGbFzU
+[2m2026-02-26T07:49:41.691244Z[0m [32m INFO[0m Registering watch channel for file 1c8OJx6emM76s5UNxC9_vASWX_1enbcWU1-SZQLGbFzU
+[2m2026-02-26T07:49:42.050757Z[0m [32m INFO[0m Created watch channel 5440e3a4-98de-4652-b976-f3d1ed070d3c for file 1c8OJx6emM76s5UNxC9_vASWX_1enbcWU1-SZQLGbFzU, expires at 2026-02-26 08:49:41 UTC
+[2m2026-02-26T07:49:42.052990Z[0m [32m INFO[0m Renewed watch channel for file 1c8OJx6emM76s5UNxC9_vASWX_1enbcWU1-SZQLGbFzU
+[2m2026-02-26T07:51:28.700502Z[0m [32m INFO[0m Fetched 4 shared documents (cache miss)
+[2m2026-02-26T07:53:53.913939Z[0m [32m INFO[0m Fetched 1 shared presentations (cache miss)
+[2m2026-02-26T07:54:09.322044Z[0m [32m INFO[0m Fetched 1 shared spreadsheets (cache miss)

@@ -471,10 +471,12 @@ fn get_element_type(elem: &serde_json::Value) -> &'static str {
 }
 
 /// Extract element position and size from transform
+/// Note: Images have size stored with scaleX/scaleY transforms that need to be applied
 fn extract_element_bounds(elem: &serde_json::Value) -> (f64, f64, f64, f64) {
     let transform = elem.get("transform");
     let size = elem.get("size");
 
+    // Get translation (position) - always in EMU
     let translate_x = transform
         .and_then(|t| t.get("translateX"))
         .and_then(|v| v.as_f64())
@@ -485,15 +487,31 @@ fn extract_element_bounds(elem: &serde_json::Value) -> (f64, f64, f64, f64) {
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0) / 914400.0 * 72.0;
 
-    let width = size
+    // Get scale factors (images use these to set actual display size)
+    let scale_x = transform
+        .and_then(|t| t.get("scaleX"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0);
+
+    let scale_y = transform
+        .and_then(|t| t.get("scaleY"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0);
+
+    // Get base size
+    let base_width = size
         .and_then(|s| s.get("width"))
         .map(|w| extract_dimension(Some(w)))
         .unwrap_or(0.0);
 
-    let height = size
+    let base_height = size
         .and_then(|s| s.get("height"))
         .map(|h| extract_dimension(Some(h)))
         .unwrap_or(0.0);
+
+    // Apply scale to get actual displayed size
+    let width = base_width * scale_x.abs();
+    let height = base_height * scale_y.abs();
 
     (translate_x, translate_y, width, height)
 }
@@ -837,14 +855,20 @@ fn cmd_find_space(
         return Err(format!("Slide {} not found in presentation", slide_id));
     };
 
-    // Collect all element bounding boxes
+    // Collect all element bounding boxes with safety padding
     let mut occupied_regions: Vec<(f64, f64, f64, f64)> = Vec::new();
+    let element_padding = 15.0; // Add padding around elements to prevent overlap
 
     if let Some(elements) = slide.get("pageElements").and_then(|e| e.as_array()) {
         for elem in elements {
             let (x, y, w, h) = extract_element_bounds(elem);
             if w > 0.0 && h > 0.0 {
-                occupied_regions.push((x, y, w, h));
+                // Add padding around the element
+                let padded_x = (x - element_padding).max(0.0);
+                let padded_y = (y - element_padding).max(0.0);
+                let padded_w = w + element_padding * 2.0;
+                let padded_h = h + element_padding * 2.0;
+                occupied_regions.push((padded_x, padded_y, padded_w, padded_h));
             }
         }
     }

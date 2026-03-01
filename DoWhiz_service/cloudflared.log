@@ -1,0 +1,82 @@
+2026-02-26T06:46:23Z INF Thank you for trying Cloudflare Tunnel. Doing so, without a Cloudflare account, is a quick way to experiment and try it out. However, be aware that these account-less Tunnels have no uptime guarantee, are subject to the Cloudflare Online Services Terms of Use (https://www.cloudflare.com/website-terms/), and Cloudflare reserves the right to investigate your use of Tunnels for violations of such terms. If you intend to use Tunnels in production you should use a pre-created named tunnel by following: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps
+2026-02-26T06:46:23Z INF Requesting new quick Tunnel on trycloudflare.com...
+2026-02-26T06:46:27Z INF +--------------------------------------------------------------------------------------------+
+2026-02-26T06:46:27Z INF |  Your quick Tunnel has been created! Visit it at (it may take some time to be reachable):  |
+2026-02-26T06:46:27Z INF |  https://climbing-donors-searching-solve.trycloudflare.com                                 |
+2026-02-26T06:46:27Z INF +--------------------------------------------------------------------------------------------+
+2026-02-26T06:46:27Z INF Cannot determine default configuration path. No file [config.yml config.yaml] in [~/.cloudflared ~/.cloudflare-warp ~/cloudflare-warp /etc/cloudflared /usr/local/etc/cloudflared]
+2026-02-26T06:46:27Z INF Version 2026.2.0 (Checksum 176746db3be7dc7bd48f3dd287c8930a4645ebb6e6700f883fddda5a4c307c16)
+2026-02-26T06:46:27Z INF GOOS: linux, GOVersion: go1.24.13, GoArch: amd64
+2026-02-26T06:46:27Z INF Settings: map[ha-connections:1 protocol:quic url:http://localhost:9100]
+2026-02-26T06:46:27Z INF Autoupdate frequency is set autoupdateFreq=86400000
+2026-02-26T06:46:27Z INF Generated Connector ID: b538f5ef-940d-4898-b621-dd7505e69d48
+2026-02-26T06:46:27Z INF Initial protocol quic
+2026-02-26T06:46:27Z INF ICMP proxy will use 10.0.0.75 as source for IPv4
+2026-02-26T06:46:27Z INF ICMP proxy will use 2601:400:8000:eda0::7c62 in zone eth0 as source for IPv6
+2026-02-26T06:46:27Z WRN The user running cloudflared process has a GID (group ID) that is not within ping_group_range. You might need to add that user to a group within that range, or instead update the range to encompass a group the user is already in by modifying /proc/sys/net/ipv4/ping_group_range. Otherwise cloudflared will not be able to ping this network error="Group ID 1000 is not between ping group 1 to 0"
+2026-02-26T06:46:27Z WRN ICMP proxy feature is disabled error="cannot create ICMPv4 proxy: Group ID 1000 is not between ping group 1 to 0 nor ICMPv6 proxy: socket: permission denied"
+2026-02-26T06:46:27Z INF ICMP proxy will use 10.0.0.75 as source for IPv4
+2026-02-26T06:46:28Z INF ICMP proxy will use 2601:400:8000:eda0::7c62 in zone eth0 as source for IPv6
+2026-02-26T06:46:28Z INF Starting metrics server on 127.0.0.1:20243/metrics
+2026-02-26T06:46:28Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.107
+2026/02/26 01:46:28 failed to sufficiently increase receive buffer size (was: 208 kiB, wanted: 7168 kiB, got: 416 kiB). See https://github.com/quic-go/quic-go/wiki/UDP-Buffer-Sizes for details.
+2026-02-26T06:46:28Z INF Registered tunnel connection connIndex=0 connection=03513f85-3d9d-4a78-8a4b-277f94333740 event=0 ip=198.41.192.107 location=ord02 protocol=qui2026-02-26T07:02:16Z ERR failed to run the datagram handler error="write udp [::]:10832->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:02:16Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: write udp [::]:10832->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:02:16Z ERR failed to serve tunnel connection error="datagram manager encountered a failure while serving" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:02:16Z ERR Serve tunnel error error="datagram manager encountered a failure while serving" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:02:16Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:02:17Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:02:17Z INF Registered tunnel connection connIndex=0 connection=c5e60cd1-bdda-437c-b9c0-ec923d127112 event=0 ip=198.41.200.43 location=dtw01 protocol=quic
+2026-02-26T07:02:41Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: write udp [::]:10832->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:02:41Z ERR failed to run the datagram handler error="write udp [::]:10832->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:02:41Z ERR failed to serve tunnel connection error="accept stream listener encountered a failure while serving" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:02:41Z ERR Serve tunnel error error="accept stream listener encountered a failure while serving" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:02:41Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:02:43Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:02:43Z INF Registered tunnel connection connIndex=0 connection=b68d2f89-837e-4090-b153-143362be4c65 event=0 ip=198.41.200.43 location=dtw01 protocol=quic
+2026-02-26T07:10:14Z ERR failed to run the datagram handler error="write udp [::]:10832->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:10:14Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: write udp [::]:10832->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:10:14Z ERR failed to serve tunnel connection error="datagram manager encountered a failure while serving" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:10:14Z ERR Serve tunnel error error="datagram manager encountered a failure while serving" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:10:14Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:10:15Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:10:16Z INF Registered tunnel connection connIndex=0 connection=25938104-cbb3-498f-8350-387ef8d3f063 event=0 ip=198.41.200.43 location=dtw01 protocol=quic
+2026-02-26T07:10:25Z ERR failed to run the datagram handler error="write udp [::]:10832->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:10:25Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: write udp [::]:10832->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:10:25Z ERR failed to serve tunnel connection error="datagram manager encountered a failure while serving" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:10:25Z ERR Serve tunnel error error="datagram manager encountered a failure while serving" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:10:25Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:10:26Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:10:26Z INF Registered tunnel connection connIndex=0 connection=0ba55337-fd18-4def-8276-be69803731f0 event=0 ip=198.41.200.43 location=dtw01 protocol=quic
+2026-02-26T07:33:56Z ERR failed to run the datagram handler error="write udp [::]:10832->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:33:56Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: write udp [::]:10832->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:33:56Z ERR failed to serve tunnel connection error="datagram manager encountered a failure while serving" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:33:56Z ERR Serve tunnel error error="datagram manager encountered a failure while serving" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:33:56Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:33:57Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:33:57Z INF Registered tunnel connection connIndex=0 connection=02a9e766-5bd3-4b77-9ce7-cf9aa53a0b41 event=0 ip=198.41.200.43 location=dtw01 protocol=quic
+2026-02-26T07:49:26Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: write udp [::]:10832->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:49:26Z ERR failed to run the datagram handler error="write udp [::]:10832->198.41.200.43:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:49:26Z WRN failed to serve tunnel connection error="accept stream listener encountered a failure while serving" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:49:26Z ERR Serve tunnel error error="accept stream listener encountered a failure while serving" connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:49:26Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:49:26Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.200.43
+2026-02-26T07:49:26Z INF Registered tunnel connection connIndex=0 connection=2578428d-c493-4615-a844-8caffff08a2b event=0 ip=198.41.200.43 location=dtw01 protocol=quic
+5e4475ba-168e-4d5b-ae92-1d611745ed3b event=0 ip=198.41.192.107 location=ord02 protocol=quic
+2026-02-26T07:46:54Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: write udp [::]:11551->198.41.192.107:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.192.107
+2026-02-26T07:46:54Z ERR failed to run the datagram handler error="context canceled" connIndex=0 event=0 ip=198.41.192.107
+2026-02-26T07:46:54Z ERR failed to serve tunnel connection error="accept stream listener encountered a failure while serving" connIndex=0 event=0 ip=198.41.192.107
+2026-02-26T07:46:54Z ERR Serve tunnel error error="accept stream listener encountered a failure while serving" connIndex=0 event=0 ip=198.41.192.107
+2026-02-26T07:46:54Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.192.107
+2026-02-26T07:46:56Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.107
+2026-02-26T07:46:56Z INF Registered tunnel connection connIndex=0 connection=d1f2a903-63ac-4ef1-8e8a-7be4f5a16b72 event=0 ip=198.41.192.107 location=ord02 protocol=quic
+2026-02-26T07:49:16Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: write udp [::]:11551->198.41.192.107:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.192.107
+2026-02-26T07:49:16Z ERR failed to run the datagram handler error="write udp [::]:11551->198.41.192.107:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.192.107
+2026-02-26T07:49:16Z WRN failed to serve tunnel connection error="accept stream listener encountered a failure while serving" connIndex=0 event=0 ip=198.41.192.107
+2026-02-26T07:49:16Z ERR Serve tunnel error error="accept stream listener encountered a failure while serving" connIndex=0 event=0 ip=198.41.192.107
+2026-02-26T07:49:16Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.192.107
+2026-02-26T07:49:16Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.107
+2026-02-26T07:49:16Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: write udp [::]:11551->198.41.192.107:7844: sendmsg: network is unreachable" connIndex=0 event=0 ip=198.41.192.107
+2026-02-26T07:49:16Z INF Retrying connection in up to 4s connIndex=0 event=0 ip=198.41.192.107
+2026-02-26T07:49:19Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.200.23
+2026-02-26T07:49:19Z INF Registered tunnel connection connIndex=0 connection=4ceebb33-d8a6-4df0-9851-f7e6839f85f0 event=0 ip=198.41.200.23 location=dtw01 protocol=quic
