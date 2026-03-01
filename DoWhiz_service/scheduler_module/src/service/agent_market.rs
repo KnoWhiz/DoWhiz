@@ -129,6 +129,7 @@ struct StoredOperatorPayload {
 struct StoredDeploymentPayload {
     agent_name: String,
     azure_region: String,
+    agent_hourly_rate_usd: String,
     wallet_id: String,
     contact_channel: String,
     workspace_paths: String,
@@ -261,6 +262,8 @@ async fn submit_agent_market_request(
     let team_name = optional_text_field(&text_fields, "team_name");
     let azure_region = required_text_field(&text_fields, "azure_region")?;
     let agent_name = required_text_field(&text_fields, "agent_name")?;
+    let agent_hourly_rate_usd_raw = optional_text_field(&text_fields, "agent_hourly_rate_usd");
+    let owner_hourly_rate_usd_raw = optional_text_field(&text_fields, "owner_hourly_rate_usd");
     let wallet_id = optional_text_field(&text_fields, "wallet_id");
     let contact_channel = required_text_field(&text_fields, "contact_channel")?;
     let workspace_paths = required_text_field(&text_fields, "workspace_paths")?;
@@ -275,6 +278,12 @@ async fn submit_agent_market_request(
         bad_request("Environment keys format is invalid. Please retry the submission.")
     })?;
     normalize_and_validate_env_keys(&mut env_keys)?;
+    let hourly_rate_raw = if agent_hourly_rate_usd_raw.is_empty() {
+        owner_hourly_rate_usd_raw
+    } else {
+        agent_hourly_rate_usd_raw
+    };
+    let agent_hourly_rate_usd = normalize_hourly_rate_usd(&hourly_rate_raw)?;
 
     let skills_count = uploaded_files
         .iter()
@@ -304,6 +313,7 @@ async fn submit_agent_market_request(
     let deployment = StoredDeploymentPayload {
         agent_name,
         azure_region,
+        agent_hourly_rate_usd,
         wallet_id,
         contact_channel,
         workspace_paths,
@@ -334,6 +344,7 @@ async fn submit_agent_market_request(
         deployment: StoredDeploymentPayload {
             agent_name: deployment.agent_name.clone(),
             azure_region: deployment.azure_region.clone(),
+            agent_hourly_rate_usd: deployment.agent_hourly_rate_usd.clone(),
             wallet_id: deployment.wallet_id.clone(),
             contact_channel: deployment.contact_channel.clone(),
             workspace_paths: deployment.workspace_paths.clone(),
@@ -387,6 +398,7 @@ async fn submit_agent_market_request(
         deployment: StoredDeploymentPayload {
             agent_name: deployment.agent_name.clone(),
             azure_region: deployment.azure_region.clone(),
+            agent_hourly_rate_usd: deployment.agent_hourly_rate_usd.clone(),
             wallet_id: deployment.wallet_id.clone(),
             contact_channel: deployment.contact_channel.clone(),
             workspace_paths: deployment.workspace_paths.clone(),
@@ -518,6 +530,27 @@ fn looks_like_email(value: &str) -> bool {
         && !trimmed.contains(' ')
 }
 
+fn normalize_hourly_rate_usd(raw: &str) -> AgentMarketResult<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+
+    let parsed = trimmed
+        .parse::<f64>()
+        .map_err(|_| bad_request("Agent hourly rate must be a valid number."))?;
+    if !parsed.is_finite() || parsed < 0.0 {
+        return Err(bad_request(
+            "Agent hourly rate must be a non-negative number.",
+        ));
+    }
+    if parsed > 1_000_000.0 {
+        return Err(bad_request("Agent hourly rate is unrealistically large."));
+    }
+
+    Ok(format!("{:.2}", parsed))
+}
+
 fn normalize_relative_path(input: &str) -> String {
     let normalized = input.replace('\\', "/");
     let mut segments = Vec::new();
@@ -555,7 +588,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 fn build_admin_text_body(manifest: &EmailManifest) -> String {
     format!(
-        "Agent Market deploy request\n\nRequest ID: {}\nSubmitted at: {}\nOperator: {} <{}>\nTeam: {}\nAgent name: {}\nAzure region: {}\nWallet: {}\nContact channel: {}\nWorkspace paths: {}\n\nEnv key names: {}\nFile count: {}\nTotal bytes: {}\nStorage reference: {}\n\nThis request payload (including env values + uploaded files) is stored in raw payload storage under the reference above.",
+        "Agent Market deploy request\n\nRequest ID: {}\nSubmitted at: {}\nOperator: {} <{}>\nTeam: {}\nAgent name: {}\nAzure region: {}\nAgent piecework hourly rate (USD/hour): {}\nWallet: {}\nContact channel: {}\nWorkspace paths: {}\n\nEnv key names: {}\nFile count: {}\nTotal bytes: {}\nStorage reference: {}\n\nThis request payload (including env values + uploaded files) is stored in raw payload storage under the reference above.",
         manifest.request_id,
         manifest.submitted_at,
         manifest.operator.full_name,
@@ -567,6 +600,11 @@ fn build_admin_text_body(manifest: &EmailManifest) -> String {
         },
         manifest.deployment.agent_name,
         manifest.deployment.azure_region,
+        if manifest.deployment.agent_hourly_rate_usd.is_empty() {
+            "N/A".to_string()
+        } else {
+            format!("${}", manifest.deployment.agent_hourly_rate_usd)
+        },
         if manifest.deployment.wallet_id.is_empty() {
             "N/A"
         } else {
@@ -616,6 +654,7 @@ fn build_admin_html_body(manifest: &EmailManifest) -> String {
       <p><strong>Team:</strong> {team_name}</p>
       <p><strong>Agent:</strong> {agent_name}</p>
       <p><strong>Azure region:</strong> {azure_region}</p>
+      <p><strong>Agent piecework hourly rate:</strong> {agent_hourly_rate}</p>
       <p><strong>Wallet:</strong> {wallet}</p>
       <p><strong>Contact channel:</strong> {contact_channel}</p>
       <p><strong>Workspace paths:</strong> {workspace_paths}</p>
@@ -641,6 +680,14 @@ fn build_admin_html_body(manifest: &EmailManifest) -> String {
         },
         agent_name = escape_html(&manifest.deployment.agent_name),
         azure_region = escape_html(&manifest.deployment.azure_region),
+        agent_hourly_rate = if manifest.deployment.agent_hourly_rate_usd.is_empty() {
+            "N/A".to_string()
+        } else {
+            format!(
+                "${}",
+                escape_html(&manifest.deployment.agent_hourly_rate_usd)
+            )
+        },
         wallet = if manifest.deployment.wallet_id.is_empty() {
             "N/A".to_string()
         } else {
@@ -737,8 +784,8 @@ fn internal_error(message: impl Into<String>) -> (StatusCode, Json<AgentMarketEr
 #[cfg(test)]
 mod tests {
     use super::{
-        is_valid_env_key, looks_like_email, normalize_and_validate_env_keys, normalize_relative_path,
-        EnvKeyEntry,
+        is_valid_env_key, looks_like_email, normalize_and_validate_env_keys,
+        normalize_hourly_rate_usd, normalize_relative_path, EnvKeyEntry,
     };
 
     #[test]
@@ -811,5 +858,29 @@ mod tests {
         assert!(!looks_like_email("missing-domain@"));
         assert!(!looks_like_email("@missing-local.com"));
         assert!(!looks_like_email("bad domain@dowhiz.com"));
+    }
+
+    #[test]
+    fn hourly_rate_normalization_accepts_empty() {
+        let normalized = normalize_hourly_rate_usd("").expect("empty should be accepted");
+        assert_eq!(normalized, "");
+    }
+
+    #[test]
+    fn hourly_rate_normalization_formats_two_decimals() {
+        let normalized = normalize_hourly_rate_usd("120").expect("valid number");
+        assert_eq!(normalized, "120.00");
+    }
+
+    #[test]
+    fn hourly_rate_normalization_rejects_negative() {
+        let result = normalize_hourly_rate_usd("-1");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn hourly_rate_normalization_rejects_non_numeric() {
+        let result = normalize_hourly_rate_usd("abc");
+        assert!(result.is_err());
     }
 }
