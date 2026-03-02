@@ -5,28 +5,38 @@ use std::path::{Path, PathBuf};
 use super::errors::RunTaskError;
 
 pub(super) fn load_env_sources(workspace_dir: &Path) -> Result<(), RunTaskError> {
-    if let Some(env_path) = find_env_file(workspace_dir) {
+    for env_path in find_env_files(workspace_dir) {
         load_env_file(&env_path)?;
     }
     Ok(())
 }
 
-pub(super) fn find_env_file(workspace_dir: &Path) -> Option<PathBuf> {
-    for ancestor in workspace_dir.ancestors() {
+pub(super) fn find_env_files(workspace_dir: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    collect_env_files(workspace_dir, &mut candidates);
+    if let Ok(cwd) = env::current_dir() {
+        collect_env_files(&cwd, &mut candidates);
+    }
+    dedupe_paths(candidates)
+}
+
+fn collect_env_files(start: &Path, out: &mut Vec<PathBuf>) {
+    for ancestor in start.ancestors() {
         let candidate = ancestor.join(".env");
         if candidate.exists() {
-            return Some(candidate);
+            out.push(candidate);
         }
     }
-    if let Ok(cwd) = env::current_dir() {
-        for ancestor in cwd.ancestors() {
-            let candidate = ancestor.join(".env");
-            if candidate.exists() {
-                return Some(candidate);
-            }
+}
+
+fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut deduped = Vec::new();
+    for path in paths {
+        if !deduped.iter().any(|existing: &PathBuf| existing == &path) {
+            deduped.push(path);
         }
     }
-    None
+    deduped
 }
 
 pub(super) fn load_env_file(path: &Path) -> Result<(), RunTaskError> {
@@ -147,5 +157,90 @@ pub(super) fn resolve_env_path(key: &str, cwd: &Path) -> Option<PathBuf> {
         Some(path)
     } else {
         Some(cwd.join(path))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use tempfile::TempDir;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn unset(key: &'static str) -> Self {
+            let prev = env::var(key).ok();
+            env::remove_var(key);
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.prev {
+                env::set_var(self.key, value);
+            } else {
+                env::remove_var(self.key);
+            }
+        }
+    }
+
+    struct CwdGuard {
+        prev: PathBuf,
+    }
+
+    impl CwdGuard {
+        fn set(path: &Path) -> Self {
+            let prev = env::current_dir().expect("current dir");
+            env::set_current_dir(path).expect("set current dir");
+            Self { prev }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = env::set_current_dir(&self.prev);
+        }
+    }
+
+    #[test]
+    fn load_env_sources_merges_workspace_and_cwd_env() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _backend_guard = EnvVarGuard::unset("RUN_TASK_EXECUTION_BACKEND");
+        let _group_guard = EnvVarGuard::unset("RUN_TASK_AZURE_ACI_RESOURCE_GROUP");
+
+        let temp = TempDir::new().expect("tempdir");
+        let service_root = temp.path().join("service");
+        let workspace = temp.path().join("run_task/users/u1/workspaces/thread_1");
+        fs::create_dir_all(&service_root).expect("service root");
+        fs::create_dir_all(&workspace).expect("workspace");
+
+        fs::write(
+            service_root.join(".env"),
+            "RUN_TASK_AZURE_ACI_RESOURCE_GROUP=rg-from-service\nRUN_TASK_EXECUTION_BACKEND=azure_aci\n",
+        )
+        .expect("write service env");
+        fs::write(workspace.join(".env"), "RUN_TASK_EXECUTION_BACKEND=local\n")
+            .expect("write workspace env");
+
+        let _cwd_guard = CwdGuard::set(&service_root);
+        load_env_sources(&workspace).expect("load env sources");
+
+        assert_eq!(
+            env::var("RUN_TASK_EXECUTION_BACKEND").ok().as_deref(),
+            Some("local")
+        );
+        assert_eq!(
+            env::var("RUN_TASK_AZURE_ACI_RESOURCE_GROUP")
+                .ok()
+                .as_deref(),
+            Some("rg-from-service")
+        );
     }
 }
