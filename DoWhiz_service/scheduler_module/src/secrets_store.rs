@@ -23,7 +23,7 @@ pub(crate) fn sync_user_secrets_to_workspace(
 ) -> Result<(), io::Error> {
     let workspace_env = workspace_env_path(workspace_dir);
     if user_env_path.exists() {
-        fs::copy(user_env_path, workspace_env)?;
+        copy_file_with_fallback(user_env_path, &workspace_env)?;
         return Ok(());
     }
     if workspace_env.exists() {
@@ -47,8 +47,25 @@ pub(crate) fn sync_workspace_secrets_to_user(
     if let Some(parent) = user_env_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::copy(workspace_env, user_env_path)?;
+    copy_file_with_fallback(&workspace_env, user_env_path)?;
     Ok(())
+}
+
+fn copy_file_with_fallback(src: &Path, dest: &Path) -> Result<(), io::Error> {
+    match fs::copy(src, dest) {
+        Ok(_) => Ok(()),
+        Err(err)
+            if err.kind() == io::ErrorKind::PermissionDenied || err.raw_os_error() == Some(1) =>
+        {
+            // Some CIFS/Azure Files mounts reject kernel fast-copy syscalls.
+            // Fall back to stream copy for compatibility.
+            let mut input = fs::File::open(src)?;
+            let mut output = fs::File::create(dest)?;
+            io::copy(&mut input, &mut output)?;
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
 }
 
 fn workspace_env_path(workspace_dir: &Path) -> PathBuf {

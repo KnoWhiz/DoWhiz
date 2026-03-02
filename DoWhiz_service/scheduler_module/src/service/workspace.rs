@@ -1,3 +1,4 @@
+use std::io;
 use std::path::{Path, PathBuf};
 
 use tracing::error;
@@ -39,7 +40,7 @@ pub fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
         if src_path.is_dir() {
             copy_dir_recursive(&src_path, &dest_path)?;
         } else {
-            std::fs::copy(&src_path, &dest_path)?;
+            copy_file_with_fallback(&src_path, &dest_path)?;
         }
     }
     Ok(())
@@ -51,20 +52,38 @@ pub(super) fn ensure_workspace_employee_files(
 ) -> std::io::Result<()> {
     if let Some(path) = employee.agents_path.as_ref() {
         if path.exists() {
-            std::fs::copy(path, workspace.join("AGENTS.md"))?;
+            copy_file_with_fallback(path, &workspace.join("AGENTS.md"))?;
         }
     }
     if let Some(path) = employee.claude_path.as_ref() {
         if path.exists() {
-            std::fs::copy(path, workspace.join("CLAUDE.md"))?;
+            copy_file_with_fallback(path, &workspace.join("CLAUDE.md"))?;
         }
     }
     if let Some(path) = employee.soul_path.as_ref() {
         if path.exists() {
-            std::fs::copy(path, workspace.join("SOUL.md"))?;
+            copy_file_with_fallback(path, &workspace.join("SOUL.md"))?;
         }
     }
     Ok(())
+}
+
+fn copy_file_with_fallback(src: &Path, dest: &Path) -> std::io::Result<()> {
+    match std::fs::copy(src, dest) {
+        Ok(_) => Ok(()),
+        Err(err)
+            if err.kind() == std::io::ErrorKind::PermissionDenied
+                || err.raw_os_error() == Some(1) =>
+        {
+            // Some CIFS/Azure Files mounts reject the kernel fast-copy syscall.
+            // Fall back to a stream copy that is broadly supported.
+            let mut input = std::fs::File::open(src)?;
+            let mut output = std::fs::File::create(dest)?;
+            std::io::copy(&mut input, &mut output)?;
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
 }
 
 pub(crate) fn ensure_thread_workspace(
@@ -74,13 +93,25 @@ pub(crate) fn ensure_thread_workspace(
     employee: &EmployeeProfile,
     skills_source_dir: Option<&Path>,
 ) -> Result<PathBuf, BoxError> {
-    std::fs::create_dir_all(&user_paths.workspaces_root)?;
+    std::fs::create_dir_all(&user_paths.workspaces_root).map_err(|err| {
+        io::Error::other(format!(
+            "create_dir_all workspaces_root failed path={} error={}",
+            user_paths.workspaces_root.display(),
+            err
+        ))
+    })?;
 
     let workspace_name = thread_workspace_name(thread_key);
     let workspace = user_paths.workspaces_root.join(workspace_name);
     let is_new = !workspace.exists();
     if is_new {
-        std::fs::create_dir_all(&workspace)?;
+        std::fs::create_dir_all(&workspace).map_err(|err| {
+            io::Error::other(format!(
+                "create_dir_all workspace failed path={} error={}",
+                workspace.display(),
+                err
+            ))
+        })?;
     }
 
     let incoming_email = workspace.join("incoming_email");
@@ -88,10 +119,34 @@ pub(crate) fn ensure_thread_workspace(
     let memory = workspace.join("memory");
     let references = workspace.join("references");
 
-    std::fs::create_dir_all(&incoming_email)?;
-    std::fs::create_dir_all(&incoming_attachments)?;
-    std::fs::create_dir_all(&memory)?;
-    std::fs::create_dir_all(&references)?;
+    std::fs::create_dir_all(&incoming_email).map_err(|err| {
+        io::Error::other(format!(
+            "create_dir_all incoming_email failed path={} error={}",
+            incoming_email.display(),
+            err
+        ))
+    })?;
+    std::fs::create_dir_all(&incoming_attachments).map_err(|err| {
+        io::Error::other(format!(
+            "create_dir_all incoming_attachments failed path={} error={}",
+            incoming_attachments.display(),
+            err
+        ))
+    })?;
+    std::fs::create_dir_all(&memory).map_err(|err| {
+        io::Error::other(format!(
+            "create_dir_all memory failed path={} error={}",
+            memory.display(),
+            err
+        ))
+    })?;
+    std::fs::create_dir_all(&references).map_err(|err| {
+        io::Error::other(format!(
+            "create_dir_all references failed path={} error={}",
+            references.display(),
+            err
+        ))
+    })?;
 
     if is_new || !references.join("past_emails").exists() {
         if let Err(err) = crate::past_emails::hydrate_past_emails(
@@ -104,7 +159,13 @@ pub(crate) fn ensure_thread_workspace(
         }
     }
 
-    ensure_workspace_employee_files(&workspace, employee)?;
+    ensure_workspace_employee_files(&workspace, employee).map_err(|err| {
+        io::Error::other(format!(
+            "ensure_workspace_employee_files failed workspace={} error={}",
+            workspace.display(),
+            err
+        ))
+    })?;
 
     // Copy skills to workspace for Codex/Claude runners.
     let agents_skills_dir = workspace.join(".agents").join("skills");

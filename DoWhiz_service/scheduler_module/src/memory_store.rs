@@ -105,10 +105,27 @@ fn copy_markdown_files(src: &Path, dest: &Path) -> Result<(), io::Error> {
         let entry = entry?;
         if entry.file_type()?.is_file() && is_markdown_file(&entry.path()) {
             let dest_path = dest.join(entry.file_name());
-            fs::copy(entry.path(), dest_path)?;
+            copy_file_with_fallback(&entry.path(), &dest_path)?;
         }
     }
     Ok(())
+}
+
+fn copy_file_with_fallback(src: &Path, dest: &Path) -> Result<(), io::Error> {
+    match fs::copy(src, dest) {
+        Ok(_) => Ok(()),
+        Err(err)
+            if err.kind() == io::ErrorKind::PermissionDenied || err.raw_os_error() == Some(1) =>
+        {
+            // Some CIFS/Azure Files mounts reject kernel fast-copy syscalls.
+            // Fall back to a stream copy for broader filesystem compatibility.
+            let mut input = fs::File::open(src)?;
+            let mut output = fs::File::create(dest)?;
+            io::copy(&mut input, &mut output)?;
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
 }
 
 fn is_markdown_file(path: &Path) -> bool {
