@@ -3,6 +3,7 @@ use rusqlite::{params, Connection};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::channel::Channel;
@@ -314,6 +315,7 @@ impl SqliteSchedulerStore {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
+        self.quarantine_zero_byte_db_if_needed()?;
         let conn = Connection::open(&self.path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.execute_batch(SCHEDULER_SCHEMA)?;
@@ -327,6 +329,42 @@ impl SqliteSchedulerStore {
         ensure_send_whatsapp_tasks_table(&conn)?;
         ensure_run_task_task_columns(&conn)?;
         Ok(conn)
+    }
+
+    fn quarantine_zero_byte_db_if_needed(&self) -> Result<(), SchedulerError> {
+        let metadata = match fs::metadata(&self.path) {
+            Ok(metadata) => metadata,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(err) => return Err(err.into()),
+        };
+        if metadata.len() != 0 {
+            return Ok(());
+        }
+
+        let file_name = self
+            .path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("tasks.db");
+        let quarantine_name = format!(
+            "{}.corrupt.{}",
+            file_name,
+            Utc::now().format("%Y%m%d_%H%M%S")
+        );
+        let quarantine_path = self.path.with_file_name(quarantine_name);
+
+        match fs::rename(&self.path, &quarantine_path) {
+            Ok(()) => {
+                warn!(
+                    "quarantined zero-byte sqlite db: {} -> {}",
+                    self.path.display(),
+                    quarantine_path.display()
+                );
+                Ok(())
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// Get the current retry count for a task

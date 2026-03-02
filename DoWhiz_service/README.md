@@ -1113,7 +1113,7 @@ Single-file env split:
 |----------|---------|-------------|
 | `SCHEDULER_POLL_INTERVAL_SECS` | `1` | Poll interval for due tasks |
 | `SCHEDULER_MAX_CONCURRENCY` | `200` | Global max concurrent tasks |
-| `SCHEDULER_USER_MAX_CONCURRENCY` | `200` | Per-user max concurrent tasks |
+| `SCHEDULER_USER_MAX_CONCURRENCY` | `1` | Per-user max concurrent tasks |
 
 ### Ingestion Queue
 | Variable | Default | Description |
