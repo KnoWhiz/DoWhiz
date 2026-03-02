@@ -1,60 +1,79 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="DoWhiz">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#050505" />
-      <stop offset="1" stop-color="#0f172a" />
+      <stop offset="0" stop-color="#03050a" />
+      <stop offset="1" stop-color="#0b0d16" />
     </linearGradient>
-    <radialGradient id="glow" cx="0.2" cy="0.2" r="0.6">
-      <stop offset="0" stop-color="#1d4ed8" stop-opacity="0.5" />
-      <stop offset="1" stop-color="#0f172a" stop-opacity="0" />
+    <radialGradient id="spot" cx="0.16" cy="0.2" r="0.65">
+      <stop offset="0" stop-color="#1f2f56" stop-opacity="0.72" />
+      <stop offset="1" stop-color="#1f2f56" stop-opacity="0" />
     </radialGradient>
-    <linearGradient id="markBg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0f172a" />
-      <stop offset="0.55" stop-color="#1d4ed8" />
-      <stop offset="1" stop-color="#0ea5e9" />
+    <linearGradient id="markBg" x1="0.12" y1="0.08" x2="0.88" y2="0.92">
+      <stop offset="0" stop-color="#171b28" />
+      <stop offset="1" stop-color="#06070d" />
     </linearGradient>
-    <linearGradient id="markStroke" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#f8fafc" />
-      <stop offset="1" stop-color="#e2e8f0" />
+    <linearGradient id="markShine" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.06" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+    <pattern id="markStripe" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="rotate(-32)">
+      <rect width="12" height="24" fill="#ffffff" fill-opacity="0.03" />
+    </pattern>
+    <linearGradient id="markFill" x1="0.2" y1="0.1" x2="0.78" y2="0.92">
+      <stop offset="0" stop-color="#dce9ff" />
+      <stop offset="1" stop-color="#77aefe" />
     </linearGradient>
     <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#93c5fd" />
-      <stop offset="1" stop-color="#38bdf8" />
+      <stop offset="0" stop-color="#e2ebff" />
+      <stop offset="1" stop-color="#78adff" />
     </linearGradient>
   </defs>
 
   <rect width="1200" height="630" fill="url(#bg)" />
-  <circle cx="220" cy="170" r="280" fill="url(#glow)" />
+  <circle cx="210" cy="180" r="320" fill="url(#spot)" />
 
-  <g transform="translate(120 150)">
-    <rect x="0" y="0" width="280" height="280" rx="64" fill="url(#markBg)" />
-    <path
-      d="M48 76 L104 228 L140 136 L176 228 L232 76"
-      fill="none"
-      stroke="url(#markStroke)"
-      stroke-width="26"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-    />
-    <path d="M200 44 L218 64 L200 84 L182 64 Z" fill="#fbbf24" />
+  <g transform="translate(110 120)">
+    <rect x="0" y="0" width="360" height="360" rx="50" fill="url(#markBg)" />
+    <rect x="0" y="0" width="360" height="360" rx="50" fill="url(#markShine)" />
+    <rect x="0" y="0" width="360" height="360" rx="50" fill="url(#markStripe)" />
+    <g transform="scale(0.3515625)">
+      <path
+        fill="url(#markFill)"
+        fill-rule="evenodd"
+        d="M238 214 L404 214 C611 214 767 365 767 547 C767 722 633 855 444 855 L193 855 L238 214 Z
+           M336 335 L414 335 C543 335 647 425 647 547 C647 669 543 759 414 759 L290 759 L336 335 Z"
+      />
+      <path
+        fill="url(#markFill)"
+        fill-rule="evenodd"
+        d="M730 660
+           m -168 0
+           a 168 168 0 1 0 336 0
+           a 168 168 0 1 0 -336 0
+           M730 660
+           m -64 0
+           a 64 64 0 1 1 128 0
+           a 64 64 0 1 1 -128 0"
+      />
+    </g>
   </g>
 
   <text
-    x="440"
-    y="290"
-    font-size="96"
+    x="520"
+    y="300"
+    font-size="98"
     font-weight="700"
-    fill="#f8fafc"
+    fill="url(#title)"
     font-family="Calibri, 'Gill Sans', 'Gill Sans MT', 'Myriad Pro', 'Myriad', 'DejaVu Sans Condensed', 'Liberation Sans', 'Nimbus Sans L', Tahoma, Geneva, 'Helvetica Neue', Helvetica, Arial, sans-serif"
   >
-    Do<tspan fill="url(#title)">Whiz</tspan>
+    DoWhiz
   </text>
   <text
-    x="440"
-    y="350"
+    x="520"
+    y="360"
     font-size="30"
     font-weight="500"
-    fill="#cbd5f5"
+    fill="#bfcbec"
     font-family="Calibri, 'Gill Sans', 'Gill Sans MT', 'Myriad Pro', 'Myriad', 'DejaVu Sans Condensed', 'Liberation Sans', 'Nimbus Sans L', Tahoma, Geneva, 'Helvetica Neue', Helvetica, Arial, sans-serif"
   >
     Multi-channel digital employees across your tools.

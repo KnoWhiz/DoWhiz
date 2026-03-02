@@ -1,23 +1,43 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="DoWhiz">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="DoWhiz">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0f172a" />
-      <stop offset="0.55" stop-color="#1d4ed8" />
-      <stop offset="1" stop-color="#0ea5e9" />
+    <linearGradient id="bg" x1="0.12" y1="0.08" x2="0.88" y2="0.92">
+      <stop offset="0" stop-color="#171b28" />
+      <stop offset="1" stop-color="#06070d" />
     </linearGradient>
-    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#f8fafc" />
-      <stop offset="1" stop-color="#e2e8f0" />
+    <linearGradient id="shine" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.06" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+    <pattern id="stripe" width="96" height="96" patternUnits="userSpaceOnUse" patternTransform="rotate(-32)">
+      <rect width="48" height="96" fill="#ffffff" fill-opacity="0.025" />
+    </pattern>
+    <linearGradient id="mark" x1="0.2" y1="0.1" x2="0.78" y2="0.92">
+      <stop offset="0" stop-color="#dce9ff" />
+      <stop offset="1" stop-color="#77aefe" />
     </linearGradient>
   </defs>
-  <rect x="16" y="16" width="224" height="224" rx="48" fill="url(#bg)" />
+
+  <rect x="20" y="20" width="984" height="984" rx="132" fill="url(#bg)" />
+  <rect x="20" y="20" width="984" height="984" rx="132" fill="url(#shine)" />
+  <rect x="20" y="20" width="984" height="984" rx="132" fill="url(#stripe)" />
+
   <path
-    d="M56 80 L92 192 L128 120 L164 192 L200 80"
-    fill="none"
-    stroke="url(#mark)"
-    stroke-width="22"
-    stroke-linecap="round"
-    stroke-linejoin="round"
+    fill="url(#mark)"
+    fill-rule="evenodd"
+    d="M238 214 L404 214 C611 214 767 365 767 547 C767 722 633 855 444 855 L193 855 L238 214 Z
+       M336 335 L414 335 C543 335 647 425 647 547 C647 669 543 759 414 759 L290 759 L336 335 Z"
   />
-  <path d="M168 52 L180 68 L168 84 L152 68 Z" fill="#fbbf24" />
+
+  <path
+    fill="url(#mark)"
+    fill-rule="evenodd"
+    d="M730 660
+       m -168 0
+       a 168 168 0 1 0 336 0
+       a 168 168 0 1 0 -336 0
+       M730 660
+       m -64 0
+       a 64 64 0 1 1 128 0
+       a 64 64 0 1 1 -128 0"
+  />
 </svg>
