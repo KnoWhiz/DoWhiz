@@ -1162,6 +1162,25 @@ Single-file env split:
 | `RUN_TASK_DOCKER_DNS_SEARCH` | - | Add DNS search domains (comma/space-separated) |
 | `RUN_TASK_SKIP_WORKSPACE_REMAP` | `0` | Disable legacy workspace path migration |
 
+### Azure ACI Execution (Serverless Per Task)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RUN_TASK_EXECUTION_BACKEND` | `auto` | `azure_aci`/`local`/`auto`. In `DEPLOY_TARGET=staging|production`, local Codex execution is blocked. |
+| `RUN_TASK_AZURE_ACI_RESOURCE_GROUP` | - | Resource group used by `az container create` |
+| `RUN_TASK_AZURE_ACI_IMAGE` | `RUN_TASK_DOCKER_IMAGE` fallback | Container image for task execution |
+| `RUN_TASK_AZURE_ACI_LOCATION` | - | Optional ACI region override |
+| `RUN_TASK_AZURE_ACI_CPU` | `2.0` | vCPU per task container |
+| `RUN_TASK_AZURE_ACI_MEMORY_GB` | `4.0` | RAM (GB) per task container |
+| `RUN_TASK_AZURE_ACI_FILE_SHARE` | `dowhiz-run-task` | Azure Files share name mounted into task containers |
+| `RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT` | - | VM-side mount root for the shared workspace data |
+| `RUN_TASK_AZURE_ACI_CONTAINER_SHARE_ROOT` | `/mnt/dowhiz-share` | In-container mount root for the same Azure Files share |
+| `RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT` | `AZURE_STORAGE_ACCOUNT` fallback | Storage account for Azure Files mount |
+| `RUN_TASK_AZURE_ACI_STORAGE_KEY` | - | Storage key for Azure Files mount |
+| `RUN_TASK_AZURE_ACI_STORAGE_CONNECTION_STRING` | - | Optional source of `AccountKey` if `RUN_TASK_AZURE_ACI_STORAGE_KEY` unset |
+| `RUN_TASK_AZURE_ACI_REGISTRY_SERVER` | derived from image | Optional private registry login server |
+| `RUN_TASK_AZURE_ACI_REGISTRY_USERNAME` | - | Optional private registry username (set with password) |
+| `RUN_TASK_AZURE_ACI_REGISTRY_PASSWORD` | - | Optional private registry password (set with username) |
+
 ### Inbound Gateway
 | Variable | Default | Description |
 |----------|---------|-------------|

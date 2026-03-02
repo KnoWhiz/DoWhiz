@@ -8,8 +8,10 @@ use uuid::Uuid;
 use crate::channel::Channel;
 
 use super::{
-    actions::apply_scheduler_actions, snapshot::build_scheduler_snapshot, RunTaskTask, Schedule,
-    ScheduledTask, Scheduler, SchedulerError, TaskExecution, TaskExecutor, TaskKind,
+    actions::{apply_scheduler_actions, schedule_send_email},
+    snapshot::build_scheduler_snapshot,
+    RunTaskTask, Schedule, ScheduledTask, Scheduler, SchedulerError, TaskExecution, TaskExecutor,
+    TaskKind,
 };
 
 #[derive(Default)]
@@ -158,6 +160,103 @@ fn apply_scheduler_actions_creates_run_task() {
         }
         _ => panic!("expected run_task kind"),
     }
+}
+
+#[test]
+fn schedule_send_email_supports_five_and_twenty_minute_reminders() {
+    let temp = TempDir::new().expect("tempdir");
+    let tasks_db = temp.path().join("tasks.db");
+    let mut scheduler = Scheduler::load(&tasks_db, NoopExecutor::default()).expect("load");
+
+    let workspace = temp.path().join("workspaces").join("thread_1");
+    let mail_root = temp.path().join("mail");
+    fs::create_dir_all(workspace.join("reminder_email_attachments")).expect("attachments");
+    fs::create_dir_all(&mail_root).expect("mail");
+    fs::write(
+        workspace.join("reminder_email_draft.html"),
+        "<html><body>Reminder</body></html>",
+    )
+    .expect("html");
+
+    let run_task = base_run_task(&workspace, &mail_root);
+
+    let request_5 = run_task_module::ScheduledSendEmailTask {
+        subject: "Reminder in 5 minutes".to_string(),
+        html_path: "reminder_email_draft.html".to_string(),
+        attachments_dir: Some("reminder_email_attachments".to_string()),
+        from: None,
+        to: vec!["user@example.com".to_string()],
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        delay_minutes: Some(5),
+        delay_seconds: None,
+        run_at: None,
+    };
+    let request_20 = run_task_module::ScheduledSendEmailTask {
+        subject: "Reminder in 20 minutes".to_string(),
+        html_path: "reminder_email_draft.html".to_string(),
+        attachments_dir: Some("reminder_email_attachments".to_string()),
+        from: None,
+        to: vec!["user@example.com".to_string()],
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        delay_minutes: Some(20),
+        delay_seconds: None,
+        run_at: None,
+    };
+
+    let now_before_first = Utc::now();
+    assert!(schedule_send_email(&mut scheduler, &run_task, &request_5).expect("schedule 5"));
+    let now_before_second = Utc::now();
+    assert!(schedule_send_email(&mut scheduler, &run_task, &request_20).expect("schedule 20"));
+    let now_after_second = Utc::now();
+
+    let mut five_min_run_at = None;
+    let mut twenty_min_run_at = None;
+    for task in scheduler.tasks() {
+        if let TaskKind::SendReply(send_task) = &task.kind {
+            if send_task.subject == "Reminder in 5 minutes" {
+                if let Schedule::OneShot { run_at } = task.schedule.clone() {
+                    five_min_run_at = Some(run_at);
+                }
+            }
+            if send_task.subject == "Reminder in 20 minutes" {
+                if let Schedule::OneShot { run_at } = task.schedule.clone() {
+                    twenty_min_run_at = Some(run_at);
+                }
+            }
+        }
+    }
+
+    let five_min_run_at = five_min_run_at.expect("5 minute task");
+    let twenty_min_run_at = twenty_min_run_at.expect("20 minute task");
+
+    let min_5 = now_before_first + chrono::Duration::minutes(5);
+    let max_5 = now_before_second + chrono::Duration::minutes(5) + chrono::Duration::seconds(5);
+    assert!(
+        five_min_run_at >= min_5 && five_min_run_at <= max_5,
+        "5-minute reminder run_at out of range: {} not in [{}, {}]",
+        five_min_run_at,
+        min_5,
+        max_5
+    );
+
+    let min_20 = now_before_second + chrono::Duration::minutes(20);
+    let max_20 = now_after_second + chrono::Duration::minutes(20) + chrono::Duration::seconds(5);
+    assert!(
+        twenty_min_run_at >= min_20 && twenty_min_run_at <= max_20,
+        "20-minute reminder run_at out of range: {} not in [{}, {}]",
+        twenty_min_run_at,
+        min_20,
+        max_20
+    );
+
+    let gap = twenty_min_run_at - five_min_run_at;
+    assert!(
+        gap >= chrono::Duration::minutes(14) && gap <= chrono::Duration::minutes(16),
+        "expected ~15 minute gap between reminders, got {} seconds",
+        gap.num_seconds()
+    );
 }
 
 #[test]

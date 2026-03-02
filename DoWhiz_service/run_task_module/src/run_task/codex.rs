@@ -3,6 +3,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::constants::{
     CODEX_BASE_URL, CODEX_CONFIG_BLOCK_TEMPLATE, CODEX_CONFIG_MARKER, CODEX_MODEL_NAME,
@@ -43,6 +46,33 @@ const PAYMENT_ENV_KEYS: &[&str] = &[
     "X402_API_SECRET",
 ];
 
+const REMOTE_OUTPUT_FILENAME: &str = ".codex_remote_output.log";
+const REMOTE_EXIT_CODE_FILENAME: &str = ".codex_remote_exit_code";
+static ACI_CONTAINER_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecutionBackend {
+    Local,
+    AzureAci,
+}
+
+#[derive(Debug, Clone)]
+struct AzureAciConfig {
+    resource_group: String,
+    image: String,
+    location: Option<String>,
+    registry_server: Option<String>,
+    registry_username: Option<String>,
+    registry_password: Option<String>,
+    cpu: String,
+    memory_gb: String,
+    storage_account: String,
+    storage_key: String,
+    file_share: String,
+    host_share_root: PathBuf,
+    container_share_root: PathBuf,
+}
+
 pub(super) fn run_codex_task(
     request: RunTaskRequest<'_>,
     runner: &str,
@@ -50,6 +80,22 @@ pub(super) fn run_codex_task(
     reply_attachments_dir: PathBuf,
 ) -> Result<RunTaskOutput, RunTaskError> {
     super::env::load_env_sources(request.workspace_dir)?;
+    let backend = resolve_execution_backend();
+    match backend {
+        ExecutionBackend::AzureAci => {
+            eprintln!(
+                "[run_task] execution_backend=azure_aci deploy_target={}",
+                env::var("DEPLOY_TARGET").unwrap_or_else(|_| "unknown".to_string())
+            );
+        }
+        ExecutionBackend::Local => {
+            eprintln!("[run_task] execution_backend=local");
+        }
+    }
+    if backend == ExecutionBackend::AzureAci {
+        return run_codex_task_azure_aci(request, runner, reply_html_path, reply_attachments_dir);
+    }
+    ensure_local_execution_allowed()?;
     let docker_image = read_env_trimmed("RUN_TASK_DOCKER_IMAGE");
     let docker_requested = env_enabled("RUN_TASK_USE_DOCKER");
     let docker_available = docker_requested && docker_cli_available();
@@ -390,6 +436,643 @@ pub(super) fn run_codex_task(
         scheduler_actions_error,
         token_usage,
     })
+}
+
+fn resolve_execution_backend() -> ExecutionBackend {
+    match read_env_trimmed("RUN_TASK_EXECUTION_BACKEND")
+        .unwrap_or_else(|| "auto".to_string())
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "azure_aci" => ExecutionBackend::AzureAci,
+        "local" => ExecutionBackend::Local,
+        _ => {
+            let target = env::var("DEPLOY_TARGET")
+                .unwrap_or_else(|_| "local".to_string())
+                .to_ascii_lowercase();
+            if target == "staging" || target == "production" {
+                ExecutionBackend::AzureAci
+            } else {
+                ExecutionBackend::Local
+            }
+        }
+    }
+}
+
+fn ensure_local_execution_allowed() -> Result<(), RunTaskError> {
+    let target = env::var("DEPLOY_TARGET")
+        .unwrap_or_else(|_| "local".to_string())
+        .to_ascii_lowercase();
+    if target == "staging" || target == "production" {
+        return Err(RunTaskError::LocalExecutionForbidden {
+            deploy_target: target,
+        });
+    }
+    Ok(())
+}
+
+fn run_codex_task_azure_aci(
+    request: RunTaskRequest<'_>,
+    runner: &str,
+    reply_html_path: PathBuf,
+    reply_attachments_dir: PathBuf,
+) -> Result<RunTaskOutput, RunTaskError> {
+    let config = load_azure_aci_config()?;
+
+    let host_workspace_dir = canonicalize_dir(request.workspace_dir)?;
+    let host_share_root = canonicalize_dir(&config.host_share_root)?;
+    let container_workspace_dir = map_workspace_to_container(
+        &host_workspace_dir,
+        &host_share_root,
+        &config.container_share_root,
+    )?;
+
+    let askpass_dir = host_workspace_dir.join(DOCKER_CODEX_HOME_DIR);
+    let github_auth = resolve_github_auth(Some(&askpass_dir))?;
+
+    let api_key =
+        env::var("AZURE_OPENAI_API_KEY_BACKUP").map_err(|_| RunTaskError::MissingEnv {
+            key: "AZURE_OPENAI_API_KEY_BACKUP",
+        })?;
+    if api_key.trim().is_empty() {
+        return Err(RunTaskError::MissingEnv {
+            key: "AZURE_OPENAI_API_KEY_BACKUP",
+        });
+    }
+
+    let azure_endpoint = normalize_azure_endpoint(CODEX_BASE_URL);
+    let model_name = if request.model_name.trim().is_empty() {
+        env::var("CODEX_MODEL").unwrap_or_else(|_| CODEX_MODEL_NAME.to_string())
+    } else {
+        request.model_name.to_string()
+    };
+    let sandbox_mode = codex_sandbox_mode();
+    let channel_lower = request.channel.to_ascii_lowercase();
+    let is_google_docs = channel_lower == "google_docs" || channel_lower == "googledocs";
+    let has_google_token = request.workspace_dir.join(".google_access_token").exists();
+    let bypass_sandbox = codex_bypass_sandbox() || is_google_docs || has_google_token;
+
+    let add_dirs = codex_add_dirs_remote(&host_workspace_dir, &container_workspace_dir)?;
+    let codex_home = host_workspace_dir.join(DOCKER_CODEX_HOME_DIR);
+    ensure_codex_config_at(&codex_home, &container_workspace_dir)?;
+    let payment_env_overrides = collect_payment_env_overrides();
+
+    let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
+    let prompt = build_prompt(
+        request.input_email_dir,
+        request.input_attachments_dir,
+        request.memory_dir,
+        request.reference_dir,
+        request.workspace_dir,
+        runner,
+        &memory_context,
+        !request.reply_to.is_empty(),
+        request.channel,
+        request.has_unified_account,
+    );
+
+    // Remote executor reads prompt from workspace file to avoid oversized command lines.
+    let prompt_path = host_workspace_dir.join(".codex_remote_prompt.txt");
+    fs::write(&prompt_path, &prompt)?;
+
+    let remote_output_path = host_workspace_dir.join(REMOTE_OUTPUT_FILENAME);
+    let remote_exit_code_path = host_workspace_dir.join(REMOTE_EXIT_CODE_FILENAME);
+    let _ = fs::remove_file(&remote_output_path);
+    let _ = fs::remove_file(&remote_exit_code_path);
+
+    if let Some(token) = request.google_access_token {
+        // Keep token as workspace file so remote container tools can access it.
+        fs::write(host_workspace_dir.join(".google_access_token"), token)?;
+    }
+
+    let askpass_container_path = github_auth.askpass_path.as_ref().and_then(|path| {
+        map_path_to_container(path, &host_workspace_dir, &container_workspace_dir)
+    });
+    if github_auth.askpass_path.is_some() && askpass_container_path.is_none() {
+        return Err(RunTaskError::InvalidPath {
+            label: "git_askpass_path",
+            path: github_auth
+                .askpass_path
+                .clone()
+                .unwrap_or_else(|| host_workspace_dir.join("missing")),
+            reason: "askpass path is not within workspace_dir",
+        });
+    }
+
+    let mut env_overrides = vec![
+        (
+            "AZURE_OPENAI_API_KEY_BACKUP".to_string(),
+            api_key.to_string(),
+        ),
+        (
+            "AZURE_OPENAI_ENDPOINT_BACKUP".to_string(),
+            azure_endpoint.to_string(),
+        ),
+        (
+            "HOME".to_string(),
+            container_workspace_dir.to_string_lossy().into_owned(),
+        ),
+        (
+            "CODEX_HOME".to_string(),
+            format!(
+                "{}/{}",
+                container_workspace_dir.to_string_lossy(),
+                DOCKER_CODEX_HOME_DIR
+            ),
+        ),
+        ("DEPLOY_TARGET".to_string(), "azure_aci_runner".to_string()),
+    ];
+    for (key, value) in payment_env_overrides {
+        env_overrides.push((key, value));
+    }
+    for (key, value) in github_auth.env_overrides {
+        env_overrides.push((key, value));
+    }
+    if let Some(token) = request.google_access_token {
+        env_overrides.push(("GOOGLE_ACCESS_TOKEN".to_string(), token.to_string()));
+    }
+    if let Some(container_path) = askpass_container_path {
+        env_overrides.push((
+            "GIT_ASKPASS".to_string(),
+            container_path.to_string_lossy().into_owned(),
+        ));
+        env_overrides.push(("GIT_TERMINAL_PROMPT".to_string(), "0".to_string()));
+    }
+
+    let container_name = build_aci_container_name();
+    eprintln!(
+        "[run_task] azure_aci create container={} resource_group={} image={}",
+        container_name, config.resource_group, config.image
+    );
+    let timeout = run_task_timeout();
+    let execution = run_azure_aci_execution(
+        &config,
+        &container_name,
+        &container_workspace_dir,
+        &add_dirs,
+        &model_name,
+        &sandbox_mode,
+        bypass_sandbox,
+        &env_overrides,
+        timeout,
+    );
+    eprintln!(
+        "[run_task] azure_aci delete container={} resource_group={}",
+        container_name, config.resource_group
+    );
+    let _ = delete_aci_container(&config, &container_name);
+
+    let (container_state, container_logs) = execution?;
+    eprintln!(
+        "[run_task] azure_aci finished container={} state={}",
+        container_name, container_state
+    );
+    let output_content = fs::read_to_string(&remote_output_path).unwrap_or_default();
+    let exit_status = read_remote_exit_code(&remote_exit_code_path);
+
+    let mut combined_output = String::new();
+    combined_output.push_str(&output_content);
+    if !container_logs.trim().is_empty() {
+        if !combined_output.trim().is_empty() {
+            combined_output.push('\n');
+        }
+        combined_output.push_str(&container_logs);
+    }
+
+    let (scheduled_tasks, scheduled_tasks_error) = extract_scheduled_tasks(&combined_output);
+    let (scheduler_actions, scheduler_actions_error) = extract_scheduler_actions(&combined_output);
+    let token_usage = extract_token_usage(&combined_output);
+    let output_tail = tail_string(&combined_output, 4000);
+
+    if container_state != "Succeeded" || exit_status != Some(0) {
+        return Err(RunTaskError::CodexFailed {
+            status: exit_status,
+            output: format!(
+                "azure_aci_state={}{}\n{}",
+                container_state,
+                match exit_status {
+                    Some(code) => format!(" exit_code={code}"),
+                    None => String::new(),
+                },
+                output_tail
+            ),
+        });
+    }
+
+    if !request.reply_to.is_empty() && !reply_html_path.exists() {
+        return Err(RunTaskError::OutputMissing {
+            path: reply_html_path,
+            output: output_tail,
+        });
+    }
+
+    Ok(RunTaskOutput {
+        reply_html_path,
+        reply_attachments_dir,
+        codex_output: output_tail,
+        scheduled_tasks,
+        scheduled_tasks_error,
+        scheduler_actions,
+        scheduler_actions_error,
+        token_usage,
+    })
+}
+
+fn load_azure_aci_config() -> Result<AzureAciConfig, RunTaskError> {
+    let resource_group = required_env_owned("RUN_TASK_AZURE_ACI_RESOURCE_GROUP")?;
+    let image = read_env_trimmed("RUN_TASK_AZURE_ACI_IMAGE")
+        .or_else(|| read_env_trimmed("RUN_TASK_DOCKER_IMAGE"))
+        .ok_or(RunTaskError::MissingEnv {
+            key: "RUN_TASK_AZURE_ACI_IMAGE",
+        })?;
+    let location = read_env_trimmed("RUN_TASK_AZURE_ACI_LOCATION");
+    let mut registry_server = read_env_trimmed("RUN_TASK_AZURE_ACI_REGISTRY_SERVER");
+    if registry_server.is_none() {
+        registry_server = image
+            .split('/')
+            .next()
+            .filter(|candidate| candidate.contains('.'))
+            .map(|value| value.to_string());
+    }
+    let registry_username = read_env_trimmed("RUN_TASK_AZURE_ACI_REGISTRY_USERNAME");
+    let registry_password = read_env_trimmed("RUN_TASK_AZURE_ACI_REGISTRY_PASSWORD");
+    if registry_username.is_some() && registry_password.is_none() {
+        return Err(RunTaskError::MissingEnv {
+            key: "RUN_TASK_AZURE_ACI_REGISTRY_PASSWORD",
+        });
+    }
+    if registry_password.is_some() && registry_username.is_none() {
+        return Err(RunTaskError::MissingEnv {
+            key: "RUN_TASK_AZURE_ACI_REGISTRY_USERNAME",
+        });
+    }
+    if registry_username.is_some() && registry_server.is_none() {
+        return Err(RunTaskError::MissingEnv {
+            key: "RUN_TASK_AZURE_ACI_REGISTRY_SERVER",
+        });
+    }
+    let cpu = read_env_trimmed("RUN_TASK_AZURE_ACI_CPU").unwrap_or_else(|| "2.0".to_string());
+    let memory_gb =
+        read_env_trimmed("RUN_TASK_AZURE_ACI_MEMORY_GB").unwrap_or_else(|| "4.0".to_string());
+    let file_share = read_env_trimmed("RUN_TASK_AZURE_ACI_FILE_SHARE")
+        .unwrap_or_else(|| "dowhiz-run-task".to_string());
+
+    let host_share_root = PathBuf::from(required_env_owned("RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT")?);
+    let container_share_root = PathBuf::from(
+        read_env_trimmed("RUN_TASK_AZURE_ACI_CONTAINER_SHARE_ROOT")
+            .unwrap_or_else(|| "/mnt/dowhiz-share".to_string()),
+    );
+
+    let storage_account = read_env_trimmed("RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT")
+        .or_else(|| read_env_trimmed("AZURE_STORAGE_ACCOUNT"))
+        .or_else(|| {
+            read_env_trimmed("AZURE_STORAGE_CONNECTION_STRING")
+                .and_then(|cs| parse_connection_string_component(&cs, "AccountName"))
+        })
+        .ok_or(RunTaskError::MissingEnv {
+            key: "RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT",
+        })?;
+
+    let storage_key = read_env_trimmed("RUN_TASK_AZURE_ACI_STORAGE_KEY")
+        .or_else(|| {
+            read_env_trimmed("RUN_TASK_AZURE_ACI_STORAGE_CONNECTION_STRING")
+                .and_then(|cs| parse_connection_string_component(&cs, "AccountKey"))
+        })
+        .or_else(|| {
+            read_env_trimmed("AZURE_STORAGE_CONNECTION_STRING")
+                .and_then(|cs| parse_connection_string_component(&cs, "AccountKey"))
+        })
+        .ok_or(RunTaskError::MissingEnv {
+            key: "RUN_TASK_AZURE_ACI_STORAGE_KEY",
+        })?;
+
+    Ok(AzureAciConfig {
+        resource_group,
+        image,
+        location,
+        registry_server,
+        registry_username,
+        registry_password,
+        cpu,
+        memory_gb,
+        storage_account,
+        storage_key,
+        file_share,
+        host_share_root,
+        container_share_root,
+    })
+}
+
+fn required_env_owned(key: &'static str) -> Result<String, RunTaskError> {
+    read_env_trimmed(key).ok_or(RunTaskError::MissingEnv { key })
+}
+
+fn parse_connection_string_component(connection_string: &str, key: &str) -> Option<String> {
+    for part in connection_string.split(';') {
+        let mut iter = part.splitn(2, '=');
+        let part_key = iter.next()?.trim();
+        let value = iter.next()?.trim();
+        if part_key.eq_ignore_ascii_case(key) && !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+fn map_workspace_to_container(
+    workspace_dir: &Path,
+    host_share_root: &Path,
+    container_share_root: &Path,
+) -> Result<PathBuf, RunTaskError> {
+    let relative =
+        workspace_dir
+            .strip_prefix(host_share_root)
+            .map_err(|_| RunTaskError::InvalidPath {
+                label: "workspace_dir",
+                path: workspace_dir.to_path_buf(),
+                reason: "workspace is outside RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT",
+            })?;
+    Ok(container_share_root.join(relative))
+}
+
+fn map_path_to_container(
+    host_path: &Path,
+    host_workspace_dir: &Path,
+    container_workspace_dir: &Path,
+) -> Option<PathBuf> {
+    let relative = host_path.strip_prefix(host_workspace_dir).ok()?;
+    Some(container_workspace_dir.join(relative))
+}
+
+fn codex_add_dirs_remote(
+    host_workspace_dir: &Path,
+    container_workspace_dir: &Path,
+) -> Result<Vec<String>, RunTaskError> {
+    let host_gh_config_dir = host_workspace_dir.join(".config").join("gh");
+    fs::create_dir_all(&host_gh_config_dir)?;
+    let container_gh_config_dir = container_workspace_dir.join(".config").join("gh");
+    Ok(vec![container_gh_config_dir.to_string_lossy().into_owned()])
+}
+
+fn build_aci_container_name() -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let seq = ACI_CONTAINER_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("dwz-codex-{}-{}-{}", millis, std::process::id(), seq)
+}
+
+fn run_azure_aci_execution(
+    config: &AzureAciConfig,
+    container_name: &str,
+    container_workspace_dir: &Path,
+    add_dirs: &[String],
+    model_name: &str,
+    sandbox_mode: &str,
+    bypass_sandbox: bool,
+    env_overrides: &[(String, String)],
+    timeout: Duration,
+) -> Result<(String, String), RunTaskError> {
+    let workspace_sh = shell_quote(&container_workspace_dir.to_string_lossy());
+    let output_file = shell_quote(REMOTE_OUTPUT_FILENAME);
+    let exit_file = shell_quote(REMOTE_EXIT_CODE_FILENAME);
+
+    let mut codex_parts = vec![
+        "codex".to_string(),
+        "exec".to_string(),
+        "--json".to_string(),
+    ];
+    if bypass_sandbox {
+        codex_parts.push("--yolo".to_string());
+    }
+    for add_dir in add_dirs {
+        codex_parts.push("--add-dir".to_string());
+        codex_parts.push(add_dir.clone());
+    }
+    codex_parts.push("--skip-git-repo-check".to_string());
+    codex_parts.push("-m".to_string());
+    codex_parts.push(model_name.to_string());
+    codex_parts.push("-c".to_string());
+    codex_parts.push("web_search=\"live\"".to_string());
+    codex_parts.push("-c".to_string());
+    codex_parts.push("ask_for_approval=\"never\"".to_string());
+    codex_parts.push("-c".to_string());
+    codex_parts.push(format!("sandbox=\"{}\"", sandbox_mode));
+    codex_parts.push("-c".to_string());
+    codex_parts.push("model_providers.azure.env_key=\"AZURE_OPENAI_API_KEY_BACKUP\"".to_string());
+    codex_parts.push("--cd".to_string());
+    codex_parts.push(container_workspace_dir.to_string_lossy().into_owned());
+    codex_parts.push("\"$(cat .codex_remote_prompt.txt)\"".to_string());
+    let codex_command = codex_parts
+        .iter()
+        .map(|part| {
+            if part.starts_with("\"$(cat ") {
+                part.to_string()
+            } else {
+                shell_quote(part)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let script = format!(
+        "set -euo pipefail\nexport PATH=/app/bin:$PATH\ncd {workspace}\nmkdir -p .config/gh .codex\nrm -f {output} {exit}\nset +e\n{codex} > {output} 2>&1\nstatus=$?\nprintf '%s' \"$status\" > {exit}\nexit \"$status\"\n",
+        workspace = workspace_sh,
+        codex = codex_command,
+        output = output_file,
+        exit = exit_file,
+    );
+
+    let mut create_cmd = Command::new("az");
+    create_cmd
+        .arg("container")
+        .arg("create")
+        .arg("--name")
+        .arg(container_name)
+        .arg("--resource-group")
+        .arg(&config.resource_group)
+        .arg("--image")
+        .arg(&config.image)
+        .arg("--os-type")
+        .arg("Linux")
+        .arg("--restart-policy")
+        .arg("Never")
+        .arg("--cpu")
+        .arg(&config.cpu)
+        .arg("--memory")
+        .arg(&config.memory_gb)
+        .arg("--azure-file-volume-account-name")
+        .arg(&config.storage_account)
+        .arg("--azure-file-volume-account-key")
+        .arg(&config.storage_key)
+        .arg("--azure-file-volume-share-name")
+        .arg(&config.file_share)
+        .arg("--azure-file-volume-mount-path")
+        .arg(&config.container_share_root)
+        .arg("--command-line")
+        .arg(format!("/bin/bash -lc {}", shell_quote(&script)))
+        .arg("--only-show-errors")
+        .arg("--output")
+        .arg("json");
+    if let Some(location) = &config.location {
+        create_cmd.arg("--location").arg(location);
+    }
+    if let (Some(server), Some(username), Some(password)) = (
+        &config.registry_server,
+        &config.registry_username,
+        &config.registry_password,
+    ) {
+        create_cmd
+            .arg("--registry-login-server")
+            .arg(server)
+            .arg("--registry-username")
+            .arg(username)
+            .arg("--registry-password")
+            .arg(password);
+    }
+
+    if !env_overrides.is_empty() {
+        create_cmd.arg("--environment-variables");
+        for (key, value) in env_overrides {
+            create_cmd.arg(format!("{key}={value}"));
+        }
+    }
+
+    let create_output =
+        match run_command_with_timeout(create_cmd, Duration::from_secs(300), "az container create")
+        {
+            Ok(output) => output,
+            Err(RunTaskError::Io(err)) if err.kind() == io::ErrorKind::NotFound => {
+                return Err(RunTaskError::AzureCliNotFound)
+            }
+            Err(err) => return Err(err),
+        };
+    if !create_output.status.success() {
+        let mut combined = String::new();
+        combined.push_str(&String::from_utf8_lossy(&create_output.stdout));
+        combined.push_str(&String::from_utf8_lossy(&create_output.stderr));
+        return Err(RunTaskError::CodexFailed {
+            status: create_output.status.code(),
+            output: tail_string(&combined, 4000),
+        });
+    }
+
+    let container_state = poll_aci_state(config, container_name, timeout)?;
+    let logs = fetch_aci_logs(config, container_name).unwrap_or_default();
+    Ok((container_state, logs))
+}
+
+fn poll_aci_state(
+    config: &AzureAciConfig,
+    container_name: &str,
+    timeout: Duration,
+) -> Result<String, RunTaskError> {
+    let start = Instant::now();
+    loop {
+        let mut show_cmd = Command::new("az");
+        show_cmd
+            .arg("container")
+            .arg("show")
+            .arg("--name")
+            .arg(container_name)
+            .arg("--resource-group")
+            .arg(&config.resource_group)
+            .arg("--query")
+            .arg("instanceView.state")
+            .arg("--output")
+            .arg("tsv")
+            .arg("--only-show-errors");
+        let output =
+            run_command_with_timeout(show_cmd, Duration::from_secs(60), "az container show")?;
+        if !output.status.success() {
+            let mut combined = String::new();
+            combined.push_str(&String::from_utf8_lossy(&output.stdout));
+            combined.push_str(&String::from_utf8_lossy(&output.stderr));
+            return Err(RunTaskError::CodexFailed {
+                status: output.status.code(),
+                output: tail_string(&combined, 4000),
+            });
+        }
+        let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if state.eq_ignore_ascii_case("Succeeded")
+            || state.eq_ignore_ascii_case("Failed")
+            || state.eq_ignore_ascii_case("Terminated")
+            || state.eq_ignore_ascii_case("Stopped")
+        {
+            return Ok(state);
+        }
+        if start.elapsed() >= timeout {
+            return Err(RunTaskError::CommandTimeout {
+                command: "az container show",
+                timeout_secs: timeout.as_secs(),
+                output: format!("last_state={state}"),
+            });
+        }
+        thread::sleep(Duration::from_secs(5));
+    }
+}
+
+fn fetch_aci_logs(config: &AzureAciConfig, container_name: &str) -> Result<String, RunTaskError> {
+    let mut logs_cmd = Command::new("az");
+    logs_cmd
+        .arg("container")
+        .arg("logs")
+        .arg("--name")
+        .arg(container_name)
+        .arg("--resource-group")
+        .arg(&config.resource_group)
+        .arg("--only-show-errors")
+        .arg("--output")
+        .arg("tsv");
+    let output = run_command_with_timeout(logs_cmd, Duration::from_secs(120), "az container logs")?;
+    if !output.status.success() {
+        return Ok(String::new());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn delete_aci_container(config: &AzureAciConfig, container_name: &str) -> Result<(), RunTaskError> {
+    let mut delete_cmd = Command::new("az");
+    delete_cmd
+        .arg("container")
+        .arg("delete")
+        .arg("--name")
+        .arg(container_name)
+        .arg("--resource-group")
+        .arg(&config.resource_group)
+        .arg("--yes")
+        .arg("--only-show-errors");
+    let output =
+        run_command_with_timeout(delete_cmd, Duration::from_secs(120), "az container delete")?;
+    if !output.status.success() {
+        let mut combined = String::new();
+        combined.push_str(&String::from_utf8_lossy(&output.stdout));
+        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+        return Err(RunTaskError::CodexFailed {
+            status: output.status.code(),
+            output: tail_string(&combined, 4000),
+        });
+    }
+    Ok(())
+}
+
+fn read_remote_exit_code(path: &Path) -> Option<i32> {
+    fs::read_to_string(path).ok()?.trim().parse::<i32>().ok()
+}
+
+fn shell_quote(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('\'');
+    for ch in value.chars() {
+        if ch == '\'' {
+            out.push_str("'\"'\"'");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
 }
 
 fn ensure_codex_config(workspace_dir: &Path) -> Result<(), RunTaskError> {
@@ -1145,5 +1828,59 @@ mod tests {
         assert!(overrides
             .iter()
             .any(|(k, v)| k == "GOATX402_API_KEY" && v == "api-key-global"));
+    }
+
+    #[test]
+    fn test_resolve_execution_backend_defaults_to_local() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset("RUN_TASK_EXECUTION_BACKEND"),
+            EnvVarGuard::unset("DEPLOY_TARGET"),
+        ];
+        assert_eq!(resolve_execution_backend(), ExecutionBackend::Local);
+    }
+
+    #[test]
+    fn test_resolve_execution_backend_auto_staging_uses_azure_aci() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset("RUN_TASK_EXECUTION_BACKEND"),
+            EnvVarGuard::set("DEPLOY_TARGET", "staging"),
+        ];
+        assert_eq!(resolve_execution_backend(), ExecutionBackend::AzureAci);
+    }
+
+    #[test]
+    fn test_resolve_execution_backend_auto_production_uses_azure_aci() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset("RUN_TASK_EXECUTION_BACKEND"),
+            EnvVarGuard::set("DEPLOY_TARGET", "production"),
+        ];
+        assert_eq!(resolve_execution_backend(), ExecutionBackend::AzureAci);
+    }
+
+    #[test]
+    fn test_ensure_local_execution_allowed_rejects_staging_without_override() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set("DEPLOY_TARGET", "staging"),
+            EnvVarGuard::unset("RUN_TASK_ALLOW_LOCAL_EXECUTION"),
+        ];
+        let err = ensure_local_execution_allowed()
+            .expect_err("staging should reject local execution by default");
+        match err {
+            RunTaskError::LocalExecutionForbidden { deploy_target } => {
+                assert_eq!(deploy_target, "staging")
+            }
+            other => panic!("unexpected error variant: {other}"),
+        }
+    }
+
+    #[test]
+    fn test_build_aci_container_name_is_unique() {
+        let first = build_aci_container_name();
+        let second = build_aci_container_name();
+        assert_ne!(first, second);
     }
 }

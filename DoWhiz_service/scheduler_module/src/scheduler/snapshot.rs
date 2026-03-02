@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::fs;
+use std::io;
 use std::path::Path;
 
 use super::types::{RunTaskTask, Schedule, ScheduledTask, SchedulerError, TaskKind};
@@ -22,8 +23,25 @@ pub(crate) fn snapshot_reply_draft(task: &RunTaskTask) -> Result<(), SchedulerEr
         None => format!("reply_email_draft_{timestamp}.html"),
     };
     let dest = drafts_dir.join(filename);
-    fs::copy(&draft_path, dest)?;
+    copy_file_with_fallback(&draft_path, &dest)?;
     Ok(())
+}
+
+fn copy_file_with_fallback(src: &Path, dest: &Path) -> io::Result<()> {
+    match fs::copy(src, dest) {
+        Ok(_) => Ok(()),
+        Err(err)
+            if err.kind() == io::ErrorKind::PermissionDenied || err.raw_os_error() == Some(1) =>
+        {
+            // Some CIFS/Azure Files mounts reject kernel fast-copy syscalls.
+            // Fall back to stream copy for compatibility.
+            let mut input = fs::File::open(src)?;
+            let mut output = fs::File::create(dest)?;
+            io::copy(&mut input, &mut output)?;
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
 }
 
 #[derive(Debug, Serialize)]

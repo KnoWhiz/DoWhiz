@@ -289,7 +289,19 @@ fn write_git_askpass_script_in(dir: &Path) -> Result<PathBuf, RunTaskError> {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = fs::metadata(&path)?.permissions();
         perms.set_mode(0o700);
-        fs::set_permissions(&path, perms)?;
+        if let Err(err) = fs::set_permissions(&path, perms) {
+            // Some network filesystems (for example Azure Files mounted via CIFS)
+            // reject chmod even when file_mode already makes the script executable.
+            let allow_fallback =
+                err.kind() == io::ErrorKind::PermissionDenied || err.raw_os_error() == Some(1);
+            if !allow_fallback {
+                return Err(RunTaskError::Io(err));
+            }
+            eprintln!(
+                "[run_task] Warning: failed to chmod askpass script ({}); continuing with existing mount permissions",
+                err
+            );
+        }
     }
     Ok(path)
 }

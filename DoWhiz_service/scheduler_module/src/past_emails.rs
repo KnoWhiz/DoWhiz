@@ -400,7 +400,7 @@ fn hydrate_attachments(
             }
 
             let dest_path = dest_attachments_dir.join(&file_name);
-            fs::copy(&path, &dest_path)?;
+            copy_file_with_fallback(&path, &dest_path)?;
             counts.total += 1;
             entries.push(AttachmentEntry {
                 file_name,
@@ -462,10 +462,27 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
         if file_type.is_dir() {
             copy_dir_recursive(&entry.path(), &dest)?;
         } else if file_type.is_file() {
-            fs::copy(entry.path(), dest)?;
+            copy_file_with_fallback(&entry.path(), &dest)?;
         }
     }
     Ok(())
+}
+
+fn copy_file_with_fallback(src: &Path, dest: &Path) -> io::Result<()> {
+    match fs::copy(src, dest) {
+        Ok(_) => Ok(()),
+        Err(err)
+            if err.kind() == io::ErrorKind::PermissionDenied || err.raw_os_error() == Some(1) =>
+        {
+            // Some CIFS/Azure Files mounts reject kernel fast-copy syscalls.
+            // Fall back to stream copy for compatibility.
+            let mut input = fs::File::open(src)?;
+            let mut output = fs::File::create(dest)?;
+            io::copy(&mut input, &mut output)?;
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
 }
 
 fn archive_attachments(
@@ -487,10 +504,10 @@ fn archive_attachments(
         }
         let file_name = entry.file_name().to_string_lossy().to_string();
         if file_name.ends_with(".azure_url") {
-            fs::copy(&path, dest_dir.join(&file_name))?;
+            copy_file_with_fallback(&path, &dest_dir.join(&file_name))?;
             continue;
         }
-        fs::copy(&path, dest_dir.join(&file_name))?;
+        copy_file_with_fallback(&path, &dest_dir.join(&file_name))?;
         attachments.push(serde_json::json!({
             "Name": file_name,
             "ContentType": "",
