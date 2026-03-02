@@ -22,6 +22,20 @@ const SUPPORT_EMAIL = 'admin@dowhiz.com';
 const ORG_NAME = 'DoWhiz';
 const DAY_START_HOUR = 7;
 const NIGHT_START_HOUR = 19;
+const MAX_TOTAL_UPLOAD_BYTES = 10 * 1024 * 1024;
+const DEPLOYMENT_FORM_DEFAULTS = {
+  full_name: '',
+  work_email: '',
+  agent_hourly_rate_usd: '',
+  team_name: '',
+  azure_region: '',
+  agent_name: '',
+  wallet_id: '',
+  contact_channel: '',
+  workspace_paths: 'Not provided',
+  use_case: ''
+};
+const DEPLOYMENT_REGIONS = ['eastus', 'westus2', 'centralus', 'westeurope', 'southeastasia', 'other'];
 
 const lerp = (start, end, t) => start + (end - start) * t;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -295,7 +309,17 @@ function App() {
   const [user, setUser] = useState(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [navHidden, setNavHidden] = useState(false);
+  const [deploymentForm, setDeploymentForm] = useState(DEPLOYMENT_FORM_DEFAULTS);
+  const [skillsFiles, setSkillsFiles] = useState([]);
+  const [privateFiles, setPrivateFiles] = useState([]);
+  const [envRows, setEnvRows] = useState([{ key: '', value: '', show: false }]);
+  const [confirmOwnership, setConfirmOwnership] = useState(false);
+  const [confirmMvp, setConfirmMvp] = useState(false);
+  const [deploymentStatus, setDeploymentStatus] = useState({ message: '', type: '' });
+  const [isSubmittingDeployment, setIsSubmittingDeployment] = useState(false);
   const userMenuRef = useRef(null);
+  const skillsInputRef = useRef(null);
+  const privateInputRef = useRef(null);
   const lastScrollY = useRef(0);
 
   useEffect(() => {
@@ -312,6 +336,33 @@ function App() {
     if (hasTokens || hasError) {
       window.location.replace(`/auth/index.html${hash}`);
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const scrollToHashTarget = () => {
+      const hash = window.location.hash;
+      if (!hash) {
+        return;
+      }
+
+      const targetId = decodeURIComponent(hash.replace(/^#/, ''));
+      const target = document.getElementById(targetId);
+      if (target) {
+        target.scrollIntoView({ behavior: 'auto', block: 'start' });
+      }
+    };
+
+    const timeoutId = window.setTimeout(scrollToHashTarget, 120);
+    window.addEventListener('hashchange', scrollToHashTarget);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener('hashchange', scrollToHashTarget);
+    };
   }, []);
 
   // Close dropdown when clicking outside
@@ -550,6 +601,244 @@ function App() {
     return `mailto:${email}?subject=${encodedSubject}&body=${encodedBody}`;
   };
 
+  const formatBytes = (bytes) => {
+    if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = bytes;
+    let idx = 0;
+    while (value >= 1024 && idx < units.length - 1) {
+      value /= 1024;
+      idx += 1;
+    }
+    return `${value.toFixed(value >= 100 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+  };
+
+  const getDeploymentApiBaseUrl = () => {
+    if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+      return 'http://localhost:9001';
+    }
+    return 'https://api.production1.dowhiz.com/service';
+  };
+
+  const setDeploymentStatusMessage = (message, type = '') => {
+    setDeploymentStatus({ message, type });
+  };
+
+  const handleDeploymentFieldChange = (field) => (event) => {
+    const value = event.target.value;
+    setDeploymentForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSkillsFilesChange = (event) => {
+    const files = Array.from(event.target.files || []);
+    setSkillsFiles(files);
+  };
+
+  const handlePrivateFilesChange = (event) => {
+    const files = Array.from(event.target.files || []);
+    setPrivateFiles(files);
+  };
+
+  const addEnvRow = () => {
+    setEnvRows((prev) => [...prev, { key: '', value: '', show: false }]);
+  };
+
+  const updateEnvRow = (index, field, value) => {
+    setEnvRows((prev) =>
+      prev.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row))
+    );
+  };
+
+  const toggleEnvVisibility = (index) => {
+    setEnvRows((prev) =>
+      prev.map((row, rowIndex) => (rowIndex === index ? { ...row, show: !row.show } : row))
+    );
+  };
+
+  const removeEnvRow = (index) => {
+    setEnvRows((prev) => {
+      if (prev.length <= 1) {
+        setDeploymentStatusMessage('At least one env key row is required.', 'error');
+        return prev;
+      }
+      return prev.filter((_, rowIndex) => rowIndex !== index);
+    });
+  };
+
+  const resetDeploymentForm = () => {
+    setDeploymentForm({ ...DEPLOYMENT_FORM_DEFAULTS });
+    setSkillsFiles([]);
+    setPrivateFiles([]);
+    setEnvRows([{ key: '', value: '', show: false }]);
+    setConfirmOwnership(false);
+    setConfirmMvp(false);
+    setDeploymentStatusMessage('Form reset.', 'info');
+
+    if (skillsInputRef.current) {
+      skillsInputRef.current.value = '';
+    }
+    if (privateInputRef.current) {
+      privateInputRef.current.value = '';
+    }
+  };
+
+  const collectEnvEntries = () => {
+    const entries = [];
+    const seen = new Set();
+
+    for (const row of envRows) {
+      const keyRaw = (row.key || '').trim();
+      const valueRaw = row.value || '';
+
+      if (!keyRaw && !valueRaw) {
+        continue;
+      }
+      if (!keyRaw || !valueRaw) {
+        throw new Error('Each env row needs both key and value.');
+      }
+
+      const key = keyRaw.toUpperCase();
+      if (!/^[A-Z][A-Z0-9_]*$/.test(key)) {
+        throw new Error(`Invalid env key format: ${keyRaw}`);
+      }
+      if (seen.has(key)) {
+        throw new Error(`Duplicate env key: ${key}`);
+      }
+
+      seen.add(key);
+      entries.push({ key, value: valueRaw });
+    }
+
+    if (!entries.length) {
+      throw new Error('At least one env key is required.');
+    }
+
+    return entries;
+  };
+
+  const validateDeploymentForm = () => {
+    const requiredFields = [
+      ['full_name', 'Full name'],
+      ['work_email', 'Work email'],
+      ['azure_region', 'Preferred Azure region'],
+      ['agent_name', 'Agent name'],
+      ['contact_channel', 'Primary contact channel'],
+      ['use_case', 'Primary tasks this agent should run']
+    ];
+
+    for (const [key, label] of requiredFields) {
+      if (!(deploymentForm[key] || '').trim()) {
+        setDeploymentStatusMessage(`${label} is required.`, 'error');
+        return null;
+      }
+    }
+
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(deploymentForm.work_email.trim())) {
+      setDeploymentStatusMessage('Please enter a valid work email address.', 'error');
+      return null;
+    }
+
+    if (!skillsFiles.length) {
+      setDeploymentStatusMessage('Upload at least one skills file.', 'error');
+      return null;
+    }
+
+    if (!privateFiles.length) {
+      setDeploymentStatusMessage('Upload at least one private data folder/file.', 'error');
+      return null;
+    }
+
+    const combinedBytes = [...skillsFiles, ...privateFiles].reduce((sum, file) => sum + file.size, 0);
+    if (combinedBytes > MAX_TOTAL_UPLOAD_BYTES) {
+      setDeploymentStatusMessage(
+        `Total upload size ${formatBytes(combinedBytes)} exceeds limit ${formatBytes(MAX_TOTAL_UPLOAD_BYTES)}.`,
+        'error'
+      );
+      return null;
+    }
+
+    if (!confirmOwnership || !confirmMvp) {
+      setDeploymentStatusMessage('Please confirm both review checkboxes before submitting.', 'error');
+      return null;
+    }
+
+    try {
+      const envEntries = collectEnvEntries();
+      return { envEntries };
+    } catch (error) {
+      setDeploymentStatusMessage(error instanceof Error ? error.message : 'Invalid environment keys.', 'error');
+      return null;
+    }
+  };
+
+  const handleDeploymentSubmit = async (event) => {
+    event.preventDefault();
+    setDeploymentStatusMessage('');
+
+    const validation = validateDeploymentForm();
+    if (!validation) {
+      return;
+    }
+
+    setIsSubmittingDeployment(true);
+    setDeploymentStatusMessage('Uploading package and starting deployment intake...', 'info');
+
+    try {
+      const formData = new FormData();
+      formData.append('full_name', deploymentForm.full_name.trim());
+      formData.append('work_email', deploymentForm.work_email.trim());
+      formData.append('agent_hourly_rate_usd', deploymentForm.agent_hourly_rate_usd.trim());
+      formData.append('team_name', deploymentForm.team_name.trim());
+      formData.append('azure_region', deploymentForm.azure_region.trim());
+      formData.append('agent_name', deploymentForm.agent_name.trim());
+      formData.append('wallet_id', deploymentForm.wallet_id.trim());
+      formData.append('contact_channel', deploymentForm.contact_channel.trim());
+      formData.append('workspace_paths', deploymentForm.workspace_paths || 'Not provided');
+      formData.append('use_case', deploymentForm.use_case.trim());
+      formData.append('env_keys_json', JSON.stringify(validation.envEntries));
+
+      skillsFiles.forEach((file) => {
+        formData.append('skills_files', file, file.webkitRelativePath || file.name);
+      });
+
+      privateFiles.forEach((file) => {
+        formData.append('private_data_files', file, file.webkitRelativePath || file.name);
+      });
+
+      const response = await fetch(`${getDeploymentApiBaseUrl()}/api/agent-market/deploy`, {
+        method: 'POST',
+        body: formData
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.error || 'Deployment intake is temporarily unavailable. Please retry in a few minutes.'
+        );
+      }
+
+      const requestId = payload?.request_id;
+      const etaHours = payload?.eta_hours || 24;
+      const requestSuffix = requestId ? ` (request: ${requestId})` : '';
+      setDeploymentStatusMessage(
+        `Deployment request accepted${requestSuffix}. Provisioning is in progress and is usually ready within ${etaHours} hours.`,
+        'success'
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to submit deployment request. Please retry.';
+      setDeploymentStatusMessage(message, 'error');
+    } finally {
+      setIsSubmittingDeployment(false);
+    }
+  };
+
   const features = [
     {
       tag: '01',
@@ -681,6 +970,30 @@ function App() {
       title: 'Revoke',
       desc: 'Remove workspace permissions at any time when the task is complete.'
     }
+  ];
+
+  const deploymentSteps = [
+    {
+      id: '01',
+      title: 'Submit deployment package',
+      desc: 'Share operator details, skills files, private data folders, and environment keys required to run your OpenClaw.'
+    },
+    {
+      id: '02',
+      title: 'Validation and orchestration',
+      desc: 'DoWhiz validates the package, checks security requirements, and starts deployment orchestration automatically.'
+    },
+    {
+      id: '03',
+      title: 'Provisioning handoff',
+      desc: 'Your OpenClaw environment is provisioned on DoWhiz and handed off with status updates and next-step guidance.'
+    }
+  ];
+
+  const deploymentChecklist = [
+    'Upload only the minimum secrets and private files required for this deployment.',
+    'Use uppercase env key names like OPENAI_API_KEY to avoid validation failures.',
+    'Provisioning is typically ready within 24 hours after submission.'
   ];
 
   const workflowExamples = [
@@ -996,7 +1309,7 @@ function App() {
               <a href="#workflows" className="nav-btn">Workflows</a>
               <a href="#safety" className="nav-btn">Safety</a>
               <a href="#features" className="nav-btn">Features</a>
-              <a href="/agent-market/" className="nav-btn">Deployment</a>
+              <a href="#deployment" className="nav-btn">Deployment</a>
               <a href="#faq" className="nav-btn">FAQ</a>
               <a href="#blog" className="nav-btn">Blog</a>
             </div>
@@ -1355,6 +1668,325 @@ function App() {
                 </div>
               ))}
             </div>
+          </div>
+        </section>
+
+        <section id="deployment" className="section deployment-section">
+          <div className="container">
+            <h2 className="section-title">Deployment</h2>
+            <p className="section-intro">
+              Launch OpenClaw with a structured intake flow while staying in the same DoWhiz landing-page experience.
+            </p>
+            <div className="deployment-grid">
+              {deploymentSteps.map((step) => (
+                <article key={step.id} className="deployment-card">
+                  <span className="deployment-step-tag">{step.id}</span>
+                  <h3>{step.title}</h3>
+                  <p>{step.desc}</p>
+                </article>
+              ))}
+            </div>
+            <article className="deployment-cta-card">
+              <h3>Before you submit</h3>
+              <ul className="deployment-point-list">
+                {deploymentChecklist.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+              <div className="deployment-actions">
+                <a className="btn btn-secondary" href="#deployment-intake">
+                  Open full deployment intake form
+                </a>
+                <a className="btn btn-secondary" href="/trust-safety/">
+                  Review trust &amp; safety
+                </a>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="deployment-intake" className="section deployment-intake-section">
+          <div className="container">
+            <h2 className="section-title">Deployment Intake Form</h2>
+            <p className="section-intro">
+              Submit deployment details in the same DoWhiz UI. Intake starts immediately after validation.
+            </p>
+
+            <form className="deployment-intake-form" onSubmit={handleDeploymentSubmit} noValidate>
+              <article className="deployment-form-card">
+                <h3>Operator Profile</h3>
+                <p>Tell us who owns this OpenClaw deployment request.</p>
+                <div className="deployment-field-grid">
+                  <label className="deployment-field">
+                    <span>Full name</span>
+                    <input
+                      type="text"
+                      name="full_name"
+                      autoComplete="name"
+                      value={deploymentForm.full_name}
+                      onChange={handleDeploymentFieldChange('full_name')}
+                      required
+                    />
+                  </label>
+
+                  <label className="deployment-field">
+                    <span>Work email</span>
+                    <input
+                      type="email"
+                      name="work_email"
+                      autoComplete="email"
+                      value={deploymentForm.work_email}
+                      onChange={handleDeploymentFieldChange('work_email')}
+                      required
+                    />
+                  </label>
+
+                  <label className="deployment-field">
+                    <span>Agent piecework hourly rate (USD/hour)</span>
+                    <input
+                      type="number"
+                      name="agent_hourly_rate_usd"
+                      min="0"
+                      step="0.01"
+                      placeholder="e.g. 120"
+                      value={deploymentForm.agent_hourly_rate_usd}
+                      onChange={handleDeploymentFieldChange('agent_hourly_rate_usd')}
+                    />
+                  </label>
+
+                  <label className="deployment-field">
+                    <span>Company or team</span>
+                    <input
+                      type="text"
+                      name="team_name"
+                      value={deploymentForm.team_name}
+                      onChange={handleDeploymentFieldChange('team_name')}
+                    />
+                  </label>
+
+                  <label className="deployment-field">
+                    <span>Preferred Azure region</span>
+                    <select
+                      name="azure_region"
+                      value={deploymentForm.azure_region}
+                      onChange={handleDeploymentFieldChange('azure_region')}
+                      required
+                    >
+                      <option value="">Select a region</option>
+                      {DEPLOYMENT_REGIONS.map((region) => (
+                        <option key={region} value={region}>{region}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="deployment-field">
+                    <span>Agent name</span>
+                    <input
+                      type="text"
+                      name="agent_name"
+                      value={deploymentForm.agent_name}
+                      onChange={handleDeploymentFieldChange('agent_name')}
+                      required
+                    />
+                  </label>
+
+                  <label className="deployment-field">
+                    <span>x402 wallet (optional)</span>
+                    <input
+                      type="text"
+                      name="wallet_id"
+                      value={deploymentForm.wallet_id}
+                      onChange={handleDeploymentFieldChange('wallet_id')}
+                    />
+                  </label>
+
+                  <label className="deployment-field">
+                    <span>Primary contact channel</span>
+                    <input
+                      type="text"
+                      name="contact_channel"
+                      placeholder="Email / Telegram / Slack / Discord"
+                      value={deploymentForm.contact_channel}
+                      onChange={handleDeploymentFieldChange('contact_channel')}
+                      required
+                    />
+                  </label>
+
+                  <label className="deployment-field deployment-field-full">
+                    <span>Primary tasks this agent should run</span>
+                    <textarea
+                      name="use_case"
+                      placeholder="Describe target users, task types, and expected outputs."
+                      value={deploymentForm.use_case}
+                      onChange={handleDeploymentFieldChange('use_case')}
+                      required
+                    />
+                  </label>
+                </div>
+              </article>
+
+              <article className="deployment-form-card">
+                <h3>Uploads</h3>
+                <p>Select your skills and private data folders for deployment.</p>
+                <div className="deployment-upload-grid">
+                  <div className="deployment-upload-box">
+                    <h4>Skills files</h4>
+                    <p>Upload skill files (e.g. .md, .json, .yaml, .zip).</p>
+                    <input
+                      ref={skillsInputRef}
+                      type="file"
+                      name="skills_files"
+                      multiple
+                      onChange={handleSkillsFilesChange}
+                      required
+                    />
+                    <div className="deployment-file-meta">
+                      {skillsFiles.length
+                        ? `${skillsFiles.length} file(s), total ${formatBytes(
+                          skillsFiles.reduce((sum, file) => sum + file.size, 0)
+                        )}`
+                        : 'No files selected.'}
+                    </div>
+                    <div className="deployment-file-list">
+                      {skillsFiles.length ? (
+                        skillsFiles.map((file, index) => (
+                          <div key={`${file.name}-${file.size}-${index}`} className="deployment-file-item">
+                            {(file.webkitRelativePath || file.name)} ({formatBytes(file.size)})
+                          </div>
+                        ))
+                      ) : (
+                        <span className="deployment-file-empty">No files selected.</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="deployment-upload-box">
+                    <h4>Private data folders</h4>
+                    <p>Choose one or more folders. Relative paths are retained for intake.</p>
+                    <input
+                      ref={privateInputRef}
+                      type="file"
+                      name="private_data_files"
+                      webkitdirectory=""
+                      directory=""
+                      multiple
+                      onChange={handlePrivateFilesChange}
+                      required
+                    />
+                    <div className="deployment-file-meta">
+                      {privateFiles.length
+                        ? `${privateFiles.length} file(s), total ${formatBytes(
+                          privateFiles.reduce((sum, file) => sum + file.size, 0)
+                        )}`
+                        : 'No files selected.'}
+                    </div>
+                    <div className="deployment-file-list">
+                      {privateFiles.length ? (
+                        privateFiles.map((file, index) => (
+                          <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="deployment-file-item">
+                            {(file.webkitRelativePath || file.name)} ({formatBytes(file.size)})
+                          </div>
+                        ))
+                      ) : (
+                        <span className="deployment-file-empty">No files selected.</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <p className="deployment-upload-total">
+                  Current total upload size: {formatBytes(
+                    [...skillsFiles, ...privateFiles].reduce((sum, file) => sum + file.size, 0)
+                  )} / {formatBytes(MAX_TOTAL_UPLOAD_BYTES)}
+                </p>
+              </article>
+
+              <article className="deployment-form-card">
+                <div className="deployment-env-header">
+                  <div>
+                    <h3>Environment Keys</h3>
+                    <p>Add env key name + value pairs for the requested deployment.</p>
+                  </div>
+                  <button type="button" className="btn btn-secondary deployment-mini-btn" onClick={addEnvRow}>
+                    Add env key
+                  </button>
+                </div>
+                <div className="deployment-env-list">
+                  {envRows.map((row, index) => (
+                    <div key={`env-row-${index}`} className="deployment-env-row">
+                      <input
+                        type="text"
+                        placeholder="KEY_NAME"
+                        value={row.key}
+                        onChange={(event) => updateEnvRow(index, 'key', event.target.value)}
+                      />
+                      <input
+                        type={row.show ? 'text' : 'password'}
+                        placeholder="Secret value"
+                        value={row.value}
+                        onChange={(event) => updateEnvRow(index, 'value', event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary deployment-mini-btn"
+                        onClick={() => toggleEnvVisibility(index)}
+                      >
+                        {row.show ? 'Hide' : 'Show'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary deployment-mini-btn"
+                        onClick={() => removeEnvRow(index)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <p className="deployment-env-help">
+                  Format rule: key must match <code>[A-Z][A-Z0-9_]*</code>. Example: <code>OPENAI_API_KEY</code>.
+                </p>
+              </article>
+
+              <article className="deployment-form-card">
+                <h3>Review &amp; Send</h3>
+                <p>Submitting starts DoWhiz deployment intake immediately.</p>
+                <div className="deployment-checklist">
+                  <label className="deployment-check">
+                    <input
+                      type="checkbox"
+                      checked={confirmOwnership}
+                      onChange={(event) => setConfirmOwnership(event.target.checked)}
+                      required
+                    />
+                    <span>I confirm I am allowed to share these files and secrets for DoWhiz deployment.</span>
+                  </label>
+                  <label className="deployment-check">
+                    <input
+                      type="checkbox"
+                      checked={confirmMvp}
+                      onChange={(event) => setConfirmMvp(event.target.checked)}
+                      required
+                    />
+                    <span>I understand provisioning may take up to 24 hours after submission.</span>
+                  </label>
+                </div>
+
+                <div className="deployment-submit-row">
+                  <button type="submit" className="btn btn-primary" disabled={isSubmittingDeployment}>
+                    {isSubmittingDeployment ? 'Submitting...' : 'Start OpenClaw Deployment'}
+                  </button>
+                  <button type="button" className="btn btn-secondary" onClick={resetDeploymentForm}>
+                    Reset form
+                  </button>
+                </div>
+
+                {deploymentStatus.message ? (
+                  <p className={`deployment-status deployment-status-${deploymentStatus.type || 'info'}`}>
+                    {deploymentStatus.message}
+                  </p>
+                ) : null}
+              </article>
+            </form>
           </div>
         </section>
 
