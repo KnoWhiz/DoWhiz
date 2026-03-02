@@ -490,8 +490,16 @@ ul {
   text-decoration: none;
   display: inline-flex;
   align-items: center;
+  gap: 0.55rem;
   white-space: nowrap;
   min-width: max-content;
+  flex: 0 0 auto;
+}
+
+.brand-mark {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 0.45rem;
   flex: 0 0 auto;
 }
 
@@ -1838,6 +1846,17 @@ ul {
   font-weight: 700;
   letter-spacing: -0.03em;
   color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  text-decoration: none;
+}
+
+.footer-brand-mark {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  flex: 0 0 auto;
 }
 
 .footer-tagline {
@@ -2189,6 +2208,11 @@ ul {
     margin: 0 auto;
     justify-content: center;
     font-size: 2rem;
+  }
+
+  .brand-mark {
+    width: 2rem;
+    height: 2rem;
   }
 
   /* Compact Buttons for Mobile */
