@@ -1,43 +1,48 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="DoWhiz">
   <defs>
-    <linearGradient id="bg" x1="0.12" y1="0.08" x2="0.88" y2="0.92">
-      <stop offset="0" stop-color="#171b28" />
-      <stop offset="1" stop-color="#06070d" />
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#000000" flood-opacity="0.28" />
+    </filter>
+    <linearGradient id="bg" x1="0.1" y1="0.1" x2="0.9" y2="0.9">
+      <stop offset="0" stop-color="#1e2330" />
+      <stop offset="1" stop-color="#090b12" />
     </linearGradient>
-    <linearGradient id="shine" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.06" />
+    <linearGradient id="shine" x1="0.2" y1="0.05" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.055" />
       <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
     </linearGradient>
-    <pattern id="stripe" width="96" height="96" patternUnits="userSpaceOnUse" patternTransform="rotate(-32)">
-      <rect width="48" height="96" fill="#ffffff" fill-opacity="0.025" />
+    <pattern id="stripe" width="140" height="140" patternUnits="userSpaceOnUse" patternTransform="rotate(-35)">
+      <rect width="70" height="140" fill="#ffffff" fill-opacity="0.038" />
     </pattern>
-    <linearGradient id="mark" x1="0.2" y1="0.1" x2="0.78" y2="0.92">
+    <linearGradient id="mark" x1="0.5" y1="0.14" x2="0.5" y2="0.95">
       <stop offset="0" stop-color="#dce9ff" />
-      <stop offset="1" stop-color="#77aefe" />
+      <stop offset="1" stop-color="#71a8ff" />
     </linearGradient>
   </defs>
 
-  <rect x="20" y="20" width="984" height="984" rx="132" fill="url(#bg)" />
-  <rect x="20" y="20" width="984" height="984" rx="132" fill="url(#shine)" />
-  <rect x="20" y="20" width="984" height="984" rx="132" fill="url(#stripe)" />
+  <g filter="url(#shadow)">
+    <rect x="18" y="18" width="988" height="988" rx="132" fill="url(#bg)" />
+    <rect x="18" y="18" width="988" height="988" rx="132" fill="url(#shine)" />
+    <rect x="18" y="18" width="988" height="988" rx="132" fill="url(#stripe)" />
+  </g>
 
   <path
     fill="url(#mark)"
     fill-rule="evenodd"
-    d="M238 214 L404 214 C611 214 767 365 767 547 C767 722 633 855 444 855 L193 855 L238 214 Z
-       M336 335 L414 335 C543 335 647 425 647 547 C647 669 543 759 414 759 L290 759 L336 335 Z"
+    d="M168 789 L252 225 H410 C569 225 694 332 714 486 C647 506 595 564 580 639 C573 673 575 705 586 732 C546 768 496 791 436 793 H284 L301 636 H414 C499 621 559 548 559 456 C559 376 498 311 417 311 H303 L252 789 Z
+       M283 789 L334 343 H411 C473 343 523 394 523 456 C523 518 474 570 414 583 H331 L310 789 Z"
   />
 
   <path
     fill="url(#mark)"
     fill-rule="evenodd"
-    d="M730 660
-       m -168 0
-       a 168 168 0 1 0 336 0
-       a 168 168 0 1 0 -336 0
-       M730 660
-       m -64 0
-       a 64 64 0 1 1 128 0
-       a 64 64 0 1 1 -128 0"
+    d="M728 661
+       m -163 0
+       a 163 163 0 1 0 326 0
+       a 163 163 0 1 0 -326 0
+       M728 661
+       m -66 0
+       a 66 66 0 1 1 132 0
+       a 66 66 0 1 1 -132 0"
   />
 </svg>
