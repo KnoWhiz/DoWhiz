@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::account_store::lookup_account_by_channel;
@@ -19,6 +21,24 @@ use super::super::config::ServiceConfig;
 use super::super::BoxError;
 use super::discord_context::build_discord_router_context;
 use super::persist_discord_ingest_context;
+
+const DISCORD_QUICK_RESPONSE_DEDUPE_FILE: &str = "discord_quick_response_dedupe.json";
+const DISCORD_QUICK_RESPONSE_MAX_THREADS: usize = 512;
+const DISCORD_QUICK_RESPONSE_MAX_MESSAGE_IDS_PER_THREAD: usize = 256;
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct DiscordQuickResponseDedupeStore {
+    #[serde(default)]
+    threads: HashMap<String, DiscordQuickResponseThreadStore>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct DiscordQuickResponseThreadStore {
+    #[serde(default)]
+    message_ids: Vec<String>,
+    #[serde(default)]
+    updated_at_unix_secs: i64,
+}
 
 /// Read memo.md from a user's memory directory (local file)
 fn read_user_memo_local(memory_dir: &Path) -> Option<String> {
@@ -80,6 +100,127 @@ fn write_memory_update(
     global_memory_queue()
         .submit(request)
         .map_err(|e| e.to_string())
+}
+
+fn discord_quick_response_dedupe_path(state_dir: &Path) -> std::path::PathBuf {
+    state_dir.join(DISCORD_QUICK_RESPONSE_DEDUPE_FILE)
+}
+
+fn discord_quick_response_scope_key(message: &crate::channel::InboundMessage) -> Option<String> {
+    let channel_id = message.metadata.discord_channel_id?;
+    let guild = message
+        .metadata
+        .discord_guild_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "dm".to_string());
+    Some(format!(
+        "discord:{}:{}:{}",
+        guild, channel_id, message.thread_id
+    ))
+}
+
+fn discord_inbound_message_id(message: &crate::channel::InboundMessage) -> Option<&str> {
+    message
+        .message_id
+        .as_deref()
+        .or(message.metadata.discord_message_id.as_deref())
+}
+
+fn discord_quick_response_already_sent(
+    state_dir: &Path,
+    scope_key: &str,
+    message_id: &str,
+) -> bool {
+    let path = discord_quick_response_dedupe_path(state_dir);
+    let store = load_discord_quick_response_dedupe_store(&path);
+    store
+        .threads
+        .get(scope_key)
+        .map(|thread| thread.message_ids.iter().any(|entry| entry == message_id))
+        .unwrap_or(false)
+}
+
+fn record_discord_quick_response_sent(
+    state_dir: &Path,
+    scope_key: &str,
+    message_id: &str,
+) -> Result<(), BoxError> {
+    let path = discord_quick_response_dedupe_path(state_dir);
+    let mut store = load_discord_quick_response_dedupe_store(&path);
+
+    let thread = store.threads.entry(scope_key.to_string()).or_default();
+    if !thread.message_ids.iter().any(|entry| entry == message_id) {
+        thread.message_ids.push(message_id.to_string());
+    }
+    let overflow = thread
+        .message_ids
+        .len()
+        .saturating_sub(DISCORD_QUICK_RESPONSE_MAX_MESSAGE_IDS_PER_THREAD);
+    if overflow > 0 {
+        thread.message_ids.drain(0..overflow);
+    }
+    thread.updated_at_unix_secs = now_unix_secs();
+
+    prune_discord_quick_response_store(&mut store);
+    write_discord_quick_response_dedupe_store(&path, &store)?;
+    Ok(())
+}
+
+fn load_discord_quick_response_dedupe_store(path: &Path) -> DiscordQuickResponseDedupeStore {
+    let Ok(raw) = std::fs::read(path) else {
+        return DiscordQuickResponseDedupeStore::default();
+    };
+    match serde_json::from_slice::<DiscordQuickResponseDedupeStore>(&raw) {
+        Ok(store) => store,
+        Err(err) => {
+            warn!(
+                "failed to parse discord quick response dedupe store at {}: {}",
+                path.display(),
+                err
+            );
+            DiscordQuickResponseDedupeStore::default()
+        }
+    }
+}
+
+fn write_discord_quick_response_dedupe_store(
+    path: &Path,
+    store: &DiscordQuickResponseDedupeStore,
+) -> Result<(), BoxError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension(format!("tmp-{}", Uuid::new_v4()));
+    let serialized = serde_json::to_vec_pretty(store)?;
+    std::fs::write(&tmp, serialized)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+fn prune_discord_quick_response_store(store: &mut DiscordQuickResponseDedupeStore) {
+    if store.threads.len() <= DISCORD_QUICK_RESPONSE_MAX_THREADS {
+        return;
+    }
+    let mut thread_by_age = store
+        .threads
+        .iter()
+        .map(|(key, value)| (key.clone(), value.updated_at_unix_secs))
+        .collect::<Vec<_>>();
+    thread_by_age.sort_by_key(|(_, updated_at)| *updated_at);
+    let overflow = store
+        .threads
+        .len()
+        .saturating_sub(DISCORD_QUICK_RESPONSE_MAX_THREADS);
+    for (key, _) in thread_by_age.into_iter().take(overflow) {
+        store.threads.remove(&key);
+    }
+}
+
+fn now_unix_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 pub(crate) fn try_quick_response_slack(
@@ -295,6 +436,18 @@ pub(crate) fn try_quick_response_discord(
     let user = user_store.get_or_create_user("discord", &message.sender)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
+    let dedupe_scope = discord_quick_response_scope_key(message);
+    let inbound_message_id = discord_inbound_message_id(message);
+
+    if let (Some(scope), Some(inbound_id)) = (dedupe_scope.as_deref(), inbound_message_id) {
+        if discord_quick_response_already_sent(&user_paths.state_dir, scope, inbound_id) {
+            info!(
+                "discord quick response dedupe hit employee={} sender={} scope={} message_id={}",
+                config.employee_profile.id, message.sender, scope, inbound_id
+            );
+            return Ok(true);
+        }
+    }
 
     let router_context = match build_discord_router_context(config, message, raw_payload) {
         Ok(context) => Some(context),
@@ -340,6 +493,18 @@ pub(crate) fn try_quick_response_discord(
                 send_quick_discord_response_simple(&token, channel_id, message_id, &response)
                     .is_ok();
             if sent {
+                if let (Some(scope), Some(inbound_id)) =
+                    (dedupe_scope.as_deref(), inbound_message_id)
+                {
+                    if let Err(err) =
+                        record_discord_quick_response_sent(&user_paths.state_dir, scope, inbound_id)
+                    {
+                        warn!(
+                            "failed to record discord quick response dedupe key scope={} message_id={}: {}",
+                            scope, inbound_id, err
+                        );
+                    }
+                }
                 if let Err(err) = persist_discord_ingest_context(
                     config,
                     user_store,
@@ -572,5 +737,107 @@ pub(crate) fn try_quick_response_whatsapp(
             Ok(false)
         }
         RouterDecision::Complex | RouterDecision::Passthrough => Ok(false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::channel::{Channel, ChannelMetadata, InboundMessage};
+    use tempfile::TempDir;
+
+    fn build_discord_message(
+        thread_id: &str,
+        message_id: Option<&str>,
+        metadata_message_id: Option<&str>,
+        guild_id: Option<u64>,
+        channel_id: Option<u64>,
+    ) -> InboundMessage {
+        InboundMessage {
+            channel: Channel::Discord,
+            sender: "1234".to_string(),
+            sender_name: Some("Bingran".to_string()),
+            recipient: "oliver-bot".to_string(),
+            subject: None,
+            text_body: Some("Hi".to_string()),
+            html_body: None,
+            thread_id: thread_id.to_string(),
+            message_id: message_id.map(str::to_string),
+            attachments: Vec::new(),
+            reply_to: Vec::new(),
+            raw_payload: Vec::new(),
+            metadata: ChannelMetadata {
+                discord_guild_id: guild_id,
+                discord_channel_id: channel_id,
+                discord_message_id: metadata_message_id.map(str::to_string),
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn discord_quick_response_dedupe_records_and_matches() -> Result<(), BoxError> {
+        let temp = TempDir::new()?;
+        let state_dir = temp.path().join("state");
+        let scope = "discord:guild-1:42:thread-1";
+        let message_id = "msg-1";
+
+        assert!(!discord_quick_response_already_sent(
+            &state_dir, scope, message_id
+        ));
+
+        record_discord_quick_response_sent(&state_dir, scope, message_id)?;
+
+        assert!(discord_quick_response_already_sent(
+            &state_dir, scope, message_id
+        ));
+
+        let path = discord_quick_response_dedupe_path(&state_dir);
+        let store = load_discord_quick_response_dedupe_store(&path);
+        let entries = &store.threads.get(scope).expect("thread entry").message_ids;
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0], "msg-1");
+
+        Ok(())
+    }
+
+    #[test]
+    fn discord_quick_response_dedupe_prunes_old_message_ids() -> Result<(), BoxError> {
+        let temp = TempDir::new()?;
+        let state_dir = temp.path().join("state");
+        let scope = "discord:guild-1:42:thread-1";
+
+        for index in 0..(DISCORD_QUICK_RESPONSE_MAX_MESSAGE_IDS_PER_THREAD + 5) {
+            let message_id = format!("msg-{}", index);
+            record_discord_quick_response_sent(&state_dir, scope, &message_id)?;
+        }
+
+        let path = discord_quick_response_dedupe_path(&state_dir);
+        let store = load_discord_quick_response_dedupe_store(&path);
+        let entries = &store.threads.get(scope).expect("thread entry").message_ids;
+
+        assert_eq!(
+            entries.len(),
+            DISCORD_QUICK_RESPONSE_MAX_MESSAGE_IDS_PER_THREAD
+        );
+        assert!(!entries.iter().any(|entry| entry == "msg-0"));
+        assert!(entries.iter().any(|entry| entry
+            == &format!(
+                "msg-{}",
+                DISCORD_QUICK_RESPONSE_MAX_MESSAGE_IDS_PER_THREAD + 4
+            )));
+
+        Ok(())
+    }
+
+    #[test]
+    fn discord_scope_key_and_message_id_fallback_work() {
+        let message = build_discord_message("thread-1", None, Some("meta-msg-id"), None, Some(42));
+
+        let scope = discord_quick_response_scope_key(&message).expect("scope key");
+        assert_eq!(scope, "discord:dm:42:thread-1");
+
+        let message_id = discord_inbound_message_id(&message).expect("message id");
+        assert_eq!(message_id, "meta-msg-id");
     }
 }
