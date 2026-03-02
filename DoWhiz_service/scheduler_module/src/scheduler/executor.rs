@@ -459,6 +459,50 @@ impl TaskExecutor for ModuleExecutor {
                         task.workspace_dir.display()
                     );
                 }
+                // Check balance before running task (only for unified accounts)
+                if let Some(account_id) = account_id {
+                    if let Some(store) = get_global_account_store() {
+                        match store.has_sufficient_balance(account_id) {
+                            Ok(false) => {
+                                // Insufficient balance - write error reply and skip task
+                                warn!(
+                                    "Account {} has insufficient balance, skipping task execution",
+                                    account_id
+                                );
+                                let reply_message = "Insufficient balance. Please increase your balance for more employee hours.";
+
+                                // Write to appropriate reply file based on channel
+                                let reply_path = match task.channel {
+                                    Channel::Email
+                                    | Channel::GoogleDocs
+                                    | Channel::GoogleSheets
+                                    | Channel::GoogleSlides => {
+                                        task.workspace_dir.join("reply_email_draft.html")
+                                    }
+                                    _ => task.workspace_dir.join("reply_message.txt"),
+                                };
+
+                                if let Err(e) = std::fs::write(&reply_path, reply_message) {
+                                    warn!("Failed to write balance error reply: {}", e);
+                                }
+
+                                // Return empty execution (no token usage, task considered complete)
+                                return Ok(TaskExecution::empty());
+                            }
+                            Ok(true) => {
+                                // Sufficient balance, continue with task
+                            }
+                            Err(e) => {
+                                // Balance check failed - log but continue (fail open)
+                                warn!(
+                                    "Failed to check balance for account {}: {}, continuing anyway",
+                                    account_id, e
+                                );
+                            }
+                        }
+                    }
+                }
+
                 let params = run_task_module::RunTaskParams {
                     workspace_dir: task.workspace_dir.clone(),
                     input_email_dir: task.input_email_dir.clone(),

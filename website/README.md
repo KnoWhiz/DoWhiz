@@ -1,5 +1,9 @@
 # DoWhiz Website
 
+<p align="center">
+  <img src="public/assets/DoWhiz.jpeg" alt="Do icon" width="96" />
+</p>
+
 Product website for DoWhiz, built with Vite + React.
 
 ## Prerequisites

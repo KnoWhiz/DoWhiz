@@ -14,6 +14,23 @@ pub struct Account {
     pub auth_user_id: Uuid,
     pub created_at: DateTime<Utc>,
     pub tokens_to_hours: Option<f64>,
+    pub purchased_hours: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BalanceInfo {
+    pub purchased_hours: f64,
+    pub used_hours: f64,
+    pub balance_hours: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct Payment {
+    pub stripe_session_id: String,
+    pub account_id: Uuid,
+    pub amount_cents: i32,
+    pub hours_purchased: f64,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -115,14 +132,22 @@ impl AccountStore {
         Ok(pool.get()?)
     }
 
+    /// Get a connection from the pool (primarily for tests)
+    pub fn get_conn(
+        &self,
+    ) -> Result<PooledConnection<PostgresConnectionManager<MakeTlsConnector>>, AccountStoreError>
+    {
+        self.conn()
+    }
+
     /// Create a new account linked to a Supabase auth user
     pub fn create_account(&self, auth_user_id: Uuid) -> Result<Account, AccountStoreError> {
         let mut conn = self.conn()?;
         let id = Uuid::new_v4();
         let row = conn.query_one(
-            "INSERT INTO accounts (id, auth_user_id, created_at, tokens_to_hours)
-             VALUES ($1, $2, NOW(), 0)
-             RETURNING id, auth_user_id, created_at, tokens_to_hours::float8",
+            "INSERT INTO accounts (id, auth_user_id, created_at, tokens_to_hours, purchased_hours)
+             VALUES ($1, $2, NOW(), 0, 0)
+             RETURNING id, auth_user_id, created_at, tokens_to_hours::float8, purchased_hours::float8",
             &[&id, &auth_user_id],
         )?;
         Ok(Account {
@@ -130,6 +155,7 @@ impl AccountStore {
             auth_user_id: row.get(1),
             created_at: row.get(2),
             tokens_to_hours: row.get(3),
+            purchased_hours: row.get(4),
         })
     }
 
@@ -140,7 +166,8 @@ impl AccountStore {
     ) -> Result<Option<Account>, AccountStoreError> {
         let mut conn = self.conn()?;
         let row = conn.query_opt(
-            "SELECT id, auth_user_id, created_at, tokens_to_hours::float8 FROM accounts WHERE auth_user_id = $1",
+            "SELECT id, auth_user_id, created_at, tokens_to_hours::float8, purchased_hours::float8
+             FROM accounts WHERE auth_user_id = $1",
             &[&auth_user_id],
         )?;
         Ok(row.map(|r| Account {
@@ -148,6 +175,7 @@ impl AccountStore {
             auth_user_id: r.get(1),
             created_at: r.get(2),
             tokens_to_hours: r.get(3),
+            purchased_hours: r.get(4),
         }))
     }
 
@@ -155,7 +183,8 @@ impl AccountStore {
     pub fn get_account(&self, account_id: Uuid) -> Result<Option<Account>, AccountStoreError> {
         let mut conn = self.conn()?;
         let row = conn.query_opt(
-            "SELECT id, auth_user_id, created_at, tokens_to_hours::float8 FROM accounts WHERE id = $1",
+            "SELECT id, auth_user_id, created_at, tokens_to_hours::float8, purchased_hours::float8
+             FROM accounts WHERE id = $1",
             &[&account_id],
         )?;
         Ok(row.map(|r| Account {
@@ -163,6 +192,7 @@ impl AccountStore {
             auth_user_id: r.get(1),
             created_at: r.get(2),
             tokens_to_hours: r.get(3),
+            purchased_hours: r.get(4),
         }))
     }
 
@@ -174,7 +204,7 @@ impl AccountStore {
     ) -> Result<Option<Account>, AccountStoreError> {
         let mut conn = self.conn()?;
         let row = conn.query_opt(
-            "SELECT a.id, a.auth_user_id, a.created_at, a.tokens_to_hours::float8
+            "SELECT a.id, a.auth_user_id, a.created_at, a.tokens_to_hours::float8, a.purchased_hours::float8
              FROM accounts a
              JOIN account_identifiers ai ON ai.account_id = a.id
              WHERE ai.identifier_type = $1 AND ai.identifier = $2 AND ai.verified = true",
@@ -185,6 +215,7 @@ impl AccountStore {
             auth_user_id: r.get(1),
             created_at: r.get(2),
             tokens_to_hours: r.get(3),
+            purchased_hours: r.get(4),
         }))
     }
 
@@ -317,6 +348,78 @@ impl AccountStore {
             &[&tokens, &account_id],
         )?;
         Ok(())
+    }
+
+    // =========================================================================
+    // Billing methods
+    // =========================================================================
+
+    /// Get balance info for an account
+    pub fn get_balance(&self, account_id: Uuid) -> Result<BalanceInfo, AccountStoreError> {
+        let account = self
+            .get_account(account_id)?
+            .ok_or(AccountStoreError::NotFound)?;
+
+        let purchased = account.purchased_hours.unwrap_or(0.0);
+        let used = account.tokens_to_hours.unwrap_or(0.0);
+
+        Ok(BalanceInfo {
+            purchased_hours: purchased,
+            used_hours: used,
+            balance_hours: purchased - used,
+        })
+    }
+
+    /// Check if account has sufficient balance (allows 1 hour grace)
+    pub fn has_sufficient_balance(&self, account_id: Uuid) -> Result<bool, AccountStoreError> {
+        let balance = self.get_balance(account_id)?;
+        // Block if used_hours exceeds purchased_hours + 1 (1 hour grace)
+        Ok(balance.used_hours <= balance.purchased_hours + 1.0)
+    }
+
+    /// Add purchased hours to an account (called after successful payment)
+    pub fn add_purchased_hours(
+        &self,
+        account_id: Uuid,
+        hours: f64,
+    ) -> Result<(), AccountStoreError> {
+        let mut conn = self.conn()?;
+        conn.execute(
+            "UPDATE accounts
+             SET purchased_hours = COALESCE(purchased_hours, 0) + $1::float8
+             WHERE id = $2",
+            &[&hours, &account_id],
+        )?;
+        Ok(())
+    }
+
+    /// Record a payment in the audit table (stripe_session_id is primary key)
+    pub fn record_payment(
+        &self,
+        account_id: Uuid,
+        stripe_session_id: &str,
+        amount_cents: i32,
+        hours: f64,
+    ) -> Result<(), AccountStoreError> {
+        let mut conn = self.conn()?;
+        // Use ON CONFLICT DO NOTHING for idempotency
+        conn.execute(
+            "INSERT INTO payments (stripe_session_id, account_id, amount_cents, hours_purchased, created_at)
+             VALUES ($1, $2, $3, $4::float8, NOW())
+             ON CONFLICT (stripe_session_id) DO NOTHING",
+            &[&stripe_session_id, &account_id, &amount_cents, &hours],
+        )?;
+        Ok(())
+    }
+
+    /// Check if a payment has already been recorded (for idempotency)
+    pub fn payment_exists(&self, stripe_session_id: &str) -> Result<bool, AccountStoreError> {
+        let mut conn = self.conn()?;
+        let row = conn.query_opt(
+            "SELECT stripe_session_id FROM payments WHERE stripe_session_id = $1",
+            &[&stripe_session_id],
+        )?;
+        Ok(row.is_some())
     }
 
     /// Create an email verification token (expires in 24 hours)

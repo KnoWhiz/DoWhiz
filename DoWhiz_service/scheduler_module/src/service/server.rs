@@ -22,6 +22,7 @@ use tokio::task;
 
 use super::agent_market::{agent_market_router, AgentMarketState};
 use super::auth::{auth_router, AuthState};
+use super::billing::{billing_router, BillingState};
 
 use super::config::ServiceConfig;
 use super::ingestion::spawn_ingestion_consumer;
@@ -109,6 +110,12 @@ pub async fn run_server(
     let frontend_url =
         std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:5173".to_string());
 
+    // Create billing state (optional - only if Stripe is configured)
+    let billing_state = BillingState::from_env(account_store.clone());
+    if billing_state.is_some() {
+        info!("Stripe billing enabled");
+    }
+
     let auth_state = AuthState {
         account_store,
         blob_store,
@@ -132,14 +139,21 @@ pub async fn run_server(
     let addr = SocketAddr::new(host, config.port);
     info!("Rust email service listening on {}", addr);
 
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/", get(health))
         .route("/health", get(health))
         .route("/slack/install", get(slack_install))
         .route("/slack/oauth/callback", get(slack_oauth_callback))
         .with_state(state)
         .merge(auth_router(auth_state))
-        .merge(agent_market_router(agent_market_state))
+        .merge(agent_market_router(agent_market_state));
+
+    // Add billing routes if Stripe is configured
+    if let Some(billing) = billing_state {
+        app = app.merge(billing_router(billing));
+    }
+
+    let app = app
         .layer(DefaultBodyLimit::max(config.inbound_body_max_bytes))
         .layer(
             CorsLayer::new()
