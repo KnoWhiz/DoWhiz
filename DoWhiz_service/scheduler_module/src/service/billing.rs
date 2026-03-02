@@ -82,18 +82,35 @@ async fn get_balance(
 
     let auth_user = validate_supabase_token(&state.supabase_url, &token).await?;
 
-    // Get account
-    let account = state
-        .account_store
-        .get_account_by_auth_user(auth_user.id)
-        .map_err(|e| {
-            error!("Failed to get account: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
-        })?
-        .ok_or((StatusCode::NOT_FOUND, "Account not found".to_string()))?;
+    // Get account - run sync DB operation on blocking thread
+    let store = state.account_store.clone();
+    let auth_user_id = auth_user.id;
+    let account = tokio::task::spawn_blocking(move || {
+        store.get_account_by_auth_user(auth_user_id)
+    })
+    .await
+    .map_err(|e| {
+        error!("Task join error: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".to_string())
+    })?
+    .map_err(|e| {
+        error!("Failed to get account: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+    })?
+    .ok_or((StatusCode::NOT_FOUND, "Account not found".to_string()))?;
 
-    // Get balance
-    let balance = state.account_store.get_balance(account.id).map_err(|e| {
+    // Get balance - run sync DB operation on blocking thread
+    let store = state.account_store.clone();
+    let account_id = account.id;
+    let balance = tokio::task::spawn_blocking(move || {
+        store.get_balance(account_id)
+    })
+    .await
+    .map_err(|e| {
+        error!("Task join error: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".to_string())
+    })?
+    .map_err(|e| {
         error!("Failed to get balance: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
@@ -125,15 +142,22 @@ async fn create_checkout(
 
     let auth_user = validate_supabase_token(&state.supabase_url, &token).await?;
 
-    // Get account
-    let account = state
-        .account_store
-        .get_account_by_auth_user(auth_user.id)
-        .map_err(|e| {
-            error!("Failed to get account: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
-        })?
-        .ok_or((StatusCode::NOT_FOUND, "Account not found".to_string()))?;
+    // Get account - run sync DB operation on blocking thread
+    let store = state.account_store.clone();
+    let auth_user_id = auth_user.id;
+    let account = tokio::task::spawn_blocking(move || {
+        store.get_account_by_auth_user(auth_user_id)
+    })
+    .await
+    .map_err(|e| {
+        error!("Task join error: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".to_string())
+    })?
+    .map_err(|e| {
+        error!("Failed to get account: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+    })?
+    .ok_or((StatusCode::NOT_FOUND, "Account not found".to_string()))?;
 
     // Calculate price in cents ($10/hr)
     let amount_cents = (payload.hours as i64) * 1000; // $10 = 1000 cents
@@ -231,17 +255,25 @@ async fn handle_webhook(
         }
     };
 
-    let session_id = session.id.as_str();
+    let session_id = session.id.as_str().to_string();
 
-    // Check idempotency - skip if already processed
-    if state
-        .account_store
-        .payment_exists(session_id)
-        .map_err(|e| {
-            error!("Failed to check payment existence: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
-        })?
-    {
+    // Check idempotency - skip if already processed (run on blocking thread)
+    let store = state.account_store.clone();
+    let session_id_clone = session_id.clone();
+    let payment_exists = tokio::task::spawn_blocking(move || {
+        store.payment_exists(&session_id_clone)
+    })
+    .await
+    .map_err(|e| {
+        error!("Task join error: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".to_string())
+    })?
+    .map_err(|e| {
+        error!("Failed to check payment existence: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+    })?;
+
+    if payment_exists {
         info!("Payment {} already processed, skipping", session_id);
         return Ok(StatusCode::OK);
     }
@@ -275,23 +307,36 @@ async fn handle_webhook(
     // Get amount from session
     let amount_cents = session.amount_total.unwrap_or(0) as i32;
 
-    // Record payment (idempotent insert)
-    state
-        .account_store
-        .record_payment(account_id, session_id, amount_cents, hours)
-        .map_err(|e| {
-            error!("Failed to record payment: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to record payment".to_string())
-        })?;
+    // Record payment (idempotent insert) - run on blocking thread
+    let store = state.account_store.clone();
+    let session_id_for_record = session_id.clone();
+    tokio::task::spawn_blocking(move || {
+        store.record_payment(account_id, &session_id_for_record, amount_cents, hours)
+    })
+    .await
+    .map_err(|e| {
+        error!("Task join error: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".to_string())
+    })?
+    .map_err(|e| {
+        error!("Failed to record payment: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to record payment".to_string())
+    })?;
 
-    // Add purchased hours to account
-    state
-        .account_store
-        .add_purchased_hours(account_id, hours)
-        .map_err(|e| {
-            error!("Failed to add purchased hours: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to update account".to_string())
-        })?;
+    // Add purchased hours to account - run on blocking thread
+    let store = state.account_store.clone();
+    tokio::task::spawn_blocking(move || {
+        store.add_purchased_hours(account_id, hours)
+    })
+    .await
+    .map_err(|e| {
+        error!("Task join error: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".to_string())
+    })?
+    .map_err(|e| {
+        error!("Failed to add purchased hours: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to update account".to_string())
+    })?;
 
     info!(
         "Payment {} processed: {} hours added to account {}",
