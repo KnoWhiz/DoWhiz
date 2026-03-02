@@ -196,7 +196,7 @@
         border: 1px solid var(--border, #333);
         border-radius: 12px;
         padding: 2rem;
-        max-width: 400px;
+        max-width: 500px;
         width: 90%;
       }
       .settings-modal-header {
@@ -223,11 +223,11 @@
         background: var(--surface, #1a1a1a);
         border: 1px solid var(--border, #333);
         border-radius: 8px;
-        padding: 1.5rem;
+        padding: 1rem 0.75rem;
         text-align: center;
       }
       .settings-stat-value {
-        font-size: 2.5rem;
+        font-size: 1.75rem;
         font-weight: 700;
         background: linear-gradient(135deg, #38bdf8, #6366f1);
         -webkit-background-clip: text;
@@ -678,12 +678,8 @@
             <section class="legal-card dashboard-section">
               <div class="dashboard-header">
                 <h2>Your Account</h2>
-                <button id="info-btn" class="info-btn" title="Info">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="12" y1="16" x2="12" y2="12"></line>
-                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                  </svg>
+                <button id="info-btn" class="auth-btn auth-btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;">
+                  Add Employee Hours
                 </button>
               </div>
               <p>Account ID: <code id="account-id">Loading...</code></p>
@@ -694,12 +690,38 @@
             <div id="settings-modal" class="settings-modal hidden">
               <div class="settings-modal-content">
                 <div class="settings-modal-header">
-                  <h3>Account Stats</h3>
+                  <h3>Account Balance</h3>
                   <button id="settings-close-btn" class="settings-close-btn">&times;</button>
                 </div>
-                <div class="settings-stat">
-                  <div id="oliver-hours" class="settings-stat-value">--</div>
-                  <div class="settings-stat-label">Total hours worked</div>
+                <div class="billing-stats" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.5rem; margin-bottom: 1.5rem;">
+                  <div class="settings-stat">
+                    <div id="purchased-hours" class="settings-stat-value">--</div>
+                    <div class="settings-stat-label">Purchased</div>
+                  </div>
+                  <div class="settings-stat">
+                    <div id="used-hours" class="settings-stat-value">--</div>
+                    <div class="settings-stat-label">Used</div>
+                  </div>
+                  <div class="settings-stat">
+                    <div id="balance-hours" class="settings-stat-value" style="color: var(--accent, #38bdf8);">--</div>
+                    <div class="settings-stat-label">Balance</div>
+                  </div>
+                </div>
+                <div class="buy-hours-section" style="border-top: 1px solid var(--border, #333); padding-top: 1rem;">
+                  <h4 style="margin: 0 0 0.75rem 0; font-size: 0.9rem;">Buy More Hours</h4>
+                  <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <select id="hours-select" class="auth-input" style="flex: 1;">
+                      <option value="1">1 hour - $10</option>
+                      <option value="5">5 hours - $50</option>
+                      <option value="10" selected>10 hours - $100</option>
+                      <option value="25">25 hours - $250</option>
+                      <option value="50">50 hours - $500</option>
+                    </select>
+                    <button id="buy-hours-btn" class="auth-btn auth-btn-primary" style="white-space: nowrap;">
+                      Buy Now
+                    </button>
+                  </div>
+                  <p id="checkout-status" style="font-size: 0.85rem; margin-top: 0.5rem; color: var(--text-muted, #888);"></p>
                 </div>
               </div>
             </div>
@@ -1132,25 +1154,82 @@
       // Settings modal handlers
       document.getElementById('info-btn').addEventListener('click', async () => {
         const modal = document.getElementById('settings-modal');
-        const hoursEl = document.getElementById('oliver-hours');
-        hoursEl.textContent = '...';
+        const purchasedEl = document.getElementById('purchased-hours');
+        const usedEl = document.getElementById('used-hours');
+        const balanceEl = document.getElementById('balance-hours');
+
+        purchasedEl.textContent = '...';
+        usedEl.textContent = '...';
+        balanceEl.textContent = '...';
         modal.classList.remove('hidden');
 
-        // Fetch fresh account data
+        // Fetch balance from billing endpoint
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
           try {
-            const res = await fetch(`${DOWHIZ_API_URL}/auth/account`, {
+            const res = await fetch(`${DOWHIZ_API_URL}/billing/balance`, {
               headers: { 'Authorization': `Bearer ${session.access_token}` }
             });
             if (res.ok) {
               const data = await res.json();
-              hoursEl.textContent = (data.tokens_to_hours || 0).toFixed(2);
+              purchasedEl.textContent = (data.purchased_hours || 0).toFixed(2);
+              usedEl.textContent = (data.used_hours || 0).toFixed(2);
+              balanceEl.textContent = (data.balance_hours || 0).toFixed(2);
+              // Color the balance based on value
+              balanceEl.style.color = data.balance_hours > 0 ? 'var(--accent, #38bdf8)' : '#ef4444';
+            } else {
+              purchasedEl.textContent = '0.00';
+              usedEl.textContent = '0.00';
+              balanceEl.textContent = '0.00';
             }
           } catch (err) {
-            console.error('Failed to fetch account stats:', err);
-            hoursEl.textContent = '0.00';
+            console.error('Failed to fetch balance:', err);
+            purchasedEl.textContent = '0.00';
+            usedEl.textContent = '0.00';
+            balanceEl.textContent = '0.00';
           }
+        }
+      });
+
+      // Buy hours button handler
+      document.getElementById('buy-hours-btn').addEventListener('click', async () => {
+        const hoursSelect = document.getElementById('hours-select');
+        const statusEl = document.getElementById('checkout-status');
+        const hours = parseInt(hoursSelect.value, 10);
+
+        statusEl.textContent = 'Creating checkout session...';
+        statusEl.style.color = 'var(--text-muted, #888)';
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          statusEl.textContent = 'Please sign in first.';
+          statusEl.style.color = '#ef4444';
+          return;
+        }
+
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/billing/checkout`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ hours })
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            statusEl.textContent = 'Redirecting to checkout...';
+            window.location.href = data.checkout_url;
+          } else {
+            const error = await res.text();
+            statusEl.textContent = error || 'Failed to create checkout session.';
+            statusEl.style.color = '#ef4444';
+          }
+        } catch (err) {
+          console.error('Checkout error:', err);
+          statusEl.textContent = 'Network error. Please try again.';
+          statusEl.style.color = '#ef4444';
         }
       });
 
@@ -1436,6 +1515,27 @@
         }
         // Clean up URL
         window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      // Check for payment result
+      const paymentResult = urlParams.get('payment');
+      if (paymentResult) {
+        // Show the settings modal with payment result
+        const modal = document.getElementById('settings-modal');
+        const statusEl = document.getElementById('checkout-status');
+        modal.classList.remove('hidden');
+
+        if (paymentResult === 'success') {
+          statusEl.textContent = 'Payment successful! Your hours have been added.';
+          statusEl.style.color = '#22c55e';
+        } else if (paymentResult === 'cancelled') {
+          statusEl.textContent = 'Payment was cancelled.';
+          statusEl.style.color = '#ef4444';
+        }
+        // Refresh balance display for both success and cancelled
+        document.getElementById('info-btn').click();
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname + '?loggedIn=true');
       }
 
       // Slack OAuth button
