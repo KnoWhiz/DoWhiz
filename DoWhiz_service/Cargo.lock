@@ -107,6 +107,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-stripe"
+version = "0.39.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58d670cf4d47a1b8ffef54286a5625382e360a34ee76902fd93ad8c7032a0c30"
+dependencies = [
+ "chrono",
+ "futures-util",
+ "hex",
+ "hmac",
+ "http-types",
+ "hyper 0.14.32",
+ "hyper-tls 0.5.0",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_qs 0.10.1",
+ "sha2",
+ "smart-default",
+ "smol_str",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid 0.8.2",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -212,7 +237,7 @@ dependencies = [
  "time",
  "tracing",
  "url",
- "uuid",
+ "uuid 1.21.0",
 ]
 
 [[package]]
@@ -241,7 +266,7 @@ dependencies = [
  "time",
  "tracing",
  "url",
- "uuid",
+ "uuid 1.21.0",
 ]
 
 [[package]]
@@ -275,7 +300,7 @@ dependencies = [
  "time",
  "tracing",
  "url",
- "uuid",
+ "uuid 1.21.0",
 ]
 
 [[package]]
@@ -296,7 +321,7 @@ dependencies = [
  "time",
  "tracing",
  "url",
- "uuid",
+ "uuid 1.21.0",
 ]
 
 [[package]]
@@ -1156,12 +1181,13 @@ dependencies = [
  "async-channel",
  "base64 0.13.1",
  "futures-lite",
+ "http 0.2.12",
  "infer",
  "pin-project-lite",
  "rand 0.7.3",
  "serde",
  "serde_json",
- "serde_qs",
+ "serde_qs 0.8.5",
  "serde_urlencoded",
  "url",
 ]
@@ -2159,7 +2185,7 @@ dependencies = [
  "chrono",
  "fallible-iterator 0.2.0",
  "postgres-protocol",
- "uuid",
+ "uuid 1.21.0",
 ]
 
 [[package]]
@@ -2746,6 +2772,7 @@ dependencies = [
 name = "scheduler_module"
 version = "0.1.0"
 dependencies = [
+ "async-stripe",
  "axum",
  "azure_core 0.21.0",
  "azure_messaging_servicebus",
@@ -2789,7 +2816,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "urlencoding",
- "uuid",
+ "uuid 1.21.0",
 ]
 
 [[package]]
@@ -2940,6 +2967,17 @@ name = "serde_qs"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7715380eec75f029a4ef7de39a9200e0a63823176b759d055b613f5a87df6a6"
+dependencies = [
+ "percent-encoding",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "serde_qs"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cac3f1e2ca2fe333923a1ae72caca910b98ed0630bb35ef6f8c8517d6e81afa"
 dependencies = [
  "percent-encoding",
  "serde",
@@ -3099,6 +3137,26 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+
+[[package]]
+name = "smart-default"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "133659a15339456eeeb07572eb02a91c91e9815e9cbc89566944d2c8d3efdbf6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "smol_str"
+version = "0.1.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fad6c857cbab2627dcf01ec85a623ca4e7dcb5691cbaa3d7fb7653671f0d09c9"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "socket2"
@@ -3781,6 +3839,15 @@ name = "utf8_iter"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
+
+[[package]]
+name = "uuid"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
+dependencies = [
+ "getrandom 0.2.17",
+]
 
 [[package]]
 name = "uuid"
