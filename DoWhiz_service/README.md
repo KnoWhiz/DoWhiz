@@ -304,6 +304,8 @@ az servicebus queue create -g <rg> --namespace-name <sb-namespace> -n ingestion-
 az apim create -g <rg> -n <apim> --location westus2 --publisher-email proto@dowhiz.com --publisher-name DoWhiz --sku-name Consumption
 ```
 
+For production workers, set queue `LockDuration` to `PT5M` (5 minutes) to reduce lock-expiry risk during slow processing bursts.
+
 **Step 2: Configure gateway + worker configs**
 Update `DoWhiz_service/gateway.toml` and `DoWhiz_service/employee.toml` with your service addresses and routing targets. These same files are used by the gateway and by workers.
 
@@ -1221,6 +1223,7 @@ sudo mount /home/azureuser/server/.dowhiz/DoWhiz/run_task
 | `SERVICE_BUS_QUEUE_NAME` | `ingestion` | Shared queue name for all employees |
 | `SERVICE_BUS_TEST_QUEUE_NAME` | `ingestion-test` | Queue used by Service Bus tests |
 | `SERVICE_BUS_PEEK_LOCK_TIMEOUT_SECS` | `30` | Peek-lock timeout for Service Bus receive |
+| `SERVICE_BUS_LOCK_RENEW_INTERVAL_SECS` | `15` | Worker lock-renew cadence for claimed messages (bounded to 5-60s) |
 | `RAW_PAYLOAD_STORAGE_BACKEND` | `supabase` | `supabase` or `azure` (`azure` recommended for gateway production flow) |
 | `AZURE_STORAGE_ACCOUNT` | - | Azure Storage account name |
 | `AZURE_STORAGE_CONNECTION_STRING_INGEST` | - | Optional connection string (used to derive account name for ingestion SAS URLs) |
