@@ -330,12 +330,17 @@ impl SqliteSchedulerStore {
                     task_id
                 ))
             })?;
+        let text_path_buf = PathBuf::from(&text_path);
+        let attachments_dir = text_path_buf
+            .parent()
+            .map(|parent| parent.join("reply_attachments"))
+            .unwrap_or_default();
 
         Ok(SendReplyTask {
             channel: Channel::Discord,
             subject: String::new(), // Discord doesn't use subject
-            html_path: PathBuf::from(text_path),
-            attachments_dir: PathBuf::new(), // Discord attachments handled differently
+            html_path: text_path_buf,
+            attachments_dir,
             from: None,
             to: vec![discord_channel_id], // channel_id stored in to[0]
             cc: Vec::new(),

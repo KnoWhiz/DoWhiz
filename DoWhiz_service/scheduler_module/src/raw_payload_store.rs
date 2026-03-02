@@ -437,6 +437,12 @@ pub fn download_raw_payload(reference: &str) -> Result<Vec<u8>, RawPayloadStoreE
     Ok(bytes)
 }
 
+pub fn resolve_azure_blob_url(reference: &str) -> Result<String, RawPayloadStoreError> {
+    let (_container, path) = parse_azure_ref(reference)?;
+    let container_sas_url = resolve_azure_container_sas_url()?;
+    Ok(build_azure_blob_url(&container_sas_url, &path))
+}
+
 fn is_azure_blob_url(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
     lower.contains("blob.core.windows.net") || lower.contains("sig=")
