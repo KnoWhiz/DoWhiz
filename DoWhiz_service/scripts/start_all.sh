@@ -13,6 +13,9 @@ source "${SCRIPT_DIR}/load_env_target.sh"
 echo "✓ 已加载环境变量: ${ENV_FILE:-<shell environment only>}"
 echo "✓ DEPLOY_TARGET=${DEPLOY_TARGET:-production}"
 
+# Azure ACI backend requires VM-side shared mount before worker starts.
+"${SCRIPT_DIR}/ensure_aci_share_mount.sh"
+
 GATEWAY_CONFIG_PATH="${GATEWAY_CONFIG_PATH:-gateway.toml}"
 GATEWAY_HOST="${GATEWAY_HOST:-0.0.0.0}"
 GATEWAY_PORT="${GATEWAY_PORT:-9100}"

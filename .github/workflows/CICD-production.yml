@@ -157,6 +157,11 @@ jobs:
             source /home/${{ secrets.PROD_AZURE_VM_USER }}/.nvm/nvm.sh
           fi
           APP_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
+          export DEPLOY_TARGET=production
+
+          # Ensure Azure Files mount is present before starting worker
+          # so ACI tasks share workspace/memory paths correctly.
+          bash "$APP_DIR/scripts/ensure_aci_share_mount.sh"
 
           worker_running=0
           for service in dw_worker dowhiz_rust_service dowhiz-rust-service; do
