@@ -117,6 +117,35 @@ fn run_task_uses_yolo_with_bypass() {
 
 #[test]
 #[cfg(unix)]
+fn run_task_uses_danger_sandbox_with_bypass() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("codex_task_danger_sandbox").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let home_dir = temp.path.join("home");
+    let bin_dir = temp.path.join("bin");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_fake_codex(&bin_dir, FakeCodexMode::EnsureDangerSandbox).unwrap();
+
+    let old_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), old_path);
+    let _env = EnvGuard::set(&[
+        ("HOME", home_dir.to_str().unwrap()),
+        ("PATH", &new_path),
+        ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("CODEX_BYPASS_SANDBOX", "1"),
+        ("GH_AUTH_DISABLED", "1"),
+    ]);
+
+    let params = build_params(&workspace);
+    let result = run_task(&params).unwrap();
+    assert!(result.reply_html_path.exists());
+    assert!(result.reply_attachments_dir.is_dir());
+}
+
+#[test]
+#[cfg(unix)]
 fn run_task_passes_add_dir_for_gh_config() {
     let _lock = ENV_MUTEX.lock().unwrap();
     let temp = TempDir::new("codex_task_add_dir").unwrap();

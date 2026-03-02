@@ -128,6 +128,7 @@ pub enum FakeCodexMode {
     X402EnvCheck,
     EnsureNoYolo,
     EnsureYolo,
+    EnsureDangerSandbox,
     EnsureAddDir,
     Sleep,
 }
@@ -250,6 +251,27 @@ for arg in "$@"; do
 done
 if [ "$found" != "1" ]; then
   echo "missing --yolo" >&2
+  exit 3
+fi
+echo "<html><body>Test reply</body></html>" > reply_email_draft.html
+mkdir -p reply_email_attachments
+echo "attachment" > reply_email_attachments/attachment.txt
+"#
+        }
+        FakeCodexMode::EnsureDangerSandbox => {
+            r#"#!/bin/sh
+set -e
+found="0"
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-c" ] && [ "$arg" = "sandbox=\"danger-full-access\"" ]; then
+    found="1"
+    break
+  fi
+  prev="$arg"
+done
+if [ "$found" != "1" ]; then
+  echo "missing danger-full-access sandbox arg" >&2
   exit 3
 fi
 echo "<html><body>Test reply</body></html>" > reply_email_draft.html

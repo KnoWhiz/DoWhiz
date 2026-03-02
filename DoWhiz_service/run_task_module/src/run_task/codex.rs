@@ -153,6 +153,7 @@ pub(super) fn run_codex_task(
     // Also bypass sandbox if workspace has .google_access_token (indicates Google Docs artifacts)
     let has_google_token = request.workspace_dir.join(".google_access_token").exists();
     let bypass_sandbox = codex_bypass_sandbox() || use_docker || is_google_docs || has_google_token;
+    let sandbox_mode = effective_codex_sandbox_mode(&sandbox_mode, bypass_sandbox);
     let add_dirs = codex_add_dirs(request.workspace_dir, use_docker)?;
     if use_docker {
         let codex_home = host_workspace_dir
@@ -511,6 +512,7 @@ fn run_codex_task_azure_aci(
     let is_google_docs = channel_lower == "google_docs" || channel_lower == "googledocs";
     let has_google_token = request.workspace_dir.join(".google_access_token").exists();
     let bypass_sandbox = codex_bypass_sandbox() || is_google_docs || has_google_token;
+    let sandbox_mode = effective_codex_sandbox_mode(&sandbox_mode, bypass_sandbox);
 
     let add_dirs = codex_add_dirs_remote(&host_workspace_dir, &container_workspace_dir)?;
     let codex_home = host_workspace_dir.join(DOCKER_CODEX_HOME_DIR);
@@ -1129,7 +1131,17 @@ fn toml_escape(value: &str) -> String {
 }
 
 fn codex_sandbox_mode() -> String {
-    CODEX_SANDBOX_MODE.to_string()
+    read_env_trimmed("CODEX_SANDBOX_MODE")
+        .or_else(|| read_env_trimmed("RUN_TASK_CODEX_SANDBOX_MODE"))
+        .unwrap_or_else(|| CODEX_SANDBOX_MODE.to_string())
+}
+
+fn effective_codex_sandbox_mode(sandbox_mode: &str, bypass_sandbox: bool) -> String {
+    if bypass_sandbox {
+        "danger-full-access".to_string()
+    } else {
+        sandbox_mode.to_string()
+    }
 }
 
 fn codex_bypass_sandbox() -> bool {
