@@ -817,12 +817,17 @@ fn cmd_search_image(
 
         output.push_str(&format!("{}. {}\n", i + 1, desc_preview));
         output.push_str(&format!("   ID: {}\n", image.id));
-        output.push_str(&format!("   Size: {}x{} ({})\n",
+        output.push_str(&format!(
+            "   Size: {}x{} ({})\n",
             image.width,
             image.height,
-            if image.width > image.height { "landscape" }
-            else if image.height > image.width { "portrait" }
-            else { "square" }
+            if image.width > image.height {
+                "landscape"
+            } else if image.height > image.width {
+                "portrait"
+            } else {
+                "square"
+            }
         ));
         output.push_str(&format!("   URL (regular): {}\n", image.urls.regular));
         output.push_str(&format!("   Attribution: {}\n", image.get_attribution()));
@@ -830,7 +835,8 @@ fn cmd_search_image(
     }
 
     output.push_str("Usage: Copy the URL and use insert-image to add to document:\n");
-    output.push_str("  google-docs insert-image <doc_id> --url=\"<URL>\" --after=\"anchor text\"\n");
+    output
+        .push_str("  google-docs insert-image <doc_id> --url=\"<URL>\" --after=\"anchor text\"\n");
 
     Ok(output)
 }

@@ -338,12 +338,36 @@ pub(super) fn run_codex_task(
         return Err(if use_docker {
             RunTaskError::DockerFailed {
                 status: output.status.code(),
-                output: output_tail,
+                output: output_tail.clone(),
             }
         } else {
             RunTaskError::CodexFailed {
                 status: output.status.code(),
-                output: output_tail,
+                output: output_tail.clone(),
+            }
+        });
+    }
+
+    // Codex can return process exit code 0 while reporting turn/task failure in JSON events.
+    // Surface those runtime failures before checking for expected output files.
+    if let Some(runtime_failure) = detect_codex_runtime_failure(&combined_output) {
+        let status = runtime_failure
+            .status_code
+            .or_else(|| output.status.code().filter(|code| *code != 0));
+        let mut failure_output = runtime_failure.message;
+        if !output_tail.is_empty() {
+            failure_output.push('\n');
+            failure_output.push_str(&output_tail);
+        }
+        return Err(if use_docker {
+            RunTaskError::DockerFailed {
+                status,
+                output: failure_output,
+            }
+        } else {
+            RunTaskError::CodexFailed {
+                status,
+                output: failure_output,
             }
         });
     }
@@ -352,7 +376,7 @@ pub(super) fn run_codex_task(
     if !request.reply_to.is_empty() && !reply_html_path.exists() {
         return Err(RunTaskError::OutputMissing {
             path: reply_html_path,
-            output: output_tail,
+            output: output_tail.clone(),
         });
     }
 
@@ -545,6 +569,90 @@ fn extract_token_usage(output: &str) -> Option<TokenUsage> {
     None
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CodexRuntimeFailure {
+    status_code: Option<i32>,
+    message: String,
+}
+
+fn detect_codex_runtime_failure(output: &str) -> Option<CodexRuntimeFailure> {
+    enum TerminalState {
+        Success,
+        Failure(CodexRuntimeFailure),
+    }
+
+    let mut terminal_state: Option<TerminalState> = None;
+
+    for line in output.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if value.get("type").and_then(|v| v.as_str()) != Some("event_msg") {
+            continue;
+        }
+        let Some(payload) = value.get("payload") else {
+            continue;
+        };
+
+        match payload.get("type").and_then(|v| v.as_str()) {
+            Some("task_complete") => {
+                let status = payload.get("status").and_then(|v| v.as_str());
+                let exit_code = payload
+                    .get("exit_code")
+                    .and_then(|v| v.as_i64())
+                    .and_then(|v| i32::try_from(v).ok());
+                let status_failed = matches!(status, Some("failed" | "error" | "aborted"));
+                let exit_failed = matches!(exit_code, Some(code) if code != 0);
+
+                if status_failed || exit_failed {
+                    let status_text = status.unwrap_or("unknown");
+                    let mut message = format!("Codex task_complete reported status={status_text}");
+                    if let Some(code) = exit_code {
+                        message.push_str(&format!(" exit_code={code}"));
+                    }
+                    if let Some(last_agent_message) =
+                        payload.get("last_agent_message").and_then(|v| v.as_str())
+                    {
+                        let trimmed = last_agent_message.trim();
+                        if !trimmed.is_empty() {
+                            message.push_str(&format!(
+                                ". last_agent_message: {}",
+                                tail_string(trimmed, 400)
+                            ));
+                        }
+                    }
+                    terminal_state = Some(TerminalState::Failure(CodexRuntimeFailure {
+                        status_code: exit_code,
+                        message,
+                    }));
+                } else if matches!(status, Some("success")) || matches!(exit_code, Some(0)) {
+                    terminal_state = Some(TerminalState::Success);
+                }
+            }
+            Some("turn_aborted") => {
+                let reason = payload
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                terminal_state = Some(TerminalState::Failure(CodexRuntimeFailure {
+                    status_code: None,
+                    message: format!("Codex turn aborted (reason: {reason})"),
+                }));
+            }
+            _ => {}
+        }
+    }
+
+    match terminal_state {
+        Some(TerminalState::Failure(failure)) => Some(failure),
+        _ => None,
+    }
+}
+
 fn parse_scheduling_from_outputs(
     stdout_output: &str,
     stderr_output: &str,
@@ -563,7 +671,8 @@ fn parse_scheduling_from_outputs(
         .or_else(|| extract_assistant_text_from_jsonl(stderr_output))
         .or_else(|| extract_assistant_text_from_jsonl(combined_output));
     let scheduling_output = assistant_output.as_deref().unwrap_or("");
-    let (mut scheduled_tasks, mut scheduled_tasks_error) = extract_scheduled_tasks(scheduling_output);
+    let (mut scheduled_tasks, mut scheduled_tasks_error) =
+        extract_scheduled_tasks(scheduling_output);
     let (mut scheduler_actions, mut scheduler_actions_error) =
         extract_scheduler_actions(scheduling_output);
 
@@ -750,10 +859,7 @@ fn collect_event_msg_agent_message(value: &serde_json::Value, target: &mut Strin
     }
 }
 
-fn collect_response_item_assistant_message(
-    value: &serde_json::Value,
-    target: &mut String,
-) -> bool {
+fn collect_response_item_assistant_message(value: &serde_json::Value, target: &mut String) -> bool {
     if value.get("type").and_then(|v| v.as_str()) != Some("response_item") {
         return false;
     }
@@ -888,6 +994,39 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_codex_runtime_failure_from_task_complete_failed() {
+        let output = r#"{"type":"event_msg","payload":{"type":"task_complete","status":"failed","exit_code":101,"last_agent_message":"compile failed"}} "#;
+        let failure = detect_codex_runtime_failure(output).expect("expected failure");
+        assert_eq!(failure.status_code, Some(101));
+        assert!(failure.message.contains("status=failed"));
+        assert!(failure.message.contains("exit_code=101"));
+        assert!(failure.message.contains("compile failed"));
+    }
+
+    #[test]
+    fn test_detect_codex_runtime_failure_from_turn_aborted() {
+        let output =
+            r#"{"type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}"#;
+        let failure = detect_codex_runtime_failure(output).expect("expected failure");
+        assert_eq!(failure.status_code, None);
+        assert!(failure.message.contains("turn aborted"));
+        assert!(failure.message.contains("interrupted"));
+    }
+
+    #[test]
+    fn test_detect_codex_runtime_failure_ignores_terminal_success() {
+        let output = r#"{"type":"event_msg","payload":{"type":"task_complete","status":"failed","exit_code":101}}
+{"type":"event_msg","payload":{"type":"task_complete","status":"success","exit_code":0}}"#;
+        assert!(detect_codex_runtime_failure(output).is_none());
+    }
+
+    #[test]
+    fn test_detect_codex_runtime_failure_none_when_success_only() {
+        let output = r#"{"type":"event_msg","payload":{"type":"task_complete","status":"success","exit_code":0}}"#;
+        assert!(detect_codex_runtime_failure(output).is_none());
+    }
+
+    #[test]
     fn test_extract_assistant_text_from_jsonl_item_completed() {
         let output = r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"hello\nSCHEDULED_TASKS_JSON_BEGIN\n[{\"type\":\"send_email\",\"delay_seconds\":60,\"subject\":\"x\",\"html_path\":\"x.html\"}]\nSCHEDULED_TASKS_JSON_END"}}"#;
 
@@ -942,10 +1081,8 @@ mod tests {
     #[test]
     fn test_parse_scheduling_from_outputs_falls_back_to_recent_session_file() {
         let _lock = env_lock();
-        let temp_root = std::env::temp_dir().join(format!(
-            "codex-session-fallback-{}",
-            std::process::id()
-        ));
+        let temp_root =
+            std::env::temp_dir().join(format!("codex-session-fallback-{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_root);
         let session_dir = temp_root.join(".codex/sessions/2026/03/01");
         fs::create_dir_all(&session_dir).expect("create session dir");

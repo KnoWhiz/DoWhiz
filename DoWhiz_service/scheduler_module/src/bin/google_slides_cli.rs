@@ -240,8 +240,12 @@ fn main() {
                 eprintln!("Error: --url and --page-id are required");
                 exit(1);
             }
-            let x = parse_arg(&args, "--x").and_then(|s| s.parse().ok()).unwrap_or(100.0);
-            let y = parse_arg(&args, "--y").and_then(|s| s.parse().ok()).unwrap_or(100.0);
+            let x = parse_arg(&args, "--x")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(100.0);
+            let y = parse_arg(&args, "--y")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(100.0);
             let width = parse_arg(&args, "--width").and_then(|s| s.parse().ok());
             let height = parse_arg(&args, "--height").and_then(|s| s.parse().ok());
             cmd_insert_image(&args[2], &url, &page_id, x, y, width, height)
@@ -260,8 +264,12 @@ fn main() {
                 print_usage();
                 exit(1);
             }
-            let min_width = parse_arg(&args, "--min-width").and_then(|s| s.parse().ok()).unwrap_or(100.0);
-            let min_height = parse_arg(&args, "--min-height").and_then(|s| s.parse().ok()).unwrap_or(100.0);
+            let min_width = parse_arg(&args, "--min-width")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(100.0);
+            let min_height = parse_arg(&args, "--min-height")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(100.0);
             cmd_find_space(&args[2], &args[3], min_width, min_height)
         }
         "search-image" => {
@@ -325,7 +333,11 @@ fn cmd_read_presentation(presentation_id: &str) -> Result<String, String> {
         .map_err(|e| format!("Failed to read presentation: {}", e))
 }
 
-fn cmd_get_presentation(presentation_id: &str, json_mode: bool, analyze_mode: bool) -> Result<String, String> {
+fn cmd_get_presentation(
+    presentation_id: &str,
+    json_mode: bool,
+    analyze_mode: bool,
+) -> Result<String, String> {
     let auth = get_auth()?;
     let adapter = GoogleSlidesInboundAdapter::new(auth, HashSet::new());
 
@@ -350,8 +362,13 @@ fn cmd_get_presentation(presentation_id: &str, json_mode: bool, analyze_mode: bo
     if let Some(page_size) = presentation.get("pageSize") {
         let width = extract_dimension(page_size.get("width"));
         let height = extract_dimension(page_size.get("height"));
-        output.push_str(&format!("Page Size: {:.0}pt x {:.0}pt ({:.1}\" x {:.1}\")\n",
-            width, height, width / 72.0, height / 72.0));
+        output.push_str(&format!(
+            "Page Size: {:.0}pt x {:.0}pt ({:.1}\" x {:.1}\")\n",
+            width,
+            height,
+            width / 72.0,
+            height / 72.0
+        ));
     }
 
     if let Some(slides) = presentation.get("slides").and_then(|s| s.as_array()) {
@@ -370,26 +387,46 @@ fn cmd_get_presentation(presentation_id: &str, json_mode: bool, analyze_mode: bo
                                 let (x, y, width, height) = extract_element_bounds(elem);
 
                                 output.push_str(&format!("     - {} ({})\n", elem_id, elem_type));
-                                output.push_str(&format!("       Position: ({:.0}, {:.0}), Size: {:.0} x {:.0} pt\n",
-                                    x, y, width, height));
+                                output.push_str(&format!(
+                                    "       Position: ({:.0}, {:.0}), Size: {:.0} x {:.0} pt\n",
+                                    x, y, width, height
+                                ));
 
                                 // For shapes with text, show text info
                                 if let Some(shape) = elem.get("shape") {
                                     if let Some(placeholder) = shape.get("placeholder") {
-                                        if let Some(ptype) = placeholder.get("type").and_then(|t| t.as_str()) {
-                                            output.push_str(&format!("       Placeholder: {}\n", ptype));
+                                        if let Some(ptype) =
+                                            placeholder.get("type").and_then(|t| t.as_str())
+                                        {
+                                            output.push_str(&format!(
+                                                "       Placeholder: {}\n",
+                                                ptype
+                                            ));
                                         }
                                     }
 
                                     if let Some(text) = shape.get("text") {
-                                        let (text_content, char_count, font_size) = extract_text_info(text);
-                                        let capacity = estimate_text_capacity(width, height, font_size);
+                                        let (text_content, char_count, font_size) =
+                                            extract_text_info(text);
+                                        let capacity =
+                                            estimate_text_capacity(width, height, font_size);
 
-                                        output.push_str(&format!("       Font Size: {:.0}pt\n", font_size));
-                                        output.push_str(&format!("       Text: {} chars", char_count));
+                                        output.push_str(&format!(
+                                            "       Font Size: {:.0}pt\n",
+                                            font_size
+                                        ));
+                                        output.push_str(&format!(
+                                            "       Text: {} chars",
+                                            char_count
+                                        ));
                                         if capacity > 0 {
-                                            let usage_pct = (char_count as f64 / capacity as f64 * 100.0).min(100.0);
-                                            output.push_str(&format!(" / ~{} capacity ({:.0}% used)", capacity, usage_pct));
+                                            let usage_pct = (char_count as f64 / capacity as f64
+                                                * 100.0)
+                                                .min(100.0);
+                                            output.push_str(&format!(
+                                                " / ~{} capacity ({:.0}% used)",
+                                                capacity, usage_pct
+                                            ));
                                         }
                                         output.push('\n');
 
@@ -399,7 +436,10 @@ fn cmd_get_presentation(presentation_id: &str, json_mode: bool, analyze_mode: bo
                                             } else {
                                                 text_content
                                             };
-                                            output.push_str(&format!("       Content: \"{}\"\n", preview.replace('\n', "\\n")));
+                                            output.push_str(&format!(
+                                                "       Content: \"{}\"\n",
+                                                preview.replace('\n', "\\n")
+                                            ));
                                         }
                                     }
                                 }
@@ -410,10 +450,14 @@ fn cmd_get_presentation(presentation_id: &str, json_mode: bool, analyze_mode: bo
                         for elem in elements {
                             if let Some(shape) = elem.get("shape") {
                                 if let Some(text) = shape.get("text") {
-                                    if let Some(elements) = text.get("textElements").and_then(|e| e.as_array()) {
+                                    if let Some(elements) =
+                                        text.get("textElements").and_then(|e| e.as_array())
+                                    {
                                         for te in elements {
                                             if let Some(tr) = te.get("textRun") {
-                                                if let Some(content) = tr.get("content").and_then(|c| c.as_str()) {
+                                                if let Some(content) =
+                                                    tr.get("content").and_then(|c| c.as_str())
+                                                {
                                                     let preview = content.trim();
                                                     if !preview.is_empty() && preview.len() > 1 {
                                                         let short = if preview.len() > 40 {
@@ -421,7 +465,10 @@ fn cmd_get_presentation(presentation_id: &str, json_mode: bool, analyze_mode: bo
                                                         } else {
                                                             preview.to_string()
                                                         };
-                                                        output.push_str(&format!("     \"{}\"", short));
+                                                        output.push_str(&format!(
+                                                            "     \"{}\"",
+                                                            short
+                                                        ));
                                                         break;
                                                     }
                                                 }
@@ -440,7 +487,9 @@ fn cmd_get_presentation(presentation_id: &str, json_mode: bool, analyze_mode: bo
 
     if analyze_mode {
         output.push_str("\n--- Capacity Guidelines ---\n");
-        output.push_str("Title (24pt): ~50 chars | Subtitle (18pt): ~80 chars | Body (14pt): ~500 chars\n");
+        output.push_str(
+            "Title (24pt): ~50 chars | Subtitle (18pt): ~80 chars | Body (14pt): ~500 chars\n",
+        );
         output.push_str("Warning: >80% capacity may cause text overflow\n");
     }
 
@@ -457,17 +506,25 @@ fn extract_dimension(dim: Option<&serde_json::Value>) -> f64 {
             "PT" => magnitude,
             _ => magnitude,
         })
-    }).unwrap_or(0.0)
+    })
+    .unwrap_or(0.0)
 }
 
 /// Get element type string
 fn get_element_type(elem: &serde_json::Value) -> &'static str {
-    if elem.get("shape").is_some() { "Shape" }
-    else if elem.get("image").is_some() { "Image" }
-    else if elem.get("table").is_some() { "Table" }
-    else if elem.get("line").is_some() { "Line" }
-    else if elem.get("video").is_some() { "Video" }
-    else { "Unknown" }
+    if elem.get("shape").is_some() {
+        "Shape"
+    } else if elem.get("image").is_some() {
+        "Image"
+    } else if elem.get("table").is_some() {
+        "Table"
+    } else if elem.get("line").is_some() {
+        "Line"
+    } else if elem.get("video").is_some() {
+        "Video"
+    } else {
+        "Unknown"
+    }
 }
 
 /// Extract element position and size from transform
@@ -480,12 +537,16 @@ fn extract_element_bounds(elem: &serde_json::Value) -> (f64, f64, f64, f64) {
     let translate_x = transform
         .and_then(|t| t.get("translateX"))
         .and_then(|v| v.as_f64())
-        .unwrap_or(0.0) / 914400.0 * 72.0; // EMU to points
+        .unwrap_or(0.0)
+        / 914400.0
+        * 72.0; // EMU to points
 
     let translate_y = transform
         .and_then(|t| t.get("translateY"))
         .and_then(|v| v.as_f64())
-        .unwrap_or(0.0) / 914400.0 * 72.0;
+        .unwrap_or(0.0)
+        / 914400.0
+        * 72.0;
 
     // Get scale factors (images use these to set actual display size)
     let scale_x = transform
@@ -705,8 +766,13 @@ fn cmd_analyze_slide(presentation_id: &str, slide_id: &str) -> Result<String, St
     if let Some(page_size) = presentation.get("pageSize") {
         let width = extract_dimension(page_size.get("width"));
         let height = extract_dimension(page_size.get("height"));
-        output.push_str(&format!("Page Size: {:.0}pt x {:.0}pt ({:.1}\" x {:.1}\")\n\n",
-            width, height, width / 72.0, height / 72.0));
+        output.push_str(&format!(
+            "Page Size: {:.0}pt x {:.0}pt ({:.1}\" x {:.1}\")\n\n",
+            width,
+            height,
+            width / 72.0,
+            height / 72.0
+        ));
     }
 
     if let Some(elements) = slide.get("pageElements").and_then(|e| e.as_array()) {
@@ -719,8 +785,13 @@ fn cmd_analyze_slide(presentation_id: &str, slide_id: &str) -> Result<String, St
 
                 output.push_str(&format!("┌─ {} [{}]\n", elem_id, elem_type));
                 output.push_str(&format!("│  Position: ({:.0}, {:.0}) pt\n", x, y));
-                output.push_str(&format!("│  Size: {:.0} x {:.0} pt ({:.1}\" x {:.1}\")\n",
-                    width, height, width / 72.0, height / 72.0));
+                output.push_str(&format!(
+                    "│  Size: {:.0} x {:.0} pt ({:.1}\" x {:.1}\")\n",
+                    width,
+                    height,
+                    width / 72.0,
+                    height / 72.0
+                ));
 
                 if let Some(shape) = elem.get("shape") {
                     // Placeholder info
@@ -738,7 +809,8 @@ fn cmd_analyze_slide(presentation_id: &str, slide_id: &str) -> Result<String, St
                         output.push_str(&format!("│  Font Size: {:.0}pt\n", font_size));
 
                         if capacity > 0 {
-                            let usage_pct = (char_count as f64 / capacity as f64 * 100.0).min(100.0);
+                            let usage_pct =
+                                (char_count as f64 / capacity as f64 * 100.0).min(100.0);
                             let status = if usage_pct > 90.0 {
                                 "⚠️  OVERFLOW RISK"
                             } else if usage_pct > 70.0 {
@@ -747,10 +819,14 @@ fn cmd_analyze_slide(presentation_id: &str, slide_id: &str) -> Result<String, St
                                 "✓ OK"
                             };
 
-                            output.push_str(&format!("│  Text: {} / ~{} chars ({:.0}%) {}\n",
-                                char_count, capacity, usage_pct, status));
-                            output.push_str(&format!("│  Remaining: ~{} chars\n",
-                                capacity.saturating_sub(char_count)));
+                            output.push_str(&format!(
+                                "│  Text: {} / ~{} chars ({:.0}%) {}\n",
+                                char_count, capacity, usage_pct, status
+                            ));
+                            output.push_str(&format!(
+                                "│  Remaining: ~{} chars\n",
+                                capacity.saturating_sub(char_count)
+                            ));
                         } else {
                             output.push_str(&format!("│  Text: {} chars\n", char_count));
                         }
@@ -761,7 +837,10 @@ fn cmd_analyze_slide(presentation_id: &str, slide_id: &str) -> Result<String, St
                             } else {
                                 text_content
                             };
-                            output.push_str(&format!("│  Content: \"{}\"\n", preview.replace('\n', "\\n")));
+                            output.push_str(&format!(
+                                "│  Content: \"{}\"\n",
+                                preview.replace('\n', "\\n")
+                            ));
                         }
                     }
                 } else if elem.get("image").is_some() {
@@ -874,16 +953,32 @@ fn cmd_find_space(
     }
 
     let mut output = String::new();
-    output.push_str(&format!("=== Available Space Analysis for Slide {} ===\n\n", slide_id));
-    output.push_str(&format!("Slide size: {:.0} x {:.0} pt ({:.1}\" x {:.1}\")\n",
-        slide_width, slide_height,
-        slide_width / 72.0, slide_height / 72.0
+    output.push_str(&format!(
+        "=== Available Space Analysis for Slide {} ===\n\n",
+        slide_id
     ));
-    output.push_str(&format!("Minimum space requested: {:.0} x {:.0} pt\n\n", min_width, min_height));
+    output.push_str(&format!(
+        "Slide size: {:.0} x {:.0} pt ({:.1}\" x {:.1}\")\n",
+        slide_width,
+        slide_height,
+        slide_width / 72.0,
+        slide_height / 72.0
+    ));
+    output.push_str(&format!(
+        "Minimum space requested: {:.0} x {:.0} pt\n\n",
+        min_width, min_height
+    ));
 
     output.push_str(&format!("Existing elements: {}\n", occupied_regions.len()));
     for (i, (x, y, w, h)) in occupied_regions.iter().enumerate() {
-        output.push_str(&format!("  {}. ({:.0}, {:.0}) size {:.0}x{:.0}\n", i + 1, x, y, w, h));
+        output.push_str(&format!(
+            "  {}. ({:.0}, {:.0}) size {:.0}x{:.0}\n",
+            i + 1,
+            x,
+            y,
+            w,
+            h
+        ));
     }
     output.push_str("\n");
 
@@ -895,15 +990,24 @@ fn cmd_find_space(
     // Check various positions
     let positions_to_check = vec![
         // Bottom right (common for images)
-        (slide_width - min_width - margin, slide_height - min_height - margin),
+        (
+            slide_width - min_width - margin,
+            slide_height - min_height - margin,
+        ),
         // Bottom left
         (margin, slide_height - min_height - margin),
         // Top right
         (slide_width - min_width - margin, margin),
         // Center bottom
-        ((slide_width - min_width) / 2.0, slide_height - min_height - margin),
+        (
+            (slide_width - min_width) / 2.0,
+            slide_height - min_height - margin,
+        ),
         // Center
-        ((slide_width - min_width) / 2.0, (slide_height - min_height) / 2.0),
+        (
+            (slide_width - min_width) / 2.0,
+            (slide_height - min_height) / 2.0,
+        ),
     ];
 
     for (check_x, check_y) in positions_to_check {
@@ -946,11 +1050,7 @@ fn cmd_find_space(
                 let rect2_right = ox + ow;
                 let rect2_bottom = oy + oh;
 
-                if x < rect2_right
-                    && rect1_right > *ox
-                    && y < rect2_bottom
-                    && rect1_bottom > *oy
-                {
+                if x < rect2_right && rect1_right > *ox && y < rect2_bottom && rect1_bottom > *oy {
                     overlaps = true;
                     break;
                 }
@@ -981,23 +1081,37 @@ fn cmd_find_space(
         output.push_str("  - Removing or repositioning existing elements\n");
         output.push_str("  - Creating a new slide\n");
     } else {
-        output.push_str(&format!("✓ Found {} available positions:\n\n", available_positions.len()));
+        output.push_str(&format!(
+            "✓ Found {} available positions:\n\n",
+            available_positions.len()
+        ));
         for (i, (x, y, w, h)) in available_positions.iter().take(5).enumerate() {
             let location = if *y > slide_height * 0.6 {
-                if *x > slide_width * 0.6 { "bottom-right" }
-                else if *x < slide_width * 0.4 { "bottom-left" }
-                else { "bottom-center" }
+                if *x > slide_width * 0.6 {
+                    "bottom-right"
+                } else if *x < slide_width * 0.4 {
+                    "bottom-left"
+                } else {
+                    "bottom-center"
+                }
             } else if *y < slide_height * 0.4 {
-                if *x > slide_width * 0.6 { "top-right" }
-                else if *x < slide_width * 0.4 { "top-left" }
-                else { "top-center" }
+                if *x > slide_width * 0.6 {
+                    "top-right"
+                } else if *x < slide_width * 0.4 {
+                    "top-left"
+                } else {
+                    "top-center"
+                }
             } else {
                 "center"
             };
 
             output.push_str(&format!(
                 "{}. Position: ({:.0}, {:.0}) - {} area\n",
-                i + 1, x, y, location
+                i + 1,
+                x,
+                y,
+                location
             ));
             output.push_str(&format!(
                 "   Command: google-slides insert-image {} --url=\"<URL>\" --page-id={} --x={:.0} --y={:.0} --width={:.0} --height={:.0}\n\n",
@@ -1046,12 +1160,17 @@ fn cmd_search_image(
 
         output.push_str(&format!("{}. {}\n", i + 1, desc_preview));
         output.push_str(&format!("   ID: {}\n", image.id));
-        output.push_str(&format!("   Size: {}x{} ({})\n",
+        output.push_str(&format!(
+            "   Size: {}x{} ({})\n",
             image.width,
             image.height,
-            if image.width > image.height { "landscape" }
-            else if image.height > image.width { "portrait" }
-            else { "square" }
+            if image.width > image.height {
+                "landscape"
+            } else if image.height > image.width {
+                "portrait"
+            } else {
+                "square"
+            }
         ));
         output.push_str(&format!("   URL (regular): {}\n", image.urls.regular));
         output.push_str(&format!("   Attribution: {}\n", image.get_attribution()));
