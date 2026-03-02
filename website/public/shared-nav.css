@@ -1,0 +1,314 @@
+body.dw-shared-nav {
+  --dw-nav-bg: var(--navbar-bg, oklch(0.145 0 0 / 0.85));
+  --dw-nav-border: var(--glass-border, var(--border-color, var(--border, oklch(0.3 0 0))));
+  --dw-nav-border-hover: var(--card-hover-border, var(--border-hover, oklch(0.45 0 0)));
+  --dw-nav-text: var(--text-primary, var(--text, oklch(0.985 0 0)));
+  --dw-nav-muted: var(--text-secondary, var(--muted, oklch(0.708 0 0)));
+  --dw-nav-muted-bg: var(--color-muted, var(--muted-bg, oklch(0.269 0 0)));
+  --dw-nav-radius-full: var(--radius-full, 9999px);
+  --dw-nav-radius-2xl: var(--radius-2xl, 1.5rem);
+  --dw-nav-blur: var(--glass-blur, blur(12px));
+}
+
+[data-theme='light'] body.dw-shared-nav {
+  --dw-nav-bg: var(--navbar-bg, oklch(0.98 0.001 286.375 / 0.85));
+}
+
+body.dw-shared-nav .navbar {
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 2rem);
+  max-width: 72rem;
+  z-index: 3000;
+  isolation: isolate;
+  background: var(--dw-nav-bg);
+  backdrop-filter: var(--dw-nav-blur);
+  -webkit-backdrop-filter: var(--dw-nav-blur);
+  border: 1px solid var(--dw-nav-border);
+  border-radius: var(--dw-nav-radius-full);
+  transition: transform 0.3s ease, opacity 0.3s ease, background 0.3s ease;
+}
+
+body.dw-shared-nav .navbar a,
+body.dw-shared-nav .navbar button {
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.dw-shared-nav .navbar .nav-content {
+  position: relative;
+  z-index: 1;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 1.25rem;
+}
+
+body.dw-shared-nav .navbar .logo {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1;
+  color: var(--dw-nav-text);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  white-space: nowrap;
+  min-width: max-content;
+  flex: 0 0 auto;
+}
+
+body.dw-shared-nav .navbar .brand-mark {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 0.45rem;
+  flex: 0 0 auto;
+}
+
+body.dw-shared-nav .navbar .logo .text-gradient {
+  display: inline;
+  padding-bottom: 0;
+  line-height: 1;
+}
+
+body.dw-shared-nav .navbar .nav-links {
+  display: flex;
+  flex: 1;
+  gap: 0.25rem;
+  justify-content: center;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+body.dw-shared-nav .navbar .nav-btn {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--dw-nav-muted);
+  padding: 0.5rem 0.875rem;
+  border-radius: var(--dw-nav-radius-full);
+  transition: color 0.2s ease, background-color 0.2s ease;
+  white-space: nowrap;
+}
+
+body.dw-shared-nav .navbar .nav-btn:hover {
+  color: var(--dw-nav-text);
+  background: var(--dw-nav-muted-bg);
+}
+
+body.dw-shared-nav .navbar .nav-btn[aria-current='page'] {
+  color: var(--dw-nav-text);
+  background: var(--dw-nav-muted-bg);
+}
+
+body.dw-shared-nav .navbar .nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+body.dw-shared-nav .navbar .social-links {
+  display: flex;
+  gap: 0.375rem;
+  align-items: center;
+}
+
+body.dw-shared-nav .navbar .btn-small {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: var(--dw-nav-radius-full);
+  border: 1px solid var(--dw-nav-border);
+  background: transparent;
+  color: var(--dw-nav-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+body.dw-shared-nav .navbar .btn-small:hover {
+  color: var(--dw-nav-text);
+  background: var(--dw-nav-muted-bg);
+  border-color: var(--dw-nav-border-hover);
+}
+
+body.dw-shared-nav .navbar .social-links .btn-small {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--dw-nav-radius-full);
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+body.dw-shared-nav .navbar .social-links .btn-small svg {
+  width: 18px;
+  height: 18px;
+}
+
+body.dw-shared-nav .navbar + .demo-main .demo-hero {
+  padding-top: 8rem;
+}
+
+@media (max-width: 1280px) {
+  body.dw-shared-nav .navbar .nav-content {
+    gap: 0.75rem;
+  }
+
+  body.dw-shared-nav .navbar .nav-links {
+    gap: 0.35rem;
+  }
+
+  body.dw-shared-nav .navbar .nav-btn {
+    font-size: 0.82rem;
+    padding: 0.42rem 0.62rem;
+  }
+
+  body.dw-shared-nav .navbar .nav-actions {
+    gap: 0.6rem;
+  }
+
+  body.dw-shared-nav .navbar .social-links .btn-small {
+    width: 36px;
+    height: 36px;
+  }
+
+  body.dw-shared-nav .navbar .social-links .btn-small svg {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+@media (max-width: 1024px) {
+  body.dw-shared-nav .navbar .nav-content {
+    height: auto;
+    min-height: 80px;
+    padding: 0.85rem 0;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  body.dw-shared-nav .navbar .nav-actions {
+    margin-left: auto;
+  }
+
+  body.dw-shared-nav .navbar .nav-links {
+    width: 100%;
+    order: 3;
+    justify-content: flex-start;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 0.2rem;
+    scrollbar-width: none;
+  }
+
+  body.dw-shared-nav .navbar .nav-links::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  body.dw-shared-nav .navbar {
+    top: 0.75rem;
+    width: calc(100% - 1.5rem);
+    border-radius: var(--dw-nav-radius-2xl);
+    z-index: 4000;
+  }
+
+  body.dw-shared-nav .navbar .nav-content {
+    min-height: auto;
+    height: auto;
+    padding: 0.75rem 0.5rem;
+    display: grid;
+    grid-template-areas:
+      'brand actions'
+      'links links';
+    grid-template-columns: auto 1fr;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  body.dw-shared-nav .navbar .nav-links {
+    grid-area: links;
+    display: flex;
+    width: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding: 0.25rem 0;
+    gap: 0.25rem;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+  }
+
+  body.dw-shared-nav .navbar .nav-links::-webkit-scrollbar {
+    display: none;
+  }
+
+  body.dw-shared-nav .navbar .nav-btn {
+    flex: 0 0 auto;
+    font-size: 0.75rem;
+    padding: 0.375rem 0.625rem;
+    border: 1px solid var(--dw-nav-border);
+    border-radius: var(--dw-nav-radius-full);
+    background: transparent;
+  }
+
+  body.dw-shared-nav .navbar .nav-btn:hover {
+    background: var(--dw-nav-muted-bg);
+  }
+
+  body.dw-shared-nav .navbar .nav-actions {
+    grid-area: actions;
+    justify-content: flex-end;
+    gap: 0.375rem;
+    margin-left: 0;
+  }
+
+  body.dw-shared-nav .navbar .social-links {
+    gap: 0.25rem;
+  }
+
+  body.dw-shared-nav .navbar .logo {
+    grid-area: brand;
+    font-size: 1.25rem;
+  }
+
+  body.dw-shared-nav .navbar .brand-mark {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+
+  body.dw-shared-nav .navbar .btn-small {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: var(--dw-nav-radius-full);
+    justify-content: center;
+    font-size: 0.8rem;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body.dw-shared-nav .navbar .social-links .btn-small svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  body.dw-shared-nav .navbar .btn-small span {
+    display: none;
+  }
+}

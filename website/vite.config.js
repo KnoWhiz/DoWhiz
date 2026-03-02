@@ -16,7 +16,18 @@ function servePublicHtml() {
 
         // Check if this is a path that should serve a static HTML file
         const staticPaths = [
-          '/agents/', '/blog/', '/privacy/', '/terms/', '/user-guide/', '/auth/', '/integrations/', '/trust-safety/', '/demo-videos/'
+          '/agent-market/',
+          '/agents/',
+          '/auth/',
+          '/blog/',
+          '/demo-videos/',
+          '/help-center/',
+          '/integrations/',
+          '/privacy/',
+          '/solutions/',
+          '/terms/',
+          '/trust-safety/',
+          '/user-guide/'
         ]
 
         const isStaticPath = staticPaths.some(p => url.startsWith(p))
