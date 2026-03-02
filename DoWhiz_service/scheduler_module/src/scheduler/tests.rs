@@ -366,6 +366,33 @@ fn execution_status_can_be_recorded_for_task() {
     }
 }
 
+#[test]
+fn scheduler_load_quarantines_zero_byte_db_and_recovers() {
+    let temp = TempDir::new().expect("tempdir");
+    let tasks_db = temp.path().join("tasks.db");
+    fs::write(&tasks_db, "").expect("create zero-byte db");
+
+    let scheduler = Scheduler::load(&tasks_db, NoopExecutor::default()).expect("load");
+    assert!(scheduler.tasks().is_empty());
+
+    let size = fs::metadata(&tasks_db).expect("metadata").len();
+    assert!(size > 0, "recreated tasks.db should be non-empty");
+
+    let mut quarantined = false;
+    for entry in fs::read_dir(temp.path()).expect("read dir") {
+        let entry = entry.expect("entry");
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with("tasks.db.corrupt.") {
+            quarantined = true;
+            break;
+        }
+    }
+    assert!(
+        quarantined,
+        "expected zero-byte db to be quarantined with tasks.db.corrupt.<timestamp>"
+    );
+}
+
 /// Helper to create a Discord-style RunTaskTask
 fn discord_run_task(workspace: &Path) -> RunTaskTask {
     RunTaskTask {

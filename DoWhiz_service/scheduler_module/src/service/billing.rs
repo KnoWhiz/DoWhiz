@@ -77,43 +77,53 @@ async fn get_balance(
     headers: HeaderMap,
 ) -> Result<Json<BalanceResponse>, (StatusCode, String)> {
     // Extract and validate token
-    let token = extract_bearer_token(&headers)
-        .ok_or((StatusCode::UNAUTHORIZED, "Missing Authorization header".to_string()))?;
+    let token = extract_bearer_token(&headers).ok_or((
+        StatusCode::UNAUTHORIZED,
+        "Missing Authorization header".to_string(),
+    ))?;
 
     let auth_user = validate_supabase_token(&state.supabase_url, &token).await?;
 
     // Get account - run sync DB operation on blocking thread
     let store = state.account_store.clone();
     let auth_user_id = auth_user.id;
-    let account = tokio::task::spawn_blocking(move || {
-        store.get_account_by_auth_user(auth_user_id)
-    })
-    .await
-    .map_err(|e| {
-        error!("Task join error: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".to_string())
-    })?
-    .map_err(|e| {
-        error!("Failed to get account: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
-    })?
-    .ok_or((StatusCode::NOT_FOUND, "Account not found".to_string()))?;
+    let account = tokio::task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id))
+        .await
+        .map_err(|e| {
+            error!("Task join error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal error".to_string(),
+            )
+        })?
+        .map_err(|e| {
+            error!("Failed to get account: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            )
+        })?
+        .ok_or((StatusCode::NOT_FOUND, "Account not found".to_string()))?;
 
     // Get balance - run sync DB operation on blocking thread
     let store = state.account_store.clone();
     let account_id = account.id;
-    let balance = tokio::task::spawn_blocking(move || {
-        store.get_balance(account_id)
-    })
-    .await
-    .map_err(|e| {
-        error!("Task join error: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".to_string())
-    })?
-    .map_err(|e| {
-        error!("Failed to get balance: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
-    })?;
+    let balance = tokio::task::spawn_blocking(move || store.get_balance(account_id))
+        .await
+        .map_err(|e| {
+            error!("Task join error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal error".to_string(),
+            )
+        })?
+        .map_err(|e| {
+            error!("Failed to get balance: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            )
+        })?;
 
     Ok(Json(BalanceResponse {
         purchased_hours: balance.purchased_hours,
@@ -133,31 +143,40 @@ async fn create_checkout(
 ) -> Result<Json<CheckoutResponse>, (StatusCode, String)> {
     // Validate hours
     if payload.hours == 0 {
-        return Err((StatusCode::BAD_REQUEST, "Hours must be greater than 0".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Hours must be greater than 0".to_string(),
+        ));
     }
 
     // Extract and validate token
-    let token = extract_bearer_token(&headers)
-        .ok_or((StatusCode::UNAUTHORIZED, "Missing Authorization header".to_string()))?;
+    let token = extract_bearer_token(&headers).ok_or((
+        StatusCode::UNAUTHORIZED,
+        "Missing Authorization header".to_string(),
+    ))?;
 
     let auth_user = validate_supabase_token(&state.supabase_url, &token).await?;
 
     // Get account - run sync DB operation on blocking thread
     let store = state.account_store.clone();
     let auth_user_id = auth_user.id;
-    let account = tokio::task::spawn_blocking(move || {
-        store.get_account_by_auth_user(auth_user_id)
-    })
-    .await
-    .map_err(|e| {
-        error!("Task join error: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".to_string())
-    })?
-    .map_err(|e| {
-        error!("Failed to get account: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
-    })?
-    .ok_or((StatusCode::NOT_FOUND, "Account not found".to_string()))?;
+    let account = tokio::task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id))
+        .await
+        .map_err(|e| {
+            error!("Task join error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal error".to_string(),
+            )
+        })?
+        .map_err(|e| {
+            error!("Failed to get account: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            )
+        })?
+        .ok_or((StatusCode::NOT_FOUND, "Account not found".to_string()))?;
 
     // Calculate price in cents ($10/hr)
     let amount_cents = (payload.hours as i64) * 1000; // $10 = 1000 cents
@@ -197,12 +216,18 @@ async fn create_checkout(
         .await
         .map_err(|e| {
             error!("Failed to create Stripe checkout session: {}", e);
-            (StatusCode::BAD_GATEWAY, "Failed to create checkout session".to_string())
+            (
+                StatusCode::BAD_GATEWAY,
+                "Failed to create checkout session".to_string(),
+            )
         })?;
 
     let checkout_url = session.url.ok_or_else(|| {
         error!("Stripe session missing URL");
-        (StatusCode::BAD_GATEWAY, "Invalid checkout session".to_string())
+        (
+            StatusCode::BAD_GATEWAY,
+            "Invalid checkout session".to_string(),
+        )
     })?;
 
     info!(
@@ -228,17 +253,24 @@ async fn handle_webhook(
     let signature = headers
         .get("stripe-signature")
         .and_then(|v| v.to_str().ok())
-        .ok_or((StatusCode::BAD_REQUEST, "Missing Stripe signature".to_string()))?;
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            "Missing Stripe signature".to_string(),
+        ))?;
 
     // Verify webhook signature
     let payload = std::str::from_utf8(&body).map_err(|_| {
-        (StatusCode::BAD_REQUEST, "Invalid payload encoding".to_string())
+        (
+            StatusCode::BAD_REQUEST,
+            "Invalid payload encoding".to_string(),
+        )
     })?;
 
-    let event = Webhook::construct_event(payload, signature, &state.webhook_secret).map_err(|e| {
-        warn!("Webhook signature verification failed: {}", e);
-        (StatusCode::BAD_REQUEST, "Invalid signature".to_string())
-    })?;
+    let event =
+        Webhook::construct_event(payload, signature, &state.webhook_secret).map_err(|e| {
+            warn!("Webhook signature verification failed: {}", e);
+            (StatusCode::BAD_REQUEST, "Invalid signature".to_string())
+        })?;
 
     // Only handle checkout.session.completed
     if event.type_ != EventType::CheckoutSessionCompleted {
@@ -260,18 +292,23 @@ async fn handle_webhook(
     // Check idempotency - skip if already processed (run on blocking thread)
     let store = state.account_store.clone();
     let session_id_clone = session_id.clone();
-    let payment_exists = tokio::task::spawn_blocking(move || {
-        store.payment_exists(&session_id_clone)
-    })
-    .await
-    .map_err(|e| {
-        error!("Task join error: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".to_string())
-    })?
-    .map_err(|e| {
-        error!("Failed to check payment existence: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
-    })?;
+    let payment_exists =
+        tokio::task::spawn_blocking(move || store.payment_exists(&session_id_clone))
+            .await
+            .map_err(|e| {
+                error!("Task join error: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal error".to_string(),
+                )
+            })?
+            .map_err(|e| {
+                error!("Failed to check payment existence: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?;
 
     if payment_exists {
         info!("Payment {} already processed, skipping", session_id);
@@ -286,7 +323,10 @@ async fn handle_webhook(
 
     let account_id_str = metadata.get("account_id").ok_or_else(|| {
         error!("Metadata missing account_id");
-        (StatusCode::BAD_REQUEST, "Missing account_id in metadata".to_string())
+        (
+            StatusCode::BAD_REQUEST,
+            "Missing account_id in metadata".to_string(),
+        )
     })?;
 
     let account_id: Uuid = account_id_str.parse().map_err(|_| {
@@ -296,7 +336,10 @@ async fn handle_webhook(
 
     let hours_str = metadata.get("hours").ok_or_else(|| {
         error!("Metadata missing hours");
-        (StatusCode::BAD_REQUEST, "Missing hours in metadata".to_string())
+        (
+            StatusCode::BAD_REQUEST,
+            "Missing hours in metadata".to_string(),
+        )
     })?;
 
     let hours: f64 = hours_str.parse().map_err(|_| {
@@ -316,27 +359,37 @@ async fn handle_webhook(
     .await
     .map_err(|e| {
         error!("Task join error: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal error".to_string(),
+        )
     })?
     .map_err(|e| {
         error!("Failed to record payment: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to record payment".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record payment".to_string(),
+        )
     })?;
 
     // Add purchased hours to account - run on blocking thread
     let store = state.account_store.clone();
-    tokio::task::spawn_blocking(move || {
-        store.add_purchased_hours(account_id, hours)
-    })
-    .await
-    .map_err(|e| {
-        error!("Task join error: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".to_string())
-    })?
-    .map_err(|e| {
-        error!("Failed to add purchased hours: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to update account".to_string())
-    })?;
+    tokio::task::spawn_blocking(move || store.add_purchased_hours(account_id, hours))
+        .await
+        .map_err(|e| {
+            error!("Task join error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal error".to_string(),
+            )
+        })?
+        .map_err(|e| {
+            error!("Failed to add purchased hours: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update account".to_string(),
+            )
+        })?;
 
     info!(
         "Payment {} processed: {} hours added to account {}",

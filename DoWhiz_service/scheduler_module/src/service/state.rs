@@ -141,3 +141,40 @@ impl ConcurrencyLimiter {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::index_store::TaskRef;
+    use uuid::Uuid;
+
+    #[test]
+    fn scheduler_claims_supports_user_limit_200() {
+        let mut claims = SchedulerClaims::default();
+        let user_id = "user-1".to_string();
+        let mut claimed = Vec::new();
+
+        for _ in 0..200usize {
+            let task_ref = TaskRef {
+                task_id: Uuid::new_v4().to_string(),
+                user_id: user_id.clone(),
+            };
+            let result = claims.try_claim(&task_ref, 200, 0);
+            assert!(matches!(result, ClaimResult::Claimed));
+            claimed.push(task_ref);
+        }
+
+        let overflow = TaskRef {
+            task_id: Uuid::new_v4().to_string(),
+            user_id: user_id.clone(),
+        };
+        let overflow_result = claims.try_claim(&overflow, 200, 0);
+        assert!(matches!(overflow_result, ClaimResult::UserBusy));
+
+        for task_ref in claimed {
+            claims.release(&task_ref);
+        }
+        assert!(claims.running_users.is_empty());
+        assert!(claims.running_tasks.is_empty());
+    }
+}

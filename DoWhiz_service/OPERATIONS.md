@@ -69,8 +69,13 @@ Startup guardrails:
 
 Live migration note (local run_task -> Azure Files):
 - Keep a backup first, e.g. `run_task.local_backup_<timestamp>`.
-- Prefer `rsync --ignore-existing` while services stay online.
-- Exclude transient lock files: `*.db-journal`, `*.db-wal`, `*.db-shm`, `*.lock`.
+- Do not use `rsync --ignore-existing` for live state (it can preserve empty/corrupt DB files forever).
+- Use two-phase migration:
+  1) Warm copy while services are online (exclude `*.db-journal`, `*.db-wal`, `*.db-shm`, `*.lock`)
+  2) Short maintenance window: stop writer processes, run final sync without `--ignore-existing`, then restart.
+- Validate before traffic restore:
+  - zero-byte `tasks.db` count must be 0
+  - required per-user directories (e.g. `workspaces/`) must exist
 - Verify worker health after migration: `curl -sS http://127.0.0.1:9001/health`.
 
 ## 4) Safety Rules

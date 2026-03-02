@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection};
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::{Schedule, ScheduledTask};
 
@@ -121,6 +122,7 @@ impl IndexStore {
             fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(&self.path)?;
+        conn.busy_timeout(Duration::from_secs(30))?;
         conn.execute_batch(INDEX_SCHEMA)?;
         Ok(conn)
     }

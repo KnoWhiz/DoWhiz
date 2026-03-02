@@ -3,6 +3,8 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+use tracing::warn;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -116,12 +118,25 @@ impl UserStore {
             )
             .optional()?;
 
-        if let Some((id, id_type, id_value, created_at, _last_seen_at)) = row {
-            let last_seen_at = now;
-            conn.execute(
-                "UPDATE users SET last_seen_at = ?1 WHERE id = ?2",
-                params![format_datetime(last_seen_at), id],
-            )?;
+        if let Some((id, id_type, id_value, created_at, last_seen_at_raw)) = row {
+            let mut last_seen_at = parse_datetime(&last_seen_at_raw)?;
+            if should_refresh_last_seen(last_seen_at, now) {
+                match conn.execute(
+                    "UPDATE users SET last_seen_at = ?1 WHERE id = ?2",
+                    params![format_datetime(now), id.as_str()],
+                ) {
+                    Ok(_) => {
+                        last_seen_at = now;
+                    }
+                    Err(err) if is_sqlite_lock_error(&err) => {
+                        warn!(
+                            "last_seen_at update skipped due to sqlite lock for user {}: {}",
+                            id, err
+                        );
+                    }
+                    Err(err) => return Err(err.into()),
+                }
+            }
             return Ok(UserRecord {
                 user_id: id,
                 identifier_type: id_type,
@@ -197,6 +212,7 @@ impl UserStore {
             fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(&self.path)?;
+        conn.busy_timeout(Duration::from_secs(30))?;
         conn.execute_batch(USERS_SCHEMA)?;
         Ok(conn)
     }
@@ -325,6 +341,23 @@ fn format_datetime(value: DateTime<Utc>) -> String {
 fn parse_datetime(value: &str) -> Result<DateTime<Utc>, chrono::ParseError> {
     Ok(DateTime::parse_from_rfc3339(value)?.with_timezone(&Utc))
 }
+
+fn should_refresh_last_seen(last_seen_at: DateTime<Utc>, now: DateTime<Utc>) -> bool {
+    (now - last_seen_at).num_seconds() >= LAST_SEEN_UPDATE_INTERVAL_SECS
+}
+
+fn is_sqlite_lock_error(err: &rusqlite::Error) -> bool {
+    matches!(
+        err,
+        rusqlite::Error::SqliteFailure(db_err, _)
+            if matches!(
+                db_err.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            )
+    )
+}
+
+const LAST_SEEN_UPDATE_INTERVAL_SECS: i64 = 5 * 60;
 
 #[cfg(test)]
 mod tests;
