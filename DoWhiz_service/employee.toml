@@ -17,6 +17,9 @@ agents_path = "employees/little_bear/AGENTS.md"
 claude_path = "employees/little_bear/CLAUDE.md"
 soul_path = "employees/little_bear/SOUL.md"
 skills_dir = "skills"
+# GOAT x402 payment support
+x402_enabled = true
+x402_merchant_id = "dowhiz_oliver"
 
 [[employees]]
 id = "mini_mouse"
