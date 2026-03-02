@@ -123,6 +123,7 @@ pub enum FakeCodexMode {
     Success,
     NoOutput,
     Fail,
+    TurnAborted,
     GithubEnvCheck,
     X402EnvCheck,
     EnsureNoYolo,
@@ -156,6 +157,13 @@ echo '{"type":"item.delta","item":{"type":"agent_message"},"delta":{"text":"ok"}
             r#"#!/bin/sh
 echo "simulated failure" >&2
 exit 2
+"#
+        }
+        FakeCodexMode::TurnAborted => {
+            r#"#!/bin/sh
+set -e
+echo '{"type":"event_msg","payload":{"type":"agent_message","message":"starting"}}'
+echo '{"type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}'
 "#
         }
         FakeCodexMode::GithubEnvCheck => {

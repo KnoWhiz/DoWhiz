@@ -27,6 +27,7 @@ pub use google_docs::{
 };
 pub use google_sheets::{GoogleSheetsInboundAdapter, GoogleSheetsOutboundAdapter};
 pub use google_slides::{GoogleSlidesInboundAdapter, GoogleSlidesOutboundAdapter};
+pub use image_search::{ImageResult, ImageUrls, SearchResponse, UnsplashClient};
 pub use postmark::{PostmarkInboundAdapter, PostmarkOutboundAdapter};
 pub use slack::{
     is_url_verification, SlackChallengeResponse, SlackEventWrapper, SlackInboundAdapter,
@@ -38,4 +39,3 @@ pub use telegram::{
 pub use whatsapp::{
     send_quick_whatsapp_response, WhatsAppInboundAdapter, WhatsAppOutboundAdapter, WhatsAppWebhook,
 };
-pub use image_search::{ImageResult, ImageUrls, SearchResponse, UnsplashClient};
