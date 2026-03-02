@@ -294,7 +294,9 @@ function App() {
   const [enableMouseField, setEnableMouseField] = useState(false);
   const [user, setUser] = useState(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [navHidden, setNavHidden] = useState(false);
   const userMenuRef = useRef(null);
+  const lastScrollY = useRef(0);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -371,6 +373,24 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Hide navbar on scroll down, show on scroll up
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      const scrollThreshold = 100;
+
+      if (currentScrollY > lastScrollY.current && currentScrollY > scrollThreshold) {
+        setNavHidden(true);
+      } else {
+        setNavHidden(false);
+      }
+      lastScrollY.current = currentScrollY;
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   useEffect(() => {
     if (!shouldEnableMouseField()) {
@@ -964,8 +984,8 @@ function App() {
       />
       <div className="content-layer">
         {/* Navigation */}
-        <nav className="navbar">
-          <div className="container nav-content">
+        <nav className={`navbar${navHidden ? ' nav-hidden' : ''}`}>
+          <div className="nav-content">
             <a href="/" className="logo">
               <img src="/assets/DoWhiz.jpeg" alt="" className="brand-mark" aria-hidden="true" />
               <span>Do<span className="text-gradient">Whiz</span></span>

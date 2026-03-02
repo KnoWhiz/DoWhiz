@@ -1,26 +1,32 @@
+/* Satoshi font from FontShare */
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&display=swap');
+
 :root {
-  --bg-color: #050505;
-  --text-primary: #ffffff;
-  --text-secondary: #a1a1aa;
+  /* SkillsBench-inspired Design System */
+  --bg-color: oklch(0.145 0 0);
+  --text-primary: oklch(0.985 0 0);
+  --text-secondary: oklch(0.708 0 0);
   --accent-color: #3b82f6;
   --accent-gradient: linear-gradient(135deg, #6366f1 0%, #3b82f6 50%, #0ea5e9 100%);
-  --glass-bg: rgba(255, 255, 255, 0.03);
-  --glass-border: rgba(255, 255, 255, 0.06);
-  --card-hover-border: rgba(255, 255, 255, 0.15);
-  --glass-blur: blur(16px);
+  --card-bg: oklch(0.18 0 0);
+  --border-color: oklch(0.3 0 0);
+  --border-hover: oklch(0.45 0 0);
+  --muted-bg: oklch(0.269 0 0);
   --container-width: 1280px;
-  --font-sans: 'Calibri', 'Gill Sans', 'Gill Sans MT', 'Myriad Pro', 'Myriad',
-    'DejaVu Sans Condensed', 'Liberation Sans', 'Nimbus Sans L', Tahoma, Geneva,
-    'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-sans: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --radius-full: 9999px;
+  --radius-2xl: 1.5rem;
+  --radius-xl: 1rem;
 }
 
 [data-theme='light'] {
   --bg-color: #f8fafc;
   --text-primary: #1e293b;
   --text-secondary: #64748b;
-  --glass-bg: rgba(255, 255, 255, 0.6);
-  --glass-border: rgba(0, 0, 0, 0.08);
-  --card-hover-border: rgba(59, 130, 246, 0.3);
+  --card-bg: rgba(255, 255, 255, 0.8);
+  --border-color: rgba(0, 0, 0, 0.1);
+  --border-hover: rgba(59, 130, 246, 0.4);
+  --muted-bg: rgba(0, 0, 0, 0.04);
 }
 
 * {
@@ -65,18 +71,22 @@ a {
 
 .navbar {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 2rem);
+  max-width: min(90vw, 72rem);
   z-index: 1000;
-  background: rgba(5, 5, 5, 0.7);
-  backdrop-filter: var(--glass-blur);
-  border-bottom: 1px solid var(--glass-border);
+  background: oklch(0.145 0 0 / 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
 [data-theme='light'] .navbar {
-  background: rgba(248, 250, 252, 0.8);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.85);
+  border-color: var(--border-color);
 }
 
 .nav-content {
@@ -123,13 +133,13 @@ a {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 1rem;
-  border-radius: 99px;
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  background: transparent;
   color: var(--text-primary);
   font-size: 0.875rem;
   font-weight: 500;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
   white-space: nowrap;
 }
 
@@ -138,18 +148,18 @@ a {
 }
 
 .btn-small:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.25);
+  background: var(--muted-bg);
+  border-color: var(--border-hover);
 }
 
 [data-theme='light'] .btn-small {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.1);
+  background: transparent;
+  border-color: var(--border-color);
 }
 
 [data-theme='light'] .btn-small:hover {
-  background: rgba(0, 0, 0, 0.08);
-  border-color: rgba(0, 0, 0, 0.2);
+  background: var(--muted-bg);
+  border-color: var(--border-hover);
 }
 
 .demo-main {
@@ -161,23 +171,14 @@ a {
   content: '';
   position: fixed;
   inset: 0;
-  background: radial-gradient(circle at 30% 20%, rgba(59, 130, 246, 0.16), transparent 45%),
-    radial-gradient(circle at 80% 85%, rgba(14, 165, 233, 0.12), transparent 50%);
+  background: radial-gradient(circle at 30% 20%, rgba(59, 130, 246, 0.08), transparent 45%),
+    radial-gradient(circle at 80% 85%, rgba(14, 165, 233, 0.06), transparent 50%);
   pointer-events: none;
   z-index: -2;
 }
 
 .demo-main::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 34px 34px;
-  mask-image: radial-gradient(circle at center, black 24%, transparent 86%);
-  opacity: 0.22;
-  pointer-events: none;
-  z-index: -1;
+  display: none;
 }
 
 .demo-hero {
@@ -195,9 +196,9 @@ a {
   top: 42%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 1000px;
-  height: 1000px;
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.12) 0%, rgba(99, 102, 241, 0.08) 30%, transparent 65%);
+  width: 800px;
+  height: 800px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.06) 0%, rgba(99, 102, 241, 0.04) 30%, transparent 65%);
   pointer-events: none;
   z-index: 0;
   filter: blur(60px);
@@ -260,19 +261,18 @@ a {
 }
 
 .btn-primary:hover {
-  transform: translateY(-2px) scale(1.02);
-  box-shadow: 0 0 30px rgba(255, 255, 255, 0.25);
+  opacity: 0.9;
 }
 
 .btn-secondary {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--muted-bg);
   color: var(--text-primary);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border-color);
 }
 
 .btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.25);
+  background: var(--border-color);
+  border-color: var(--border-hover);
 }
 
 [data-theme='light'] .btn-primary {
@@ -281,17 +281,17 @@ a {
 }
 
 [data-theme='light'] .btn-primary:hover {
-  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.25);
+  opacity: 0.9;
 }
 
 [data-theme='light'] .btn-secondary {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.12);
+  background: var(--muted-bg);
+  border-color: var(--border-color);
 }
 
 [data-theme='light'] .btn-secondary:hover {
   background: rgba(0, 0, 0, 0.08);
-  border-color: rgba(0, 0, 0, 0.2);
+  border-color: var(--border-hover);
 }
 
 .section {
@@ -305,17 +305,15 @@ a {
 
 .video-card {
   padding: 1.45rem;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: 1.4rem;
-  backdrop-filter: blur(10px);
-  transition: all 0.35s ease;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-2xl);
+  transition: all 0.2s ease;
 }
 
 .video-card:hover {
-  border-color: var(--card-hover-border);
-  background: rgba(255, 255, 255, 0.06);
-  transform: translateY(-4px);
+  border-color: var(--border-hover);
+  transform: translateY(-2px);
 }
 
 .section-head {
@@ -438,7 +436,9 @@ a {
 
 @media (max-width: 768px) {
   .navbar {
-    backdrop-filter: none;
+    top: 0.75rem;
+    width: calc(100% - 1.5rem);
+    border-radius: var(--radius-2xl);
   }
 
   .container {
