@@ -38,6 +38,7 @@
 html,
 body {
   min-height: 100%;
+  overflow-x: clip;
 }
 
 body {
@@ -165,6 +166,7 @@ a {
 .demo-main {
   position: relative;
   isolation: isolate;
+  overflow-x: clip;
 }
 
 .demo-main::before {
@@ -189,6 +191,7 @@ a {
   justify-content: center;
   text-align: center;
   padding-top: 7.25rem;
+  overflow: clip;
 }
 
 .halo-effect {
@@ -196,8 +199,8 @@ a {
   top: 42%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 800px;
-  height: 800px;
+  width: min(800px, 92vw);
+  height: min(800px, 92vw);
   background: radial-gradient(circle, rgba(59, 130, 246, 0.06) 0%, rgba(99, 102, 241, 0.04) 30%, transparent 65%);
   pointer-events: none;
   z-index: 0;
@@ -437,12 +440,38 @@ a {
 @media (max-width: 768px) {
   .navbar {
     top: 0.75rem;
-    width: calc(100% - 1.5rem);
+    left: 0.75rem;
+    right: 0.75rem;
+    width: auto;
+    max-width: none;
+    transform: none;
     border-radius: var(--radius-2xl);
   }
 
   .container {
     padding: 0 1.2rem;
+  }
+
+  .nav-content {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .nav-actions {
+    min-width: 0;
+    margin-left: auto;
+  }
+
+  .social-links {
+    max-width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    scrollbar-width: none;
+  }
+
+  .social-links::-webkit-scrollbar {
+    display: none;
   }
 
   .hero-title {
@@ -460,9 +489,9 @@ a {
   }
 
   .halo-effect {
-    width: 560px;
-    height: 560px;
-    filter: blur(36px);
+    width: min(420px, 92vw);
+    height: min(420px, 92vw);
+    filter: blur(34px);
   }
 
   .shorts-grid {
