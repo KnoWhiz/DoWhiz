@@ -154,13 +154,18 @@ impl GoogleDocsProcessedStore {
             std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(&self.path)?;
+        // Enable WAL mode for better concurrent access
+        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch(GOOGLE_DOCS_SCHEMA)?;
         Ok(())
     }
 
     fn open(&self) -> Result<Connection, SchedulerError> {
         let conn = Connection::open(&self.path)?;
-        conn.busy_timeout(Duration::from_secs(5))?;
+        // Enable WAL mode in case it wasn't set during init (e.g., existing DB)
+        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+        // Increase busy timeout for concurrent access
+        conn.busy_timeout(Duration::from_secs(30))?;
         Ok(conn)
     }
 
