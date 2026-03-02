@@ -1,5 +1,9 @@
 # DoWhiz - A lightweight Rust replica of OpenClaw🦞
 
+<p align="center">
+  <img src="website/public/assets/DoWhiz.jpeg" alt="Do icon" width="96" />
+</p>
+
 <p align="center"><strong>Product Shorts</strong></p>
 
 <table align="center">
