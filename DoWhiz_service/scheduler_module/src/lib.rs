@@ -5,6 +5,7 @@ pub mod collaboration_store;
 pub mod discord_gateway;
 pub mod employee_config;
 pub mod env_alias;
+pub(crate) mod github_inbound;
 pub mod google_auth;
 pub mod google_docs_poller;
 pub mod google_drive_changes;

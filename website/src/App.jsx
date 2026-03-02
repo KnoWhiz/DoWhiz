@@ -17,7 +17,7 @@ import plushAxolotlImg from './assets/Plush-Axolotl.jpg';
 
 const WAITLIST_FORM_URL = 'https://docs.google.com/forms/d/1UgZpFgYxq0uSjmVdai1mpjbfj2GxcWakFt3YKL8by34/viewform';
 const SITE_URL = 'https://dowhiz.com';
-const LOGO_URL = `${SITE_URL}/do-whiz-mark.svg`;
+const LOGO_URL = `${SITE_URL}/assets/DoWhiz.jpeg`;
 const SUPPORT_EMAIL = 'admin@dowhiz.com';
 const ORG_NAME = 'DoWhiz';
 const DAY_START_HOUR = 7;
@@ -966,7 +966,10 @@ function App() {
         {/* Navigation */}
         <nav className="navbar">
           <div className="container nav-content">
-            <a href="/" className="logo">Do<span className="text-gradient">Whiz</span></a>
+            <a href="/" className="logo">
+              <img src="/assets/DoWhiz.jpeg" alt="" className="brand-mark" aria-hidden="true" />
+              <span>Do<span className="text-gradient">Whiz</span></span>
+            </a>
             <div className="nav-links">
               <a href="#roles" className="nav-btn">Team</a>
               <a href="#how-it-works" className="nav-btn">How it works</a>
@@ -1418,7 +1421,8 @@ function App() {
           <div className="container footer-content">
             <div className="footer-brand">
               <a href="#" className="footer-logo">
-                Do<span className="text-gradient">Whiz</span>
+                <img src="/assets/DoWhiz.jpeg" alt="" className="footer-brand-mark" aria-hidden="true" />
+                <span>Do<span className="text-gradient">Whiz</span></span>
               </a>
               <p className="footer-tagline">
                 Tool-native digital employees that turn messages into finished work with shared memory.

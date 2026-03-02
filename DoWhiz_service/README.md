@@ -1,5 +1,9 @@
 # DoWhiz Service
 
+<p align="center">
+  <img src="../website/public/assets/DoWhiz.jpeg" alt="Do icon" width="96" />
+</p>
+
 Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, Telegram, WhatsApp, Google Docs/Sheets/Slides, BlueBubbles/iMessage), task scheduling, AI agent execution (Codex/Claude), and outbound replies.
 
 ## Table of Contents

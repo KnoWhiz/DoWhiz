@@ -364,11 +364,19 @@ pub(super) fn run_codex_task(
         }
     };
 
+    let stdout_output = String::from_utf8_lossy(&output.stdout);
+    let stderr_output = String::from_utf8_lossy(&output.stderr);
     let mut combined_output = String::new();
-    combined_output.push_str(&String::from_utf8_lossy(&output.stdout));
-    combined_output.push_str(&String::from_utf8_lossy(&output.stderr));
-    let (scheduled_tasks, scheduled_tasks_error) = extract_scheduled_tasks(&combined_output);
-    let (scheduler_actions, scheduler_actions_error) = extract_scheduler_actions(&combined_output);
+    combined_output.push_str(&stdout_output);
+    combined_output.push_str(&stderr_output);
+
+    let (scheduled_tasks, scheduled_tasks_error, scheduler_actions, scheduler_actions_error) =
+        parse_scheduling_from_outputs(
+            &stdout_output,
+            &stderr_output,
+            &combined_output,
+            request.workspace_dir,
+        );
     let token_usage = extract_token_usage(&combined_output);
     let output_tail = tail_string(&combined_output, 2000);
 
@@ -376,12 +384,36 @@ pub(super) fn run_codex_task(
         return Err(if use_docker {
             RunTaskError::DockerFailed {
                 status: output.status.code(),
-                output: output_tail,
+                output: output_tail.clone(),
             }
         } else {
             RunTaskError::CodexFailed {
                 status: output.status.code(),
-                output: output_tail,
+                output: output_tail.clone(),
+            }
+        });
+    }
+
+    // Codex can return process exit code 0 while reporting turn/task failure in JSON events.
+    // Surface those runtime failures before checking for expected output files.
+    if let Some(runtime_failure) = detect_codex_runtime_failure(&combined_output) {
+        let status = runtime_failure
+            .status_code
+            .or_else(|| output.status.code().filter(|code| *code != 0));
+        let mut failure_output = runtime_failure.message;
+        if !output_tail.is_empty() {
+            failure_output.push('\n');
+            failure_output.push_str(&output_tail);
+        }
+        return Err(if use_docker {
+            RunTaskError::DockerFailed {
+                status,
+                output: failure_output,
+            }
+        } else {
+            RunTaskError::CodexFailed {
+                status,
+                output: failure_output,
             }
         });
     }
@@ -390,7 +422,7 @@ pub(super) fn run_codex_task(
     if !request.reply_to.is_empty() && !reply_html_path.exists() {
         return Err(RunTaskError::OutputMissing {
             path: reply_html_path,
-            output: output_tail,
+            output: output_tail.clone(),
         });
     }
 
@@ -1220,9 +1252,329 @@ fn extract_token_usage(output: &str) -> Option<TokenUsage> {
     None
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CodexRuntimeFailure {
+    status_code: Option<i32>,
+    message: String,
+}
+
+fn detect_codex_runtime_failure(output: &str) -> Option<CodexRuntimeFailure> {
+    enum TerminalState {
+        Success,
+        Failure(CodexRuntimeFailure),
+    }
+
+    let mut terminal_state: Option<TerminalState> = None;
+
+    for line in output.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if value.get("type").and_then(|v| v.as_str()) != Some("event_msg") {
+            continue;
+        }
+        let Some(payload) = value.get("payload") else {
+            continue;
+        };
+
+        match payload.get("type").and_then(|v| v.as_str()) {
+            Some("task_complete") => {
+                let status = payload.get("status").and_then(|v| v.as_str());
+                let exit_code = payload
+                    .get("exit_code")
+                    .and_then(|v| v.as_i64())
+                    .and_then(|v| i32::try_from(v).ok());
+                let status_failed = matches!(status, Some("failed" | "error" | "aborted"));
+                let exit_failed = matches!(exit_code, Some(code) if code != 0);
+
+                if status_failed || exit_failed {
+                    let status_text = status.unwrap_or("unknown");
+                    let mut message = format!("Codex task_complete reported status={status_text}");
+                    if let Some(code) = exit_code {
+                        message.push_str(&format!(" exit_code={code}"));
+                    }
+                    if let Some(last_agent_message) =
+                        payload.get("last_agent_message").and_then(|v| v.as_str())
+                    {
+                        let trimmed = last_agent_message.trim();
+                        if !trimmed.is_empty() {
+                            message.push_str(&format!(
+                                ". last_agent_message: {}",
+                                tail_string(trimmed, 400)
+                            ));
+                        }
+                    }
+                    terminal_state = Some(TerminalState::Failure(CodexRuntimeFailure {
+                        status_code: exit_code,
+                        message,
+                    }));
+                } else if matches!(status, Some("success")) || matches!(exit_code, Some(0)) {
+                    terminal_state = Some(TerminalState::Success);
+                }
+            }
+            Some("turn_aborted") => {
+                let reason = payload
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                terminal_state = Some(TerminalState::Failure(CodexRuntimeFailure {
+                    status_code: None,
+                    message: format!("Codex turn aborted (reason: {reason})"),
+                }));
+            }
+            _ => {}
+        }
+    }
+
+    match terminal_state {
+        Some(TerminalState::Failure(failure)) => Some(failure),
+        _ => None,
+    }
+}
+
+fn parse_scheduling_from_outputs(
+    stdout_output: &str,
+    stderr_output: &str,
+    combined_output: &str,
+    workspace_dir: &Path,
+) -> (
+    Vec<super::types::ScheduledTaskRequest>,
+    Option<String>,
+    Vec<super::types::SchedulerActionRequest>,
+    Option<String>,
+) {
+    // In --json mode, assistant text lives inside JSON fields with escaping.
+    // Decode assistant message payloads first, then parse scheduler blocks.
+    // Codex may emit JSONL to stdout or stderr depending on runtime environment.
+    let assistant_output = extract_assistant_text_from_jsonl(stdout_output)
+        .or_else(|| extract_assistant_text_from_jsonl(stderr_output))
+        .or_else(|| extract_assistant_text_from_jsonl(combined_output));
+    let scheduling_output = assistant_output.as_deref().unwrap_or("");
+    let (mut scheduled_tasks, mut scheduled_tasks_error) =
+        extract_scheduled_tasks(scheduling_output);
+    let (mut scheduler_actions, mut scheduler_actions_error) =
+        extract_scheduler_actions(scheduling_output);
+
+    if assistant_output.is_none() {
+        // Avoid parsing prompt scaffolding as scheduler JSON when assistant extraction fails.
+        // Fall back to raw output only if it yields concrete tasks/actions.
+        let (fallback_tasks, fallback_tasks_error) = extract_scheduled_tasks(combined_output);
+        let (fallback_actions, fallback_actions_error) = extract_scheduler_actions(combined_output);
+        if !fallback_tasks.is_empty() || !fallback_actions.is_empty() {
+            scheduled_tasks = fallback_tasks;
+            scheduled_tasks_error = fallback_tasks_error;
+            scheduler_actions = fallback_actions;
+            scheduler_actions_error = fallback_actions_error;
+        } else {
+            scheduled_tasks_error = None;
+            scheduler_actions_error = None;
+        }
+    }
+
+    if scheduled_tasks.is_empty()
+        && scheduler_actions.is_empty()
+        && (scheduled_tasks_error.is_some() || scheduler_actions_error.is_some())
+    {
+        if let Some(session_output) = extract_assistant_text_from_recent_session(workspace_dir) {
+            let (session_tasks, session_tasks_error) = extract_scheduled_tasks(&session_output);
+            let (session_actions, session_actions_error) =
+                extract_scheduler_actions(&session_output);
+            if !session_tasks.is_empty() || !session_actions.is_empty() {
+                scheduled_tasks = session_tasks;
+                scheduled_tasks_error = session_tasks_error;
+                scheduler_actions = session_actions;
+                scheduler_actions_error = session_actions_error;
+            }
+        }
+    }
+
+    (
+        scheduled_tasks,
+        scheduled_tasks_error,
+        scheduler_actions,
+        scheduler_actions_error,
+    )
+}
+
+fn extract_assistant_text_from_recent_session(workspace_dir: &Path) -> Option<String> {
+    let home = env::var("HOME").ok()?;
+    let sessions_root = PathBuf::from(home).join(".codex").join("sessions");
+    if !sessions_root.exists() {
+        return None;
+    }
+
+    let mut session_files = Vec::new();
+    collect_session_jsonl_files(&sessions_root, &mut session_files).ok()?;
+    session_files.sort_by(|a, b| {
+        let a_time = a
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        let b_time = b
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        b_time.cmp(&a_time)
+    });
+
+    let workspace_marker = workspace_dir.to_string_lossy();
+    for session_path in session_files.into_iter().take(40) {
+        let Ok(contents) = fs::read_to_string(&session_path) else {
+            continue;
+        };
+        if !contents.contains(workspace_marker.as_ref()) {
+            continue;
+        }
+        let Some(assistant_output) = extract_assistant_text_from_jsonl(&contents) else {
+            continue;
+        };
+        if assistant_output.contains("SCHEDULED_TASKS_JSON_BEGIN")
+            || assistant_output.contains("SCHEDULER_ACTIONS_JSON_BEGIN")
+        {
+            return Some(assistant_output);
+        }
+    }
+    None
+}
+
+fn collect_session_jsonl_files(dir: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_session_jsonl_files(&path, files)?;
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn extract_assistant_text_from_jsonl(output: &str) -> Option<String> {
+    let mut collected = String::new();
+    let mut found = false;
+
+    for line in output.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+
+        if collect_item_completed_agent_message(&value, &mut collected) {
+            found = true;
+        }
+        if collect_event_msg_agent_message(&value, &mut collected) {
+            found = true;
+        }
+        if collect_response_item_assistant_message(&value, &mut collected) {
+            found = true;
+        }
+    }
+
+    found.then_some(collected)
+}
+
+fn append_collected_text(target: &mut String, text: &str) {
+    if text.trim().is_empty() {
+        return;
+    }
+    if !target.is_empty() {
+        target.push('\n');
+    }
+    target.push_str(text);
+}
+
+fn collect_item_completed_agent_message(value: &serde_json::Value, target: &mut String) -> bool {
+    if value.get("type").and_then(|v| v.as_str()) != Some("item.completed") {
+        return false;
+    }
+    let Some(item) = value.get("item") else {
+        return false;
+    };
+    if item.get("type").and_then(|v| v.as_str()) != Some("agent_message") {
+        return false;
+    }
+    let Some(text) = item.get("text").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    append_collected_text(target, text);
+    true
+}
+
+fn collect_event_msg_agent_message(value: &serde_json::Value, target: &mut String) -> bool {
+    if value.get("type").and_then(|v| v.as_str()) != Some("event_msg") {
+        return false;
+    }
+    let Some(payload) = value.get("payload") else {
+        return false;
+    };
+    match payload.get("type").and_then(|v| v.as_str()) {
+        Some("agent_message") => {
+            let Some(text) = payload.get("message").and_then(|v| v.as_str()) else {
+                return false;
+            };
+            append_collected_text(target, text);
+            true
+        }
+        Some("task_complete") => {
+            let Some(text) = payload.get("last_agent_message").and_then(|v| v.as_str()) else {
+                return false;
+            };
+            append_collected_text(target, text);
+            true
+        }
+        _ => false,
+    }
+}
+
+fn collect_response_item_assistant_message(value: &serde_json::Value, target: &mut String) -> bool {
+    if value.get("type").and_then(|v| v.as_str()) != Some("response_item") {
+        return false;
+    }
+    let Some(payload) = value.get("payload") else {
+        return false;
+    };
+    if payload.get("type").and_then(|v| v.as_str()) != Some("message") {
+        return false;
+    }
+    if payload.get("role").and_then(|v| v.as_str()) != Some("assistant") {
+        return false;
+    }
+
+    let mut appended = false;
+    if let Some(content) = payload.get("content").and_then(|v| v.as_array()) {
+        for part in content {
+            if part.get("type").and_then(|v| v.as_str()) == Some("output_text") {
+                if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                    append_collected_text(target, text);
+                    appended = true;
+                }
+            }
+        }
+    }
+    appended
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::Path;
     use std::sync::{Mutex, OnceLock};
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -1322,6 +1674,121 @@ mod tests {
         let usage = usage.unwrap();
         assert_eq!(usage.input_tokens, 1000);
         assert_eq!(usage.output_tokens, 50);
+    }
+
+    #[test]
+    fn test_detect_codex_runtime_failure_from_task_complete_failed() {
+        let output = r#"{"type":"event_msg","payload":{"type":"task_complete","status":"failed","exit_code":101,"last_agent_message":"compile failed"}} "#;
+        let failure = detect_codex_runtime_failure(output).expect("expected failure");
+        assert_eq!(failure.status_code, Some(101));
+        assert!(failure.message.contains("status=failed"));
+        assert!(failure.message.contains("exit_code=101"));
+        assert!(failure.message.contains("compile failed"));
+    }
+
+    #[test]
+    fn test_detect_codex_runtime_failure_from_turn_aborted() {
+        let output =
+            r#"{"type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}"#;
+        let failure = detect_codex_runtime_failure(output).expect("expected failure");
+        assert_eq!(failure.status_code, None);
+        assert!(failure.message.contains("turn aborted"));
+        assert!(failure.message.contains("interrupted"));
+    }
+
+    #[test]
+    fn test_detect_codex_runtime_failure_ignores_terminal_success() {
+        let output = r#"{"type":"event_msg","payload":{"type":"task_complete","status":"failed","exit_code":101}}
+{"type":"event_msg","payload":{"type":"task_complete","status":"success","exit_code":0}}"#;
+        assert!(detect_codex_runtime_failure(output).is_none());
+    }
+
+    #[test]
+    fn test_detect_codex_runtime_failure_none_when_success_only() {
+        let output = r#"{"type":"event_msg","payload":{"type":"task_complete","status":"success","exit_code":0}}"#;
+        assert!(detect_codex_runtime_failure(output).is_none());
+    }
+
+    #[test]
+    fn test_extract_assistant_text_from_jsonl_item_completed() {
+        let output = r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"hello\nSCHEDULED_TASKS_JSON_BEGIN\n[{\"type\":\"send_email\",\"delay_seconds\":60,\"subject\":\"x\",\"html_path\":\"x.html\"}]\nSCHEDULED_TASKS_JSON_END"}}"#;
+
+        let parsed = extract_assistant_text_from_jsonl(output);
+        assert!(parsed.is_some());
+        let parsed = parsed.unwrap();
+        assert!(parsed.contains("SCHEDULED_TASKS_JSON_BEGIN"));
+        assert!(parsed.contains("\"delay_seconds\":60"));
+    }
+
+    #[test]
+    fn test_extract_assistant_text_from_jsonl_response_item_message() {
+        let output = r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"SCHEDULER_ACTIONS_JSON_BEGIN\n[{\"action\":\"cancel\",\"task_ids\":[\"a\"]}]\nSCHEDULER_ACTIONS_JSON_END"}]}}"#;
+
+        let parsed = extract_assistant_text_from_jsonl(output);
+        assert!(parsed.is_some());
+        let parsed = parsed.unwrap();
+        assert!(parsed.contains("SCHEDULER_ACTIONS_JSON_BEGIN"));
+        assert!(parsed.contains("\"action\":\"cancel\""));
+    }
+
+    #[test]
+    fn test_parse_scheduling_from_outputs_reads_stderr_jsonl() {
+        let stderr = r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"SCHEDULED_TASKS_JSON_BEGIN\n[{\"type\":\"send_email\",\"delay_seconds\":60,\"subject\":\"x\",\"html_path\":\"x.html\"}]\nSCHEDULED_TASKS_JSON_END"}}"#;
+        let combined = format!("{stderr}\n");
+        let (tasks, task_error, actions, action_error) =
+            parse_scheduling_from_outputs("", stderr, &combined, Path::new("/tmp/workspace"));
+        assert_eq!(tasks.len(), 1);
+        assert!(task_error.is_none());
+        assert!(actions.is_empty());
+        assert!(action_error.is_none());
+    }
+
+    #[test]
+    fn test_parse_scheduling_from_outputs_ignores_prompt_markers_without_assistant() {
+        let prompt_like = concat!(
+            "SCHEDULED_TASKS_JSON_BEGIN\n",
+            "<JSON array here>\n",
+            "SCHEDULED_TASKS_JSON_END\n",
+            "SCHEDULER_ACTIONS_JSON_BEGIN\n",
+            "<JSON array here>\n",
+            "SCHEDULER_ACTIONS_JSON_END\n"
+        );
+        let (tasks, task_error, actions, action_error) =
+            parse_scheduling_from_outputs("", "", prompt_like, Path::new("/tmp/workspace"));
+        assert!(tasks.is_empty());
+        assert!(actions.is_empty());
+        assert!(task_error.is_none());
+        assert!(action_error.is_none());
+    }
+
+    #[test]
+    fn test_parse_scheduling_from_outputs_falls_back_to_recent_session_file() {
+        let _lock = env_lock();
+        let temp_root =
+            std::env::temp_dir().join(format!("codex-session-fallback-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_root);
+        let session_dir = temp_root.join(".codex/sessions/2026/03/01");
+        fs::create_dir_all(&session_dir).expect("create session dir");
+        let workspace = Path::new("/tmp/fallback-workspace");
+
+        let session_path = session_dir.join("rollout-test.jsonl");
+        let session_jsonl = format!(
+            "{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":[{{\"type\":\"input_text\",\"text\":\"workspace: {}\"}}]}}}}\n{{\"type\":\"item.completed\",\"item\":{{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"SCHEDULED_TASKS_JSON_BEGIN\\n[{{\\\"type\\\":\\\"send_email\\\",\\\"delay_seconds\\\":60,\\\"subject\\\":\\\"fallback\\\",\\\"html_path\\\":\\\"x.html\\\"}}]\\nSCHEDULED_TASKS_JSON_END\"}}}}\n",
+            workspace.display()
+        );
+        fs::write(&session_path, session_jsonl).expect("write session");
+
+        let _home_guard = EnvVarGuard::set("HOME", temp_root.to_string_lossy().as_ref());
+        let invalid_stdout = r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"SCHEDULED_TASKS_JSON_BEGIN\n<JSON>\nSCHEDULED_TASKS_JSON_END"}}"#;
+        let (tasks, task_error, actions, action_error) =
+            parse_scheduling_from_outputs(invalid_stdout, "", invalid_stdout, workspace);
+
+        assert_eq!(tasks.len(), 1);
+        assert!(task_error.is_none());
+        assert!(actions.is_empty());
+        assert!(action_error.is_none());
+
+        let _ = fs::remove_dir_all(&temp_root);
     }
 
     #[test]

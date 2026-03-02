@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tracing::{info, warn};
 
@@ -149,6 +149,134 @@ fn resolve_discord_bot_token_for_employee(
         .map_err(|_| SchedulerError::TaskFailed("DISCORD_BOT_TOKEN not set".to_string()))
 }
 
+fn read_cached_azure_url(sidecar_path: &Path) -> Option<String> {
+    fs::read_to_string(sidecar_path)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| value.starts_with("http://") || value.starts_with("https://"))
+}
+
+fn collect_discord_attachment_links(attachments_dir: &Path) -> Vec<(String, String)> {
+    if !attachments_dir.is_dir() {
+        return Vec::new();
+    }
+
+    let mut attachment_paths = match fs::read_dir(attachments_dir) {
+        Ok(entries) => entries
+            .filter_map(|entry| entry.ok().map(|value| value.path()))
+            .filter(|path| path.is_file())
+            .collect::<Vec<_>>(),
+        Err(err) => {
+            warn!(
+                "failed to read Discord attachments dir {}: {}",
+                attachments_dir.display(),
+                err
+            );
+            return Vec::new();
+        }
+    };
+    attachment_paths.sort();
+
+    let envelope_id = uuid::Uuid::new_v4();
+    let received_at = chrono::Utc::now();
+    let mut links = Vec::new();
+
+    for (index, path) in attachment_paths.into_iter().enumerate() {
+        let file_name = path
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if file_name.is_empty() || file_name.ends_with(".azure_url") {
+            continue;
+        }
+
+        let sidecar_path = path.with_file_name(format!("{}.azure_url", file_name));
+        if let Some(url) = read_cached_azure_url(&sidecar_path) {
+            links.push((file_name, url));
+            continue;
+        }
+
+        let bytes = match fs::read(&path) {
+            Ok(value) if !value.is_empty() => value,
+            Ok(_) => {
+                warn!(
+                    "skipping empty Discord attachment for blob upload: {}",
+                    path.display()
+                );
+                continue;
+            }
+            Err(err) => {
+                warn!(
+                    "failed to read Discord attachment {}: {}",
+                    path.display(),
+                    err
+                );
+                continue;
+            }
+        };
+
+        let storage_ref = match crate::raw_payload_store::upload_attachment_azure_blocking(
+            envelope_id,
+            received_at,
+            index,
+            &file_name,
+            &bytes,
+        ) {
+            Ok(value) => value,
+            Err(err) => {
+                warn!(
+                    "failed to upload Discord attachment {} to Azure: {}",
+                    path.display(),
+                    err
+                );
+                continue;
+            }
+        };
+
+        let blob_url = match crate::raw_payload_store::resolve_azure_blob_url(&storage_ref) {
+            Ok(value) => value,
+            Err(err) => {
+                warn!(
+                    "failed to resolve Azure URL for Discord attachment {}: {}",
+                    path.display(),
+                    err
+                );
+                continue;
+            }
+        };
+
+        if let Err(err) = fs::write(&sidecar_path, &blob_url) {
+            warn!(
+                "failed to write Discord attachment URL sidecar {}: {}",
+                sidecar_path.display(),
+                err
+            );
+        }
+
+        links.push((file_name, blob_url));
+    }
+
+    links
+}
+
+fn append_discord_attachment_links(base_text: &str, attachments_dir: &Path) -> String {
+    let links = collect_discord_attachment_links(attachments_dir);
+    if links.is_empty() {
+        return base_text.to_string();
+    }
+
+    let mut suffix = String::from("Attachments:\n");
+    for (name, url) in links {
+        suffix.push_str(&format!("- {}: {}\n", name, url));
+    }
+
+    if base_text.trim().is_empty() {
+        suffix.trim_end().to_string()
+    } else {
+        format!("{}\n\n{}", base_text.trim_end(), suffix.trim_end())
+    }
+}
+
 /// Execute a SendReplyTask via Discord.
 pub(crate) fn execute_discord_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
     use crate::adapters::discord::DiscordOutboundAdapter;
@@ -159,11 +287,12 @@ pub(crate) fn execute_discord_send(task: &SendReplyTask) -> Result<(), Scheduler
 
     let adapter = DiscordOutboundAdapter::new(bot_token);
 
-    let text_body = if task.html_path.exists() {
+    let base_text_body = if task.html_path.exists() {
         fs::read_to_string(&task.html_path).unwrap_or_default()
     } else {
         String::new()
     };
+    let text_body = append_discord_attachment_links(&base_text_body, &task.attachments_dir);
 
     let channel_id = task.to.first().and_then(|value| value.parse::<u64>().ok());
 

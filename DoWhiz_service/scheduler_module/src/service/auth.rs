@@ -49,9 +49,9 @@ struct JwtClaims {
 }
 
 /// Authenticated user info extracted from token
-struct AuthUser {
-    id: Uuid,
-    email: Option<String>,
+pub struct AuthUser {
+    pub id: Uuid,
+    pub email: Option<String>,
 }
 
 /// Cached JWT secret for local verification
@@ -61,7 +61,7 @@ fn get_jwt_secret() -> Option<String> {
 
 /// Extract and validate Supabase JWT locally, returns the auth user ID and email
 /// This avoids an HTTP round-trip to Supabase on every request.
-async fn validate_supabase_token(
+pub async fn validate_supabase_token(
     supabase_url: &str,
     token: &str,
 ) -> Result<AuthUser, (StatusCode, String)> {
@@ -136,7 +136,7 @@ async fn validate_supabase_token(
 }
 
 /// Extract Bearer token from Authorization header
-fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
+pub fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     headers
         .get("Authorization")
         .and_then(|v| v.to_str().ok())

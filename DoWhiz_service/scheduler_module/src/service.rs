@@ -1,5 +1,6 @@
 pub mod agent_market;
 pub mod auth;
+pub mod billing;
 mod config;
 mod email;
 mod html;

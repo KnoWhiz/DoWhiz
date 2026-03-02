@@ -1,8 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde_json::Value;
+
 use super::errors::RunTaskError;
 use super::workspace::resolve_rel_dir;
+
+const GITHUB_NOTIFICATIONS_ADDRESS: &str = "notifications@github.com";
 
 /// Check if we've already prompted user to register in this thread.
 /// Returns true if a marker file exists, indicating we've already prompted.
@@ -71,6 +75,7 @@ pub(super) fn build_prompt(
     } else {
         String::new()
     };
+    let github_coauthor_section = build_github_coauthor_section(workspace_dir, input_email_dir);
 
     // Build registration prompt section if user doesn't have a unified account
     // and we haven't prompted them yet in this thread
@@ -107,6 +112,7 @@ Inputs (relative to workspace root):
 - Reference dir (contain all past emails with the current user): {reference}
 
 {discord_context_section}
+{github_coauthor_section}
 
 Memory about the current user:
 ```{memory_section}```
@@ -141,8 +147,192 @@ Rules:
         guidance_section = guidance_section,
         reply_instruction = reply_instruction,
         discord_context_section = discord_context_section,
+        github_coauthor_section = github_coauthor_section,
         registration_section = registration_section,
     )
+}
+
+fn build_github_coauthor_section(workspace_dir: &Path, input_email_dir: &Path) -> String {
+    let Some(login) = load_github_requester_login(workspace_dir, input_email_dir) else {
+        return String::new();
+    };
+    let coauthor_email = format!("{login}@users.noreply.github.com");
+    let trailer = format!("Co-authored-by: {login} <{coauthor_email}>");
+    format!(
+        r#"GitHub Attribution Requirement:
+- This request came from GitHub user @{login}.
+- If you create or amend any git commit for this task, append this trailer exactly once in each relevant commit message: `{trailer}`.
+- If you open or update a PR, include `Requested-by: @{login}` in the PR body.
+- Do not add co-author/requested-by lines when no commit or PR is created.
+
+"#
+    )
+}
+
+fn load_github_requester_login(workspace_dir: &Path, input_email_dir: &Path) -> Option<String> {
+    let payload_path = workspace_dir
+        .join(input_email_dir)
+        .join("postmark_payload.json");
+    let payload_raw = fs::read(payload_path).ok()?;
+    let payload: Value = serde_json::from_slice(&payload_raw).ok()?;
+    let from = payload
+        .get("From")
+        .or_else(|| payload.get("from"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !looks_like_github_notifications_sender(from) {
+        return None;
+    }
+    extract_github_sender_from_headers(&payload)
+        .or_else(|| extract_github_sender_from_bodies(&payload))
+}
+
+fn looks_like_github_notifications_sender(from: &str) -> bool {
+    from.to_ascii_lowercase()
+        .contains(&GITHUB_NOTIFICATIONS_ADDRESS.to_ascii_lowercase())
+}
+
+fn extract_github_sender_from_headers(payload: &Value) -> Option<String> {
+    let headers = payload
+        .get("Headers")
+        .or_else(|| payload.get("headers"))
+        .and_then(Value::as_array)?;
+    for header in headers {
+        let name = header
+            .get("Name")
+            .or_else(|| header.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !name.eq_ignore_ascii_case("X-GitHub-Sender") {
+            continue;
+        }
+        let value = header
+            .get("Value")
+            .or_else(|| header.get("value"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if let Some(login) = normalize_github_login(value) {
+            return Some(login);
+        }
+    }
+    None
+}
+
+fn extract_github_sender_from_bodies(payload: &Value) -> Option<String> {
+    for field in ["StrippedTextReply", "TextBody", "HtmlBody"] {
+        if let Some(body) = payload.get(field).and_then(Value::as_str) {
+            if let Some(login) = extract_github_sender_from_text(body) {
+                return Some(login);
+            }
+        }
+    }
+    None
+}
+
+fn extract_github_sender_from_text(text: &str) -> Option<String> {
+    if text.trim().is_empty() {
+        return None;
+    }
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if let Some(login) = extract_login_from_activity_line(trimmed) {
+            return Some(login);
+        }
+
+        if let Some(login) = extract_login_from_html_activity_line(trimmed) {
+            return Some(login);
+        }
+    }
+
+    None
+}
+
+fn extract_login_from_activity_line(line: &str) -> Option<String> {
+    let (candidate, rest) = line.split_once(char::is_whitespace)?;
+    let rest = rest.trim_start().to_ascii_lowercase();
+    let activity_prefixes = [
+        "left a comment",
+        "created an issue",
+        "opened a pull request",
+        "opened an issue",
+        "closed an issue",
+        "reopened an issue",
+        "reviewed",
+        "requested a review",
+    ];
+    if activity_prefixes
+        .iter()
+        .any(|prefix| rest.starts_with(prefix))
+    {
+        return normalize_github_login(candidate);
+    }
+    None
+}
+
+fn extract_login_from_html_activity_line(line: &str) -> Option<String> {
+    let lower = line.to_ascii_lowercase();
+    let start_idx = lower.find("<strong>")?;
+    let after_start = &line[start_idx + "<strong>".len()..];
+    let after_start_lower = after_start.to_ascii_lowercase();
+    let end_idx = after_start_lower.find("</strong>")?;
+    let candidate = &after_start[..end_idx];
+    let rest = after_start[end_idx + "</strong>".len()..]
+        .trim_start()
+        .to_ascii_lowercase();
+    let activity_prefixes = [
+        "left a comment",
+        "created an issue",
+        "opened a pull request",
+        "opened an issue",
+    ];
+    if activity_prefixes
+        .iter()
+        .any(|prefix| rest.starts_with(prefix))
+    {
+        return normalize_github_login(candidate);
+    }
+    None
+}
+
+fn normalize_github_login(raw: &str) -> Option<String> {
+    let trimmed = raw
+        .trim()
+        .trim_start_matches('@')
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '<' | '>' | '`'));
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    let (base, bot_suffix) = if lower.ends_with("[bot]") {
+        (&lower[..lower.len() - "[bot]".len()], true)
+    } else {
+        (lower.as_str(), false)
+    };
+    if base.is_empty() || base.len() > 39 {
+        return None;
+    }
+    let mut chars = base.chars();
+    let first = chars.next()?;
+    if !first.is_ascii_alphanumeric() {
+        return None;
+    }
+    if chars.any(|ch| !(ch.is_ascii_alphanumeric() || ch == '-')) {
+        return None;
+    }
+    if base.ends_with('-') {
+        return None;
+    }
+    if bot_suffix {
+        Some(format!("{base}[bot]"))
+    } else {
+        Some(base.to_string())
+    }
 }
 
 fn build_guidance_section(workspace_dir: &Path, runner: &str) -> String {
@@ -368,5 +558,72 @@ mod tests {
 
         assert!(prompt.contains("Discord context snapshot (auto-generated"));
         assert!(prompt.contains("Quoted + thread context"));
+    }
+
+    #[test]
+    fn build_prompt_includes_github_coauthor_guidance_when_sender_detected() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+        let incoming_dir = workspace.join("incoming_email");
+        fs::create_dir_all(&incoming_dir).expect("incoming_email");
+        fs::write(
+            incoming_dir.join("postmark_payload.json"),
+            r#"{
+  "From": "Bingran You <notifications@github.com>",
+  "Headers": [{"Name":"X-GitHub-Sender","Value":"bingran-you"}]
+}"#,
+        )
+        .expect("postmark payload");
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            workspace,
+            "codex",
+            "",
+            true,
+            "email",
+            true,
+        );
+
+        assert!(prompt.contains("GitHub Attribution Requirement"));
+        assert!(
+            prompt.contains("Co-authored-by: bingran-you <bingran-you@users.noreply.github.com>")
+        );
+        assert!(prompt.contains("Requested-by: @bingran-you"));
+    }
+
+    #[test]
+    fn build_prompt_omits_github_coauthor_guidance_for_non_github_email() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+        let incoming_dir = workspace.join("incoming_email");
+        fs::create_dir_all(&incoming_dir).expect("incoming_email");
+        fs::write(
+            incoming_dir.join("postmark_payload.json"),
+            r#"{
+  "From": "Alice <alice@example.com>",
+  "TextBody": "hello"
+}"#,
+        )
+        .expect("postmark payload");
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            workspace,
+            "codex",
+            "",
+            true,
+            "email",
+            true,
+        );
+
+        assert!(!prompt.contains("GitHub Attribution Requirement"));
+        assert!(!prompt.contains("Co-authored-by:"));
     }
 }

@@ -188,6 +188,78 @@ fn send_reply_discord_uses_mock() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn send_reply_discord_uploads_attachments_and_includes_blob_links(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let Some(mut server) = test_support::start_mockito_server(
+        "send_reply_discord_uploads_attachments_and_includes_blob_links",
+    ) else {
+        return Ok(());
+    };
+
+    let azure_mock = server
+        .mock("PUT", Matcher::Regex("^/ingestion-raw/.+".to_string()))
+        .match_header("x-ms-blob-type", "BlockBlob")
+        .with_status(201)
+        .expect(1)
+        .create();
+
+    let discord_mock = server
+        .mock("POST", "/api/v10/channels/987654/messages")
+        .match_header("authorization", "Bot discord-test")
+        .match_header("content-type", "application/json")
+        .match_body(Matcher::Regex("Hello Discord".to_string()))
+        .match_body(Matcher::Regex("diagram\\.png".to_string()))
+        .match_body(Matcher::Regex("ingestion-raw".to_string()))
+        .match_body(Matcher::Regex("sig=test".to_string()))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"id":"msg-1000","timestamp":"2024-01-01T00:00:00Z","channel_id":"987654"}"#)
+        .expect(1)
+        .create();
+
+    let _guard_token = EnvGuard::set("DISCORD_BOT_TOKEN", "discord-test");
+    let _guard_api = EnvGuard::set("DISCORD_API_BASE_URL", format!("{}/api/v10", server.url()));
+    let _guard_container = EnvGuard::set("AZURE_STORAGE_CONTAINER_INGEST", "ingestion-raw");
+    let _guard_container_prefixed = EnvGuard::set(
+        "SCALE_OLIVER_AZURE_STORAGE_CONTAINER_INGEST",
+        "ingestion-raw",
+    );
+    let _guard_path_prefix = EnvGuard::set("RAW_PAYLOAD_PATH_PREFIX", "ingestion_raw");
+    let _guard_path_prefix_prefixed =
+        EnvGuard::set("SCALE_OLIVER_RAW_PAYLOAD_PATH_PREFIX", "ingestion_raw");
+    let container_sas_url = format!("{}/ingestion-raw?sig=test", server.url());
+    let _guard_container_sas_url =
+        EnvGuard::set("AZURE_STORAGE_CONTAINER_SAS_URL", &container_sas_url);
+    let _guard_container_sas_url_prefixed = EnvGuard::set(
+        "SCALE_OLIVER_AZURE_STORAGE_CONTAINER_SAS_URL",
+        &container_sas_url,
+    );
+
+    let temp = TempDir::new()?;
+    let html_path = write_text_file(&temp, "discord_message.txt", "Hello Discord")?;
+    let attachments_dir = create_attachments_dir(&temp)?;
+    fs::write(attachments_dir.join("diagram.png"), b"fake-png-bytes")?;
+
+    let mut task = base_send_task(Channel::Discord, html_path, attachments_dir.clone());
+    task.to = vec!["987654".to_string()];
+
+    let db_path = temp.path().join("tasks.db");
+    let mut scheduler = Scheduler::load(&db_path, ModuleExecutor::default())?;
+    scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::SendReply(task))?;
+    scheduler.tick()?;
+
+    azure_mock.assert();
+    discord_mock.assert();
+
+    let sidecar = fs::read_to_string(attachments_dir.join("diagram.png.azure_url"))?;
+    assert!(sidecar.contains("/ingestion-raw/"));
+    assert!(sidecar.contains("sig=test"));
+
+    Ok(())
+}
+
+#[test]
 fn send_reply_sms_uses_mock() -> Result<(), Box<dyn std::error::Error>> {
     let _lock = ENV_MUTEX.lock().unwrap();
     let Some(mut server) = test_support::start_mockito_server("send_reply_sms_uses_mock") else {
