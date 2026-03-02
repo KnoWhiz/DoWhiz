@@ -1,4 +1,8 @@
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::JoinHandle;
+use std::time::Duration;
 use tracing::{info, warn};
 
 use crate::account_store::{
@@ -175,6 +179,133 @@ fn write_github_sender_parse_failed_reply(
     Ok(())
 }
 
+const DISCORD_TYPING_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(8);
+
+fn resolve_discord_bot_token_for_employee(employee_id: Option<&str>) -> Option<String> {
+    if let Some(emp_id) = employee_id {
+        let emp_upper = emp_id.to_uppercase().replace('-', "_");
+        let emp_token_key = format!("{}_DISCORD_BOT_TOKEN", emp_upper);
+        if let Ok(token) = std::env::var(&emp_token_key) {
+            if !token.trim().is_empty() {
+                return Some(token);
+            }
+        }
+    }
+
+    std::env::var("DISCORD_BOT_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn discord_typing_channel_id(task: &super::types::RunTaskTask) -> Option<u64> {
+    if task.channel != Channel::Discord {
+        return None;
+    }
+    // Prefer the legacy slot (index 1) if present, otherwise use index 0.
+    if let Some(channel_id) = task
+        .reply_to
+        .get(1)
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        return Some(channel_id);
+    }
+    task.reply_to
+        .first()
+        .and_then(|value| value.parse::<u64>().ok())
+}
+
+struct DiscordTypingHeartbeat {
+    stop: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl DiscordTypingHeartbeat {
+    fn start(task: &super::types::RunTaskTask) -> Option<Self> {
+        let channel_id = discord_typing_channel_id(task)?;
+        let bot_token = resolve_discord_bot_token_for_employee(task.employee_id.as_deref())?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop);
+        let worker_employee_id = task.employee_id.clone().unwrap_or_default();
+
+        let handle = std::thread::spawn(move || {
+            let api_base = std::env::var("DISCORD_API_BASE_URL")
+                .unwrap_or_else(|_| "https://discord.com/api/v10".to_string());
+            let url = format!(
+                "{}/channels/{}/typing",
+                api_base.trim_end_matches('/'),
+                channel_id
+            );
+            let client = reqwest::blocking::Client::new();
+            let mut logged_failure = false;
+
+            while !stop_clone.load(Ordering::Relaxed) {
+                match client
+                    .post(&url)
+                    .header("Authorization", format!("Bot {}", bot_token))
+                    .header("Content-Type", "application/json")
+                    .send()
+                {
+                    Ok(response) if response.status().is_success() => {
+                        if logged_failure {
+                            info!(
+                                "discord typing heartbeat recovered for employee={} channel={}",
+                                worker_employee_id, channel_id
+                            );
+                            logged_failure = false;
+                        }
+                    }
+                    Ok(response) => {
+                        if !logged_failure {
+                            warn!(
+                                "discord typing heartbeat failed for employee={} channel={} status={}",
+                                worker_employee_id,
+                                channel_id,
+                                response.status()
+                            );
+                            logged_failure = true;
+                        }
+                    }
+                    Err(err) => {
+                        if !logged_failure {
+                            warn!(
+                                "discord typing heartbeat request error for employee={} channel={}: {}",
+                                worker_employee_id, channel_id, err
+                            );
+                            logged_failure = true;
+                        }
+                    }
+                }
+
+                let mut slept = Duration::from_millis(0);
+                while slept < DISCORD_TYPING_HEARTBEAT_INTERVAL {
+                    if stop_clone.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let remaining = DISCORD_TYPING_HEARTBEAT_INTERVAL.saturating_sub(slept);
+                    let step = remaining.min(Duration::from_millis(250));
+                    std::thread::sleep(step);
+                    slept += step;
+                }
+            }
+        });
+
+        Some(Self {
+            stop,
+            handle: Some(handle),
+        })
+    }
+}
+
+impl Drop for DiscordTypingHeartbeat {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 pub trait TaskExecutor {
     fn execute(&self, task: &TaskKind) -> Result<TaskExecution, SchedulerError>;
 }
@@ -264,6 +395,7 @@ impl TaskExecutor for ModuleExecutor {
                 let workspace_memory_dir = task.workspace_dir.join(&task.memory_dir);
                 let user_memory_dir = resolve_user_memory_dir(task);
                 let user_secrets_path = resolve_user_secrets_path(task);
+                let _typing_heartbeat = DiscordTypingHeartbeat::start(task);
 
                 // Sync memo to workspace: prefer Azure Blob if account exists, else local storage
                 let original_memo_snapshot = if let Some(account_id) = account_id {
@@ -469,6 +601,28 @@ mod tests {
         }
     }
 
+    fn run_task_with_reply_to(channel: Channel, reply_to: Vec<&str>) -> RunTaskTask {
+        RunTaskTask {
+            workspace_dir: PathBuf::from("."),
+            input_email_dir: PathBuf::from("incoming_email"),
+            input_attachments_dir: PathBuf::from("incoming_attachments"),
+            memory_dir: PathBuf::from("memory"),
+            reference_dir: PathBuf::from("references"),
+            model_name: "gpt-5".to_string(),
+            runner: "codex".to_string(),
+            codex_disabled: false,
+            reply_to: reply_to.into_iter().map(str::to_string).collect(),
+            reply_from: None,
+            archive_root: None,
+            thread_id: None,
+            thread_epoch: None,
+            thread_state_path: None,
+            channel,
+            slack_team_id: None,
+            employee_id: None,
+        }
+    }
+
     #[test]
     fn load_github_inbound_context_reads_postmark_payload() {
         let temp = TempDir::new().expect("tempdir");
@@ -549,5 +703,29 @@ mod tests {
         assert!(body.contains("could not deterministically extract"));
         assert!(body.contains("did not execute the task"));
         assert!(workspace.join("reply_email_attachments").is_dir());
+    }
+
+    #[test]
+    fn typing_channel_id_prefers_second_slot_when_present() {
+        let task = run_task_with_reply_to(Channel::Discord, vec!["123", "456"]);
+        assert_eq!(discord_typing_channel_id(&task), Some(456));
+    }
+
+    #[test]
+    fn typing_channel_id_falls_back_to_first_slot() {
+        let task = run_task_with_reply_to(Channel::Discord, vec!["456"]);
+        assert_eq!(discord_typing_channel_id(&task), Some(456));
+    }
+
+    #[test]
+    fn typing_channel_id_returns_none_for_non_discord() {
+        let task = run_task_with_reply_to(Channel::Slack, vec!["456"]);
+        assert_eq!(discord_typing_channel_id(&task), None);
+    }
+
+    #[test]
+    fn typing_channel_id_returns_none_when_reply_to_is_not_numeric() {
+        let task = run_task_with_reply_to(Channel::Discord, vec!["abc", "def"]);
+        assert_eq!(discord_typing_channel_id(&task), None);
     }
 }
