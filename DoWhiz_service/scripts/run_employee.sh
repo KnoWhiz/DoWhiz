@@ -89,6 +89,9 @@ service_root="$(cd "${script_dir}/.." && pwd)"
 # shellcheck source=./load_env_target.sh
 source "${script_dir}/load_env_target.sh"
 
+# For Azure ACI backend, ensure the shared run_task mount is present on host.
+"${script_dir}/ensure_aci_share_mount.sh"
+
 ngrok_pid=""
 service_pid=""
 

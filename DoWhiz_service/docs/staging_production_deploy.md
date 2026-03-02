@@ -181,19 +181,40 @@ git fetch origin
 git checkout main
 git pull --ff-only origin main
 ```
-3. Start production target:
+3. One-time Azure Files mount bootstrap (required for ACI backend):
+```bash
+sudo mkdir -p /etc/smbcredentials
+sudo tee /etc/smbcredentials/<storage-account-name> >/dev/null <<'EOF'
+username=<storage-account-name>
+password=<storage-account-key>
+EOF
+sudo chmod 600 /etc/smbcredentials/<storage-account-name>
+
+sudo mkdir -p /home/azureuser/server/.dowhiz/DoWhiz/run_task
+echo '//<storage-account-name>.file.core.windows.net/<prod-file-share> /home/azureuser/server/.dowhiz/DoWhiz/run_task cifs vers=3.0,credentials=/etc/smbcredentials/<storage-account-name>,dir_mode=0777,file_mode=0777,serverino,uid=1000,gid=1000,mfsymlinks,_netdev,nofail 0 0' | sudo tee -a /etc/fstab
+sudo mount /home/azureuser/server/.dowhiz/DoWhiz/run_task
+findmnt -T /home/azureuser/server/.dowhiz/DoWhiz/run_task
+```
+Current prod example:
+- share: `//dwhzoliverdev.file.core.windows.net/dowhiz-run-task-prod`
+- host path: `/home/azureuser/server/.dowhiz/DoWhiz/run_task`
+
+4. Start production target:
 ```bash
 export DEPLOY_TARGET=production
 ./DoWhiz_service/scripts/run_gateway_local.sh
 ./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
 ```
-4. Verify:
+`run_employee.sh` now includes `scripts/ensure_aci_share_mount.sh`, which auto-checks the mount and runs `mount <RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT>` from `/etc/fstab` when needed.
+
+5. Verify:
 ```bash
 curl -sS http://127.0.0.1:9100/health
 curl -sS http://127.0.0.1:9001/health
 ```
 - Ensure Postmark inbound hook points to production endpoint
 - Ensure production Service Bus namespace/queue are used
+- Ensure `findmnt -T /home/azureuser/server/.dowhiz/DoWhiz/run_task` returns Azure Files (`cifs`)
 
 ## 6) Webhook notes (current staging URL)
 
