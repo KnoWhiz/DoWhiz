@@ -95,7 +95,15 @@ a {
   color: var(--text-primary);
   display: inline-flex;
   align-items: center;
+  gap: 0.55rem;
   white-space: nowrap;
+}
+
+.brand-mark {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 0.45rem;
+  flex: 0 0 auto;
 }
 
 .nav-actions {
@@ -416,6 +424,11 @@ a {
   .social-links {
     justify-content: center;
     flex-wrap: wrap;
+  }
+
+  .brand-mark {
+    width: 2rem;
+    height: 2rem;
   }
 
   .shorts-grid {

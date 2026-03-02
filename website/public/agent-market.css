@@ -160,6 +160,7 @@ a:hover {
 .logo {
   display: inline-flex;
   align-items: center;
+  gap: 0.55rem;
   white-space: nowrap;
   font-size: 1.5rem;
   font-weight: 700;
@@ -168,6 +169,13 @@ a:hover {
   color: #ffffff;
   text-decoration: none;
   min-width: max-content;
+  flex: 0 0 auto;
+}
+
+.brand-mark {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 0.45rem;
   flex: 0 0 auto;
 }
 
@@ -804,6 +812,11 @@ textarea {
     text-align: center;
     margin-bottom: 0.5rem;
     justify-content: center;
+  }
+
+  .brand-mark {
+    width: 2rem;
+    height: 2rem;
   }
 
   .page {
