@@ -195,7 +195,7 @@ impl ServiceConfig {
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|value| *value > 0)
-            .unwrap_or(200);
+            .unwrap_or(1);
         let ingestion_poll_interval = env::var("INGESTION_POLL_INTERVAL_SECS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
