@@ -21,6 +21,7 @@ use axum::Router;
 use std::env;
 use std::sync::Arc;
 use tokio::task;
+use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, warn};
 
 use scheduler_module::account_store::AccountStore;
@@ -48,6 +49,13 @@ use handlers::{
 };
 use routes::normalize_routes;
 use state::{build_address_map, GatewayConfig, GatewayState};
+
+fn gateway_cors_layer() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any)
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -205,7 +213,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .with_state(state)
         .merge(auth_router(auth_state))
         .merge(agent_market_router(agent_market_state))
-        .layer(DefaultBodyLimit::max(max_body_bytes));
+        .layer(DefaultBodyLimit::max(max_body_bytes))
+        .layer(gateway_cors_layer());
 
     let addr: std::net::SocketAddr = format!("{}:{}", host, port).parse()?;
     info!("ingestion gateway listening on {}", addr);
@@ -213,4 +222,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gateway_cors_layer;
+    use axum::http::StatusCode;
+    use axum::routing::post;
+    use axum::Router;
+
+    #[tokio::test]
+    async fn cors_preflight_allows_frontend_origin() {
+        let app = Router::new()
+            .route("/auth/signup", post(|| async { StatusCode::OK }))
+            .layer(gateway_cors_layer());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("listener addr");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("server should run");
+        });
+
+        let client = reqwest::Client::new();
+        let response = client
+            .request(
+                reqwest::Method::OPTIONS,
+                format!("http://{addr}/auth/signup"),
+            )
+            .header("origin", "https://www.dowhiz.com")
+            .header("access-control-request-method", "POST")
+            .header(
+                "access-control-request-headers",
+                "authorization,content-type",
+            )
+            .send()
+            .await
+            .expect("preflight request");
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let headers = response.headers();
+        assert!(headers.contains_key("access-control-allow-origin"));
+        assert!(headers.contains_key("access-control-allow-methods"));
+        assert!(headers.contains_key("access-control-allow-headers"));
+
+        server.abort();
+    }
 }
