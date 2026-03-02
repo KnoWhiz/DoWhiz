@@ -1181,6 +1181,29 @@ Single-file env split:
 | `RUN_TASK_AZURE_ACI_REGISTRY_USERNAME` | - | Optional private registry username (set with password) |
 | `RUN_TASK_AZURE_ACI_REGISTRY_PASSWORD` | - | Optional private registry password (set with username) |
 
+Important host prerequisite for `RUN_TASK_EXECUTION_BACKEND=azure_aci`:
+- `RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT` must be a mounted Azure Files path on the VM before worker startup.
+- Startup/deploy scripts now call `DoWhiz_service/scripts/ensure_aci_share_mount.sh` to enforce this.
+- The script behavior:
+  - skip for non-ACI backends,
+  - verify mount already exists,
+  - if not mounted, run `mount <RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT>` from `/etc/fstab`,
+  - fail fast when `/etc/fstab` is missing that mount entry.
+
+One-time bootstrap example on VM (production):
+```bash
+sudo mkdir -p /etc/smbcredentials
+sudo tee /etc/smbcredentials/dwhzoliverdev >/dev/null <<'EOF'
+username=dwhzoliverdev
+password=<storage-account-key>
+EOF
+sudo chmod 600 /etc/smbcredentials/dwhzoliverdev
+
+sudo mkdir -p /home/azureuser/server/.dowhiz/DoWhiz/run_task
+echo '//dwhzoliverdev.file.core.windows.net/dowhiz-run-task-prod /home/azureuser/server/.dowhiz/DoWhiz/run_task cifs vers=3.0,credentials=/etc/smbcredentials/dwhzoliverdev,dir_mode=0777,file_mode=0777,serverino,uid=1000,gid=1000,mfsymlinks,_netdev,nofail 0 0' | sudo tee -a /etc/fstab
+sudo mount /home/azureuser/server/.dowhiz/DoWhiz/run_task
+```
+
 ### Inbound Gateway
 | Variable | Default | Description |
 |----------|---------|-------------|

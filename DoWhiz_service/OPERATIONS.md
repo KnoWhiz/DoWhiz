@@ -40,13 +40,46 @@ PM2 logs (if PM2 is used):
 - `/home/azureuser/server/.pm2/logs/dowhiz-rust-service-out.log`
 - `/home/azureuser/server/.pm2/logs/dowhiz-rust-service-error.log`
 
-## 3) Safety Rules
+## 3) Azure Files Mount (Required for ACI Worker)
+
+When `RUN_TASK_EXECUTION_BACKEND=azure_aci`, worker state/workspaces must live on the shared Azure Files mount configured by:
+- `RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT`
+
+One-time bootstrap on VM:
+```bash
+sudo mkdir -p /etc/smbcredentials
+sudo tee /etc/smbcredentials/<storage-account-name> >/dev/null <<'EOF'
+username=<storage-account-name>
+password=<storage-account-key>
+EOF
+sudo chmod 600 /etc/smbcredentials/<storage-account-name>
+
+sudo mkdir -p /home/azureuser/server/.dowhiz/DoWhiz/run_task
+echo '//<storage-account-name>.file.core.windows.net/<file-share> /home/azureuser/server/.dowhiz/DoWhiz/run_task cifs vers=3.0,credentials=/etc/smbcredentials/<storage-account-name>,dir_mode=0777,file_mode=0777,serverino,uid=1000,gid=1000,mfsymlinks,_netdev,nofail 0 0' | sudo tee -a /etc/fstab
+sudo mount /home/azureuser/server/.dowhiz/DoWhiz/run_task
+findmnt -T /home/azureuser/server/.dowhiz/DoWhiz/run_task
+```
+
+Startup guardrails:
+- `DoWhiz_service/scripts/ensure_aci_share_mount.sh` is executed by:
+  - `scripts/run_employee.sh`
+  - `scripts/start_all.sh`
+  - production/staging CI deploy workflows before PM2 restart
+- If backend is `azure_aci`, the script will fail fast when mount is unavailable or `/etc/fstab` is missing the mount entry.
+
+Live migration note (local run_task -> Azure Files):
+- Keep a backup first, e.g. `run_task.local_backup_<timestamp>`.
+- Prefer `rsync --ignore-existing` while services stay online.
+- Exclude transient lock files: `*.db-journal`, `*.db-wal`, `*.db-shm`, `*.lock`.
+- Verify worker health after migration: `curl -sS http://127.0.0.1:9001/health`.
+
+## 4) Safety Rules
 
 - Do not run destructive git commands on shared VMs.
 - Do not restart production processes unless explicitly planned.
 - Do not run `start_all.sh` on production unless you explicitly want to start ngrok and overwrite Postmark inbound hook to ngrok.
 
-## 4) Staging Runbook (`dowhizstaging`)
+## 5) Staging Runbook (`dowhizstaging`)
 
 Default branch for staging deploys: `dev`
 
@@ -79,7 +112,7 @@ Expected staging behavior:
 - default outbound sender is `dowhiz@deep-tutor.com`
 - queue/storage/postmark use `STAGING_` values
 
-## 5) Production Runbook (`dowhizprod1`)
+## 6) Production Runbook (`dowhizprod1`)
 
 Default branch for production deploys: `main`
 
@@ -102,7 +135,7 @@ curl -sS http://127.0.0.1:9100/health
 curl -sS http://127.0.0.1:9001/health
 ```
 
-## 6) Quick Verification
+## 7) Quick Verification
 
 Resolve target-mapped runtime values:
 ```bash
@@ -124,7 +157,7 @@ pm2 logs dowhiz-inbound-gateway
 pm2 logs dowhiz-rust-service
 ```
 
-## 7) Live E2E Notes
+## 8) Live E2E Notes
 
 - `scheduler_module/tests/service_real_email.rs` supports SMTP port override via `POSTMARK_SMTP_PORT`.
 - On cloud VMs where SMTP port `25` is blocked, use `POSTMARK_SMTP_PORT=2525`.
@@ -136,7 +169,7 @@ export DEPLOY_TARGET=staging
 RUN_CODEX_E2E=1 POSTMARK_LIVE_TEST=1 cargo test -p scheduler_module --test service_real_email -- --nocapture
 ```
 
-## 8) Common Failure Patterns
+## 9) Common Failure Patterns
 
 1. Gateway exits with backend error
 - Cause: target-resolved `INGESTION_QUEUE_BACKEND` is not `servicebus`.
@@ -153,7 +186,7 @@ RUN_CODEX_E2E=1 POSTMARK_LIVE_TEST=1 cargo test -p scheduler_module --test servi
 - Cause: SMTP blocked or sender not verified in Postmark.
 - Fix: set SMTP port override and verify sender/domain signatures.
 
-## 9) Rollback
+## 10) Rollback
 
 Use:
 - `DoWhiz_service/docs/staging_production_deploy.md` -> `Rollback (staging -> production)`
