@@ -24,7 +24,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     let count = parse_arg_usize(&args, "--count", 200);
     let employee_id = parse_arg(&args, "--employee-id", "little_bear");
+    let recipient = parse_arg(&args, "--recipient", "dowhiz@deep-tutor.com");
     let reply_to = parse_arg(&args, "--reply-to", "proto@dowhiz.com");
+    let fixed_thread_id = parse_arg(&args, "--thread-id", "");
     let run_id = parse_arg(
         &args,
         "--run-id",
@@ -38,7 +40,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for idx in 0..count {
         let now = Utc::now();
-        let thread_id = format!("{run_id}-thread-{idx:04}");
+        let thread_id = if fixed_thread_id.trim().is_empty() {
+            format!("{run_id}-thread-{idx:04}")
+        } else {
+            fixed_thread_id.clone()
+        };
         let message_id = format!("{run_id}-msg-{idx:04}-{}", Uuid::new_v4());
         let dedupe_key = format!("{run_id}-{idx}-{}", Uuid::new_v4());
         let subject = format!("[{run_id}] Parallel load task {idx}");
@@ -57,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             payload: IngestionPayload {
                 sender: format!("parallel-test+{idx}@example.com"),
                 sender_name: Some("Parallel Test".to_string()),
-                recipient: "oliver@dowhiz.com".to_string(),
+                recipient: recipient.clone(),
                 subject: Some(subject),
                 text_body: Some(text_body),
                 html_body: None,

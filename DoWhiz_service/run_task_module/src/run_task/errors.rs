@@ -31,6 +31,10 @@ pub enum RunTaskError {
         status: Option<i32>,
         output: String,
     },
+    AzureCliNotFound,
+    LocalExecutionForbidden {
+        deploy_target: String,
+    },
     CommandTimeout {
         command: &'static str,
         timeout_secs: u64,
@@ -86,6 +90,12 @@ impl fmt::Display for RunTaskError {
                 f,
                 "Docker run failed (status: {:?}). Output tail:\n{}",
                 status, output
+            ),
+            RunTaskError::AzureCliNotFound => write!(f, "Azure CLI (az) not found on PATH."),
+            RunTaskError::LocalExecutionForbidden { deploy_target } => write!(
+                f,
+                "Local Codex execution is forbidden for DEPLOY_TARGET='{}'. Configure RUN_TASK_EXECUTION_BACKEND=azure_aci and required Azure ACI settings.",
+                deploy_target
             ),
             RunTaskError::CommandTimeout {
                 command,

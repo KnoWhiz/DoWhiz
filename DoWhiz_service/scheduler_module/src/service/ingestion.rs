@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 
+use serde_json::json;
 use tracing::{info, warn};
 
 use crate::account_store::AccountStore;
@@ -126,8 +127,7 @@ fn process_ingestion_envelope(
 ) -> Result<(), BoxError> {
     match envelope.channel {
         Channel::Email => {
-            let raw_payload = envelope.raw_payload_bytes();
-            let payload: PostmarkInbound = serde_json::from_slice(&raw_payload)?;
+            let (payload, raw_payload) = resolve_email_payload(envelope)?;
             process_inbound_payload(config, user_store, index_store, &payload, &raw_payload)
         }
         Channel::Slack => {
@@ -230,5 +230,123 @@ fn process_ingestion_envelope(
             let raw_payload = envelope.raw_payload_bytes();
             process_whatsapp_event(config, user_store, index_store, &message, &raw_payload)
         }
+    }
+}
+
+fn resolve_email_payload(
+    envelope: &IngestionEnvelope,
+) -> Result<(PostmarkInbound, Vec<u8>), BoxError> {
+    let raw_payload = envelope.raw_payload_bytes();
+    if !raw_payload.is_empty() {
+        let parsed: PostmarkInbound = serde_json::from_slice(&raw_payload)?;
+        return Ok((parsed, raw_payload));
+    }
+
+    let reply_to = if envelope.payload.reply_to.is_empty() {
+        None
+    } else {
+        Some(envelope.payload.reply_to.join(", "))
+    };
+    let mut headers = Vec::new();
+    if let Some(value) = envelope.payload.metadata.in_reply_to.as_ref() {
+        if !value.trim().is_empty() {
+            headers.push(json!({ "Name": "In-Reply-To", "Value": value }));
+        }
+    }
+    if let Some(value) = envelope.payload.metadata.references.as_ref() {
+        if !value.trim().is_empty() {
+            headers.push(json!({ "Name": "References", "Value": value }));
+        }
+    }
+    if let Some(value) = envelope.payload.message_id.as_ref() {
+        if !value.trim().is_empty() {
+            headers.push(json!({ "Name": "Message-ID", "Value": value }));
+        }
+    }
+
+    let attachments = envelope
+        .payload
+        .attachments
+        .iter()
+        .map(|attachment| {
+            json!({
+                "Name": attachment.name,
+                "Content": attachment.content,
+                "ContentType": attachment.content_type,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let synthetic = json!({
+        "From": envelope.payload.sender,
+        "To": envelope.payload.recipient,
+        "ReplyTo": reply_to,
+        "Subject": envelope.payload.subject,
+        "TextBody": envelope.payload.text_body,
+        "HtmlBody": envelope.payload.html_body,
+        "MessageID": envelope.payload.message_id,
+        "Headers": headers,
+        "Attachments": attachments,
+    });
+    let synthetic_raw = serde_json::to_vec(&synthetic)?;
+    let payload: PostmarkInbound = serde_json::from_slice(&synthetic_raw)?;
+    Ok((payload, synthetic_raw))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_email_payload;
+    use crate::channel::{Attachment, Channel, ChannelMetadata};
+    use crate::ingestion::{IngestionEnvelope, IngestionPayload};
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    #[test]
+    fn resolve_email_payload_builds_fallback_from_ingestion_payload() {
+        let envelope = IngestionEnvelope {
+            envelope_id: Uuid::new_v4(),
+            received_at: Utc::now(),
+            tenant_id: None,
+            employee_id: "little_bear".to_string(),
+            channel: Channel::Email,
+            external_message_id: Some("msg-1".to_string()),
+            dedupe_key: "dedupe-1".to_string(),
+            payload: IngestionPayload {
+                sender: "tester@example.com".to_string(),
+                sender_name: Some("Tester".to_string()),
+                recipient: "oliver@dowhiz.com".to_string(),
+                subject: Some("hello".to_string()),
+                text_body: Some("plain".to_string()),
+                html_body: Some("<p>html</p>".to_string()),
+                thread_id: "thread-1".to_string(),
+                message_id: Some("<message-1@example.com>".to_string()),
+                attachments: vec![Attachment {
+                    name: "a.txt".to_string(),
+                    content_type: "text/plain".to_string(),
+                    content: "YQ==".to_string(),
+                }],
+                reply_to: vec!["reply@example.com".to_string()],
+                metadata: ChannelMetadata {
+                    in_reply_to: Some("<in-reply-to@example.com>".to_string()),
+                    references: Some("<ref@example.com>".to_string()),
+                    ..ChannelMetadata::default()
+                },
+            },
+            raw_payload_ref: None,
+        };
+
+        let (payload, raw) =
+            resolve_email_payload(&envelope).expect("fallback payload should be built");
+
+        assert!(!raw.is_empty());
+        assert_eq!(payload.from.as_deref(), Some("tester@example.com"));
+        assert_eq!(payload.reply_to.as_deref(), Some("reply@example.com"));
+        assert_eq!(payload.subject.as_deref(), Some("hello"));
+        assert_eq!(payload.text_body.as_deref(), Some("plain"));
+        assert_eq!(
+            payload.message_id.as_deref(),
+            Some("<message-1@example.com>")
+        );
+        assert_eq!(payload.attachments.as_ref().map(|v| v.len()), Some(1));
     }
 }

@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -51,9 +52,22 @@ pub fn process_inbound_payload(
         "resolved inbound requester identifier_type={} identifier={}",
         requester.identifier_type, requester.identifier
     );
-    let user = user_store.get_or_create_user(requester.identifier_type, &requester.identifier)?;
+    let user = user_store
+        .get_or_create_user(requester.identifier_type, &requester.identifier)
+        .map_err(|err| {
+            io::Error::other(format!(
+                "get_or_create_user failed identifier_type={} identifier={} error={}",
+                requester.identifier_type, requester.identifier, err
+            ))
+        })?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
-    user_store.ensure_user_dirs(&user_paths)?;
+    user_store.ensure_user_dirs(&user_paths).map_err(|err| {
+        io::Error::other(format!(
+            "ensure_user_dirs failed root={} error={}",
+            user_paths.root.display(),
+            err
+        ))
+    })?;
 
     let reply_to_raw = payload.reply_to.as_deref().unwrap_or("");
     let from_raw = payload.from.as_deref().unwrap_or("");
@@ -88,7 +102,16 @@ pub fn process_inbound_payload(
         &thread_key,
         &config.employee_profile,
         config.skills_source_dir.as_deref(),
-    )?;
+    )
+    .map_err(|err| {
+        io::Error::other(format!(
+            "ensure_thread_workspace failed user_id={} thread_key={} workspaces_root={} error={}",
+            user.user_id,
+            thread_key,
+            user_paths.workspaces_root.display(),
+            err
+        ))
+    })?;
     // Use the first configured address (verified sender) as reply_from,
     // not the inbound address which may be receive-only (e.g., Postmark inbound hook)
     let reply_from = config
@@ -116,13 +139,29 @@ pub fn process_inbound_payload(
         .header_message_id()
         .or(payload.message_id.as_deref())
         .map(|value| value.trim().to_string());
-    let thread_state = bump_thread_state(&thread_state_path, &thread_key, message_id.clone())?;
+    let thread_state = bump_thread_state(&thread_state_path, &thread_key, message_id.clone())
+        .map_err(|err| {
+            io::Error::other(format!(
+                "bump_thread_state failed path={} thread_key={} error={}",
+                thread_state_path.display(),
+                thread_key,
+                err
+            ))
+        })?;
     append_inbound_payload(
         &workspace,
         payload,
         raw_payload,
         thread_state.last_email_seq,
-    )?;
+    )
+    .map_err(|err| {
+        io::Error::other(format!(
+            "append_inbound_payload failed workspace={} thread_key={} error={}",
+            workspace.display(),
+            thread_key,
+            err
+        ))
+    })?;
     if let Err(err) = archive_inbound(&user_paths, payload, raw_payload) {
         error!("failed to archive inbound email: {}", err);
     }
@@ -208,7 +247,14 @@ pub fn process_inbound_payload(
         employee_id: Some(config.employee_profile.id.clone()),
     };
 
-    let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
+    let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())
+        .map_err(|err| {
+            io::Error::other(format!(
+                "scheduler_load failed tasks_db_path={} error={}",
+                user_paths.tasks_db_path.display(),
+                err
+            ))
+        })?;
     if let Err(err) = cancel_pending_thread_tasks(&mut scheduler, &workspace, thread_state.epoch) {
         warn!(
             "failed to cancel pending thread tasks for {}: {}",
@@ -216,8 +262,23 @@ pub fn process_inbound_payload(
             err
         );
     }
-    let task_id = scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
-    index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
+    let task_id = scheduler
+        .add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))
+        .map_err(|err| {
+            io::Error::other(format!(
+                "scheduler_add_one_shot_in failed tasks_db_path={} error={}",
+                user_paths.tasks_db_path.display(),
+                err
+            ))
+        })?;
+    index_store
+        .sync_user_tasks(&user.user_id, scheduler.tasks())
+        .map_err(|err| {
+            io::Error::other(format!(
+                "index_store_sync_user_tasks failed user_id={} error={}",
+                user.user_id, err
+            ))
+        })?;
     info!(
         "scheduler tasks enqueued user_id={} task_id={} message_id={} workspace={} thread_epoch={}",
         user.user_id,
