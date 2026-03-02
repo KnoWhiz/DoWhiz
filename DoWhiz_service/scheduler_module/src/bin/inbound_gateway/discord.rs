@@ -278,10 +278,7 @@ impl serenity::all::EventHandler for DiscordIngressHandler {
 
         info!(
             "discord gateway routing message to employee={} (dm={}, mention={}, reply_to_bot={})",
-            self.inner.employee_id,
-            is_direct_message,
-            is_mention,
-            is_reply_to_bot
+            self.inner.employee_id, is_direct_message, is_mention, is_reply_to_bot
         );
 
         let external_message_id = inbound.message_id.clone();

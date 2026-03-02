@@ -211,6 +211,40 @@ fn run_task_reports_codex_failure() {
 
 #[test]
 #[cfg(unix)]
+fn run_task_reports_turn_aborted_as_codex_failure() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    let temp = TempDir::new("codex_task_turn_aborted").unwrap();
+    let workspace = create_workspace(&temp.path).unwrap();
+
+    let home_dir = temp.path.join("home");
+    let bin_dir = temp.path.join("bin");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    write_fake_codex(&bin_dir, FakeCodexMode::TurnAborted).unwrap();
+
+    let old_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), old_path);
+    let _env = EnvGuard::set(&[
+        ("HOME", home_dir.to_str().unwrap()),
+        ("PATH", &new_path),
+        ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
+        ("GH_AUTH_DISABLED", "1"),
+    ]);
+
+    let params = build_params(&workspace);
+    let err = run_task(&params).unwrap_err();
+    match err {
+        RunTaskError::CodexFailed { status, output } => {
+            assert!(status.is_none());
+            assert!(output.contains("turn aborted"));
+        }
+        other => panic!("expected CodexFailed, got {:?}", other),
+    }
+}
+
+#[test]
+#[cfg(unix)]
 fn run_task_times_out_with_codex() {
     let _lock = ENV_MUTEX.lock().unwrap();
     let temp = TempDir::new("codex_task_timeout").unwrap();

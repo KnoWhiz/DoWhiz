@@ -232,7 +232,10 @@ impl GoogleSlidesOutboundAdapter {
         height_pt: Option<f64>,
     ) -> Result<String, AdapterError> {
         // Generate a unique object ID for the image
-        let object_id = format!("img_{}", uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string());
+        let object_id = format!(
+            "img_{}",
+            uuid::Uuid::new_v4().to_string().replace('-', "")[..12].to_string()
+        );
 
         // Convert points to EMU (English Metric Units) - Google Slides uses EMU
         // 1 point = 914400 / 72 EMU = 12700 EMU
