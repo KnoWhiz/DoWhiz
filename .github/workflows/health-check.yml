@@ -65,8 +65,9 @@ jobs:
           PM2_STATUS=$(ssh -o ConnectTimeout=10 ${{ secrets[matrix.vm_user_secret] }}@${{ secrets[matrix.vm_ip_secret] }} \
             "source ~/.nvm/nvm.sh && pm2 jlist" 2>/dev/null || echo "[]")
 
+          # Only show safe fields (name, status, uptime, restarts) - NOT environment variables
           echo '```json' >> $GITHUB_STEP_SUMMARY
-          echo "$PM2_STATUS" | jq '.' >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "$PM2_STATUS" >> $GITHUB_STEP_SUMMARY
+          echo "$PM2_STATUS" | jq '[.[] | {name: .name, status: .pm2_env.status, uptime: .pm2_env.pm_uptime, restarts: .pm2_env.restart_time}]' >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "[]" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
           WORKER_STATUS=$(echo "$PM2_STATUS" | jq -r '.[] | select(.name=="dw_worker") | .pm2_env.status' 2>/dev/null || echo "unknown")
