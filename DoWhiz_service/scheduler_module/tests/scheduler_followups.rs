@@ -38,7 +38,7 @@ impl TaskExecutor for FollowUpExecutor {
 }
 
 #[test]
-fn run_task_followups_persist_to_sqlite() {
+fn run_task_followups_persist_across_restarts() {
     let temp = tempfile::tempdir().expect("tempdir failed");
     let storage = temp.path().join("tasks.db");
     let workspace = temp.path().join("workspace");

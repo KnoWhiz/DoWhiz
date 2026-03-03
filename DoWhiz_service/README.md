@@ -41,7 +41,7 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
 ## Prerequisites
 
 - Rust toolchain
-- System libs: `libsqlite3`, `libssl`, `pkg-config`, `ca-certificates`
+- System libs: `libssl`, `pkg-config`, `ca-certificates`
 - Node.js 20 + npm
 - `codex` CLI on your PATH (only required for local execution; optional when `RUN_TASK_USE_DOCKER=1` and the image includes Codex)
 - `claude` CLI on your PATH (only required for employees with `runner = "claude"`)
@@ -70,7 +70,7 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates libsqlite3-dev libssl-dev pkg-config curl
+sudo apt-get install -y ca-certificates libssl-dev pkg-config curl
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 sudo npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest @playwright/cli@latest
@@ -88,7 +88,7 @@ sudo ln -sf "$chromium_path" /opt/google/chrome/chrome
 ### macOS (Homebrew)
 
 ```bash
-brew install node@20 openssl@3 sqlite pkg-config
+brew install node@20 openssl@3 pkg-config
 npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest @playwright/cli@latest
 npx playwright install chromium
 ```
@@ -448,7 +448,7 @@ Outbound SMTP (`25`) is often blocked on cloud VMs; run E2E senders from your lo
 3. Install dependencies + ngrok (VM):
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates libsqlite3-dev libssl-dev pkg-config curl git python3
+sudo apt-get install -y ca-certificates libssl-dev pkg-config curl git python3
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 curl https://sh.rustup.rs -sSf | sh -s -- -y
@@ -1365,23 +1365,18 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 
 ## Database Schema
 
-### users.db
-Table `users(id, identifier_type, identifier, created_at, last_seen_at)` stores normalized identifiers (email/phone/slack/etc), creation time, and last activity time (RFC3339 UTC). `last_seen_at` updates on inbound activity.
+### MongoDB Collections
+Scheduler/runtime state is stored in MongoDB collections:
 
-Upgrade note: if you have an older `users.db` with only the `email` column, delete it to rebuild or migrate by adding `identifier_type` + `identifier` and backfilling from `email`.
+- `users` - normalized user identifiers and last-seen timestamps.
+- `tasks` - scheduled task payloads and scheduling metadata.
+- `task_executions` - task run history/status/error.
+- `task_index` - due-task index for scheduler scanning.
+- `slack_installations` - Slack OAuth installations.
+- `processed_comments` / `workspace_files` - Google Docs/Workspace polling state.
+- `collaboration_sessions` / `collaboration_messages` / `collaboration_artifacts` - multi-channel collaboration context.
 
-### task_index.db
-Global task index for due work. Table `task_index(task_id, user_id, next_run, enabled)` plus indexes on `next_run` and `user_id`. This is a derived index synced from each user's `tasks.db` and used by the scheduler thread to query due tasks efficiently.
-
-### tasks.db (per-user)
-Per-user scheduler store (SQLite with foreign keys on). Key tables:
-
-- `tasks(id, kind, channel, enabled, created_at, last_run, schedule_type, cron_expression, next_run, run_at, retry_count)` - Scheduling metadata. `schedule_type` is `cron` or `one_shot`; cron uses `cron_expression` + `next_run`, one-shot uses `run_at`.
-- `send_email_tasks(task_id, subject, html_path, attachments_dir, from_address, in_reply_to, references_header, archive_root, thread_epoch, thread_state_path)` - Email payloads (also reused by Google Workspace comment replies).
-- `send_email_recipients(id, task_id, recipient_type, address)` - `to`/`cc`/`bcc` recipients.
-- `send_slack_tasks`, `send_discord_tasks`, `send_sms_tasks`, `send_telegram_tasks`, `send_bluebubbles_tasks`, `send_whatsapp_tasks` - Channel-specific outbound payloads for `SendReply`.
-- `run_task_tasks(task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, runner, codex_disabled, reply_to, reply_from, archive_root, thread_id, thread_epoch, thread_state_path, employee_id)` - RunTask parameters. `reply_to` is newline-separated; `reply_from` carries the inbound service mailbox used for replies.
-- `task_executions(id, task_id, started_at, finished_at, status, error_message)` - Execution history and errors.
+Owner/user isolation is enforced with scoped fields (for example `owner_scope` on tasks and per-store scope keys), so one user's tasks cannot modify or read another user's scheduler records.
 
 ---
 
@@ -1456,7 +1451,7 @@ Entry directories are named `YYYY-MM-DD_<action>_<topic>_<shortid>`. `direction`
 
 ## Scheduled Follow-ups
 
-If the agent needs to send a follow-up later, it should emit a schedule block to stdout at the end of its response. The scheduler parses the block and stores follow-up tasks in SQLite.
+If the agent needs to send a follow-up later, it should emit a schedule block to stdout at the end of its response. The scheduler parses the block and stores follow-up tasks in MongoDB.
 `"type":"send_email"` remains the wire-format tag for backward compatibility, and is mapped to `SendReply` internally.
 
 **Example schedule block:**

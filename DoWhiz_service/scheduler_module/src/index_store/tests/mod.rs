@@ -38,7 +38,7 @@ fn sync_user_tasks_and_query_due_users() {
         .sync_user_tasks(&user_b, &[future_task.clone()])
         .unwrap();
 
-    let due_users = store.due_user_ids(now, 10).unwrap();
+    let due_users = store.due_user_ids(now, 10_000).unwrap();
     assert!(due_users.contains(&user_a));
     assert!(!due_users.contains(&user_b));
 }
@@ -77,7 +77,7 @@ fn sync_user_tasks_dedupes_repeated_task_ids() {
         .sync_user_tasks(&user_id, &[first.clone(), second.clone()])
         .unwrap();
     let refs = store
-        .due_task_refs(now + Duration::minutes(2), 100)
+        .due_task_refs(now + Duration::minutes(2), 10_000)
         .unwrap();
     let matching: Vec<_> = refs
         .into_iter()
@@ -90,7 +90,7 @@ fn sync_user_tasks_dedupes_repeated_task_ids() {
     first.enabled = false;
     store.sync_user_tasks(&user_id, &[first, second]).unwrap();
     let refs = store
-        .due_task_refs(now + Duration::minutes(2), 100)
+        .due_task_refs(now + Duration::minutes(2), 10_000)
         .unwrap();
     let matching: Vec<_> = refs
         .into_iter()

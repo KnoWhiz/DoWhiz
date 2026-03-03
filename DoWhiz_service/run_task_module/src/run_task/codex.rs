@@ -1965,10 +1965,7 @@ mod tests {
             EnvVarGuard::set("CODEX_SANDBOX_MODE", "workspace-write"),
             EnvVarGuard::set("RUN_TASK_CODEX_SANDBOX_MODE", "workspace-write"),
             EnvVarGuard::set("STAGING_CODEX_SANDBOX_MODE", "danger-full-access"),
-            EnvVarGuard::set(
-                "STAGING_RUN_TASK_CODEX_SANDBOX_MODE",
-                "read-only",
-            ),
+            EnvVarGuard::set("STAGING_RUN_TASK_CODEX_SANDBOX_MODE", "read-only"),
         ];
 
         // STAGING_CODEX_SANDBOX_MODE has higher priority than STAGING_RUN_TASK_CODEX_SANDBOX_MODE.

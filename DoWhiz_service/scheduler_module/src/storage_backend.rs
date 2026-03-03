@@ -4,35 +4,27 @@ use tracing::warn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StorageBackend {
-    Sqlite,
-    Dual,
     Mongo,
 }
 
 impl StorageBackend {
     pub fn from_env() -> Self {
         let _ = crate::env_alias::apply_deploy_target_overrides();
-        let raw = env::var("STORAGE_BACKEND").unwrap_or_else(|_| "sqlite".to_string());
+        let raw = env::var("STORAGE_BACKEND").unwrap_or_else(|_| "mongo".to_string());
         match raw.trim().to_ascii_lowercase().as_str() {
-            "sqlite" => Self::Sqlite,
-            "dual" => Self::Dual,
             "mongo" | "mongodb" => Self::Mongo,
             other => {
                 warn!(
-                    "unknown STORAGE_BACKEND='{}'; falling back to sqlite",
+                    "unsupported STORAGE_BACKEND='{}'; forcing mongo backend",
                     other
                 );
-                Self::Sqlite
+                Self::Mongo
             }
         }
     }
 
     pub fn uses_mongo(self) -> bool {
-        matches!(self, Self::Dual | Self::Mongo)
-    }
-
-    pub fn uses_sqlite(self) -> bool {
-        matches!(self, Self::Dual | Self::Sqlite)
+        true
     }
 }
 
@@ -69,19 +61,19 @@ mod tests {
     }
 
     #[test]
-    fn storage_backend_defaults_to_sqlite() {
+    fn storage_backend_defaults_to_mongo() {
         let _lock = ENV_MUTEX.lock().unwrap();
         let _backend = EnvGuard::set("STORAGE_BACKEND", "");
-        assert_eq!(StorageBackend::from_env(), StorageBackend::Sqlite);
+        assert_eq!(StorageBackend::from_env(), StorageBackend::Mongo);
     }
 
     #[test]
-    fn storage_backend_parses_mongo_and_dual() {
+    fn storage_backend_accepts_legacy_values_as_mongo() {
         let _lock = ENV_MUTEX.lock().unwrap();
         let _mongo = EnvGuard::set("STORAGE_BACKEND", "mongo");
         assert_eq!(StorageBackend::from_env(), StorageBackend::Mongo);
         drop(_mongo);
-        let _dual = EnvGuard::set("STORAGE_BACKEND", "dual");
-        assert_eq!(StorageBackend::from_env(), StorageBackend::Dual);
+        let _legacy = EnvGuard::set("STORAGE_BACKEND", "legacy");
+        assert_eq!(StorageBackend::from_env(), StorageBackend::Mongo);
     }
 }

@@ -203,6 +203,10 @@ fn run_scheduler_x402_env_test(
     let _home_guard = EnvGuard::set("HOME", &home_root);
     let _docker_image_guard = EnvGuard::set("RUN_TASK_DOCKER_IMAGE", "");
     let _docker_mode_guard = EnvGuard::set("RUN_TASK_USE_DOCKER", "0");
+    let _deploy_target_guard = EnvGuard::set("DEPLOY_TARGET", "local");
+    let _execution_backend_guard = EnvGuard::set("RUN_TASK_EXECUTION_BACKEND", "local");
+    let _staging_execution_backend_guard =
+        EnvGuard::set("STAGING_RUN_TASK_EXECUTION_BACKEND", "local");
     let _gh_auth_guard = EnvGuard::set("GH_AUTH_DISABLED", "1");
     let _api_guard = EnvGuard::set("AZURE_OPENAI_API_KEY_BACKUP", "test-key");
     let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");

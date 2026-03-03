@@ -36,7 +36,7 @@ cargo test -p run_task_module --test run_task_tests -- --nocapture
 Prereqs (Dockerfile parity):
 ```
 sudo apt-get update
-sudo apt-get install -y ca-certificates libsqlite3-dev libssl-dev pkg-config curl
+sudo apt-get install -y ca-certificates libssl-dev pkg-config curl
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 sudo npm install -g @openai/codex@latest @playwright/cli@latest
