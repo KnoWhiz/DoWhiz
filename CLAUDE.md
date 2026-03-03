@@ -13,18 +13,16 @@ DoWhiz is a multi-tenant, email-first digital employee platform. Users send task
 ## Build and Development Commands
 
 ### Rust Backend (DoWhiz_service)
-
-**IMPORTANT:** Always use `--release` flag when running cargo build/test to prevent debug artifacts from bloating storage:
 ```bash
-cargo build --release                          # Build all modules (release)
-cargo test --release                           # Run all tests (release)
-cargo test --release -p scheduler_module       # Test specific module
-cargo test --release -p scheduler_module --test scheduler_basic  # Single test
+cargo build                                    # Build all modules
+cargo test                                     # Run all tests
+cargo test -p scheduler_module                 # Test specific module
+cargo test -p scheduler_module --test scheduler_basic  # Single test
 cargo clippy --all-targets --all-features     # Lint
 cargo fmt --check                             # Format check
 
 # Run HTTP server
-cargo run --release -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
+cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001
 ```
 
 ### React Website
