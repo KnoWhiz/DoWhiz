@@ -1,38 +1,64 @@
-name: Production Health Check
+name: Environment Health Check
 
 on:
   schedule:
     # Run every 10 minutes
     - cron: '*/10 * * * *'
   workflow_dispatch:
-    # Allow manual trigger
+    inputs:
+      environment:
+        description: 'Environment to check'
+        required: false
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - prod
+          - staging
 
 jobs:
   health-check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env: prod
+            ssh_key_secret: PROD_SSH_PRIVATE_KEY
+            vm_ip_secret: PROD_AZURE_VM_IP
+            vm_user_secret: PROD_AZURE_VM_USER
+          - env: staging
+            ssh_key_secret: STAGING_SSH_PRIVATE_KEY
+            vm_ip_secret: STAGING_AZURE_VM_IP
+            vm_user_secret: STAGING_AZURE_VM_USER
+
+    # Skip based on manual input
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.environment == 'both' ||
+      github.event.inputs.environment == matrix.env
 
     steps:
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          echo "${{ secrets[matrix.ssh_key_secret] }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.PROD_AZURE_VM_IP }} >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -H ${{ secrets[matrix.vm_ip_secret] }} >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Check PM2 Processes
+      - name: Check PM2 Processes (${{ matrix.env }})
         id: pm2
         run: |
-          echo "## PM2 Process Status" >> $GITHUB_STEP_SUMMARY
+          echo "## [${{ matrix.env }}] PM2 Process Status" >> $GITHUB_STEP_SUMMARY
 
-          PM2_STATUS=$(ssh -o ConnectTimeout=10 ${{ secrets.PROD_AZURE_VM_USER }}@${{ secrets.PROD_AZURE_VM_IP }} \
+          PM2_STATUS=$(ssh -o ConnectTimeout=10 ${{ secrets[matrix.vm_user_secret] }}@${{ secrets[matrix.vm_ip_secret] }} \
             "source ~/.nvm/nvm.sh && pm2 jlist" 2>/dev/null || echo "[]")
 
           echo '```json' >> $GITHUB_STEP_SUMMARY
           echo "$PM2_STATUS" | jq '.' >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "$PM2_STATUS" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
-          # Check if dw_worker is online
           WORKER_STATUS=$(echo "$PM2_STATUS" | jq -r '.[] | select(.name=="dw_worker") | .pm2_env.status' 2>/dev/null || echo "unknown")
           GATEWAY_STATUS=$(echo "$PM2_STATUS" | jq -r '.[] | select(.name=="dw_gateway") | .pm2_env.status' 2>/dev/null || echo "unknown")
 
@@ -40,23 +66,21 @@ jobs:
           echo "gateway_status=$GATEWAY_STATUS" >> $GITHUB_OUTPUT
 
           if [[ "$WORKER_STATUS" != "online" ]]; then
-            echo "::error::dw_worker is not online (status: $WORKER_STATUS)"
+            echo "::error::[${{ matrix.env }}] dw_worker is not online (status: $WORKER_STATUS)"
           fi
           if [[ "$GATEWAY_STATUS" != "online" ]]; then
-            echo "::error::dw_gateway is not online (status: $GATEWAY_STATUS)"
+            echo "::error::[${{ matrix.env }}] dw_gateway is not online (status: $GATEWAY_STATUS)"
           fi
 
-      - name: Check Health Endpoints
+      - name: Check Health Endpoints (${{ matrix.env }})
         id: endpoints
         run: |
-          echo "## Health Endpoints" >> $GITHUB_STEP_SUMMARY
+          echo "## [${{ matrix.env }}] Health Endpoints" >> $GITHUB_STEP_SUMMARY
 
-          # Check rust_service (port 9001)
-          WORKER_HEALTH=$(ssh -o ConnectTimeout=10 ${{ secrets.PROD_AZURE_VM_USER }}@${{ secrets.PROD_AZURE_VM_IP }} \
+          WORKER_HEALTH=$(ssh -o ConnectTimeout=10 ${{ secrets[matrix.vm_user_secret] }}@${{ secrets[matrix.vm_ip_secret] }} \
             "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 http://localhost:9001/health" 2>/dev/null || echo "000")
 
-          # Check gateway (port 9100)
-          GATEWAY_HEALTH=$(ssh -o ConnectTimeout=10 ${{ secrets.PROD_AZURE_VM_USER }}@${{ secrets.PROD_AZURE_VM_IP }} \
+          GATEWAY_HEALTH=$(ssh -o ConnectTimeout=10 ${{ secrets[matrix.vm_user_secret] }}@${{ secrets[matrix.vm_ip_secret] }} \
             "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 http://localhost:9100/health" 2>/dev/null || echo "000")
 
           echo "| Service | Port | HTTP Status |" >> $GITHUB_STEP_SUMMARY
@@ -68,166 +92,242 @@ jobs:
           echo "gateway_health=$GATEWAY_HEALTH" >> $GITHUB_OUTPUT
 
           if [[ "$WORKER_HEALTH" != "200" ]]; then
-            echo "::error::rust_service health check failed (HTTP $WORKER_HEALTH)"
+            echo "::error::[${{ matrix.env }}] rust_service health check failed (HTTP $WORKER_HEALTH)"
           fi
           if [[ "$GATEWAY_HEALTH" != "200" ]]; then
-            echo "::error::gateway health check failed (HTTP $GATEWAY_HEALTH)"
+            echo "::error::[${{ matrix.env }}] gateway health check failed (HTTP $GATEWAY_HEALTH)"
           fi
 
-      - name: Check CIFS Mount
-        id: cifs
+      - name: Check MongoDB Connection (${{ matrix.env }})
+        id: mongodb
         run: |
-          echo "## CIFS Mount Status" >> $GITHUB_STEP_SUMMARY
+          echo "## [${{ matrix.env }}] MongoDB Status" >> $GITHUB_STEP_SUMMARY
 
-          MOUNT_CHECK=$(ssh -o ConnectTimeout=10 ${{ secrets.PROD_AZURE_VM_USER }}@${{ secrets.PROD_AZURE_VM_IP }} \
-            "mount | grep dowhiz-run-task-prod && echo 'MOUNTED' || echo 'NOT_MOUNTED'" 2>/dev/null)
+          MONGO_CHECK=$(ssh -o ConnectTimeout=10 ${{ secrets[matrix.vm_user_secret] }}@${{ secrets[matrix.vm_ip_secret] }} << 'EOF'
+            ENV_FILE="/home/azureuser/server/DoWhiz/DoWhiz_service/.env"
+            STORAGE_BACKEND=$(grep -E "^STORAGE_BACKEND=" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "unknown")
+            echo "Storage Backend: $STORAGE_BACKEND"
+
+            if grep -qE "^MONGODB_URI=" "$ENV_FILE" 2>/dev/null; then
+              echo "MongoDB URI: configured"
+
+              MONGODB_URI=$(grep -E "^MONGODB_URI=" "$ENV_FILE" | cut -d= -f2)
+              if command -v mongosh &>/dev/null; then
+                if mongosh "$MONGODB_URI" --eval "db.runCommand({ping:1})" --quiet 2>/dev/null | grep -q "ok"; then
+                  echo "MongoDB Connection: OK"
+                  echo "MONGO_HEALTHY"
+                else
+                  echo "MongoDB Connection: FAILED"
+                  echo "MONGO_UNHEALTHY"
+                fi
+              elif command -v mongo &>/dev/null; then
+                if mongo "$MONGODB_URI" --eval "db.runCommand({ping:1})" --quiet 2>/dev/null | grep -q "ok"; then
+                  echo "MongoDB Connection: OK"
+                  echo "MONGO_HEALTHY"
+                else
+                  echo "MongoDB Connection: FAILED"
+                  echo "MONGO_UNHEALTHY"
+                fi
+              else
+                echo "MongoDB Connection: skipped (no mongosh/mongo client)"
+                echo "MONGO_SKIPPED"
+              fi
+            else
+              echo "MongoDB URI: not configured in $ENV_FILE"
+              echo "MONGO_NOT_CONFIGURED"
+            fi
+          EOF
+          )
 
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "$MOUNT_CHECK" >> $GITHUB_STEP_SUMMARY
+          echo "$MONGO_CHECK" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
-          if [[ "$MOUNT_CHECK" != *"MOUNTED"* ]]; then
-            echo "::error::CIFS mount dowhiz-run-task-prod is not mounted!"
-            echo "cifs_mounted=false" >> $GITHUB_OUTPUT
+          if [[ "$MONGO_CHECK" == *"MONGO_UNHEALTHY"* ]]; then
+            echo "::error::[${{ matrix.env }}] MongoDB connection failed"
+            echo "mongo_healthy=false" >> $GITHUB_OUTPUT
+          elif [[ "$MONGO_CHECK" == *"MONGO_HEALTHY"* ]]; then
+            echo "mongo_healthy=true" >> $GITHUB_OUTPUT
           else
-            echo "cifs_mounted=true" >> $GITHUB_OUTPUT
+            echo "mongo_healthy=skipped" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check CIFS Locks
-        id: cifs_locks
+      - name: Check SQLite Remnants (${{ matrix.env }})
+        id: sqlite_remnants
         run: |
-          echo "## CIFS Lock Status" >> $GITHUB_STEP_SUMMARY
+          echo "## [${{ matrix.env }}] SQLite Remnants Check" >> $GITHUB_STEP_SUMMARY
 
-          LOCK_CHECK=$(ssh -o ConnectTimeout=10 ${{ secrets.PROD_AZURE_VM_USER }}@${{ secrets.PROD_AZURE_VM_IP }} << 'EOF'
+          SQLITE_CHECK=$(ssh -o ConnectTimeout=10 ${{ secrets[matrix.vm_user_secret] }}@${{ secrets[matrix.vm_ip_secret] }} << 'EOF'
             STATE_DIR="/home/azureuser/server/.dowhiz/DoWhiz/run_task/little_bear/state"
-            MOUNT_POINT="/home/azureuser/server/.dowhiz/DoWhiz/run_task"
+            USERS_DIR="/home/azureuser/server/.dowhiz/DoWhiz/run_task/little_bear/users"
+            ENV_FILE="/home/azureuser/server/DoWhiz/DoWhiz_service/.env"
 
+            STORAGE_BACKEND=$(grep -E "^STORAGE_BACKEND=" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "not_set")
+            echo "### Configuration"
+            echo "STORAGE_BACKEND=$STORAGE_BACKEND"
+
+            if [[ "$STORAGE_BACKEND" != "mongo" && "$STORAGE_BACKEND" != "mongodb" ]]; then
+              echo "WARNING: STORAGE_BACKEND is not set to 'mongo' - SQLite fallback may be active"
+              echo "SQLITE_FALLBACK_RISK"
+            fi
+
+            echo ""
+            echo "### SQLite Files in State Directory"
+            EXPECTED_DBS="users.db task_index.db slack.db ingestion.db"
+
+            if [[ -d "$STATE_DIR" ]]; then
+              echo "| File | Size | Status |"
+              echo "|------|------|--------|"
+
+              for db in "$STATE_DIR"/*.db; do
+                [[ -e "$db" ]] || continue
+                BASENAME=$(basename "$db")
+                SIZE=$(stat -c%s "$db" 2>/dev/null || echo "0")
+
+                if echo "$EXPECTED_DBS" | grep -qw "$BASENAME"; then
+                  if [[ "$SIZE" -eq 0 ]]; then
+                    echo "| $BASENAME | ${SIZE}B | EXPECTED but CORRUPTED (zero-byte) |"
+                  else
+                    echo "| $BASENAME | ${SIZE}B | EXPECTED (legacy) |"
+                  fi
+                else
+                  echo "| $BASENAME | ${SIZE}B | UNEXPECTED - should not be SQLite |"
+                  echo "UNEXPECTED_SQLITE_FILE"
+                fi
+              done
+
+              if ls "$STATE_DIR"/*.db 1>/dev/null 2>&1; then
+                echo "SQLITE_FILES_EXIST"
+              else
+                echo "No SQLite files found"
+              fi
+            else
+              echo "State directory not found"
+            fi
+
+            echo ""
             echo "### Stale Journal/WAL Files"
             JOURNALS=$(find "$STATE_DIR" -maxdepth 1 \( -name "*.db-journal" -o -name "*.db-wal" -o -name "*.db-shm" \) 2>/dev/null)
             if [[ -n "$JOURNALS" ]]; then
-              echo "STALE_LOCKS_FOUND"
-              echo '```'
+              echo "STALE_JOURNALS_FOUND"
               ls -la $JOURNALS 2>/dev/null
-              echo '```'
             else
-              echo "None found"
+              echo "No stale journal files"
             fi
 
             echo ""
-            echo "### Processes Holding Locks"
-            # Check for processes with open file handles on the mount
-            LOCK_PROCS=$(lsof +D "$MOUNT_POINT" 2>/dev/null | grep -E "\.db" | head -20 || echo "")
-            if [[ -n "$LOCK_PROCS" ]]; then
-              echo '```'
-              echo "$LOCK_PROCS"
-              echo '```'
-            else
-              echo "No processes holding DB locks"
-            fi
+            echo "### CIFS Lock Status"
+            if mount | grep -q "dowhiz-run-task"; then
+              echo "CIFS mount: active"
 
-            echo ""
-            echo "### Kernel CIFS Locks"
-            # Check /proc/locks for CIFS-related locks
-            CIFS_LOCKS=$(grep -i "cifs\|dowhiz" /proc/locks 2>/dev/null | head -10 || echo "")
-            if [[ -n "$CIFS_LOCKS" ]]; then
-              echo "CIFS_KERNEL_LOCKS"
-              echo '```'
-              echo "$CIFS_LOCKS"
-              echo '```'
-            else
-              echo "No kernel CIFS locks detected"
-            fi
-          EOF
-          )
-
-          echo "$LOCK_CHECK" >> $GITHUB_STEP_SUMMARY
-
-          if [[ "$LOCK_CHECK" == *"STALE_LOCKS_FOUND"* ]]; then
-            echo "::warning::Stale SQLite journal/WAL files detected on CIFS mount"
-            echo "stale_locks=true" >> $GITHUB_OUTPUT
-          else
-            echo "stale_locks=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Check SQLite Files
-        id: sqlite
-        run: |
-          echo "## SQLite Database Status" >> $GITHUB_STEP_SUMMARY
-
-          SQLITE_CHECK=$(ssh -o ConnectTimeout=10 ${{ secrets.PROD_AZURE_VM_USER }}@${{ secrets.PROD_AZURE_VM_IP }} << 'EOF'
-            STATE_DIR="/home/azureuser/server/.dowhiz/DoWhiz/run_task/little_bear/state"
-
-            echo "| File | Size | Status |"
-            echo "|------|------|--------|"
-
-            for db in users.db task_index.db slack.db; do
-              FILE="$STATE_DIR/$db"
-              if [[ -f "$FILE" ]]; then
-                SIZE=$(stat -c%s "$FILE" 2>/dev/null || echo "0")
-                if [[ "$SIZE" -eq 0 ]]; then
-                  echo "| $db | ${SIZE}B | CORRUPTED (zero-byte) |"
-                else
-                  # Try to open with sqlite3
-                  if sqlite3 "$FILE" "SELECT 1;" >/dev/null 2>&1; then
-                    echo "| $db | ${SIZE}B | OK |"
-                  else
-                    echo "| $db | ${SIZE}B | LOCKED/ERROR |"
-                  fi
-                fi
+              LOCK_PROCS=$(lsof +D "$STATE_DIR" 2>/dev/null | grep -E "\.db" | head -10 || echo "")
+              if [[ -n "$LOCK_PROCS" ]]; then
+                echo "Processes holding DB file locks:"
+                echo "$LOCK_PROCS"
+                echo "CIFS_LOCKS_HELD"
               else
-                echo "| $db | - | MISSING |"
+                echo "No processes holding DB locks"
               fi
-            done
+
+              CIFS_LOCKS=$(grep -i "cifs" /proc/locks 2>/dev/null | head -5 || echo "")
+              if [[ -n "$CIFS_LOCKS" ]]; then
+                echo "Kernel CIFS locks detected:"
+                echo "$CIFS_LOCKS"
+                echo "CIFS_KERNEL_LOCKS"
+              else
+                echo "No kernel CIFS locks"
+              fi
+            else
+              echo "CIFS mount: not active (good - using MongoDB)"
+            fi
+
+            echo ""
+            echo "### Recent SQLite Errors in Logs"
+            if [[ -f ~/.nvm/nvm.sh ]]; then
+              source ~/.nvm/nvm.sh 2>/dev/null
+              SQLITE_ERRORS=$(pm2 logs --nostream --lines 50 2>&1 | grep -i "sqlite\|database is locked" | tail -5)
+              if [[ -n "$SQLITE_ERRORS" ]]; then
+                echo "Recent SQLite-related errors:"
+                echo "$SQLITE_ERRORS"
+                echo "SQLITE_ERRORS_IN_LOGS"
+              else
+                echo "No recent SQLite errors"
+              fi
+            fi
           EOF
           )
 
+          echo '```' >> $GITHUB_STEP_SUMMARY
           echo "$SQLITE_CHECK" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
-          if [[ "$SQLITE_CHECK" == *"CORRUPTED"* ]] || [[ "$SQLITE_CHECK" == *"LOCKED"* ]]; then
-            echo "::warning::SQLite database issues detected"
-            echo "sqlite_healthy=false" >> $GITHUB_OUTPUT
+          if [[ "$SQLITE_CHECK" == *"SQLITE_ERRORS_IN_LOGS"* ]]; then
+            echo "::error::[${{ matrix.env }}] SQLite errors found in recent logs"
+            echo "sqlite_status=errors" >> $GITHUB_OUTPUT
+          elif [[ "$SQLITE_CHECK" == *"CIFS_LOCKS_HELD"* ]]; then
+            echo "::warning::[${{ matrix.env }}] CIFS locks held on SQLite files"
+            echo "sqlite_status=cifs_locks" >> $GITHUB_OUTPUT
+          elif [[ "$SQLITE_CHECK" == *"STALE_JOURNALS_FOUND"* ]]; then
+            echo "::warning::[${{ matrix.env }}] Stale SQLite journal files found"
+            echo "sqlite_status=stale_journals" >> $GITHUB_OUTPUT
+          elif [[ "$SQLITE_CHECK" == *"UNEXPECTED_SQLITE_FILE"* ]]; then
+            echo "::warning::[${{ matrix.env }}] Unexpected SQLite file found"
+            echo "sqlite_status=unexpected_file" >> $GITHUB_OUTPUT
+          elif [[ "$SQLITE_CHECK" == *"SQLITE_FALLBACK_RISK"* ]]; then
+            echo "::warning::[${{ matrix.env }}] STORAGE_BACKEND not set to mongo"
+            echo "sqlite_status=fallback_risk" >> $GITHUB_OUTPUT
           else
-            echo "sqlite_healthy=true" >> $GITHUB_OUTPUT
+            echo "sqlite_status=ok" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check Recent Errors
+      - name: Check Disk Space (${{ matrix.env }})
+        id: disk
         run: |
-          echo "## Recent Errors (last 5 min)" >> $GITHUB_STEP_SUMMARY
+          echo "## [${{ matrix.env }}] Disk Space" >> $GITHUB_STEP_SUMMARY
 
-          ERRORS=$(ssh -o ConnectTimeout=10 ${{ secrets.PROD_AZURE_VM_USER }}@${{ secrets.PROD_AZURE_VM_IP }} \
-            "source ~/.nvm/nvm.sh && pm2 logs --nostream --lines 100 2>&1 | grep -i 'error\|locked\|failed' | tail -20" 2>/dev/null || echo "No recent errors")
+          DISK_CHECK=$(ssh -o ConnectTimeout=10 ${{ secrets[matrix.vm_user_secret] }}@${{ secrets[matrix.vm_ip_secret] }} \
+            "df -h / /home/azureuser/server 2>/dev/null | tail -n +2" 2>/dev/null || echo "unknown")
 
-          if [[ -n "$ERRORS" && "$ERRORS" != "No recent errors" ]]; then
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "$ERRORS" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$DISK_CHECK" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          if echo "$DISK_CHECK" | awk '{print $5}' | grep -qE "^9[0-9]%|^100%"; then
+            echo "::warning::[${{ matrix.env }}] Disk usage above 90%"
+            echo "disk_ok=false" >> $GITHUB_OUTPUT
           else
-            echo "No recent errors found" >> $GITHUB_STEP_SUMMARY
+            echo "disk_ok=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Summary
+      - name: Summary (${{ matrix.env }})
         if: always()
         run: |
-          echo "## Health Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## [${{ matrix.env }}] Health Check Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Worker PM2**: ${{ steps.pm2.outputs.worker_status }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Gateway PM2**: ${{ steps.pm2.outputs.gateway_status }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Worker HTTP**: ${{ steps.endpoints.outputs.worker_health }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Gateway HTTP**: ${{ steps.endpoints.outputs.gateway_health }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **CIFS Mounted**: ${{ steps.cifs.outputs.cifs_mounted }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Stale CIFS Locks**: ${{ steps.cifs_locks.outputs.stale_locks }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **SQLite Healthy**: ${{ steps.sqlite.outputs.sqlite_healthy }}" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Worker PM2 | ${{ steps.pm2.outputs.worker_status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Gateway PM2 | ${{ steps.pm2.outputs.gateway_status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Worker HTTP | ${{ steps.endpoints.outputs.worker_health }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Gateway HTTP | ${{ steps.endpoints.outputs.gateway_health }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| MongoDB | ${{ steps.mongodb.outputs.mongo_healthy }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SQLite Remnants | ${{ steps.sqlite_remnants.outputs.sqlite_status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Disk Space | ${{ steps.disk.outputs.disk_ok }} |" >> $GITHUB_STEP_SUMMARY
 
-      - name: Fail if Critical Issues
+      - name: Fail if Critical Issues (${{ matrix.env }})
         if: |
-          steps.endpoints.outputs.worker_health != '200' ||
-          steps.cifs.outputs.cifs_mounted == 'false' ||
-          steps.cifs_locks.outputs.stale_locks == 'true'
+          matrix.env == 'prod' && (
+            steps.endpoints.outputs.worker_health != '200' ||
+            steps.endpoints.outputs.gateway_health != '200' ||
+            steps.mongodb.outputs.mongo_healthy == 'false' ||
+            steps.sqlite_remnants.outputs.sqlite_status == 'errors'
+          )
         run: |
-          echo "Critical health check failures detected!"
+          echo "Critical health check failures detected on ${{ matrix.env }}!"
           echo "Worker Health: ${{ steps.endpoints.outputs.worker_health }}"
-          echo "CIFS Mounted: ${{ steps.cifs.outputs.cifs_mounted }}"
-          echo "Stale Locks: ${{ steps.cifs_locks.outputs.stale_locks }}"
+          echo "Gateway Health: ${{ steps.endpoints.outputs.gateway_health }}"
+          echo "MongoDB: ${{ steps.mongodb.outputs.mongo_healthy }}"
+          echo "SQLite Status: ${{ steps.sqlite_remnants.outputs.sqlite_status }}"
           exit 1
 
   notify-on-failure:
@@ -239,7 +339,3 @@ jobs:
         run: |
           echo "Health check failed! Check the workflow run for details."
           # Add Slack/Discord/Email notification here if needed
-          # Example for Slack:
-          # curl -X POST -H 'Content-type: application/json' \
-          #   --data '{"text":"DoWhiz Production Health Check Failed!"}' \
-          #   ${{ secrets.SLACK_WEBHOOK_URL }}
