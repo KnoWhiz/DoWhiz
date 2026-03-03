@@ -14,9 +14,11 @@ pub mod ingestion;
 pub mod ingestion_queue;
 pub mod mailbox;
 pub mod message_router;
+pub mod mongo_store;
 pub mod raw_payload_store;
 pub mod service_bus_queue;
 pub mod slack_store;
+pub mod storage_backend;
 pub(crate) mod thread_state;
 
 pub mod account_store;
