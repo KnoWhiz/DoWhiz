@@ -317,7 +317,10 @@ impl SqliteSchedulerStore {
         }
         self.quarantine_zero_byte_db_if_needed()?;
         let conn = Connection::open(&self.path)?;
-        conn.busy_timeout(Duration::from_secs(5))?;
+        // Enable WAL mode for better concurrent access (reduces "database is locked" errors)
+        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+        // Increase busy timeout for concurrent access from multiple workers
+        conn.busy_timeout(Duration::from_secs(30))?;
         conn.execute_batch(SCHEDULER_SCHEMA)?;
         ensure_tasks_columns(&conn)?;
         ensure_send_email_task_columns(&conn)?;
