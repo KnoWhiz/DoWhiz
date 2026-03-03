@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use mongodb::bson::{doc, DateTime as BsonDateTime, Document};
+use mongodb::error::ErrorKind;
 use mongodb::options::FindOptions;
 use mongodb::options::IndexOptions;
 use mongodb::options::UpdateOptions;
@@ -7,6 +8,7 @@ use mongodb::sync::Collection;
 use mongodb::IndexModel;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use tracing::warn;
 
 use crate::mongo_store::{create_client_from_env, database_from_env, ensure_index_compatible};
 use crate::{Schedule, ScheduledTask};
@@ -153,17 +155,27 @@ impl MongoIndexStore {
         now: DateTime<Utc>,
         limit: usize,
     ) -> Result<Vec<String>, IndexStoreError> {
-        let cursor = self.task_index.find(
-            doc! {
-                "scope": &self.scope,
-                "enabled": true,
-                "next_run": { "$lte": BsonDateTime::from_chrono(now) },
-            },
-            FindOptions::builder()
-                .sort(doc! { "next_run": 1 })
-                .limit(limit as i64)
-                .build(),
-        )?;
+        let filter = doc! {
+            "scope": &self.scope,
+            "enabled": true,
+            "next_run": { "$lte": BsonDateTime::from_chrono(now) },
+        };
+        let sorted_options = FindOptions::builder()
+            .sort(doc! { "next_run": 1 })
+            .limit(limit as i64)
+            .build();
+        let unsorted_limit = (limit as i64).saturating_mul(8).max(limit as i64);
+        let unsorted_options = FindOptions::builder().limit(unsorted_limit).build();
+        let cursor = match self.task_index.find(filter.clone(), sorted_options) {
+            Ok(cursor) => cursor,
+            Err(err) if is_order_by_index_excluded(&err) => {
+                warn!(
+                    "task_index next_run sort rejected by backend; falling back to unsorted due-user query"
+                );
+                self.task_index.find(filter, unsorted_options)?
+            }
+            Err(err) => return Err(err.into()),
+        };
         let mut ids = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for row in cursor {
@@ -185,17 +197,26 @@ impl MongoIndexStore {
         now: DateTime<Utc>,
         limit: usize,
     ) -> Result<Vec<TaskRef>, IndexStoreError> {
-        let cursor = self.task_index.find(
-            doc! {
-                "scope": &self.scope,
-                "enabled": true,
-                "next_run": { "$lte": BsonDateTime::from_chrono(now) },
-            },
-            FindOptions::builder()
-                .sort(doc! { "next_run": 1 })
-                .limit(limit as i64)
-                .build(),
-        )?;
+        let filter = doc! {
+            "scope": &self.scope,
+            "enabled": true,
+            "next_run": { "$lte": BsonDateTime::from_chrono(now) },
+        };
+        let sorted_options = FindOptions::builder()
+            .sort(doc! { "next_run": 1 })
+            .limit(limit as i64)
+            .build();
+        let unsorted_options = FindOptions::builder().limit(limit as i64).build();
+        let cursor = match self.task_index.find(filter.clone(), sorted_options) {
+            Ok(cursor) => cursor,
+            Err(err) if is_order_by_index_excluded(&err) => {
+                warn!(
+                    "task_index next_run sort rejected by backend; falling back to unsorted due-task query"
+                );
+                self.task_index.find(filter, unsorted_options)?
+            }
+            Err(err) => return Err(err.into()),
+        };
         let mut refs = Vec::new();
         for row in cursor {
             let doc = row?;
@@ -230,6 +251,19 @@ fn enabled_task_next_runs(tasks: &[ScheduledTask]) -> Vec<(String, DateTime<Utc>
 
 fn scope_from_path(path: PathBuf) -> String {
     format!("{:x}", md5::compute(path.to_string_lossy().as_bytes()))
+}
+
+fn is_order_by_index_excluded(err: &mongodb::error::Error) -> bool {
+    let ErrorKind::Command(command_error) = err.kind.as_ref() else {
+        return false;
+    };
+    if command_error.code != 2 {
+        return false;
+    }
+    command_error
+        .message
+        .to_ascii_lowercase()
+        .contains("the index path corresponding to the specified order-by item is excluded")
 }
 
 #[cfg(test)]
