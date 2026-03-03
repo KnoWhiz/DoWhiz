@@ -2,7 +2,6 @@
 # DoWhiz 服务状态检查
 
 SERVICE_DIR="/home/liuxt/deeptutor/DoWhiz/DoWhiz_service"
-DB_PATH="$SERVICE_DIR/.workspace/boiled_egg/state/ingestion.db"
 
 echo "=========================================="
 echo "       DoWhiz 服务状态检查"
@@ -38,37 +37,15 @@ curl -s http://localhost:9001/health > /dev/null 2>&1 && echo "✅ Worker  (9001
 
 # 3. 队列状态
 echo ""
-echo "=== 最近 5 条消息 ==="
-if [[ -f "$DB_PATH" ]]; then
-    sqlite3 -header -column "$DB_PATH" \
-        "SELECT
-            substr(id, 1, 8) as id,
-            status,
-            attempts,
-            substr(created_at, 12, 8) as time,
-            CASE WHEN last_error IS NULL THEN '-' ELSE substr(last_error, 1, 30) END as error
-         FROM ingestion_queue
-         ORDER BY created_at DESC
-         LIMIT 5;" 2>/dev/null || echo "无法读取数据库"
-else
-    echo "数据库不存在"
-fi
+echo "=== 队列与存储 ==="
+echo "当前版本默认使用 MongoDB + Service Bus/PG 队列，不再读取本地 state DB 文件。"
+echo "请通过日志、Azure Portal 或对应数据库工具检查消息与任务状态。"
 
 # 4. 正在执行的任务
 echo ""
 echo "=== 任务队列 ==="
-TASK_DB="$SERVICE_DIR/.workspace/boiled_egg/state/task_index.db"
-if [[ -f "$TASK_DB" ]]; then
-    COUNT=$(sqlite3 "$TASK_DB" "SELECT COUNT(*) FROM task_index WHERE enabled=1;" 2>/dev/null || echo "0")
-    echo "待执行任务数: $COUNT"
-    if [[ "$COUNT" -gt 0 ]]; then
-        sqlite3 -header -column "$TASK_DB" \
-            "SELECT substr(task_id, 1, 8) as task_id, substr(next_run, 12, 8) as next_run, enabled
-             FROM task_index LIMIT 5;" 2>/dev/null
-    fi
-else
-    echo "任务数据库不存在"
-fi
+echo "任务状态已迁移到 MongoDB（collections: tasks, task_executions, task_index）。"
+echo "可通过服务 API 或 Mongo shell 查询。"
 
 # 5. 最新日志
 echo ""

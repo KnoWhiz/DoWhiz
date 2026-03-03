@@ -50,8 +50,8 @@ scheduler.run_loop(Duration::from_secs(1), &stop_flag)?;
 
 ## Notes
 
-- Tasks are stored in a SQLite database at the provided storage path and reloaded on startup.
-- Execution attempts are recorded in the `task_executions` table with status and error details.
+- Tasks are stored in MongoDB and scoped by owner/user path so records reload across restarts.
+- Execution attempts are recorded in the `task_executions` collection with status and error details.
 - Use `add_one_shot_in` to schedule “N minutes from now” tasks based on local time converted to UTC.
 
 ## Production Deployment

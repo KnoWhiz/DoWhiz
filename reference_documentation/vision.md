@@ -3,7 +3,7 @@
 Current implementation baseline (as of 2026-02):
 - Ingress is already multi-channel: Email, Slack, Discord, SMS/Twilio, Telegram, WhatsApp, Google Docs/Sheets/Slides comments, and BlueBubbles/iMessage.
 - Inbound gateway + worker architecture is in production use: gateway handles ingress, workers consume queue by employee.
-- Scheduler/user state is persisted in SQLite per employee/user; ingestion queue backend supports Service Bus (recommended) and Postgres (legacy).
+- Scheduler/user state is persisted in Legacy Local DB per employee/user; ingestion queue backend supports Service Bus (recommended) and Postgres (legacy).
 
 ## 1. North Star Vision
 Let every user have a "digital employee team" that collaborates like real colleagues via email/collab docs/team tools, can execute tasks independently, keep following up, proactively sync progress, and escalate to humans when needed (clarify / approval / escalation).
@@ -70,7 +70,7 @@ OpenClaw's architecture has mature abstractions for "multi-channel messaging + a
 
 5) **Storage Layer (Data & Memory)**
    - Azure Blob/Supabase Storage: raw payloads, artifacts, and memo/object storage
-   - SQLite (current runtime): scheduler state, users, task index
+   - Legacy Local DB (current runtime): scheduler state, users, task index
    - Postgres (legacy/optional path): ingestion queue backend and future shared metadata expansion
 
 6) **Observability Layer (Observability)**

@@ -1,4 +1,8 @@
+use std::collections::HashSet;
 use std::env;
+use std::sync::{Mutex, OnceLock};
+use std::thread;
+use std::time::Duration;
 
 use mongodb::bson::{doc, Document};
 use mongodb::error::ErrorKind;
@@ -7,17 +11,19 @@ use mongodb::sync::{Client, Collection, Database};
 use mongodb::IndexModel;
 use tracing::warn;
 
+use crate::env_alias::apply_deploy_target_overrides;
 use crate::storage_backend::StorageBackend;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MongoStoreError {
-    #[error("MONGODB_URI must be set when STORAGE_BACKEND includes mongo")]
+    #[error("MONGODB_URI must be set")]
     MissingMongoUri,
     #[error("mongodb error: {0}")]
     Mongo(#[from] mongodb::error::Error),
 }
 
 pub fn create_client_from_env() -> Result<Client, MongoStoreError> {
+    let _ = apply_deploy_target_overrides();
     let uri = env::var("MONGODB_URI")
         .ok()
         .map(|value| value.trim().to_string())
@@ -84,17 +90,49 @@ pub fn ensure_index_compatible(
     collection: &Collection<Document>,
     model: IndexModel,
 ) -> Result<(), mongodb::error::Error> {
-    match collection.create_index(model, None) {
-        Ok(_) => Ok(()),
-        Err(err) if is_ignorable_index_conflict(&err) => {
-            warn!(
-                error = %err,
-                collection = collection.name(),
-                "ignoring existing conflicting index definition; keeping remote index options"
-            );
-            Ok(())
+    let cache_key = index_cache_key(collection, &model);
+    let mut cache = ensured_indexes()
+        .lock()
+        .expect("index cache mutex poisoned");
+    if cache.contains(&cache_key) {
+        return Ok(());
+    }
+
+    let mut attempt = 0usize;
+    loop {
+        match collection.create_index(model.clone(), None) {
+            Ok(_) => {
+                cache.insert(cache_key.clone());
+                return Ok(());
+            }
+            Err(err) if is_ignorable_index_conflict(&err) => {
+                warn!(
+                    error = %err,
+                    collection = collection.name(),
+                    "ignoring existing conflicting index definition; keeping remote index options"
+                );
+                cache.insert(cache_key.clone());
+                return Ok(());
+            }
+            Err(err) => {
+                let Some(retry_after_ms) = retry_after_ms_for_index_create(&err) else {
+                    return Err(err);
+                };
+                if attempt >= 7 {
+                    return Err(err);
+                }
+                attempt += 1;
+                let sleep_ms = retry_after_ms.clamp(25, 2_000) + (attempt as u64 * 25);
+                warn!(
+                    error = %err,
+                    collection = collection.name(),
+                    attempt,
+                    sleep_ms,
+                    "mongodb metadata throttle while creating index; retrying"
+                );
+                thread::sleep(Duration::from_millis(sleep_ms));
+            }
         }
-        Err(err) => Err(err),
     }
 }
 
@@ -102,15 +140,61 @@ fn is_ignorable_index_conflict(err: &mongodb::error::Error) -> bool {
     let ErrorKind::Command(command_error) = err.kind.as_ref() else {
         return false;
     };
-    if matches!(command_error.code, 68 | 85 | 86) {
+    if command_error.code == 67 && command_error.code_name == "CannotCreateIndex" {
+        let message = command_error.message.to_ascii_lowercase();
+        if message.contains("cannot create unique index over")
+            || message.contains("cannot create unique index when collection contains documents")
+        {
+            // Cosmos sharded collections can reject some unique indexes, and legacy
+            // collections may already contain rows that prevent unique index creation.
+            // This workload remains correct via id-scoped upserts/filters.
+            return true;
+        }
+    }
+    if matches!(command_error.code, 48 | 68 | 85 | 86) {
         return true;
     }
     matches!(
         command_error.code_name.as_str(),
-        "IndexAlreadyExists" | "IndexOptionsConflict" | "IndexKeySpecsConflict"
+        "NamespaceExists" | "IndexAlreadyExists" | "IndexOptionsConflict" | "IndexKeySpecsConflict"
     ) || command_error
         .message
         .contains("already exists with different options")
+}
+
+fn retry_after_ms_for_index_create(err: &mongodb::error::Error) -> Option<u64> {
+    let ErrorKind::Command(command_error) = err.kind.as_ref() else {
+        return None;
+    };
+    if command_error.code != 16500 && command_error.code_name != "RequestRateTooLarge" {
+        return None;
+    }
+    if let Some(position) = command_error.message.find("RetryAfterMs=") {
+        let value = &command_error.message[position + "RetryAfterMs=".len()..];
+        let digits: String = value.chars().take_while(|ch| ch.is_ascii_digit()).collect();
+        if let Ok(parsed) = digits.parse::<u64>() {
+            return Some(parsed);
+        }
+    }
+    Some(250)
+}
+
+fn ensured_indexes() -> &'static Mutex<HashSet<String>> {
+    static ENSURED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    ENSURED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn index_cache_key(collection: &Collection<Document>, model: &IndexModel) -> String {
+    let namespace = collection.namespace();
+    let unique = model
+        .options
+        .as_ref()
+        .and_then(|options| options.unique)
+        .unwrap_or(false);
+    format!(
+        "{}.{}:{}:unique={}",
+        namespace.db, namespace.coll, model.keys, unique
+    )
 }
 
 fn ensure_users_indexes(db: &Database) -> Result<(), mongodb::error::Error> {

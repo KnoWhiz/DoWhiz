@@ -5,25 +5,21 @@ use mongodb::options::FindOptions;
 use mongodb::options::IndexOptions;
 use mongodb::sync::Collection;
 use mongodb::IndexModel;
-use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
-use tracing::warn;
 use uuid::Uuid;
 
 use crate::mongo_store::{create_client_from_env, database_from_env, ensure_index_compatible};
-use crate::storage_backend::StorageBackend;
 
 #[derive(Debug)]
 pub struct UserStore {
-    path: PathBuf,
-    mongo: Option<MongoUserStore>,
+    mongo: MongoUserStore,
 }
 
 #[derive(Debug, Clone)]
 struct MongoUserStore {
     users: Collection<Document>,
+    scope: String,
 }
 
 #[derive(Debug, Clone)]
@@ -48,8 +44,6 @@ pub struct UserPaths {
 
 #[derive(Debug, thiserror::Error)]
 pub enum UserStoreError {
-    #[error("sqlite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
     #[error("mongodb error: {0}")]
     Mongo(#[from] mongodb::error::Error),
     #[error("io error: {0}")]
@@ -64,20 +58,10 @@ pub enum UserStoreError {
 
 impl UserStore {
     pub fn new(path: impl Into<PathBuf>) -> Result<Self, UserStoreError> {
-        let backend = StorageBackend::from_env();
-        let mongo = if backend.uses_mongo() {
-            Some(MongoUserStore::new()?)
-        } else {
-            None
-        };
-        let store = Self {
-            path: path.into(),
-            mongo,
-        };
-        if store.mongo.is_none() {
-            let _ = store.open()?;
-        }
-        Ok(store)
+        let scope = scope_from_path(path.into());
+        Ok(Self {
+            mongo: MongoUserStore::new(scope)?,
+        })
     }
 
     /// Get an existing user by identifier without creating one.
@@ -87,40 +71,8 @@ impl UserStore {
         identifier_type: &str,
         identifier: &str,
     ) -> Result<Option<UserRecord>, UserStoreError> {
-        if let Some(mongo) = &self.mongo {
-            return mongo.get_user_by_identifier(identifier_type, identifier);
-        }
-        let normalized = normalize_identifier(identifier_type, identifier)
-            .ok_or_else(|| UserStoreError::InvalidIdentifier(identifier.to_string()))?;
-        let conn = self.open()?;
-        let row = conn
-            .query_row(
-                "SELECT id, identifier_type, identifier, created_at, last_seen_at
-                 FROM users
-                 WHERE identifier_type = ?1 AND identifier = ?2",
-                params![identifier_type, normalized.as_str()],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                    ))
-                },
-            )
-            .optional()?;
-
-        match row {
-            Some((id, id_type, id_value, created_at, last_seen_at)) => Ok(Some(UserRecord {
-                user_id: id,
-                identifier_type: id_type,
-                identifier: id_value,
-                created_at: parse_datetime(&created_at)?,
-                last_seen_at: parse_datetime(&last_seen_at)?,
-            })),
-            None => Ok(None),
-        }
+        self.mongo
+            .get_user_by_identifier(identifier_type, identifier)
     }
 
     pub fn get_or_create_user(
@@ -128,92 +80,11 @@ impl UserStore {
         identifier_type: &str,
         identifier: &str,
     ) -> Result<UserRecord, UserStoreError> {
-        if let Some(mongo) = &self.mongo {
-            return mongo.get_or_create_user(identifier_type, identifier);
-        }
-        let normalized = normalize_identifier(identifier_type, identifier)
-            .ok_or_else(|| UserStoreError::InvalidIdentifier(identifier.to_string()))?;
-        let conn = self.open()?;
-        let now = Utc::now();
-        let row = conn
-            .query_row(
-                "SELECT id, identifier_type, identifier, created_at, last_seen_at
-                 FROM users
-                 WHERE identifier_type = ?1 AND identifier = ?2",
-                params![identifier_type, normalized.as_str()],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                    ))
-                },
-            )
-            .optional()?;
-
-        if let Some((id, id_type, id_value, created_at, last_seen_at_raw)) = row {
-            let mut last_seen_at = parse_datetime(&last_seen_at_raw)?;
-            if should_refresh_last_seen(last_seen_at, now) {
-                match conn.execute(
-                    "UPDATE users SET last_seen_at = ?1 WHERE id = ?2",
-                    params![format_datetime(now), id.as_str()],
-                ) {
-                    Ok(_) => {
-                        last_seen_at = now;
-                    }
-                    Err(err) if is_sqlite_lock_error(&err) => {
-                        warn!(
-                            "last_seen_at update skipped due to sqlite lock for user {}: {}",
-                            id, err
-                        );
-                    }
-                    Err(err) => return Err(err.into()),
-                }
-            }
-            return Ok(UserRecord {
-                user_id: id,
-                identifier_type: id_type,
-                identifier: id_value,
-                created_at: parse_datetime(&created_at)?,
-                last_seen_at,
-            });
-        }
-
-        let user_id = Uuid::new_v4().to_string();
-        conn.execute(
-            "INSERT INTO users (id, identifier_type, identifier, created_at, last_seen_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                user_id.as_str(),
-                identifier_type,
-                normalized.as_str(),
-                format_datetime(now),
-                format_datetime(now)
-            ],
-        )?;
-        Ok(UserRecord {
-            user_id,
-            identifier_type: identifier_type.to_string(),
-            identifier: normalized,
-            created_at: now,
-            last_seen_at: now,
-        })
+        self.mongo.get_or_create_user(identifier_type, identifier)
     }
 
     pub fn list_user_ids(&self) -> Result<Vec<String>, UserStoreError> {
-        if let Some(mongo) = &self.mongo {
-            return mongo.list_user_ids();
-        }
-        let conn = self.open()?;
-        let mut stmt = conn.prepare("SELECT id FROM users ORDER BY created_at")?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        let mut user_ids = Vec::new();
-        for row in rows {
-            user_ids.push(row?);
-        }
-        Ok(user_ids)
+        self.mongo.list_user_ids()
     }
 
     pub fn user_paths(&self, users_root: &Path, user_id: &str) -> UserPaths {
@@ -243,18 +114,6 @@ impl UserStore {
         fs::create_dir_all(&paths.workspaces_root)?;
         ensure_default_user_memo(&paths.memory_dir)?;
         Ok(())
-    }
-
-    fn open(&self) -> Result<Connection, UserStoreError> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let conn = Connection::open(&self.path)?;
-        // NOTE: Do NOT use WAL mode here. The database may be on Azure Files (CIFS),
-        // which doesn't support mmap() properly, causing WAL to fail with "database is locked".
-        conn.busy_timeout(Duration::from_secs(30))?;
-        conn.execute_batch(USERS_SCHEMA)?;
-        Ok(conn)
     }
 }
 
@@ -364,7 +223,7 @@ pub fn extract_emails(raw: &str) -> Vec<String> {
 }
 
 impl MongoUserStore {
-    fn new() -> Result<Self, UserStoreError> {
+    fn new(scope: String) -> Result<Self, UserStoreError> {
         let client =
             create_client_from_env().map_err(|err| UserStoreError::MongoConfig(err.to_string()))?;
         let db = database_from_env(&client);
@@ -372,21 +231,23 @@ impl MongoUserStore {
         ensure_index_compatible(
             &users,
             IndexModel::builder()
-                .keys(doc! { "user_id": 1 })
+                .keys(doc! { "scope": 1, "user_id": 1 })
                 .options(IndexOptions::builder().unique(Some(true)).build())
                 .build(),
         )?;
         ensure_index_compatible(
             &users,
             IndexModel::builder()
-                .keys(doc! { "identifier_type": 1, "identifier": 1 })
+                .keys(doc! { "scope": 1, "identifier_type": 1, "identifier": 1 })
                 .build(),
         )?;
         ensure_index_compatible(
             &users,
-            IndexModel::builder().keys(doc! { "created_at": 1 }).build(),
+            IndexModel::builder()
+                .keys(doc! { "scope": 1, "created_at": 1 })
+                .build(),
         )?;
-        Ok(Self { users })
+        Ok(Self { users, scope })
     }
 
     fn get_user_by_identifier(
@@ -400,6 +261,7 @@ impl MongoUserStore {
             .users
             .find_one(
                 doc! {
+                    "scope": &self.scope,
                     "identifier_type": identifier_type,
                     "identifier": normalized.as_str(),
                 },
@@ -419,6 +281,7 @@ impl MongoUserStore {
             .ok_or_else(|| UserStoreError::InvalidIdentifier(identifier.to_string()))?;
         let now = Utc::now();
         let filter = doc! {
+            "scope": &self.scope,
             "identifier_type": identifier_type,
             "identifier": normalized.as_str(),
         };
@@ -427,7 +290,10 @@ impl MongoUserStore {
             let mut record = document_to_user_record(existing)?;
             if should_refresh_last_seen(record.last_seen_at, now) {
                 self.users.update_one(
-                    doc! { "user_id": record.user_id.as_str() },
+                    doc! {
+                        "scope": &self.scope,
+                        "user_id": record.user_id.as_str(),
+                    },
                     doc! { "$set": { "last_seen_at": BsonDateTime::from_chrono(now) } },
                     None,
                 )?;
@@ -439,6 +305,7 @@ impl MongoUserStore {
         let new_user_id = Uuid::new_v4().to_string();
         let insert_result = self.users.insert_one(
             doc! {
+                "scope": &self.scope,
                 "user_id": new_user_id.as_str(),
                 "identifier_type": identifier_type,
                 "identifier": normalized.as_str(),
@@ -468,7 +335,7 @@ impl MongoUserStore {
     fn list_user_ids(&self) -> Result<Vec<String>, UserStoreError> {
         let mut ids = Vec::new();
         let cursor = self.users.find(
-            doc! {},
+            doc! { "scope": &self.scope },
             FindOptions::builder()
                 .sort(doc! { "created_at": 1 })
                 .projection(doc! { "user_id": 1 })
@@ -519,21 +386,6 @@ fn bson_datetime_to_utc(document: &Document, key: &str) -> Result<DateTime<Utc>,
     }
 }
 
-const USERS_SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    identifier_type TEXT NOT NULL,
-    identifier TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL,
-    UNIQUE(identifier_type, identifier)
-);
-"#;
-
-fn format_datetime(value: DateTime<Utc>) -> String {
-    value.to_rfc3339()
-}
-
 fn parse_datetime(value: &str) -> Result<DateTime<Utc>, chrono::ParseError> {
     Ok(DateTime::parse_from_rfc3339(value)?.with_timezone(&Utc))
 }
@@ -542,18 +394,11 @@ fn should_refresh_last_seen(last_seen_at: DateTime<Utc>, now: DateTime<Utc>) -> 
     (now - last_seen_at).num_seconds() >= LAST_SEEN_UPDATE_INTERVAL_SECS
 }
 
-fn is_sqlite_lock_error(err: &rusqlite::Error) -> bool {
-    matches!(
-        err,
-        rusqlite::Error::SqliteFailure(db_err, _)
-            if matches!(
-                db_err.code,
-                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
-            )
-    )
-}
-
 const LAST_SEEN_UPDATE_INTERVAL_SECS: i64 = 5 * 60;
+
+fn scope_from_path(path: PathBuf) -> String {
+    format!("{:x}", md5::compute(path.to_string_lossy().as_bytes()))
+}
 
 #[cfg(test)]
 mod tests;

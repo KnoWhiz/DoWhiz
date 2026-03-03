@@ -1,11 +1,11 @@
-# DoWhiz SQLite to MongoDB Refactor Plan
+# DoWhiz Legacy Local DB to MongoDB Refactor Plan
 
 Last updated: 2026-03-02  
 Status: Draft (codebase-audited)
 
 ## Recommendation
 
-The migration is worth doing. SQLite-on-Azure-Files is a real operational risk in this codebase (lock handling and per-owner file proliferation), and MongoDB is a better fit for multi-node worker/gateway deployments.
+The migration is worth doing. Legacy Local DB-on-Azure-Files is a real operational risk in this codebase (lock handling and per-owner file proliferation), and MongoDB is a better fit for multi-node worker/gateway deployments.
 
 The current draft was directionally correct, but it needed a few important scope corrections. This revised plan is parity-first, milestone-driven, and designed for safe cutover with measurable progress.
 
@@ -17,14 +17,14 @@ The current draft was directionally correct, but it needed a few important scope
 |---|---|---|---|
 | Accounts/Auth/Billing (`accounts`, `account_identifiers`, `payments`, `email_verification_tokens`) | PostgreSQL (Supabase) | `scheduler_module/src/account_store.rs` | Keep in Postgres |
 | Ingestion queue | PostgreSQL or Azure Service Bus | `scheduler_module/src/ingestion_queue.rs` | Keep as-is |
-| User identity (`users.db`) | SQLite | `scheduler_module/src/user_store/mod.rs` | Move to MongoDB |
-| Scheduler tasks (`tasks.db` per owner) | SQLite | `scheduler_module/src/scheduler/store/*` | Move to MongoDB |
-| Task executions (`task_executions`) | SQLite | `scheduler_module/src/scheduler/store/schema.rs` | Move to MongoDB |
-| Scheduler index (`task_index.db`) | SQLite | `scheduler_module/src/index_store/mod.rs` | Move to MongoDB (v1) |
-| Slack OAuth installations (`slack.db`) | SQLite | `scheduler_module/src/slack_store.rs` | Move to MongoDB |
-| Google Docs processed comments (`google_docs_processed.db`) | SQLite | `scheduler_module/src/google_docs_poller.rs` | Move to MongoDB |
-| Google Workspace processed comments (`google_workspace_processed.db`) | SQLite | `scheduler_module/src/google_workspace_poller.rs` | Move to MongoDB |
-| Collaboration session store | SQLite module exists | `scheduler_module/src/collaboration_store.rs` | Defer or migrate later |
+| User identity (`users.db`) | Legacy Local DB | `scheduler_module/src/user_store/mod.rs` | Move to MongoDB |
+| Scheduler tasks (`tasks.db` per owner) | Legacy Local DB | `scheduler_module/src/scheduler/store/*` | Move to MongoDB |
+| Task executions (`task_executions`) | Legacy Local DB | `scheduler_module/src/scheduler/store/schema.rs` | Move to MongoDB |
+| Scheduler index (`task_index.db`) | Legacy Local DB | `scheduler_module/src/index_store/mod.rs` | Move to MongoDB (v1) |
+| Slack OAuth installations (`slack.db`) | Legacy Local DB | `scheduler_module/src/slack_store.rs` | Move to MongoDB |
+| Google Docs processed comments (`google_docs_processed.db`) | Legacy Local DB | `scheduler_module/src/google_docs_poller.rs` | Move to MongoDB |
+| Google Workspace processed comments (`google_workspace_processed.db`) | Legacy Local DB | `scheduler_module/src/google_workspace_poller.rs` | Move to MongoDB |
+| Collaboration session store | Legacy Local DB module exists | `scheduler_module/src/collaboration_store.rs` | Defer or migrate later |
 | Memory (`memo.md`) | Filesystem | `memory_store`, workspace/user dirs | Keep as files |
 | Secrets (`.env`) | Filesystem | `secrets_store` | Keep as files |
 | Raw payload storage | Supabase Storage (default) or Azure Blob | `raw_payload_store.rs` | Keep as object storage |
@@ -32,7 +32,7 @@ The current draft was directionally correct, but it needed a few important scope
 ### Important behavior details that affect schema design
 
 1. `tasks.db` is not only "per-user". It exists for legacy user IDs, account-level shadow copies, and Discord guild scopes.
-2. Task `task_id` is not globally unique across all SQLite files. The same `task_id` is intentionally duplicated into account-level shadow storage.
+2. Task `task_id` is not globally unique across all Legacy Local DB files. The same `task_id` is intentionally duplicated into account-level shadow storage.
 3. `IndexStore` is actively used by the scheduler thread for due-task selection (`due_task_refs`); dropping it immediately is high risk.
 4. `UserStore` currently stores one `(identifier_type, identifier)` pair per user row, not an embedded identifier list.
 5. `CollaborationStore` exists but is not broadly wired into runtime flows today; treat it as lower-priority migration scope.
@@ -41,7 +41,7 @@ The current draft was directionally correct, but it needed a few important scope
 
 ### 1. `users`
 
-Replaces SQLite `users` table.
+Replaces Legacy Local DB `users` table.
 
 ```javascript
 {
@@ -63,7 +63,7 @@ db.users.createIndex({ identifier_type: 1, identifier: 1 }, { unique: true });
 
 ### 2. `tasks` (canonical runnable tasks)
 
-Replaces per-owner SQLite `tasks` + child tables (`send_*_tasks`, `run_task_tasks`, recipients).
+Replaces per-owner Legacy Local DB `tasks` + child tables (`send_*_tasks`, `run_task_tasks`, recipients).
 
 ```javascript
 {
@@ -107,7 +107,7 @@ db.tasks.createIndex({ enabled: 1, "schedule.next_run": 1 });
 
 ### 3. `task_executions`
 
-Replaces SQLite `task_executions`.
+Replaces Legacy Local DB `task_executions`.
 
 ```javascript
 {
@@ -168,7 +168,7 @@ db.task_index.createIndex({ enabled: 1, next_run: 1 });
 
 ### 5. `account_task_views` (replace account shadow `tasks.db`)
 
-Current code writes duplicate task rows into account-level SQLite to power `/api/account/tasks`. Replace that with an explicit read model, not duplicated runnable tasks.
+Current code writes duplicate task rows into account-level Legacy Local DB to power `/api/account/tasks`. Replace that with an explicit read model, not duplicated runnable tasks.
 
 ```javascript
 {
@@ -267,25 +267,25 @@ Mongo has no built-in row-level security equivalent for this pattern. Enforce sc
 ### M0 - Baseline and guardrails
 
 - [ ] M0.1 Freeze and document current storage invariants.
-- [ ] M0.2 Add feature flags: `STORAGE_BACKEND=sqlite|dual|mongo`.
+- [ ] M0.2 Add feature flags: `STORAGE_BACKEND=legacy_local_db|dual|mongo`.
 - [ ] M0.3 Add parity tests for account task-view behavior (Slack/Discord/Google Workspace).
 - [ ] M0.4 Add metrics counters for store reads/writes/errors by backend.
 
 Exit criteria:
 
-- All current AUTO tests still pass on SQLite.
-- Feature flags compile and default to SQLite.
+- All current AUTO tests still pass on Legacy Local DB.
+- Feature flags compile and default to Legacy Local DB.
 
 ### M1 - Storage interfaces without behavior change
 
 - [ ] M1.1 Define traits: `UserRepo`, `TaskRepo`, `TaskIndexRepo`, `ExecutionRepo`, `SlackRepo`, `ProcessedCommentRepo`, `AccountTaskViewRepo`.
-- [ ] M1.2 Wrap existing SQLite implementations behind traits.
+- [ ] M1.2 Wrap existing Legacy Local DB implementations behind traits.
 - [ ] M1.3 Replace direct `SqliteSchedulerStore` call sites in service flows with trait-backed stores.
 
 Exit criteria:
 
 - No behavior diff in tests.
-- Direct SQLite usage limited to adapter implementations.
+- Direct Legacy Local DB usage limited to adapter implementations.
 
 ### M2 - Mongo infrastructure
 
@@ -319,7 +319,7 @@ Exit criteria:
 Exit criteria:
 
 - Scheduler integration tests pass with Mongo backend.
-- Due-task throughput and latency are within acceptable range vs SQLite baseline.
+- Due-task throughput and latency are within acceptable range vs Legacy Local DB baseline.
 
 ### M5 - Replace account-level shadow tasks with projection
 
@@ -335,7 +335,7 @@ Exit criteria:
 
 ### M6 - Backfill and verification tooling
 
-- [ ] M6.1 Build idempotent migration tool for SQLite files to Mongo.
+- [ ] M6.1 Build idempotent migration tool for Legacy Local DB files to Mongo.
 - [ ] M6.2 Classify owner scope:
   - `legacy_user`: `USERS_ROOT/<id>/state/tasks.db` where `<id>` is not an account UUID
   - `account_shadow`: account UUID paths (for view projection import only)
@@ -350,9 +350,9 @@ Exit criteria:
 ### M7 - Dual-run and cutover
 
 - [ ] M7.1 Enable dual-write in staging.
-- [ ] M7.2 Run consistency checker on interval (SQLite vs Mongo).
+- [ ] M7.2 Run consistency checker on interval (Legacy Local DB vs Mongo).
 - [ ] M7.3 Switch read path to Mongo after stable window.
-- [ ] M7.4 Disable SQLite writes after additional stable window.
+- [ ] M7.4 Disable Legacy Local DB writes after additional stable window.
 
 Exit criteria:
 
@@ -361,17 +361,17 @@ Exit criteria:
 
 ### M8 - Cleanup
 
-- [ ] M8.1 Remove SQLite adapters and `rusqlite` dependency where no longer needed.
+- [ ] M8.1 Remove Legacy Local DB adapters and `legacy_local_db_driver` dependency where no longer needed.
 - [ ] M8.2 Remove legacy account shadow task sync code.
 - [ ] M8.3 Update docs/runbooks/test checklist for Mongo-only path.
 
 Exit criteria:
 
-- Build/test green without SQLite task/user/index stores in runtime path.
+- Build/test green without Legacy Local DB task/user/index stores in runtime path.
 
 ## Suggested PR Slices
 
-1. PR-1: trait interfaces + SQLite adapters (no behavior change).
+1. PR-1: trait interfaces + Legacy Local DB adapters (no behavior change).
 2. PR-2: Mongo infra + index bootstrap.
 3. PR-3: Slack + processed comments migration.
 4. PR-4: users migration.
@@ -405,10 +405,10 @@ For LIVE/MANUAL/PLANNED checklist entries, mark `SKIP` with reason unless explic
 
 ## Rollback Plan
 
-1. Keep SQLite data untouched during dual-write.
-2. Keep runtime read toggle (`sqlite` vs `mongo`) until post-cutover stability window is complete.
-3. If Mongo errors spike, switch reads back to SQLite immediately and continue dual-write investigation.
-4. Only remove SQLite write paths after stable production soak.
+1. Keep Legacy Local DB data untouched during dual-write.
+2. Keep runtime read toggle (`legacy_local_db` vs `mongo`) until post-cutover stability window is complete.
+3. If Mongo errors spike, switch reads back to Legacy Local DB immediately and continue dual-write investigation.
+4. Only remove Legacy Local DB write paths after stable production soak.
 
 ## Open Decisions
 

@@ -15,7 +15,7 @@ use super::outbound::execute_slack_send;
 use super::reply::load_reply_context;
 use super::schedule::{next_run_after, validate_cron_expression};
 use super::snapshot::{snapshot_reply_draft, write_scheduler_snapshot};
-use super::store::SqliteSchedulerStore;
+use super::store::SchedulerStore;
 use super::types::{
     RunTaskTask, Schedule, ScheduledTask, SchedulerError, SendReplyTask, TaskKind,
     RUN_TASK_FAILURE_DIR, RUN_TASK_FAILURE_LIMIT, RUN_TASK_FAILURE_NOTICE,
@@ -25,14 +25,14 @@ use super::types::{
 pub struct Scheduler<E: TaskExecutor> {
     pub(super) tasks: Vec<ScheduledTask>,
     executor: E,
-    pub(super) store: SqliteSchedulerStore,
+    pub(super) store: SchedulerStore,
     failure_counts: HashMap<Uuid, u32>,
 }
 
 impl<E: TaskExecutor> Scheduler<E> {
     pub fn load(storage_path: impl Into<PathBuf>, executor: E) -> Result<Self, SchedulerError> {
         let storage_path = storage_path.into();
-        let store = SqliteSchedulerStore::new(storage_path)?;
+        let store = SchedulerStore::new(storage_path)?;
         let tasks = store.load_tasks()?;
         Ok(Self {
             tasks,
@@ -409,7 +409,7 @@ fn sync_task_status_to_user_storage(
         .join("tasks.db");
 
     // Open the user's scheduler store and update the task
-    match SqliteSchedulerStore::new(user_tasks_db_path.clone()) {
+    match SchedulerStore::new(user_tasks_db_path.clone()) {
         Ok(store) => {
             // Record execution start and finish to update status
             match store.record_execution_start(task_id, executed_at) {

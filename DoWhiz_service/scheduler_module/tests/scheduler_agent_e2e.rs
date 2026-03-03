@@ -138,6 +138,10 @@ fn scheduler_actions_end_to_end() {
     let _path_guard = EnvGuard::set("PATH", &path_value);
     let _home_guard = EnvGuard::set("HOME", home_root.to_str().expect("home root path"));
     let _docker_guard = EnvGuard::set("RUN_TASK_DOCKER_IMAGE", "");
+    let _deploy_target_guard = EnvGuard::set("DEPLOY_TARGET", "local");
+    let _execution_backend_guard = EnvGuard::set("RUN_TASK_EXECUTION_BACKEND", "local");
+    let _staging_execution_backend_guard =
+        EnvGuard::set("STAGING_RUN_TASK_EXECUTION_BACKEND", "local");
     let _api_guard = EnvGuard::set("AZURE_OPENAI_API_KEY_BACKUP", "test-key");
     let _endpoint_guard = EnvGuard::set("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.test");
 

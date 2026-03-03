@@ -19,13 +19,10 @@ pub use utils::load_google_access_token_from_service_env;
 
 use std::path::Path;
 
-/// Load task status summaries from a tasks.db file.
-/// Returns an empty vector if the database doesn't exist or can't be read.
+/// Load task status summaries for the owner scope derived from `tasks_db_path`.
+/// Returns an empty vector if the storage backend can't be reached.
 pub fn load_tasks_with_status(tasks_db_path: &Path) -> Vec<TaskStatusSummary> {
-    if !tasks_db_path.exists() {
-        return Vec::new();
-    }
-    match store::SqliteSchedulerStore::new(tasks_db_path.to_path_buf()) {
+    match store::SchedulerStore::new(tasks_db_path.to_path_buf()) {
         Ok(store) => store.list_tasks_with_status().unwrap_or_default(),
         Err(_) => Vec::new(),
     }

@@ -1,7 +1,6 @@
 use lettre::message::header::{ContentType, HeaderName, HeaderValue};
 use lettre::message::{Attachment as LettreAttachment, MultiPart, SinglePart};
 use lettre::Transport;
-use rusqlite::OptionalExtension;
 use scheduler_module::employee_config::{
     load_employee_directory, EmployeeDirectory, EmployeeProfile,
 };
@@ -581,16 +580,14 @@ fn wait_for_tasks_complete(
 ) -> Result<Vec<ScheduledTask>, BoxError> {
     let start = SystemTime::now();
     loop {
-        if tasks_path.exists() {
-            let scheduler = Scheduler::load(tasks_path, NoopExecutor)?;
-            let tasks = scheduler.tasks().to_vec();
-            if !tasks.is_empty()
-                && tasks
-                    .iter()
-                    .all(|task| !task.enabled && task.last_run.is_some())
-            {
-                return Ok(tasks);
-            }
+        let scheduler = Scheduler::load(tasks_path, NoopExecutor)?;
+        let tasks = scheduler.tasks().to_vec();
+        if !tasks.is_empty()
+            && tasks
+                .iter()
+                .all(|task| !task.enabled && task.last_run.is_some())
+        {
+            return Ok(tasks);
         }
         if start.elapsed().unwrap_or_default() >= timeout {
             return Err("timed out waiting for tasks to complete".into());
@@ -600,30 +597,13 @@ fn wait_for_tasks_complete(
 }
 
 fn wait_for_user_id(
-    users_db_path: &Path,
+    _users_db_path: &Path,
     users_root: &Path,
-    email: &str,
+    _email: &str,
     timeout: Duration,
 ) -> Option<String> {
-    let normalized = normalize_email(email)?;
     let start = SystemTime::now();
     loop {
-        if users_db_path.exists() {
-            if let Ok(conn) = rusqlite::Connection::open(users_db_path) {
-                if let Ok(row) = conn
-                    .query_row(
-                        "SELECT id FROM users WHERE email = ?1",
-                        rusqlite::params![normalized.as_str()],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()
-                {
-                    if let Some(user_id) = row {
-                        return Some(user_id);
-                    }
-                }
-            }
-        }
         if let Ok(entries) = fs::read_dir(users_root) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -964,7 +944,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         .unwrap_or_else(|poison| poison.into_inner());
     let logs = String::from_utf8_lossy(&log_guard);
     if logs.contains("unable to open database file") {
-        return Err("sqlite warning detected after cleanup".into());
+        return Err("database warning detected after cleanup".into());
     }
 
     Ok(())

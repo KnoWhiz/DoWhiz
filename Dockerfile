@@ -5,7 +5,6 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    libsqlite3-dev \
     libssl-dev \
     pkg-config \
   && rm -rf /var/lib/apt/lists/*
@@ -36,7 +35,6 @@ RUN if [ -f /etc/apt/sources.list ]; then \
   && mkdir -p /tmp/apt-cache/partial \
   && apt-get update && apt-get install -y --no-install-recommends \
     -o Dir::Cache::Archives=/tmp/apt-cache \
-    libsqlite3-0 \
     libssl3 \
     python3 \
     python3-pip \

@@ -949,51 +949,68 @@ fn run_azure_aci_execution(
     let workspace_sh = shell_quote(&container_workspace_dir.to_string_lossy());
     let output_file = shell_quote(REMOTE_OUTPUT_FILENAME);
     let exit_file = shell_quote(REMOTE_EXIT_CODE_FILENAME);
-
-    let mut codex_parts = vec![
-        "codex".to_string(),
-        "exec".to_string(),
-        "--json".to_string(),
-    ];
-    if bypass_sandbox {
-        codex_parts.push("--yolo".to_string());
-    }
-    for add_dir in add_dirs {
-        codex_parts.push("--add-dir".to_string());
-        codex_parts.push(add_dir.clone());
-    }
-    codex_parts.push("--skip-git-repo-check".to_string());
-    codex_parts.push("-m".to_string());
-    codex_parts.push(model_name.to_string());
-    codex_parts.push("-c".to_string());
-    codex_parts.push("web_search=\"live\"".to_string());
-    codex_parts.push("-c".to_string());
-    codex_parts.push("ask_for_approval=\"never\"".to_string());
-    codex_parts.push("-c".to_string());
-    codex_parts.push(format!("sandbox=\"{}\"", sandbox_mode));
-    codex_parts.push("-c".to_string());
-    codex_parts.push("model_providers.azure.env_key=\"AZURE_OPENAI_API_KEY_BACKUP\"".to_string());
-    codex_parts.push("--cd".to_string());
-    codex_parts.push(container_workspace_dir.to_string_lossy().into_owned());
-    codex_parts.push("\"$(cat .codex_remote_prompt.txt)\"".to_string());
-    let codex_command = codex_parts
+    let model_name_sh = shell_quote(model_name);
+    let sandbox_mode_sh = shell_quote(sandbox_mode);
+    let web_search_cfg = shell_quote("web_search=\"live\"");
+    let ask_for_approval_cfg = shell_quote("ask_for_approval=\"never\"");
+    let sandbox_cfg = shell_quote(&format!("sandbox=\"{}\"", sandbox_mode));
+    let azure_env_cfg =
+        shell_quote("model_providers.azure.env_key=\"AZURE_OPENAI_API_KEY_BACKUP\"");
+    let add_dir_lines = add_dirs
         .iter()
-        .map(|part| {
-            if part.starts_with("\"$(cat ") {
-                part.to_string()
-            } else {
-                shell_quote(part)
-            }
-        })
+        .map(|dir| format!("codex_cmd+=(--add-dir {})", shell_quote(dir)))
         .collect::<Vec<_>>()
-        .join(" ");
+        .join("\n");
+    let bypass_enabled = if bypass_sandbox { "1" } else { "0" };
 
     let script = format!(
-        "set -euo pipefail\nexport PATH=/app/bin:$PATH\ncd {workspace}\nmkdir -p .config/gh .codex\nrm -f {output} {exit}\nset +e\n{codex} > {output} 2>&1\nstatus=$?\nprintf '%s' \"$status\" > {exit}\nexit \"$status\"\n",
+        "set -euo pipefail\n\
+export PATH=/app/bin:$PATH\n\
+cd {workspace}\n\
+mkdir -p .config/gh .codex\n\
+rm -f {output} {exit}\n\
+codex_help=\"$(codex exec --help 2>/dev/null || true)\"\n\
+codex_cmd=(codex exec --json)\n\
+if printf '%s' \"$codex_help\" | grep -q -- '--search'; then\n\
+  codex_cmd+=(--search)\n\
+else\n\
+  codex_cmd+=(-c {web_search_cfg})\n\
+fi\n\
+if printf '%s' \"$codex_help\" | grep -q -- '--ask-for-approval'; then\n\
+  codex_cmd+=(--ask-for-approval never)\n\
+else\n\
+  codex_cmd+=(-c {ask_for_approval_cfg})\n\
+fi\n\
+if printf '%s' \"$codex_help\" | grep -q -- '--sandbox'; then\n\
+  codex_cmd+=(--sandbox {sandbox_mode})\n\
+else\n\
+  codex_cmd+=(-c {sandbox_cfg})\n\
+fi\n\
+if [ \"{bypass}\" = \"1\" ]; then\n\
+  if printf '%s' \"$codex_help\" | grep -q -- '--dangerously-bypass-approvals-and-sandbox'; then\n\
+    codex_cmd+=(--dangerously-bypass-approvals-and-sandbox)\n\
+  elif printf '%s' \"$codex_help\" | grep -q -- '--yolo'; then\n\
+    codex_cmd+=(--yolo)\n\
+  fi\n\
+fi\n\
+{add_dirs}\n\
+codex_cmd+=(--skip-git-repo-check -m {model_name} -c {azure_env_cfg} --cd {workspace} \"$(cat .codex_remote_prompt.txt)\")\n\
+set +e\n\
+\"${{codex_cmd[@]}}\" > {output} 2>&1\n\
+status=$?\n\
+printf '%s' \"$status\" > {exit}\n\
+exit \"$status\"\n",
         workspace = workspace_sh,
-        codex = codex_command,
         output = output_file,
         exit = exit_file,
+        web_search_cfg = web_search_cfg,
+        ask_for_approval_cfg = ask_for_approval_cfg,
+        sandbox_mode = sandbox_mode_sh,
+        sandbox_cfg = sandbox_cfg,
+        bypass = bypass_enabled,
+        add_dirs = add_dir_lines,
+        model_name = model_name_sh,
+        azure_env_cfg = azure_env_cfg,
     );
 
     let mut create_cmd = Command::new("az");
@@ -1965,10 +1982,7 @@ mod tests {
             EnvVarGuard::set("CODEX_SANDBOX_MODE", "workspace-write"),
             EnvVarGuard::set("RUN_TASK_CODEX_SANDBOX_MODE", "workspace-write"),
             EnvVarGuard::set("STAGING_CODEX_SANDBOX_MODE", "danger-full-access"),
-            EnvVarGuard::set(
-                "STAGING_RUN_TASK_CODEX_SANDBOX_MODE",
-                "read-only",
-            ),
+            EnvVarGuard::set("STAGING_RUN_TASK_CODEX_SANDBOX_MODE", "read-only"),
         ];
 
         // STAGING_CODEX_SANDBOX_MODE has higher priority than STAGING_RUN_TASK_CODEX_SANDBOX_MODE.
