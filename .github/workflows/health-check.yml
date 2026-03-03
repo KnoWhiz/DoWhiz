@@ -2,8 +2,8 @@ name: Environment Health Check
 
 on:
   schedule:
-    # Run every 10 minutes
-    - cron: '*/10 * * * *'
+    # Run every hour
+    - cron: '0 * * * *'
   workflow_dispatch:
     inputs:
       environment:
@@ -346,12 +346,3 @@ jobs:
           echo "SQLite Status: ${{ steps.sqlite_remnants.outputs.sqlite_status }}"
           exit 1
 
-  notify-on-failure:
-    needs: health-check
-    if: failure()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Send Notification
-        run: |
-          echo "Health check failed! Check the workflow run for details."
-          # Add Slack/Discord/Email notification here if needed
