@@ -1360,7 +1360,7 @@ function App() {
                           <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" strokeWidth="2" fill="none">
                             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
                           </svg>
-                          Integrations
+                          Dashboard
                         </a>
                         <button className="dropdown-item" onClick={async () => {
                           await supabase.auth.signOut();
