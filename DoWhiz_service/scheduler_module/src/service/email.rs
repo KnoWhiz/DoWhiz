@@ -10,7 +10,6 @@ use tracing::{error, info, warn};
 
 use crate::artifact_extractor::extract_artifacts_from_email;
 use crate::channel::{Channel, ExtractedArtifactRef};
-use crate::collaboration_store::CollaborationStore;
 use crate::github_inbound::{
     extract_github_sender_login_from_postmark_payload, is_github_notifications_postmark_payload,
 };
