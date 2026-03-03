@@ -61,18 +61,20 @@ pub async fn run_server(
             .await
             .map_err(|err| -> BoxError { err.into() })??;
     let message_router = Arc::new(MessageRouter::new());
-    if let Ok(user_ids) = user_store.list_user_ids() {
-        for user_id in user_ids {
-            let paths = user_store.user_paths(&config.users_root, &user_id);
-            let scheduler = Scheduler::load(&paths.tasks_db_path, ModuleExecutor::default());
-            match scheduler {
-                Ok(scheduler) => {
-                    if let Err(err) = index_store.sync_user_tasks(&user_id, scheduler.tasks()) {
-                        error!("index bootstrap failed for {}: {}", user_id, err);
+    if storage_backend.uses_sqlite() {
+        if let Ok(user_ids) = user_store.list_user_ids() {
+            for user_id in user_ids {
+                let paths = user_store.user_paths(&config.users_root, &user_id);
+                let scheduler = Scheduler::load(&paths.tasks_db_path, ModuleExecutor::default());
+                match scheduler {
+                    Ok(scheduler) => {
+                        if let Err(err) = index_store.sync_user_tasks(&user_id, scheduler.tasks()) {
+                            error!("index bootstrap failed for {}: {}", user_id, err);
+                        }
                     }
-                }
-                Err(err) => {
-                    error!("scheduler bootstrap failed for {}: {}", user_id, err);
+                    Err(err) => {
+                        error!("scheduler bootstrap failed for {}: {}", user_id, err);
+                    }
                 }
             }
         }
