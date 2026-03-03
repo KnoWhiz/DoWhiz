@@ -294,6 +294,76 @@ jobs:
             echo "sqlite_status=ok" >> $GITHUB_OUTPUT
           fi
 
+      - name: Check User Tasks DB Corruption (${{ matrix.env }})
+        if: steps.should_run.outputs.run == 'true'
+        id: tasks_corruption
+        run: |
+          echo "## [${{ matrix.env }}] Per-User Tasks DB Corruption Check" >> $GITHUB_STEP_SUMMARY
+
+          CORRUPTION_CHECK=$(ssh -o ConnectTimeout=30 ${{ secrets[matrix.vm_user_secret] }}@${{ secrets[matrix.vm_ip_secret] }} << 'EOF'
+            USERS_DIR="/home/azureuser/server/.dowhiz/DoWhiz/run_task/little_bear/users"
+
+            if [[ ! -d "$USERS_DIR" ]]; then
+              echo "Users directory not found"
+              echo "USERS_DIR_MISSING"
+              exit 0
+            fi
+
+            TOTAL=0
+            CORRUPTED=0
+            HEALTHY=0
+            MISSING=0
+
+            for user_dir in "$USERS_DIR"/*/; do
+              [[ -d "$user_dir" ]] || continue
+              TOTAL=$((TOTAL + 1))
+              tasks_db="$user_dir/state/tasks.db"
+
+              if [[ -f "$tasks_db" ]]; then
+                size=$(stat -c%s "$tasks_db" 2>/dev/null || echo "0")
+                if [[ "$size" -eq 0 ]]; then
+                  CORRUPTED=$((CORRUPTED + 1))
+                else
+                  HEALTHY=$((HEALTHY + 1))
+                fi
+              else
+                MISSING=$((MISSING + 1))
+              fi
+            done
+
+            echo "| Status | Count |"
+            echo "|--------|-------|"
+            echo "| Total users | $TOTAL |"
+            echo "| Healthy tasks.db | $HEALTHY |"
+            echo "| Corrupted (0 bytes) | $CORRUPTED |"
+            echo "| Missing tasks.db | $MISSING |"
+
+            if [[ "$CORRUPTED" -gt 0 ]]; then
+              PERCENT=$((CORRUPTED * 100 / TOTAL))
+              echo ""
+              echo "Corruption rate: ${PERCENT}%"
+              echo "TASKS_DB_CORRUPTED:$CORRUPTED"
+            else
+              echo "TASKS_DB_HEALTHY"
+            fi
+          EOF
+          )
+
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$CORRUPTION_CHECK" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          if [[ "$CORRUPTION_CHECK" == *"TASKS_DB_CORRUPTED"* ]]; then
+            CORRUPTED_COUNT=$(echo "$CORRUPTION_CHECK" | grep "TASKS_DB_CORRUPTED" | cut -d: -f2)
+            echo "::error::[${{ matrix.env }}] $CORRUPTED_COUNT users have corrupted tasks.db files"
+            echo "tasks_corruption=corrupted" >> $GITHUB_OUTPUT
+            echo "corrupted_count=$CORRUPTED_COUNT" >> $GITHUB_OUTPUT
+          elif [[ "$CORRUPTION_CHECK" == *"USERS_DIR_MISSING"* ]]; then
+            echo "tasks_corruption=missing_dir" >> $GITHUB_OUTPUT
+          else
+            echo "tasks_corruption=healthy" >> $GITHUB_OUTPUT
+          fi
+
       - name: Check Disk Space (${{ matrix.env }})
         if: steps.should_run.outputs.run == 'true'
         id: disk
@@ -327,6 +397,7 @@ jobs:
           echo "| Gateway HTTP | ${{ steps.endpoints.outputs.gateway_health }} |" >> $GITHUB_STEP_SUMMARY
           echo "| MongoDB | ${{ steps.mongodb.outputs.mongo_healthy }} |" >> $GITHUB_STEP_SUMMARY
           echo "| SQLite Remnants | ${{ steps.sqlite_remnants.outputs.sqlite_status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tasks DB Corruption | ${{ steps.tasks_corruption.outputs.tasks_corruption }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Disk Space | ${{ steps.disk.outputs.disk_ok }} |" >> $GITHUB_STEP_SUMMARY
 
       - name: Fail if Critical Issues (${{ matrix.env }})
@@ -336,7 +407,8 @@ jobs:
             steps.endpoints.outputs.worker_health != '200' ||
             steps.endpoints.outputs.gateway_health != '200' ||
             steps.mongodb.outputs.mongo_healthy == 'false' ||
-            steps.sqlite_remnants.outputs.sqlite_status == 'errors'
+            steps.sqlite_remnants.outputs.sqlite_status == 'errors' ||
+            steps.tasks_corruption.outputs.tasks_corruption == 'corrupted'
           )
         run: |
           echo "Critical health check failures detected on ${{ matrix.env }}!"
@@ -344,5 +416,6 @@ jobs:
           echo "Gateway Health: ${{ steps.endpoints.outputs.gateway_health }}"
           echo "MongoDB: ${{ steps.mongodb.outputs.mongo_healthy }}"
           echo "SQLite Status: ${{ steps.sqlite_remnants.outputs.sqlite_status }}"
+          echo "Tasks DB Corruption: ${{ steps.tasks_corruption.outputs.tasks_corruption }} (count: ${{ steps.tasks_corruption.outputs.corrupted_count }})"
           exit 1
 
