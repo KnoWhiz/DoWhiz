@@ -212,8 +212,8 @@ impl UserStore {
             fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(&self.path)?;
-        // Enable WAL mode for better concurrent access (reduces "database is locked" errors)
-        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+        // NOTE: Do NOT use WAL mode here. The database may be on Azure Files (CIFS),
+        // which doesn't support mmap() properly, causing WAL to fail with "database is locked".
         conn.busy_timeout(Duration::from_secs(30))?;
         conn.execute_batch(USERS_SCHEMA)?;
         Ok(conn)

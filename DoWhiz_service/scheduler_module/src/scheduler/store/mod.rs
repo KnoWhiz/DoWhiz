@@ -317,9 +317,8 @@ impl SqliteSchedulerStore {
         }
         self.quarantine_zero_byte_db_if_needed()?;
         let conn = Connection::open(&self.path)?;
-        // Enable WAL mode for better concurrent access (reduces "database is locked" errors)
-        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
-        // Increase busy timeout for concurrent access from multiple workers
+        // NOTE: Do NOT use WAL mode here. The database may be on Azure Files (CIFS),
+        // which doesn't support mmap() properly, causing WAL to fail with "database is locked".
         conn.busy_timeout(Duration::from_secs(30))?;
         conn.execute_batch(SCHEDULER_SCHEMA)?;
         ensure_tasks_columns(&conn)?;
