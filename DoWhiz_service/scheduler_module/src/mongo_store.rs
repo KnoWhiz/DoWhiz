@@ -140,15 +140,16 @@ fn is_ignorable_index_conflict(err: &mongodb::error::Error) -> bool {
     let ErrorKind::Command(command_error) = err.kind.as_ref() else {
         return false;
     };
-    if command_error.code == 67
-        && command_error.code_name == "CannotCreateIndex"
-        && command_error
-            .message
-            .contains("cannot create unique index over")
-    {
-        // Cosmos sharded collections can reject some unique compound indexes even when
-        // equivalent upsert filters still provide correctness for this workload.
-        return true;
+    if command_error.code == 67 && command_error.code_name == "CannotCreateIndex" {
+        let message = command_error.message.to_ascii_lowercase();
+        if message.contains("cannot create unique index over")
+            || message.contains("cannot create unique index when collection contains documents")
+        {
+            // Cosmos sharded collections can reject some unique indexes, and legacy
+            // collections may already contain rows that prevent unique index creation.
+            // This workload remains correct via id-scoped upserts/filters.
+            return true;
+        }
     }
     if matches!(command_error.code, 48 | 68 | 85 | 86) {
         return true;
