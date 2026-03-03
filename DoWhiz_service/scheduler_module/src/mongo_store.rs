@@ -188,10 +188,11 @@ fn ensure_task_executions_indexes(db: &Database) -> Result<(), mongodb::error::E
 
 fn ensure_task_index_indexes(db: &Database) -> Result<(), mongodb::error::Error> {
     let collection = db.collection::<Document>("task_index");
+    // user_id must come first for sharded collections (Cosmos DB shard key compatibility)
     ensure_index_compatible(
         &collection,
         IndexModel::builder()
-            .keys(doc! { "task_id": 1, "user_id": 1 })
+            .keys(doc! { "user_id": 1, "task_id": 1 })
             .options(IndexOptions::builder().unique(Some(true)).build())
             .build(),
     )?;
