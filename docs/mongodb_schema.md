@@ -1,515 +1,422 @@
-# DoWhiz MongoDB Schema Design
+# DoWhiz SQLite to MongoDB Refactor Plan
 
-## Overview
+Last updated: 2026-03-02  
+Status: Draft (codebase-audited)
 
-Migration from SQLite (Azure Files) to MongoDB to resolve:
-- Multi-VM access conflicts (staging + prod accessing same files)
-- SQLite lock issues on CIFS/network filesystems
-- Per-user database file anti-pattern
+## Recommendation
 
-## Current State
+The migration is worth doing. SQLite-on-Azure-Files is a real operational risk in this codebase (lock handling and per-owner file proliferation), and MongoDB is a better fit for multi-node worker/gateway deployments.
 
-| Store | Current DB | Location | Issue |
-|-------|-----------|----------|-------|
-| AccountStore | PostgreSQL (Supabase) | Cloud | None - keep as is |
-| UserStore | SQLite | Azure Files | Lock conflicts |
-| TaskStore | SQLite (per-user) | Azure Files | Lock conflicts, file proliferation |
-| SlackStore | SQLite | Azure Files | Lock conflicts |
-| CollaborationStore | SQLite | Azure Files | Lock conflicts |
-| GoogleDocsPoller | SQLite | Azure Files | Lock conflicts |
-| GoogleWorkspacePoller | SQLite | Azure Files | Lock conflicts |
-| IndexStore | SQLite | Azure Files | Lock conflicts |
-| IngestionQueue | PostgreSQL | Supabase | None - keep as is |
-| MemoryStore | Files (markdown) | Azure Files | None - keep as files |
-| SecretsStore | Files (.env) | Azure Files | None - keep as files |
+The current draft was directionally correct, but it needed a few important scope corrections. This revised plan is parity-first, milestone-driven, and designed for safe cutover with measurable progress.
 
----
+## Codebase-Verified Current State
 
-## Collections
+### Storage inventory (actual code as of today)
+
+| Domain | Current backend | Where in code | Migration target |
+|---|---|---|---|
+| Accounts/Auth/Billing (`accounts`, `account_identifiers`, `payments`, `email_verification_tokens`) | PostgreSQL (Supabase) | `scheduler_module/src/account_store.rs` | Keep in Postgres |
+| Ingestion queue | PostgreSQL or Azure Service Bus | `scheduler_module/src/ingestion_queue.rs` | Keep as-is |
+| User identity (`users.db`) | SQLite | `scheduler_module/src/user_store/mod.rs` | Move to MongoDB |
+| Scheduler tasks (`tasks.db` per owner) | SQLite | `scheduler_module/src/scheduler/store/*` | Move to MongoDB |
+| Task executions (`task_executions`) | SQLite | `scheduler_module/src/scheduler/store/schema.rs` | Move to MongoDB |
+| Scheduler index (`task_index.db`) | SQLite | `scheduler_module/src/index_store/mod.rs` | Move to MongoDB (v1) |
+| Slack OAuth installations (`slack.db`) | SQLite | `scheduler_module/src/slack_store.rs` | Move to MongoDB |
+| Google Docs processed comments (`google_docs_processed.db`) | SQLite | `scheduler_module/src/google_docs_poller.rs` | Move to MongoDB |
+| Google Workspace processed comments (`google_workspace_processed.db`) | SQLite | `scheduler_module/src/google_workspace_poller.rs` | Move to MongoDB |
+| Collaboration session store | SQLite module exists | `scheduler_module/src/collaboration_store.rs` | Defer or migrate later |
+| Memory (`memo.md`) | Filesystem | `memory_store`, workspace/user dirs | Keep as files |
+| Secrets (`.env`) | Filesystem | `secrets_store` | Keep as files |
+| Raw payload storage | Supabase Storage (default) or Azure Blob | `raw_payload_store.rs` | Keep as object storage |
+
+### Important behavior details that affect schema design
+
+1. `tasks.db` is not only "per-user". It exists for legacy user IDs, account-level shadow copies, and Discord guild scopes.
+2. Task `task_id` is not globally unique across all SQLite files. The same `task_id` is intentionally duplicated into account-level shadow storage.
+3. `IndexStore` is actively used by the scheduler thread for due-task selection (`due_task_refs`); dropping it immediately is high risk.
+4. `UserStore` currently stores one `(identifier_type, identifier)` pair per user row, not an embedded identifier list.
+5. `CollaborationStore` exists but is not broadly wired into runtime flows today; treat it as lower-priority migration scope.
+
+## Target MongoDB Model (Parity First)
 
 ### 1. `users`
 
-Replaces: `UserStore` (SQLite `users` table)
+Replaces SQLite `users` table.
 
 ```javascript
 {
-  _id: ObjectId,                    // MongoDB auto-generated
-  user_id: String,                  // UUID, indexed, unique
-  identifiers: [                    // Embedded array (was separate lookups)
-    {
-      type: String,                 // "email", "phone", "slack", "discord"
-      value: String,                // Normalized identifier
-      added_at: ISODate
-    }
-  ],
+  _id: ObjectId,
+  user_id: String,                 // UUID string
+  identifier_type: String,         // "email" | "phone" | "slack" | "discord" | ...
+  identifier: String,              // normalized
   created_at: ISODate,
   last_seen_at: ISODate
 }
 ```
 
-**Indexes:**
+Indexes:
+
 ```javascript
-db.users.createIndex({ "user_id": 1 }, { unique: true })
-db.users.createIndex({ "identifiers.type": 1, "identifiers.value": 1 })
+db.users.createIndex({ user_id: 1 }, { unique: true });
+db.users.createIndex({ identifier_type: 1, identifier: 1 }, { unique: true });
 ```
 
-**Why this design:**
-- Identifiers embedded (not separate collection) - a user has few identifiers, always fetched together
-- Single document = atomic updates, no joins
+### 2. `tasks` (canonical runnable tasks)
 
----
-
-### 2. `tasks`
-
-Replaces: `TaskStore` (per-user SQLite databases with `tasks`, `send_email_tasks`, `send_slack_tasks`, etc.)
+Replaces per-owner SQLite `tasks` + child tables (`send_*_tasks`, `run_task_tasks`, recipients).
 
 ```javascript
 {
   _id: ObjectId,
-  task_id: String,                  // UUID, indexed, unique
-  user_id: String,                  // Foreign key to users.user_id, indexed
-
-  // Common fields (was `tasks` table)
-  kind: String,                     // "send_email", "send_slack", "send_sms", "run_task", etc.
-  channel: String,                  // "email", "slack", "sms", "telegram"
+  owner_scope: {
+    kind: String,                  // "legacy_user" | "discord_guild"
+    id: String
+  },
+  task_id: String,                 // UUID string (unique within owner_scope)
+  kind: String,                    // "send_email" | "run_task" | "noop"
+  channel: String,                 // "email" | "slack" | "discord" | "sms" | ...
   enabled: Boolean,
   created_at: ISODate,
-  last_run: ISODate,                // nullable
+  last_run: ISODate,               // nullable
   retry_count: Number,
-
-  // Schedule (polymorphic)
   schedule: {
-    type: String,                   // "cron" or "one_shot"
-    cron_expression: String,        // if type == "cron"
-    next_run: ISODate,
-    run_at: ISODate                 // if type == "one_shot"
+    type: String,                  // "cron" | "one_shot"
+    cron_expression: String,       // for cron
+    next_run: ISODate,             // for cron
+    run_at: ISODate                // for one_shot
   },
-
-  // Task-specific payload (polymorphic, based on `kind`)
   payload: {
-    // For send_email:
-    subject: String,
-    html_path: String,
-    attachments_dir: String,
-    from_address: String,
-    recipients: [
-      { type: String, address: String }  // type: "to", "cc", "bcc"
-    ],
-    in_reply_to: String,
-    references_header: String,
-    archive_root: String,
-    thread_epoch: Number,
-    thread_state_path: String,
-
-    // For send_slack:
-    slack_channel_id: String,
-    thread_ts: String,
-    text_path: String,
-    workspace_dir: String,
-
-    // For send_sms:
-    from_number: String,
-    to_number: String,
-    text_path: String,
-    thread_id: String,
-
-    // For run_task:
-    workspace_dir: String,
-    input_email_dir: String,
-    input_attachments_dir: String,
-    memory_dir: String,
-    reference_dir: String,
-    model_name: String,
-    runner: String,
-    codex_disabled: Boolean,
-    reply_to: [String],
-    reply_from: String,
-    employee_id: String
-
-    // ... other task types as needed
-  }
+    // Polymorphic union; covers current task subtables:
+    // send_email, send_slack, send_discord, send_sms,
+    // send_bluebubbles, send_telegram, send_whatsapp, run_task
+  },
+  linked_account_ids: [String]     // optional: account UUIDs for dashboard projection
 }
 ```
 
-**Indexes:**
+Indexes:
+
 ```javascript
-db.tasks.createIndex({ "task_id": 1 }, { unique: true })
-db.tasks.createIndex({ "user_id": 1 })
-db.tasks.createIndex({ "user_id": 1, "enabled": 1 })
-db.tasks.createIndex({ "schedule.next_run": 1, "enabled": 1 })  // For scheduler polling
+db.tasks.createIndex(
+  { "owner_scope.kind": 1, "owner_scope.id": 1, task_id: 1 },
+  { unique: true }
+);
+db.tasks.createIndex({ "owner_scope.kind": 1, "owner_scope.id": 1, enabled: 1 });
+db.tasks.createIndex({ enabled: 1, "schedule.next_run": 1 });
 ```
-
-**Why this design:**
-- Single collection instead of 8+ tables (tasks, send_email_tasks, send_slack_tasks, etc.)
-- Polymorphic `payload` field - MongoDB handles schema flexibility naturally
-- `user_id` field enables multi-tenant queries with single index
-- No per-user databases = no file proliferation
-
----
 
 ### 3. `task_executions`
 
-Replaces: `task_executions` table (was per-user SQLite)
+Replaces SQLite `task_executions`.
 
 ```javascript
 {
   _id: ObjectId,
-  task_id: String,                  // Foreign key to tasks.task_id
-  user_id: String,                  // Denormalized for efficient queries
+  owner_scope: { kind: String, id: String },
+  task_id: String,
   started_at: ISODate,
-  finished_at: ISODate,             // nullable
-  status: String,                   // "running", "success", "failed"
-  error_message: String             // nullable
+  finished_at: ISODate,            // nullable
+  status: String,                  // "running" | "success" | "failed"
+  error_message: String            // nullable
 }
 ```
 
-**Indexes:**
+Indexes:
+
 ```javascript
-db.task_executions.createIndex({ "task_id": 1, "started_at": -1 })
-db.task_executions.createIndex({ "user_id": 1, "started_at": -1 })
+db.task_executions.createIndex({
+  "owner_scope.kind": 1,
+  "owner_scope.id": 1,
+  task_id: 1,
+  started_at: -1
+});
+db.task_executions.createIndex({ started_at: -1 });
 ```
 
-**TTL Index (auto-delete old executions):**
+Optional retention:
+
 ```javascript
 db.task_executions.createIndex(
-  { "started_at": 1 },
-  { expireAfterSeconds: 2592000 }  // 30 days
-)
+  { started_at: 1 },
+  { expireAfterSeconds: 7776000 }  // 90 days
+);
 ```
 
----
+### 4. `task_index` (keep in v1 for scheduler parity)
 
-### 4. `task_index` (Optional - for scheduler optimization)
-
-Replaces: `IndexStore` SQLite
+Keep this materialized view in Mongo for low-risk scheduler migration.
 
 ```javascript
 {
   _id: ObjectId,
+  owner_scope: { kind: String, id: String },
   task_id: String,
-  user_id: String,
   next_run: ISODate,
   enabled: Boolean
 }
 ```
 
-**Note:** This could be eliminated - MongoDB can efficiently query `tasks` directly with compound index on `(schedule.next_run, enabled)`. Only keep if scheduler needs extreme throughput.
+Indexes:
 
----
+```javascript
+db.task_index.createIndex(
+  { "owner_scope.kind": 1, "owner_scope.id": 1, task_id: 1 },
+  { unique: true }
+);
+db.task_index.createIndex({ enabled: 1, next_run: 1 });
+```
 
-### 5. `slack_installations`
+### 5. `account_task_views` (replace account shadow `tasks.db`)
 
-Replaces: `SlackStore` SQLite
+Current code writes duplicate task rows into account-level SQLite to power `/api/account/tasks`. Replace that with an explicit read model, not duplicated runnable tasks.
 
 ```javascript
 {
   _id: ObjectId,
-  team_id: String,                  // Slack workspace ID, unique
-  team_name: String,                // nullable
-  bot_token: String,                // xoxb-... token (encrypt at rest)
+  account_id: String,              // UUID
+  task_id: String,
+  source_owner_scope: { kind: String, id: String },
+  channel: String,
+  created_at: ISODate,
+  schedule_type: String,
+  next_run: ISODate,               // nullable
+  run_at: ISODate,                 // nullable
+  latest_execution_status: String, // nullable
+  latest_error_message: String,    // nullable
+  latest_execution_started_at: ISODate
+}
+```
+
+Indexes:
+
+```javascript
+db.account_task_views.createIndex({ account_id: 1, task_id: 1 }, { unique: true });
+db.account_task_views.createIndex({ account_id: 1, created_at: -1 });
+```
+
+### 6. `slack_installations`
+
+```javascript
+{
+  _id: ObjectId,
+  team_id: String,
+  team_name: String,
+  bot_token: String,
   bot_user_id: String,
   installed_at: ISODate
 }
 ```
 
-**Indexes:**
+Indexes:
+
 ```javascript
-db.slack_installations.createIndex({ "team_id": 1 }, { unique: true })
+db.slack_installations.createIndex({ team_id: 1 }, { unique: true });
 ```
 
----
-
-### 6. `collaboration_sessions`
-
-Replaces: `CollaborationStore` SQLite (3 tables → 1 collection with embedded docs)
+### 7. `processed_comments` (unified docs/sheets/slides)
 
 ```javascript
 {
   _id: ObjectId,
-  session_id: String,               // UUID, unique
-  user_id: String,                  // indexed
-  thread_id: String,
-  primary_channel: String,          // "email", "slack", "google_docs"
-
-  // Primary artifact (optional)
-  artifact: {
-    type: String,                   // "google_docs", "github_pr"
-    id: String,
-    title: String
-  },
-
-  original_request: String,
-  status: String,                   // "active", "completed", "stale"
-  workspace_path: String,
-
-  created_at: ISODate,
-  last_activity_at: ISODate,
-
-  // Embedded messages (was separate table)
-  messages: [
-    {
-      id: String,
-      source_channel: String,
-      external_message_id: String,
-      sender_id: String,
-      content_preview: String,      // First 500 chars
-      has_attachments: Boolean,
-      attachment_manifest: String,  // JSON
-      timestamp: ISODate
-    }
-  ],
-
-  // Embedded artifacts (was separate table)
-  artifacts: [
-    {
-      id: String,
-      type: String,                 // "google_docs", "github_pr"
-      external_id: String,
-      url: String,
-      title: String,
-      role: String,                 // "target" or "reference"
-      created_at: ISODate
-    }
-  ]
-}
-```
-
-**Indexes:**
-```javascript
-db.collaboration_sessions.createIndex({ "session_id": 1 }, { unique: true })
-db.collaboration_sessions.createIndex({ "user_id": 1, "thread_id": 1 }, { unique: true })
-db.collaboration_sessions.createIndex({ "user_id": 1, "status": 1 })
-db.collaboration_sessions.createIndex({ "artifacts.type": 1, "artifacts.external_id": 1 })
-```
-
-**Why embedded:**
-- Messages and artifacts are always fetched with the session
-- A session has limited messages/artifacts (not unbounded)
-- Atomic updates to the whole session
-
----
-
-### 7. `processed_comments`
-
-Replaces: `GoogleDocsPoller` + `GoogleWorkspacePoller` SQLite tables
-
-```javascript
-{
-  _id: ObjectId,
-  file_id: String,                  // Google Drive file ID
-  file_type: String,                // "docs", "sheets", "slides"
-  comment_id: String,
+  file_id: String,
+  file_type: String,               // "docs" | "sheets" | "slides"
+  tracking_id: String,             // comment or comment+reply tracking id
   processed_at: ISODate
 }
 ```
 
-**Indexes:**
-```javascript
-db.processed_comments.createIndex({ "file_id": 1, "comment_id": 1 }, { unique: true })
-db.processed_comments.createIndex({ "file_type": 1 })
-```
+Indexes:
 
-**TTL Index (auto-cleanup old records):**
 ```javascript
 db.processed_comments.createIndex(
-  { "processed_at": 1 },
-  { expireAfterSeconds: 7776000 }  // 90 days
-)
+  { file_id: 1, tracking_id: 1 },
+  { unique: true }
+);
+db.processed_comments.createIndex({ file_type: 1, processed_at: -1 });
 ```
 
----
-
-### 8. `google_workspace_files` (Optional cache)
-
-Replaces: `google_docs_documents` + `google_workspace_files` SQLite tables
+### 8. `workspace_files` (optional metadata cache)
 
 ```javascript
 {
   _id: ObjectId,
-  file_id: String,                  // Google Drive file ID, unique
-  file_type: String,                // "docs", "sheets", "slides"
-  title: String,
-  last_polled_at: ISODate
+  file_id: String,
+  file_type: String,
+  file_name: String,
+  owner_email: String,
+  last_checked_at: ISODate,
+  created_at: ISODate
 }
 ```
 
-**Note:** This is a cache for file metadata. Could be eliminated if polling always fetches fresh from Google API.
+### 9. Collaboration data
 
----
+Defer from critical path unless you explicitly decide to activate these flows now. If migrated later, keep separate collections (`collaboration_sessions`, `collaboration_messages`, `collaboration_artifacts`) to avoid unbounded document growth.
 
-## Migration Notes
+## Isolation Model (RLS Equivalent)
 
-### What stays in PostgreSQL (Supabase)
-- Most Oauth functionalities
-- `accounts` - billing, auth_user linkage
-- `account_identifiers` - verified contact methods
-- `payments` - Stripe payment records
-- `email_verification_tokens`
+Mongo has no built-in row-level security equivalent for this pattern. Enforce scope in repository layer:
 
-### What moves to MongoDB
-- `users` (UserStore)
-- `tasks` + all task subtables (TaskStore)
-- `task_executions`
-- `task_index` (IndexStore) - optional, can query tasks directly
-- `slack_installations` (SlackStore)
-- `collaboration_sessions` (CollaborationStore - 3 tables merged)
-- `processed_comments` (GoogleDocsPoller + GoogleWorkspacePoller)
-- `google_workspace_files` (optional cache)
+1. No raw collection access in business logic.
+2. All repository methods take `owner_scope` or `account_id` explicitly.
+3. Repositories inject scope into every query/update.
+4. Add static checks (`rg "collection::<"`) and code review rule: only storage module may call raw collections.
 
-### What stays as files
-- Memory (memo.md files) - these are user-editable markdown
-- Secrets (.env files) - sensitive, should stay local or move to proper secrets manager
+## Migration Milestones (Trackable)
 
----
+### M0 - Baseline and guardrails
 
-## Agent Isolation (RLS equivalent)
+- [ ] M0.1 Freeze and document current storage invariants.
+- [ ] M0.2 Add feature flags: `STORAGE_BACKEND=sqlite|dual|mongo`.
+- [ ] M0.3 Add parity tests for account task-view behavior (Slack/Discord/Google Workspace).
+- [ ] M0.4 Add metrics counters for store reads/writes/errors by backend.
 
-### What is RLS?
+Exit criteria:
 
-In PostgreSQL, Row-Level Security (RLS) lets the **database** enforce access rules:
+- All current AUTO tests still pass on SQLite.
+- Feature flags compile and default to SQLite.
 
-```sql
--- PostgreSQL RLS example
-CREATE POLICY user_isolation ON tasks
-  USING (user_id = current_setting('app.current_user_id')::UUID);
+### M1 - Storage interfaces without behavior change
 
--- Now even if code has a bug, database blocks cross-user access:
-SET app.current_user_id = '123';
-SELECT * FROM tasks WHERE user_id = '456';  -- Returns NOTHING (blocked by DB)
-```
-- RLS on `user_id`
+- [ ] M1.1 Define traits: `UserRepo`, `TaskRepo`, `TaskIndexRepo`, `ExecutionRepo`, `SlackRepo`, `ProcessedCommentRepo`, `AccountTaskViewRepo`.
+- [ ] M1.2 Wrap existing SQLite implementations behind traits.
+- [ ] M1.3 Replace direct `SqliteSchedulerStore` call sites in service flows with trait-backed stores.
 
-### MongoDB: No native RLS
+Exit criteria:
 
-MongoDB doesn't have built-in RLS. Instead, isolation is enforced at **application level**:
+- No behavior diff in tests.
+- Direct SQLite usage limited to adapter implementations.
 
-```rust
-// When agent connects, set user context
-struct AgentContext {
-    user_id: String,
-}
+### M2 - Mongo infrastructure
 
-// All queries MUST include user_id filter
-async fn get_tasks(ctx: &AgentContext, db: &Database) -> Vec<Task> {
-    db.collection("tasks")
-        .find(doc! { "user_id": &ctx.user_id })  // <-- Developer must remember this
-        .await
-}
-```
-* Essentially we have to maintain RLS policy ourselves, and expose to the agent rows only by `user_id`
+- [ ] M2.1 Add `mongodb` crate, connection config, and client lifecycle management.
+- [ ] M2.2 Implement index bootstrap at startup.
+- [ ] M2.3 Add startup health check + fail-fast on bad Mongo config.
+- [ ] M2.4 Add structured logs for query latency and errors.
 
-**Risk:** If a developer forgets the `user_id` filter, data leaks across users.
+Exit criteria:
 
-### Mitigation strategies
+- Service starts with Mongo config and creates required indexes.
 
-**1. Wrapper struct that enforces user_id (recommended)**
+### M3 - Migrate low-risk stores first
 
-```rust
-/// A "scoped" collection that automatically injects user_id into all queries
-pub struct UserScopedCollection<T> {
-    collection: Collection<T>,
-    user_id: String,
-}
+- [ ] M3.1 Implement Mongo `SlackRepo`.
+- [ ] M3.2 Implement Mongo processed comment stores (Docs + Workspace).
+- [ ] M3.3 Add compatibility tests and switch these reads/writes behind flag.
 
-impl<T> UserScopedCollection<T> {
-    /// All queries automatically filtered by user_id
-    pub async fn find(&self, mut filter: Document) -> Result<Vec<T>> {
-        filter.insert("user_id", &self.user_id);  // Always injected
-        self.collection.find(filter).await
-    }
+Exit criteria:
 
-    pub async fn insert(&self, mut doc: Document) -> Result<()> {
-        doc.insert("user_id", &self.user_id);  // Always injected
-        self.collection.insert_one(doc).await
-    }
+- Slack install + Google poller flows pass with `STORAGE_BACKEND=mongo`.
 
-    // ... delete, update also inject user_id
-}
-```
+### M4 - Migrate user + scheduler storage core
 
-**2. MongoDB Atlas Field-Level Redaction (Atlas only)**
+- [ ] M4.1 Implement Mongo `UserRepo`.
+- [ ] M4.2 Implement Mongo `TaskRepo` for all current task kinds/channels.
+- [ ] M4.3 Implement Mongo `ExecutionRepo`.
+- [ ] M4.4 Implement Mongo `TaskIndexRepo` and wire scheduler due-task loop.
+- [ ] M4.5 Preserve retry and failure-notification logic.
 
-```javascript
-// Atlas App Services rule (JSON)
-{
-  "roles": [{
-    "name": "user",
-    "apply_when": { "%%user.id": { "$exists": true } },
-    "document_filters": {
-      "read": { "user_id": "%%user.id" },
-      "write": { "user_id": "%%user.id" }
-    }
-  }]
-}
-```
+Exit criteria:
 
-This is the closest to PostgreSQL RLS - database enforces the rule.
+- Scheduler integration tests pass with Mongo backend.
+- Due-task throughput and latency are within acceptable range vs SQLite baseline.
 
-### Comparison
+### M5 - Replace account-level shadow tasks with projection
 
-| Approach | Isolation Strength | Complexity | Cross-user queries |
-|----------|-------------------|------------|-------------------|
-| PostgreSQL RLS | Strong (DB enforced) | Low | Easy (admin bypasses RLS) |
-| MongoDB wrapper struct | Medium (app enforced) | Low | Easy |
-| MongoDB Atlas rules | Strong (DB enforced) | Medium | Requires admin role |
-| Separate databases | Strongest | High | Impossible |
+- [ ] M5.1 Implement `account_task_views` write/update paths.
+- [ ] M5.2 Update inbound Slack/Discord/Google Workspace to write linked account view rows.
+- [ ] M5.3 Update execution completion to update account task view status.
+- [ ] M5.4 Simplify `/api/account/tasks` to query projection (remove Slack legacy merge fallback).
 
-### Recommendation for DoWhiz
+Exit criteria:
 
-Use **wrapper struct** approach:
-1. Simple to implement
-2. Works with any MongoDB (Atlas, self-hosted, Cosmos)
-3. Compile-time safety - can't accidentally use raw collection
-4. Easy to audit - grep for raw collection usage
+- `/api/account/tasks` parity confirmed against baseline fixtures.
+- No duplicate runnable task documents required.
 
-```rust
-// Bad - raw access, could forget user_id
-let tasks = db.collection::<Task>("tasks");
+### M6 - Backfill and verification tooling
 
-// Good - scoped access, user_id always enforced
-let tasks = UserScopedCollection::new(db, &agent.user_id);
-```
+- [ ] M6.1 Build idempotent migration tool for SQLite files to Mongo.
+- [ ] M6.2 Classify owner scope:
+  - `legacy_user`: `USERS_ROOT/<id>/state/tasks.db` where `<id>` is not an account UUID
+  - `account_shadow`: account UUID paths (for view projection import only)
+  - `discord_guild`: `WORKSPACE_ROOT/discord/<guild_id>/state/tasks.db`
+- [ ] M6.3 Add dry-run mode and consistency report output.
+- [ ] M6.4 Validate counts, due tasks, and latest execution status on sampled owners.
 
----
+Exit criteria:
 
-## Connection Example (Rust)
+- Dry-run and real import both complete with acceptable diff thresholds.
 
-```rust
-use mongodb::{Client, options::ClientOptions};
+### M7 - Dual-run and cutover
 
-async fn connect() -> mongodb::error::Result<Client> {
-    let uri = std::env::var("MONGODB_URI")
-        .unwrap_or_else(|_| "mongodb://localhost:27017".to_string());
+- [ ] M7.1 Enable dual-write in staging.
+- [ ] M7.2 Run consistency checker on interval (SQLite vs Mongo).
+- [ ] M7.3 Switch read path to Mongo after stable window.
+- [ ] M7.4 Disable SQLite writes after additional stable window.
 
-    let mut options = ClientOptions::parse(&uri).await?;
-    options.app_name = Some("dowhiz-worker".to_string());
+Exit criteria:
 
-    Client::with_options(options)
-}
-```
+- No critical mismatches during stability window.
+- Operational metrics and error rates acceptable.
 
----
+### M8 - Cleanup
 
-## Comparison: SQLite vs MongoDB for this use case
+- [ ] M8.1 Remove SQLite adapters and `rusqlite` dependency where no longer needed.
+- [ ] M8.2 Remove legacy account shadow task sync code.
+- [ ] M8.3 Update docs/runbooks/test checklist for Mongo-only path.
 
-| Aspect | SQLite (current) | MongoDB |
-|--------|-----------------|---------|
-| Multi-VM access | Broken (lock conflicts) | Native support |
-| Per-user isolation | Separate files | `user_id` field |
-| Schema flexibility | Rigid (migrations) | Flexible (polymorphic) |
-| Horizontal scaling | Not possible | Replica sets, sharding |
-| Operational complexity | Low (files) | Medium (managed service) |
-| Cost | Free | ~$50/mo for Atlas M10 |
+Exit criteria:
 
----
+- Build/test green without SQLite task/user/index stores in runtime path.
 
-## Recommended MongoDB Provider
+## Suggested PR Slices
 
-**MongoDB Atlas** (managed):
-- M10 cluster (~$50/mo) handles DoWhiz scale easily
-- Automatic backups, monitoring, scaling
-- No CIFS/lock issues - proper database protocol
+1. PR-1: trait interfaces + SQLite adapters (no behavior change).
+2. PR-2: Mongo infra + index bootstrap.
+3. PR-3: Slack + processed comments migration.
+4. PR-4: users migration.
+5. PR-5: tasks + executions + task_index migration.
+6. PR-6: account_task_views + `/api/account/tasks` migration.
+7. PR-7: backfill tool + dual-write + cutover controls.
+8. PR-8: cleanup/removal.
 
-**Self-hosted** (not recommended):
-- Same Azure VM issues if on Azure Files
-- Use Azure Cosmos DB (MongoDB API) if staying in Azure
+## Test Strategy and Release Gates
+
+For each milestone touching `DoWhiz_service`, run relevant AUTO tests from `reference_documentation/test_plans/DoWhiz_service_tests.md`.
+
+Core gates for this migration:
+
+1. Unit and integration:
+   - `cargo test -p scheduler_module`
+   - `cargo test -p run_task_module`
+   - `cargo test -p send_emails_module`
+2. Scheduler behavior parity:
+   - `cargo test -p scheduler_module --test scheduler_basic`
+   - `cargo test -p scheduler_module --test scheduler_followups`
+   - `cargo test -p scheduler_module --test scheduler_concurrency`
+   - `cargo test -p scheduler_module --test thread_latest_epoch_e2e`
+3. Inbound channel flows:
+   - `cargo test -p scheduler_module --test github_env_e2e`
+   - `cargo test -p scheduler_module --test send_reply_outbound_e2e`
+   - `cargo test -p scheduler_module --test scheduler_retry_notifications_e2e`
+   - `cargo test -p scheduler_module --test scheduler_retry_notifications_slack_e2e`
+
+For LIVE/MANUAL/PLANNED checklist entries, mark `SKIP` with reason unless explicitly run.
+
+## Rollback Plan
+
+1. Keep SQLite data untouched during dual-write.
+2. Keep runtime read toggle (`sqlite` vs `mongo`) until post-cutover stability window is complete.
+3. If Mongo errors spike, switch reads back to SQLite immediately and continue dual-write investigation.
+4. Only remove SQLite write paths after stable production soak.
+
+## Open Decisions
+
+- [ ] Keep `task_index` permanently or remove after proving direct due-task query performance on `tasks`.
+- [ ] Migrate collaboration storage now, or defer until collaboration runtime wiring is expanded.
+- [ ] Execution retention policy (`task_executions` TTL duration).
+- [ ] Provider choice finalization: Atlas vs Cosmos Mongo API.
+
+## Final Notes
+
+This plan intentionally prioritizes correctness and controlled rollout over a big-bang switch. The migration should be implemented as small, auditable PRs with explicit parity checks at each step.
