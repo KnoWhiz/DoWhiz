@@ -2,7 +2,9 @@ use crate::memory_store::ensure_default_user_memo;
 use chrono::{DateTime, Utc};
 use mongodb::bson::{doc, Bson, DateTime as BsonDateTime, Document};
 use mongodb::options::FindOptions;
+use mongodb::options::IndexOptions;
 use mongodb::sync::Collection;
+use mongodb::IndexModel;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -366,9 +368,25 @@ impl MongoUserStore {
         let client =
             create_client_from_env().map_err(|err| UserStoreError::MongoConfig(err.to_string()))?;
         let db = database_from_env(&client);
-        Ok(Self {
-            users: db.collection::<Document>("users"),
-        })
+        let users = db.collection::<Document>("users");
+        users.create_index(
+            IndexModel::builder()
+                .keys(doc! { "user_id": 1 })
+                .options(IndexOptions::builder().unique(Some(true)).build())
+                .build(),
+            None,
+        )?;
+        users.create_index(
+            IndexModel::builder()
+                .keys(doc! { "identifier_type": 1, "identifier": 1 })
+                .build(),
+            None,
+        )?;
+        users.create_index(
+            IndexModel::builder().keys(doc! { "created_at": 1 }).build(),
+            None,
+        )?;
+        Ok(Self { users })
     }
 
     fn get_user_by_identifier(

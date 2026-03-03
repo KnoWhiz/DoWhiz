@@ -5,7 +5,9 @@
 use chrono::{DateTime, Utc};
 use mongodb::bson::{doc, Bson, DateTime as BsonDateTime, Document};
 use mongodb::options::FindOptions;
+use mongodb::options::IndexOptions;
 use mongodb::sync::Collection;
+use mongodb::IndexModel;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -236,9 +238,21 @@ impl MongoSlackStore {
         let client = create_client_from_env()
             .map_err(|err| SlackStoreError::MongoConfig(err.to_string()))?;
         let db = database_from_env(&client);
-        Ok(Self {
-            installations: db.collection::<Document>("slack_installations"),
-        })
+        let installations = db.collection::<Document>("slack_installations");
+        installations.create_index(
+            IndexModel::builder()
+                .keys(doc! { "team_id": 1 })
+                .options(IndexOptions::builder().unique(Some(true)).build())
+                .build(),
+            None,
+        )?;
+        installations.create_index(
+            IndexModel::builder()
+                .keys(doc! { "installed_at": -1 })
+                .build(),
+            None,
+        )?;
+        Ok(Self { installations })
     }
 
     fn upsert_installation(&self, installation: &SlackInstallation) -> Result<(), SlackStoreError> {

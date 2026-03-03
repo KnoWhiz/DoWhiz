@@ -1,7 +1,9 @@
 use chrono::{Duration as ChronoDuration, Utc};
 use mongodb::bson::{doc, Bson, DateTime as BsonDateTime, Document};
-use mongodb::options::{FindOneOptions, FindOptions};
+use mongodb::options::{FindOneOptions, FindOptions, UpdateOptions};
 use mongodb::sync::Collection;
+use mongodb::IndexModel;
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicI64, Ordering};
 use uuid::Uuid;
@@ -27,9 +29,40 @@ impl MongoSchedulerStore {
         let client = create_client_from_env().map_err(mongo_config_err)?;
         let db = database_from_env(&client);
         let (owner_kind, owner_id) = resolve_owner_scope(tasks_db_path);
+        let tasks = db.collection::<Document>("tasks");
+        tasks
+            .create_index(
+                IndexModel::builder()
+                    .keys(doc! { "owner_scope.kind": 1, "owner_scope.id": 1, "task_id": 1 })
+                    .build(),
+                None,
+            )
+            .map_err(mongo_err)?;
+        tasks
+            .create_index(
+                IndexModel::builder()
+                    .keys(doc! { "owner_scope.kind": 1, "owner_scope.id": 1, "created_at": 1 })
+                    .build(),
+                None,
+            )
+            .map_err(mongo_err)?;
+        let executions = db.collection::<Document>("task_executions");
+        executions
+            .create_index(
+                IndexModel::builder()
+                    .keys(doc! {
+                        "owner_scope.kind": 1,
+                        "owner_scope.id": 1,
+                        "task_id": 1,
+                        "started_at": -1
+                    })
+                    .build(),
+                None,
+            )
+            .map_err(mongo_err)?;
         Ok(Self {
-            tasks: db.collection::<Document>("tasks"),
-            executions: db.collection::<Document>("task_executions"),
+            tasks,
+            executions,
             owner_kind,
             owner_id,
         })
@@ -41,13 +74,19 @@ impl MongoSchedulerStore {
             .find(
                 self.owner_filter(),
                 FindOptions::builder()
-                    .sort(doc! { "created_at": 1 })
+                    .sort(doc! { "created_at": -1 })
                     .build(),
             )
             .map_err(mongo_err)?;
+        let mut seen_task_ids = HashSet::new();
         let mut tasks = Vec::new();
         for row in cursor {
             let document = row.map_err(mongo_err)?;
+            if let Ok(task_id) = document.get_str("task_id") {
+                if !seen_task_ids.insert(task_id.to_string()) {
+                    continue;
+                }
+            }
             let task_json = document.get_str("task_json").map_err(|err| {
                 SchedulerError::Storage(format!("missing task_json for task document: {err}"))
             })?;
@@ -55,25 +94,35 @@ impl MongoSchedulerStore {
                 .map_err(|err| SchedulerError::Storage(format!("invalid task_json: {err}")))?;
             tasks.push(task);
         }
+        tasks.sort_by_key(|task| task.created_at);
         Ok(tasks)
     }
 
     pub(crate) fn insert_task(&self, task: &ScheduledTask) -> Result<(), SchedulerError> {
         let task_json = serde_json::to_string(task)
             .map_err(|err| SchedulerError::Storage(format!("serialize task failed: {err}")))?;
-        let document = doc! {
-            "owner_scope": self.owner_scope_doc(),
-            "task_id": task.id.to_string(),
-            "kind": task_kind_label(&task.kind),
-            "channel": task_kind_channel(&task.kind).to_string(),
-            "enabled": task.enabled,
-            "created_at": BsonDateTime::from_chrono(task.created_at),
-            "last_run": task.last_run.map(BsonDateTime::from_chrono).map(Bson::DateTime).unwrap_or(Bson::Null),
-            "retry_count": 0i32,
-            "schedule": schedule_doc(&task.schedule),
-            "task_json": task_json,
-        };
-        self.tasks.insert_one(document, None).map_err(mongo_err)?;
+        self.tasks
+            .update_one(
+                self.task_filter(&task.id.to_string()),
+                doc! {
+                    "$set": {
+                        "owner_scope": self.owner_scope_doc(),
+                        "task_id": task.id.to_string(),
+                        "kind": task_kind_label(&task.kind),
+                        "channel": task_kind_channel(&task.kind).to_string(),
+                        "enabled": task.enabled,
+                        "created_at": BsonDateTime::from_chrono(task.created_at),
+                        "last_run": task.last_run.map(BsonDateTime::from_chrono).map(Bson::DateTime).unwrap_or(Bson::Null),
+                        "schedule": schedule_doc(&task.schedule),
+                        "task_json": task_json,
+                    },
+                    "$setOnInsert": {
+                        "retry_count": 0i32,
+                    },
+                },
+                UpdateOptions::builder().upsert(Some(true)).build(),
+            )
+            .map_err(mongo_err)?;
         Ok(())
     }
 
@@ -207,11 +256,15 @@ impl MongoSchedulerStore {
             )
             .map_err(mongo_err)?;
         let mut summaries = Vec::new();
+        let mut seen_task_ids = HashSet::new();
         for row in cursor {
             let task_doc = row.map_err(mongo_err)?;
             let task_id = task_doc
                 .get_str("task_id")
                 .map_err(|err| SchedulerError::Storage(format!("missing task_id: {err}")))?;
+            if !seen_task_ids.insert(task_id.to_string()) {
+                continue;
+            }
             let schedule = task_doc.get_document("schedule").ok();
             let execution = self
                 .executions

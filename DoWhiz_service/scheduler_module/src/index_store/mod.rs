@@ -1,8 +1,12 @@
 use chrono::{DateTime, Utc};
 use mongodb::bson::{doc, DateTime as BsonDateTime, Document};
 use mongodb::options::FindOptions;
+use mongodb::options::IndexOptions;
+use mongodb::options::UpdateOptions;
 use mongodb::sync::Collection;
+use mongodb::IndexModel;
 use rusqlite::{params, Connection};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -77,20 +81,8 @@ impl IndexStore {
                 "INSERT INTO task_index (task_id, user_id, next_run, enabled)
                  VALUES (?1, ?2, ?3, ?4)",
             )?;
-            for task in tasks {
-                if !task.enabled {
-                    continue;
-                }
-                let next_run = match &task.schedule {
-                    Schedule::Cron { next_run, .. } => next_run,
-                    Schedule::OneShot { run_at } => run_at,
-                };
-                stmt.execute(params![
-                    task.id.to_string(),
-                    user_id,
-                    format_datetime(next_run),
-                    1i64
-                ])?;
+            for (task_id, next_run) in enabled_task_next_runs(tasks) {
+                stmt.execute(params![task_id, user_id, format_datetime(&next_run), 1i64])?;
             }
         }
         tx.commit()?;
@@ -168,9 +160,25 @@ impl MongoIndexStore {
         let client = create_client_from_env()
             .map_err(|err| IndexStoreError::MongoConfig(err.to_string()))?;
         let db = database_from_env(&client);
-        Ok(Self {
-            task_index: db.collection::<Document>("task_index"),
-        })
+        let task_index = db.collection::<Document>("task_index");
+        task_index.create_index(
+            IndexModel::builder()
+                .keys(doc! { "task_id": 1, "user_id": 1 })
+                .options(IndexOptions::builder().unique(Some(true)).build())
+                .build(),
+            None,
+        )?;
+        task_index.create_index(
+            IndexModel::builder()
+                .keys(doc! { "enabled": 1, "next_run": 1 })
+                .build(),
+            None,
+        )?;
+        task_index.create_index(
+            IndexModel::builder().keys(doc! { "user_id": 1 }).build(),
+            None,
+        )?;
+        Ok(Self { task_index })
     }
 
     fn sync_user_tasks(
@@ -178,27 +186,44 @@ impl MongoIndexStore {
         user_id: &str,
         tasks: &[ScheduledTask],
     ) -> Result<(), IndexStoreError> {
-        self.task_index
-            .delete_many(doc! { "user_id": user_id }, None)?;
-        let mut docs = Vec::new();
-        for task in tasks {
-            if !task.enabled {
-                continue;
-            }
-            let next_run = match &task.schedule {
-                Schedule::Cron { next_run, .. } => *next_run,
-                Schedule::OneShot { run_at } => *run_at,
-            };
-            docs.push(doc! {
-                "task_id": task.id.to_string(),
+        let task_rows = enabled_task_next_runs(tasks);
+        let task_ids: Vec<String> = task_rows
+            .iter()
+            .map(|(task_id, _)| task_id.clone())
+            .collect();
+
+        if task_ids.is_empty() {
+            self.task_index
+                .delete_many(doc! { "user_id": user_id }, None)?;
+            return Ok(());
+        }
+
+        self.task_index.delete_many(
+            doc! {
                 "user_id": user_id,
-                "next_run": BsonDateTime::from_chrono(next_run),
-                "enabled": true,
-            });
+                "task_id": { "$nin": task_ids.clone() },
+            },
+            None,
+        )?;
+
+        let options = UpdateOptions::builder().upsert(Some(true)).build();
+        for (task_id, next_run) in task_rows {
+            self.task_index.update_one(
+                doc! { "task_id": &task_id, "user_id": user_id },
+                doc! {
+                    "$set": {
+                        "next_run": BsonDateTime::from_chrono(next_run),
+                        "enabled": true,
+                    },
+                    "$setOnInsert": {
+                        "task_id": &task_id,
+                        "user_id": user_id,
+                    },
+                },
+                options.clone(),
+            )?;
         }
-        if !docs.is_empty() {
-            self.task_index.insert_many(docs, None)?;
-        }
+
         Ok(())
     }
 
@@ -278,6 +303,21 @@ CREATE INDEX IF NOT EXISTS idx_task_index_user_id ON task_index (user_id);
 
 fn format_datetime(value: &DateTime<Utc>) -> String {
     value.to_rfc3339()
+}
+
+fn enabled_task_next_runs(tasks: &[ScheduledTask]) -> Vec<(String, DateTime<Utc>)> {
+    let mut deduped: BTreeMap<String, DateTime<Utc>> = BTreeMap::new();
+    for task in tasks {
+        if !task.enabled {
+            continue;
+        }
+        let next_run = match &task.schedule {
+            Schedule::Cron { next_run, .. } => *next_run,
+            Schedule::OneShot { run_at } => *run_at,
+        };
+        deduped.insert(task.id.to_string(), next_run);
+    }
+    deduped.into_iter().collect()
 }
 
 #[cfg(test)]

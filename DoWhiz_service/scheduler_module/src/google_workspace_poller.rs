@@ -5,7 +5,9 @@
 
 use chrono::Utc;
 use mongodb::bson::{doc, Bson, DateTime as BsonDateTime, Document};
+use mongodb::options::IndexOptions;
 use mongodb::sync::Collection;
+use mongodb::IndexModel;
 use rusqlite::{params, Connection};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -429,9 +431,29 @@ impl MongoWorkspaceProcessedStore {
         let client = create_client_from_env()
             .map_err(|err| SchedulerError::Storage(format!("mongo config error: {err}")))?;
         let db = database_from_env(&client);
+        let processed_comments = db.collection::<Document>("processed_comments");
+        processed_comments
+            .create_index(
+                IndexModel::builder()
+                    .keys(doc! { "file_id": 1, "tracking_id": 1 })
+                    .options(IndexOptions::builder().unique(Some(true)).build())
+                    .build(),
+                None,
+            )
+            .map_err(mongo_scheduler_err)?;
+        let workspace_files = db.collection::<Document>("workspace_files");
+        workspace_files
+            .create_index(
+                IndexModel::builder()
+                    .keys(doc! { "file_id": 1, "file_type": 1 })
+                    .options(IndexOptions::builder().unique(Some(true)).build())
+                    .build(),
+                None,
+            )
+            .map_err(mongo_scheduler_err)?;
         Ok(Self {
-            processed_comments: db.collection::<Document>("processed_comments"),
-            workspace_files: db.collection::<Document>("workspace_files"),
+            processed_comments,
+            workspace_files,
         })
     }
 

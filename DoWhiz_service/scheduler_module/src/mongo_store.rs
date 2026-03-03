@@ -90,8 +90,11 @@ fn ensure_users_indexes(db: &Database) -> Result<(), mongodb::error::Error> {
     collection.create_index(
         IndexModel::builder()
             .keys(doc! { "identifier_type": 1, "identifier": 1 })
-            .options(IndexOptions::builder().unique(Some(true)).build())
             .build(),
+        None,
+    )?;
+    collection.create_index(
+        IndexModel::builder().keys(doc! { "created_at": 1 }).build(),
         None,
     )?;
     Ok(())
@@ -102,7 +105,6 @@ fn ensure_tasks_indexes(db: &Database) -> Result<(), mongodb::error::Error> {
     collection.create_index(
         IndexModel::builder()
             .keys(doc! { "owner_scope.kind": 1, "owner_scope.id": 1, "task_id": 1 })
-            .options(IndexOptions::builder().unique(Some(true)).build())
             .build(),
         None,
     )?;
@@ -115,6 +117,12 @@ fn ensure_tasks_indexes(db: &Database) -> Result<(), mongodb::error::Error> {
     collection.create_index(
         IndexModel::builder()
             .keys(doc! { "enabled": 1, "schedule.next_run": 1 })
+            .build(),
+        None,
+    )?;
+    collection.create_index(
+        IndexModel::builder()
+            .keys(doc! { "owner_scope.kind": 1, "owner_scope.id": 1, "created_at": 1 })
             .build(),
         None,
     )?;
@@ -147,7 +155,7 @@ fn ensure_task_index_indexes(db: &Database) -> Result<(), mongodb::error::Error>
     let collection = db.collection::<Document>("task_index");
     collection.create_index(
         IndexModel::builder()
-            .keys(doc! { "owner_scope.kind": 1, "owner_scope.id": 1, "task_id": 1 })
+            .keys(doc! { "task_id": 1, "user_id": 1 })
             .options(IndexOptions::builder().unique(Some(true)).build())
             .build(),
         None,
@@ -185,6 +193,12 @@ fn ensure_slack_installation_indexes(db: &Database) -> Result<(), mongodb::error
         IndexModel::builder()
             .keys(doc! { "team_id": 1 })
             .options(IndexOptions::builder().unique(Some(true)).build())
+            .build(),
+        None,
+    )?;
+    collection.create_index(
+        IndexModel::builder()
+            .keys(doc! { "installed_at": -1 })
             .build(),
         None,
     )?;
