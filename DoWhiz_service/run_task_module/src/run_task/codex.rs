@@ -1236,8 +1236,13 @@ fn toml_escape(value: &str) -> String {
 }
 
 fn codex_sandbox_mode() -> String {
-    read_env_trimmed("CODEX_SANDBOX_MODE")
-        .or_else(|| read_env_trimmed("RUN_TASK_CODEX_SANDBOX_MODE"))
+    read_targeted_env("CODEX_SANDBOX_MODE", "STAGING_CODEX_SANDBOX_MODE")
+        .or_else(|| {
+            read_targeted_env(
+                "RUN_TASK_CODEX_SANDBOX_MODE",
+                "STAGING_RUN_TASK_CODEX_SANDBOX_MODE",
+            )
+        })
         .unwrap_or_else(|| CODEX_SANDBOX_MODE.to_string())
 }
 
@@ -1250,7 +1255,7 @@ fn effective_codex_sandbox_mode(sandbox_mode: &str, bypass_sandbox: bool) -> Str
 }
 
 fn codex_bypass_sandbox() -> bool {
-    matches!(env::var("CODEX_BYPASS_SANDBOX"), Ok(value) if value.trim() == "1")
+    env_enabled_targeted("CODEX_BYPASS_SANDBOX", "STAGING_CODEX_BYPASS_SANDBOX")
 }
 
 fn employee_id_default_env_prefix(employee_id: &str) -> Option<&'static str> {
@@ -1945,6 +1950,36 @@ mod tests {
         assert!(overrides
             .iter()
             .any(|(k, v)| k == "GOATX402_API_KEY" && v == "api-key-global"));
+    }
+
+    #[test]
+    fn test_codex_sandbox_mode_prefers_staging_targeted_keys() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set("DEPLOY_TARGET", "staging"),
+            EnvVarGuard::set("CODEX_SANDBOX_MODE", "workspace-write"),
+            EnvVarGuard::set("RUN_TASK_CODEX_SANDBOX_MODE", "workspace-write"),
+            EnvVarGuard::set("STAGING_CODEX_SANDBOX_MODE", "danger-full-access"),
+            EnvVarGuard::set(
+                "STAGING_RUN_TASK_CODEX_SANDBOX_MODE",
+                "read-only",
+            ),
+        ];
+
+        // STAGING_CODEX_SANDBOX_MODE has higher priority than STAGING_RUN_TASK_CODEX_SANDBOX_MODE.
+        assert_eq!(codex_sandbox_mode(), "danger-full-access");
+    }
+
+    #[test]
+    fn test_codex_bypass_sandbox_respects_staging_targeted_key() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set("DEPLOY_TARGET", "staging"),
+            EnvVarGuard::set("CODEX_BYPASS_SANDBOX", "0"),
+            EnvVarGuard::set("STAGING_CODEX_BYPASS_SANDBOX", "1"),
+        ];
+
+        assert!(codex_bypass_sandbox());
     }
 
     #[test]
