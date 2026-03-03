@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicI64, Ordering};
 use uuid::Uuid;
 
-use crate::mongo_store::{create_client_from_env, database_from_env};
+use crate::mongo_store::{create_client_from_env, database_from_env, ensure_index_compatible};
 
 use super::super::types::{Schedule, ScheduledTask, SchedulerError};
 use super::super::utils::{task_kind_channel, task_kind_label};
@@ -30,36 +30,33 @@ impl MongoSchedulerStore {
         let db = database_from_env(&client);
         let (owner_kind, owner_id) = resolve_owner_scope(tasks_db_path);
         let tasks = db.collection::<Document>("tasks");
-        tasks
-            .create_index(
-                IndexModel::builder()
-                    .keys(doc! { "owner_scope.kind": 1, "owner_scope.id": 1, "task_id": 1 })
-                    .build(),
-                None,
-            )
-            .map_err(mongo_err)?;
-        tasks
-            .create_index(
-                IndexModel::builder()
-                    .keys(doc! { "owner_scope.kind": 1, "owner_scope.id": 1, "created_at": 1 })
-                    .build(),
-                None,
-            )
-            .map_err(mongo_err)?;
+        ensure_index_compatible(
+            &tasks,
+            IndexModel::builder()
+                .keys(doc! { "owner_scope.kind": 1, "owner_scope.id": 1, "task_id": 1 })
+                .build(),
+        )
+        .map_err(mongo_err)?;
+        ensure_index_compatible(
+            &tasks,
+            IndexModel::builder()
+                .keys(doc! { "owner_scope.kind": 1, "owner_scope.id": 1, "created_at": 1 })
+                .build(),
+        )
+        .map_err(mongo_err)?;
         let executions = db.collection::<Document>("task_executions");
-        executions
-            .create_index(
-                IndexModel::builder()
-                    .keys(doc! {
-                        "owner_scope.kind": 1,
-                        "owner_scope.id": 1,
-                        "task_id": 1,
-                        "started_at": -1
-                    })
-                    .build(),
-                None,
-            )
-            .map_err(mongo_err)?;
+        ensure_index_compatible(
+            &executions,
+            IndexModel::builder()
+                .keys(doc! {
+                    "owner_scope.kind": 1,
+                    "owner_scope.id": 1,
+                    "task_id": 1,
+                    "started_at": -1
+                })
+                .build(),
+        )
+        .map_err(mongo_err)?;
         Ok(Self {
             tasks,
             executions,

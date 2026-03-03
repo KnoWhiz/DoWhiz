@@ -21,7 +21,7 @@ use crate::adapters::google_docs::{ActionableComment, GoogleDocsInboundAdapter};
 use crate::channel::Channel;
 use crate::collaboration_store::CollaborationStore;
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
-use crate::mongo_store::{create_client_from_env, database_from_env};
+use crate::mongo_store::{create_client_from_env, database_from_env, ensure_index_compatible};
 use crate::storage_backend::StorageBackend;
 use crate::{RunTaskTask, Scheduler, SchedulerError, TaskExecutor, TaskKind};
 
@@ -308,25 +308,23 @@ impl MongoDocsProcessedStore {
             .map_err(|err| SchedulerError::Storage(format!("mongo config error: {err}")))?;
         let db = database_from_env(&client);
         let processed_comments = db.collection::<Document>("processed_comments");
-        processed_comments
-            .create_index(
-                IndexModel::builder()
-                    .keys(doc! { "file_id": 1, "tracking_id": 1 })
-                    .options(IndexOptions::builder().unique(Some(true)).build())
-                    .build(),
-                None,
-            )
-            .map_err(mongo_scheduler_err)?;
+        ensure_index_compatible(
+            &processed_comments,
+            IndexModel::builder()
+                .keys(doc! { "file_id": 1, "tracking_id": 1 })
+                .options(IndexOptions::builder().unique(Some(true)).build())
+                .build(),
+        )
+        .map_err(mongo_scheduler_err)?;
         let workspace_files = db.collection::<Document>("workspace_files");
-        workspace_files
-            .create_index(
-                IndexModel::builder()
-                    .keys(doc! { "file_id": 1, "file_type": 1 })
-                    .options(IndexOptions::builder().unique(Some(true)).build())
-                    .build(),
-                None,
-            )
-            .map_err(mongo_scheduler_err)?;
+        ensure_index_compatible(
+            &workspace_files,
+            IndexModel::builder()
+                .keys(doc! { "file_id": 1, "file_type": 1 })
+                .options(IndexOptions::builder().unique(Some(true)).build())
+                .build(),
+        )
+        .map_err(mongo_scheduler_err)?;
         Ok(Self {
             processed_comments,
             workspace_files,

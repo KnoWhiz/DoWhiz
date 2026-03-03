@@ -1,9 +1,11 @@
 use std::env;
 
 use mongodb::bson::{doc, Document};
+use mongodb::error::ErrorKind;
 use mongodb::options::{ClientOptions, IndexOptions};
-use mongodb::sync::{Client, Database};
+use mongodb::sync::{Client, Collection, Database};
 use mongodb::IndexModel;
+use tracing::warn;
 
 use crate::storage_backend::StorageBackend;
 
@@ -78,60 +80,94 @@ pub fn bootstrap_indexes_from_env() -> Result<(), MongoStoreError> {
     Ok(())
 }
 
+pub fn ensure_index_compatible(
+    collection: &Collection<Document>,
+    model: IndexModel,
+) -> Result<(), mongodb::error::Error> {
+    match collection.create_index(model, None) {
+        Ok(_) => Ok(()),
+        Err(err) if is_ignorable_index_conflict(&err) => {
+            warn!(
+                error = %err,
+                collection = collection.name(),
+                "ignoring existing conflicting index definition; keeping remote index options"
+            );
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn is_ignorable_index_conflict(err: &mongodb::error::Error) -> bool {
+    let ErrorKind::Command(command_error) = err.kind.as_ref() else {
+        return false;
+    };
+    if matches!(command_error.code, 68 | 85 | 86) {
+        return true;
+    }
+    matches!(
+        command_error.code_name.as_str(),
+        "IndexAlreadyExists" | "IndexOptionsConflict" | "IndexKeySpecsConflict"
+    ) || command_error
+        .message
+        .contains("already exists with different options")
+}
+
 fn ensure_users_indexes(db: &Database) -> Result<(), mongodb::error::Error> {
     let collection = db.collection::<Document>("users");
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "user_id": 1 })
             .options(IndexOptions::builder().unique(Some(true)).build())
             .build(),
-        None,
     )?;
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "identifier_type": 1, "identifier": 1 })
             .build(),
-        None,
     )?;
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder().keys(doc! { "created_at": 1 }).build(),
-        None,
     )?;
     Ok(())
 }
 
 fn ensure_tasks_indexes(db: &Database) -> Result<(), mongodb::error::Error> {
     let collection = db.collection::<Document>("tasks");
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "owner_scope.kind": 1, "owner_scope.id": 1, "task_id": 1 })
             .build(),
-        None,
     )?;
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "owner_scope.kind": 1, "owner_scope.id": 1, "enabled": 1 })
             .build(),
-        None,
     )?;
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "enabled": 1, "schedule.next_run": 1 })
             .build(),
-        None,
     )?;
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "owner_scope.kind": 1, "owner_scope.id": 1, "created_at": 1 })
             .build(),
-        None,
     )?;
     Ok(())
 }
 
 fn ensure_task_executions_indexes(db: &Database) -> Result<(), mongodb::error::Error> {
     let collection = db.collection::<Document>("task_executions");
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! {
                 "owner_scope.kind": 1,
@@ -140,85 +176,84 @@ fn ensure_task_executions_indexes(db: &Database) -> Result<(), mongodb::error::E
                 "started_at": -1
             })
             .build(),
-        None,
     )?;
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "started_at": -1 })
             .build(),
-        None,
     )?;
     Ok(())
 }
 
 fn ensure_task_index_indexes(db: &Database) -> Result<(), mongodb::error::Error> {
     let collection = db.collection::<Document>("task_index");
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "task_id": 1, "user_id": 1 })
             .options(IndexOptions::builder().unique(Some(true)).build())
             .build(),
-        None,
     )?;
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "enabled": 1, "next_run": 1 })
             .build(),
-        None,
     )?;
     Ok(())
 }
 
 fn ensure_account_task_views_indexes(db: &Database) -> Result<(), mongodb::error::Error> {
     let collection = db.collection::<Document>("account_task_views");
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "account_id": 1, "task_id": 1 })
             .options(IndexOptions::builder().unique(Some(true)).build())
             .build(),
-        None,
     )?;
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "account_id": 1, "created_at": -1 })
             .build(),
-        None,
     )?;
     Ok(())
 }
 
 fn ensure_slack_installation_indexes(db: &Database) -> Result<(), mongodb::error::Error> {
     let collection = db.collection::<Document>("slack_installations");
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "team_id": 1 })
             .options(IndexOptions::builder().unique(Some(true)).build())
             .build(),
-        None,
     )?;
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "installed_at": -1 })
             .build(),
-        None,
     )?;
     Ok(())
 }
 
 fn ensure_processed_comments_indexes(db: &Database) -> Result<(), mongodb::error::Error> {
     let collection = db.collection::<Document>("processed_comments");
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "file_id": 1, "tracking_id": 1 })
             .options(IndexOptions::builder().unique(Some(true)).build())
             .build(),
-        None,
     )?;
-    collection.create_index(
+    ensure_index_compatible(
+        &collection,
         IndexModel::builder()
             .keys(doc! { "file_type": 1, "processed_at": -1 })
             .build(),
-        None,
     )?;
     Ok(())
 }

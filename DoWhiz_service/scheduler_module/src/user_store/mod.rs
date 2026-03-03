@@ -12,7 +12,7 @@ use std::time::Duration;
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::mongo_store::{create_client_from_env, database_from_env};
+use crate::mongo_store::{create_client_from_env, database_from_env, ensure_index_compatible};
 use crate::storage_backend::StorageBackend;
 
 #[derive(Debug)]
@@ -369,22 +369,22 @@ impl MongoUserStore {
             create_client_from_env().map_err(|err| UserStoreError::MongoConfig(err.to_string()))?;
         let db = database_from_env(&client);
         let users = db.collection::<Document>("users");
-        users.create_index(
+        ensure_index_compatible(
+            &users,
             IndexModel::builder()
                 .keys(doc! { "user_id": 1 })
                 .options(IndexOptions::builder().unique(Some(true)).build())
                 .build(),
-            None,
         )?;
-        users.create_index(
+        ensure_index_compatible(
+            &users,
             IndexModel::builder()
                 .keys(doc! { "identifier_type": 1, "identifier": 1 })
                 .build(),
-            None,
         )?;
-        users.create_index(
+        ensure_index_compatible(
+            &users,
             IndexModel::builder().keys(doc! { "created_at": 1 }).build(),
-            None,
         )?;
         Ok(Self { users })
     }

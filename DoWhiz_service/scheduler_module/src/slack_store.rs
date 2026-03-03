@@ -12,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::mongo_store::{create_client_from_env, database_from_env};
+use crate::mongo_store::{create_client_from_env, database_from_env, ensure_index_compatible};
 use crate::storage_backend::StorageBackend;
 
 /// A Slack workspace installation record.
@@ -239,18 +239,18 @@ impl MongoSlackStore {
             .map_err(|err| SlackStoreError::MongoConfig(err.to_string()))?;
         let db = database_from_env(&client);
         let installations = db.collection::<Document>("slack_installations");
-        installations.create_index(
+        ensure_index_compatible(
+            &installations,
             IndexModel::builder()
                 .keys(doc! { "team_id": 1 })
                 .options(IndexOptions::builder().unique(Some(true)).build())
                 .build(),
-            None,
         )?;
-        installations.create_index(
+        ensure_index_compatible(
+            &installations,
             IndexModel::builder()
                 .keys(doc! { "installed_at": -1 })
                 .build(),
-            None,
         )?;
         Ok(Self { installations })
     }

@@ -64,6 +64,8 @@ struct RecordingExecutor {
     errors: Arc<Mutex<Vec<String>>>,
 }
 
+static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
 impl TaskExecutor for RecordingExecutor {
     fn execute(&self, task: &TaskKind) -> Result<TaskExecution, SchedulerError> {
         match task {
@@ -168,6 +170,7 @@ fn run_scheduler_x402_env_test(
     expected_api_key: &str,
     expected_api_secret: &str,
 ) {
+    let _test_lock = TEST_MUTEX.lock().expect("test lock");
     let temp = TempDir::new().expect("tempdir");
     let root = temp.path();
     let bin_root = root.join("bin");

@@ -11,7 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::mongo_store::{create_client_from_env, database_from_env};
+use crate::mongo_store::{create_client_from_env, database_from_env, ensure_index_compatible};
 use crate::storage_backend::StorageBackend;
 use crate::{Schedule, ScheduledTask};
 
@@ -161,22 +161,22 @@ impl MongoIndexStore {
             .map_err(|err| IndexStoreError::MongoConfig(err.to_string()))?;
         let db = database_from_env(&client);
         let task_index = db.collection::<Document>("task_index");
-        task_index.create_index(
+        ensure_index_compatible(
+            &task_index,
             IndexModel::builder()
                 .keys(doc! { "task_id": 1, "user_id": 1 })
                 .options(IndexOptions::builder().unique(Some(true)).build())
                 .build(),
-            None,
         )?;
-        task_index.create_index(
+        ensure_index_compatible(
+            &task_index,
             IndexModel::builder()
                 .keys(doc! { "enabled": 1, "next_run": 1 })
                 .build(),
-            None,
         )?;
-        task_index.create_index(
+        ensure_index_compatible(
+            &task_index,
             IndexModel::builder().keys(doc! { "user_id": 1 }).build(),
-            None,
         )?;
         Ok(Self { task_index })
     }
