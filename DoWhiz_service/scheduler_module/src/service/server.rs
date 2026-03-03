@@ -15,7 +15,11 @@ use crate::blob_store::get_blob_store;
 use crate::index_store::IndexStore;
 use crate::ingestion_queue::{build_queue_from_env, IngestionQueue};
 use crate::message_router::MessageRouter;
+use crate::mongo_store::{
+    bootstrap_indexes_from_env, health_check_from_env, mongo_database_name_from_env,
+};
 use crate::slack_store::{SlackInstallation, SlackStore};
+use crate::storage_backend::StorageBackend;
 use crate::user_store::UserStore;
 use crate::{ModuleExecutor, Scheduler};
 use tokio::task;
@@ -34,6 +38,17 @@ pub async fn run_server(
     config: ServiceConfig,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> Result<(), BoxError> {
+    let storage_backend = StorageBackend::from_env();
+    if storage_backend.uses_mongo() {
+        health_check_from_env()?;
+        bootstrap_indexes_from_env()?;
+        info!(
+            "mongo backend enabled backend={:?} database={}",
+            storage_backend,
+            mongo_database_name_from_env()
+        );
+    }
+
     // Export SLACK_STORE_PATH so execute_slack_send can find the OAuth tokens
     std::env::set_var("SLACK_STORE_PATH", &config.slack_store_path);
     let config = Arc::new(config);
@@ -46,18 +61,20 @@ pub async fn run_server(
             .await
             .map_err(|err| -> BoxError { err.into() })??;
     let message_router = Arc::new(MessageRouter::new());
-    if let Ok(user_ids) = user_store.list_user_ids() {
-        for user_id in user_ids {
-            let paths = user_store.user_paths(&config.users_root, &user_id);
-            let scheduler = Scheduler::load(&paths.tasks_db_path, ModuleExecutor::default());
-            match scheduler {
-                Ok(scheduler) => {
-                    if let Err(err) = index_store.sync_user_tasks(&user_id, scheduler.tasks()) {
-                        error!("index bootstrap failed for {}: {}", user_id, err);
+    if storage_backend.uses_sqlite() {
+        if let Ok(user_ids) = user_store.list_user_ids() {
+            for user_id in user_ids {
+                let paths = user_store.user_paths(&config.users_root, &user_id);
+                let scheduler = Scheduler::load(&paths.tasks_db_path, ModuleExecutor::default());
+                match scheduler {
+                    Ok(scheduler) => {
+                        if let Err(err) = index_store.sync_user_tasks(&user_id, scheduler.tasks()) {
+                            error!("index bootstrap failed for {}: {}", user_id, err);
+                        }
                     }
-                }
-                Err(err) => {
-                    error!("scheduler bootstrap failed for {}: {}", user_id, err);
+                    Err(err) => {
+                        error!("scheduler bootstrap failed for {}: {}", user_id, err);
+                    }
                 }
             }
         }

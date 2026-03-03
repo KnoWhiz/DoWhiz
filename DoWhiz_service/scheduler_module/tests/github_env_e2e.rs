@@ -13,6 +13,7 @@ use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tempfile::TempDir;
@@ -20,6 +21,14 @@ use tempfile::TempDir;
 #[derive(Clone, Default)]
 struct RecordingExecutor {
     errors: Arc<Mutex<Vec<String>>>,
+}
+
+static TEST_EMAIL_SEQ: AtomicU64 = AtomicU64::new(1);
+static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+fn unique_test_email(prefix: &str) -> String {
+    let seq = TEST_EMAIL_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}-{}-{seq}@example.com", std::process::id())
 }
 
 struct EnvGuard {
@@ -267,6 +276,7 @@ fn first_workspace_dir(root: &Path) -> PathBuf {
 
 #[test]
 fn email_flow_injects_github_env() {
+    let _test_lock = TEST_MUTEX.lock().expect("test lock");
     let temp = TempDir::new().expect("tempdir");
     let root = temp.path();
     let users_root = root.join("users");
@@ -359,14 +369,16 @@ fn email_flow_injects_github_env() {
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
 
-    let inbound_raw = r#"{
-  "From": "Alice <alice@example.com>",
-  "To": "Service <service@example.com>",
-  "Subject": "Open a PR",
-  "TextBody": "Please open a PR for issue 56.",
-  "Headers": [{"Name": "Message-ID", "Value": "<msg-1@example.com>"}]
-}"#;
-    let payload: PostmarkInbound = serde_json::from_str(inbound_raw).expect("parse inbound");
+    let sender_email = unique_test_email("alice");
+    let inbound_raw = serde_json::json!({
+        "From": format!("Alice <{}>", sender_email),
+        "To": "Service <service@example.com>",
+        "Subject": "Open a PR",
+        "TextBody": "Please open a PR for issue 56.",
+        "Headers": [{"Name": "Message-ID", "Value": "<msg-1@example.com>"}],
+    })
+    .to_string();
+    let payload: PostmarkInbound = serde_json::from_str(&inbound_raw).expect("parse inbound");
     process_inbound_payload(
         &config,
         &user_store,
@@ -377,7 +389,7 @@ fn email_flow_injects_github_env() {
     .expect("process inbound");
 
     let user = user_store
-        .get_or_create_user("email", "alice@example.com")
+        .get_or_create_user("email", &sender_email)
         .expect("user lookup");
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
 
@@ -402,6 +414,7 @@ fn email_flow_injects_github_env() {
 
 #[test]
 fn email_flow_injects_employee_github_env() {
+    let _test_lock = TEST_MUTEX.lock().expect("test lock");
     let temp = TempDir::new().expect("tempdir");
     let root = temp.path();
     let users_root = root.join("users");
@@ -495,14 +508,16 @@ fn email_flow_injects_employee_github_env() {
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
 
-    let inbound_raw = r#"{
-  "From": "Alice <alice@example.com>",
-  "To": "Service <service@example.com>",
-  "Subject": "Open a PR",
-  "TextBody": "Please open a PR for issue 56.",
-  "Headers": [{"Name": "Message-ID", "Value": "<msg-1@example.com>"}]
-}"#;
-    let payload: PostmarkInbound = serde_json::from_str(inbound_raw).expect("parse inbound");
+    let sender_email = unique_test_email("alice");
+    let inbound_raw = serde_json::json!({
+        "From": format!("Alice <{}>", sender_email),
+        "To": "Service <service@example.com>",
+        "Subject": "Open a PR",
+        "TextBody": "Please open a PR for issue 56.",
+        "Headers": [{"Name": "Message-ID", "Value": "<msg-1@example.com>"}],
+    })
+    .to_string();
+    let payload: PostmarkInbound = serde_json::from_str(&inbound_raw).expect("parse inbound");
     process_inbound_payload(
         &config,
         &user_store,
@@ -513,7 +528,7 @@ fn email_flow_injects_employee_github_env() {
     .expect("process inbound");
 
     let user = user_store
-        .get_or_create_user("email", "alice@example.com")
+        .get_or_create_user("email", &sender_email)
         .expect("user lookup");
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
 
@@ -538,6 +553,7 @@ fn email_flow_injects_employee_github_env() {
 
 #[test]
 fn email_flow_injects_x402_env() {
+    let _test_lock = TEST_MUTEX.lock().expect("test lock");
     let temp = TempDir::new().expect("tempdir");
     let root = temp.path();
     let users_root = root.join("users");
@@ -641,14 +657,16 @@ fn email_flow_injects_x402_env() {
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
 
-    let inbound_raw = r#"{
-  "From": "Alice <alice@example.com>",
-  "To": "Service <service@example.com>",
-  "Subject": "Need x402 paid endpoint",
-  "TextBody": "Please wire x402 into the API route.",
-  "Headers": [{"Name": "Message-ID", "Value": "<msg-x402-1@example.com>"}]
-}"#;
-    let payload: PostmarkInbound = serde_json::from_str(inbound_raw).expect("parse inbound");
+    let sender_email = unique_test_email("alice");
+    let inbound_raw = serde_json::json!({
+        "From": format!("Alice <{}>", sender_email),
+        "To": "Service <service@example.com>",
+        "Subject": "Need x402 paid endpoint",
+        "TextBody": "Please wire x402 into the API route.",
+        "Headers": [{"Name": "Message-ID", "Value": "<msg-x402-1@example.com>"}],
+    })
+    .to_string();
+    let payload: PostmarkInbound = serde_json::from_str(&inbound_raw).expect("parse inbound");
     process_inbound_payload(
         &config,
         &user_store,
@@ -659,7 +677,7 @@ fn email_flow_injects_x402_env() {
     .expect("process inbound");
 
     let user = user_store
-        .get_or_create_user("email", "alice@example.com")
+        .get_or_create_user("email", &sender_email)
         .expect("user lookup");
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
 
@@ -691,6 +709,7 @@ fn email_flow_injects_x402_env() {
 
 #[test]
 fn email_flow_injects_employee_prefixed_x402_env() {
+    let _test_lock = TEST_MUTEX.lock().expect("test lock");
     let temp = TempDir::new().expect("tempdir");
     let root = temp.path();
     let users_root = root.join("users");
@@ -798,14 +817,16 @@ fn email_flow_injects_employee_prefixed_x402_env() {
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
 
-    let inbound_raw = r#"{
-  "From": "Alice <alice@example.com>",
-  "To": "Service <service@example.com>",
-  "Subject": "Need prefixed x402 env",
-  "TextBody": "Please run with employee-prefixed x402 keys.",
-  "Headers": [{"Name": "Message-ID", "Value": "<msg-x402-2@example.com>"}]
-}"#;
-    let payload: PostmarkInbound = serde_json::from_str(inbound_raw).expect("parse inbound");
+    let sender_email = unique_test_email("alice");
+    let inbound_raw = serde_json::json!({
+        "From": format!("Alice <{}>", sender_email),
+        "To": "Service <service@example.com>",
+        "Subject": "Need prefixed x402 env",
+        "TextBody": "Please run with employee-prefixed x402 keys.",
+        "Headers": [{"Name": "Message-ID", "Value": "<msg-x402-2@example.com>"}],
+    })
+    .to_string();
+    let payload: PostmarkInbound = serde_json::from_str(&inbound_raw).expect("parse inbound");
     process_inbound_payload(
         &config,
         &user_store,
@@ -816,7 +837,7 @@ fn email_flow_injects_employee_prefixed_x402_env() {
     .expect("process inbound");
 
     let user = user_store
-        .get_or_create_user("email", "alice@example.com")
+        .get_or_create_user("email", &sender_email)
         .expect("user lookup");
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
 

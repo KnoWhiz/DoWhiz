@@ -21,6 +21,7 @@ hex = "0.4"
 jsonwebtoken = "9"
 kuchiki = "0.8"
 md5 = "0.7"
+mongodb = { version = "2.8", default-features = false, features = ["sync", "bson-chrono-0_4"] }
 native-tls = "0.2"
 postgres = { version = "0.19", features = ["with-uuid-1", "with-chrono-0_4"] }
 postgres-native-tls = "0.5"

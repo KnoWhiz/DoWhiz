@@ -4,6 +4,10 @@
 //! mentioning the digital employee and creates tasks to handle them.
 
 use chrono::Utc;
+use mongodb::bson::{doc, Bson, DateTime as BsonDateTime, Document};
+use mongodb::options::IndexOptions;
+use mongodb::sync::Collection;
+use mongodb::IndexModel;
 use rusqlite::{params, Connection};
 use std::collections::HashSet;
 use std::fs;
@@ -17,6 +21,8 @@ use crate::adapters::google_docs::{ActionableComment, GoogleDocsInboundAdapter};
 use crate::channel::Channel;
 use crate::collaboration_store::CollaborationStore;
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
+use crate::mongo_store::{create_client_from_env, database_from_env, ensure_index_compatible};
+use crate::storage_backend::StorageBackend;
 use crate::{RunTaskTask, Scheduler, SchedulerError, TaskExecutor, TaskKind};
 
 /// Configuration for Google Docs polling.
@@ -140,12 +146,27 @@ ON google_docs_processed_comments(document_id);
 #[derive(Debug)]
 pub struct GoogleDocsProcessedStore {
     path: PathBuf,
+    mongo: Option<MongoDocsProcessedStore>,
+}
+
+#[derive(Debug, Clone)]
+struct MongoDocsProcessedStore {
+    processed_comments: Collection<Document>,
+    workspace_files: Collection<Document>,
 }
 
 impl GoogleDocsProcessedStore {
     pub fn new(path: PathBuf) -> Result<Self, SchedulerError> {
-        let store = Self { path };
-        store.init()?;
+        let backend = StorageBackend::from_env();
+        let mongo = if backend.uses_mongo() {
+            Some(MongoDocsProcessedStore::new()?)
+        } else {
+            None
+        };
+        let store = Self { path, mongo };
+        if store.mongo.is_none() {
+            store.init()?;
+        }
         Ok(store)
     }
 
@@ -173,6 +194,9 @@ impl GoogleDocsProcessedStore {
         document_id: &str,
         comment_id: &str,
     ) -> Result<bool, SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.is_processed(document_id, comment_id);
+        }
         let conn = self.open()?;
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM google_docs_processed_comments WHERE document_id = ?1 AND comment_id = ?2",
@@ -188,6 +212,9 @@ impl GoogleDocsProcessedStore {
         document_id: &str,
         comment_id: &str,
     ) -> Result<(), SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.mark_processed(document_id, comment_id);
+        }
         let conn = self.open()?;
         conn.execute(
             "INSERT OR IGNORE INTO google_docs_processed_comments (document_id, comment_id, processed_at) VALUES (?1, ?2, ?3)",
@@ -202,6 +229,9 @@ impl GoogleDocsProcessedStore {
         &self,
         document_id: &str,
     ) -> Result<HashSet<String>, SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.get_processed_ids(document_id);
+        }
         let conn = self.open()?;
         let mut stmt = conn.prepare(
             "SELECT comment_id FROM google_docs_processed_comments WHERE document_id = ?1",
@@ -228,6 +258,9 @@ impl GoogleDocsProcessedStore {
         document_id: &str,
         tracking_id: &str,
     ) -> Result<(), SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.mark_processed(document_id, tracking_id);
+        }
         let conn = self.open()?;
         conn.execute(
             "INSERT OR IGNORE INTO google_docs_processed_comments (document_id, comment_id, processed_at) VALUES (?1, ?2, ?3)",
@@ -243,6 +276,9 @@ impl GoogleDocsProcessedStore {
         document_name: Option<&str>,
         owner_email: Option<&str>,
     ) -> Result<(), SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.register_document(document_id, document_name, owner_email);
+        }
         let conn = self.open()?;
         conn.execute(
             "INSERT OR REPLACE INTO google_docs_documents (document_id, document_name, owner_email, last_checked_at, created_at)
@@ -254,6 +290,9 @@ impl GoogleDocsProcessedStore {
 
     /// Update last checked time for a document.
     pub fn update_last_checked(&self, document_id: &str) -> Result<(), SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.update_last_checked(document_id);
+        }
         let conn = self.open()?;
         conn.execute(
             "UPDATE google_docs_documents SET last_checked_at = ?1 WHERE document_id = ?2",
@@ -261,6 +300,133 @@ impl GoogleDocsProcessedStore {
         )?;
         Ok(())
     }
+}
+
+impl MongoDocsProcessedStore {
+    fn new() -> Result<Self, SchedulerError> {
+        let client = create_client_from_env()
+            .map_err(|err| SchedulerError::Storage(format!("mongo config error: {err}")))?;
+        let db = database_from_env(&client);
+        let processed_comments = db.collection::<Document>("processed_comments");
+        ensure_index_compatible(
+            &processed_comments,
+            IndexModel::builder()
+                .keys(doc! { "file_id": 1, "tracking_id": 1 })
+                .options(IndexOptions::builder().unique(Some(true)).build())
+                .build(),
+        )
+        .map_err(mongo_scheduler_err)?;
+        let workspace_files = db.collection::<Document>("workspace_files");
+        ensure_index_compatible(
+            &workspace_files,
+            IndexModel::builder()
+                .keys(doc! { "file_id": 1, "file_type": 1 })
+                .options(IndexOptions::builder().unique(Some(true)).build())
+                .build(),
+        )
+        .map_err(mongo_scheduler_err)?;
+        Ok(Self {
+            processed_comments,
+            workspace_files,
+        })
+    }
+
+    fn is_processed(&self, document_id: &str, comment_id: &str) -> Result<bool, SchedulerError> {
+        let found = self
+            .processed_comments
+            .find_one(
+                doc! {
+                    "file_id": document_id,
+                    "file_type": "docs",
+                    "tracking_id": comment_id,
+                },
+                None,
+            )
+            .map_err(mongo_scheduler_err)?
+            .is_some();
+        Ok(found)
+    }
+
+    fn mark_processed(&self, document_id: &str, tracking_id: &str) -> Result<(), SchedulerError> {
+        self.processed_comments
+            .update_one(
+                doc! {
+                    "file_id": document_id,
+                    "file_type": "docs",
+                    "tracking_id": tracking_id,
+                },
+                doc! {
+                    "$setOnInsert": {
+                        "processed_at": BsonDateTime::from_chrono(Utc::now()),
+                    }
+                },
+                mongodb::options::UpdateOptions::builder()
+                    .upsert(true)
+                    .build(),
+            )
+            .map_err(mongo_scheduler_err)?;
+        Ok(())
+    }
+
+    fn get_processed_ids(&self, document_id: &str) -> Result<HashSet<String>, SchedulerError> {
+        let cursor = self
+            .processed_comments
+            .find(doc! { "file_id": document_id, "file_type": "docs" }, None)
+            .map_err(mongo_scheduler_err)?;
+        let mut ids = HashSet::new();
+        for row in cursor {
+            let doc = row.map_err(mongo_scheduler_err)?;
+            if let Ok(value) = doc.get_str("tracking_id") {
+                ids.insert(value.to_string());
+            }
+        }
+        Ok(ids)
+    }
+
+    fn register_document(
+        &self,
+        document_id: &str,
+        document_name: Option<&str>,
+        owner_email: Option<&str>,
+    ) -> Result<(), SchedulerError> {
+        let now = BsonDateTime::from_chrono(Utc::now());
+        self.workspace_files
+            .update_one(
+                doc! { "file_id": document_id, "file_type": "docs" },
+                doc! {
+                    "$set": {
+                        "file_name": document_name.map(Bson::from).unwrap_or(Bson::Null),
+                        "owner_email": owner_email.map(Bson::from).unwrap_or(Bson::Null),
+                        "last_checked_at": now,
+                    },
+                    "$setOnInsert": {
+                        "created_at": now,
+                    }
+                },
+                mongodb::options::UpdateOptions::builder()
+                    .upsert(true)
+                    .build(),
+            )
+            .map_err(mongo_scheduler_err)?;
+        Ok(())
+    }
+
+    fn update_last_checked(&self, document_id: &str) -> Result<(), SchedulerError> {
+        self.workspace_files
+            .update_one(
+                doc! { "file_id": document_id, "file_type": "docs" },
+                doc! {
+                    "$set": { "last_checked_at": BsonDateTime::from_chrono(Utc::now()) }
+                },
+                None,
+            )
+            .map_err(mongo_scheduler_err)?;
+        Ok(())
+    }
+}
+
+fn mongo_scheduler_err(err: mongodb::error::Error) -> SchedulerError {
+    SchedulerError::Storage(format!("mongodb error: {err}"))
 }
 
 /// Google Docs polling service.

@@ -7,6 +7,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::channel::Channel;
+use crate::storage_backend::StorageBackend;
 
 use super::types::{Schedule, ScheduledTask, SchedulerError, TaskKind};
 use super::utils::{
@@ -15,6 +16,7 @@ use super::utils::{
 };
 
 mod migrations;
+mod mongo;
 mod schema;
 mod task_rows;
 
@@ -24,21 +26,34 @@ use migrations::{
     ensure_send_sms_tasks_table, ensure_send_telegram_tasks_table,
     ensure_send_whatsapp_tasks_table, ensure_tasks_columns,
 };
+use mongo::MongoSchedulerStore;
 use schema::SCHEDULER_SCHEMA;
 
 #[derive(Debug)]
 pub(crate) struct SqliteSchedulerStore {
     path: PathBuf,
+    mongo: Option<MongoSchedulerStore>,
 }
 
 impl SqliteSchedulerStore {
     pub(crate) fn new(path: PathBuf) -> Result<Self, SchedulerError> {
-        let store = Self { path };
-        let _ = store.open()?;
+        let backend = StorageBackend::from_env();
+        let mongo = if backend.uses_mongo() {
+            Some(MongoSchedulerStore::new(&path)?)
+        } else {
+            None
+        };
+        let store = Self { path, mongo };
+        if store.mongo.is_none() {
+            let _ = store.open()?;
+        }
         Ok(store)
     }
 
     pub(crate) fn load_tasks(&self) -> Result<Vec<ScheduledTask>, SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.load_tasks();
+        }
         let conn = self.open()?;
         let mut stmt = conn.prepare(
             "SELECT id, kind, channel, enabled, created_at, last_run, schedule_type, cron_expression, next_run, run_at
@@ -159,6 +174,9 @@ impl SqliteSchedulerStore {
     }
 
     pub(crate) fn insert_task(&self, task: &ScheduledTask) -> Result<(), SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.insert_task(task);
+        }
         let mut conn = self.open()?;
         let tx = conn.transaction()?;
         let (schedule_type, cron_expression, next_run, run_at) = schedule_columns(&task.schedule);
@@ -247,6 +265,9 @@ impl SqliteSchedulerStore {
     }
 
     pub(crate) fn update_task(&self, task: &ScheduledTask) -> Result<(), SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.update_task(task);
+        }
         let conn = self.open()?;
         let (schedule_type, cron_expression, next_run, run_at) = schedule_columns(&task.schedule);
         conn.execute(
@@ -278,6 +299,9 @@ impl SqliteSchedulerStore {
         task_id: Uuid,
         started_at: DateTime<Utc>,
     ) -> Result<i64, SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.record_execution_start(task_id, started_at);
+        }
         let conn = self.open()?;
         conn.execute(
             "INSERT INTO task_executions (task_id, started_at, status)
@@ -294,6 +318,9 @@ impl SqliteSchedulerStore {
         status: &str,
         error_message: Option<&str>,
     ) -> Result<(), SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.record_execution_finish(execution_id, finished_at, status, error_message);
+        }
         let conn = self.open()?;
         conn.execute(
             "UPDATE task_executions
@@ -371,6 +398,9 @@ impl SqliteSchedulerStore {
 
     /// Get the current retry count for a task
     pub(crate) fn get_retry_count(&self, task_id: &str) -> Result<u32, SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.get_retry_count(task_id);
+        }
         let conn = self.open()?;
         let count: i64 = conn
             .query_row(
@@ -384,6 +414,9 @@ impl SqliteSchedulerStore {
 
     /// Increment the retry count for a task and return the new count
     pub(crate) fn increment_retry_count(&self, task_id: &str) -> Result<u32, SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.increment_retry_count(task_id);
+        }
         let conn = self.open()?;
         conn.execute(
             "UPDATE tasks SET retry_count = retry_count + 1 WHERE id = ?1",
@@ -399,6 +432,9 @@ impl SqliteSchedulerStore {
 
     /// Reset the retry count for a task (after successful execution)
     pub(crate) fn reset_retry_count(&self, task_id: &str) -> Result<(), SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.reset_retry_count(task_id);
+        }
         let conn = self.open()?;
         conn.execute(
             "UPDATE tasks SET retry_count = 0 WHERE id = ?1",
@@ -409,6 +445,9 @@ impl SqliteSchedulerStore {
 
     /// Disable a task by its ID (used when max retries exceeded)
     pub(crate) fn disable_task_by_id(&self, task_id: &str) -> Result<(), SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.disable_task_by_id(task_id);
+        }
         let conn = self.open()?;
         conn.execute(
             "UPDATE tasks SET enabled = 0 WHERE id = ?1",
@@ -421,6 +460,9 @@ impl SqliteSchedulerStore {
     /// Returns a list of task summaries suitable for API responses.
     /// Only returns tasks created in the past 24 hours.
     pub fn list_tasks_with_status(&self) -> Result<Vec<TaskStatusSummary>, SchedulerError> {
+        if let Some(mongo) = &self.mongo {
+            return mongo.list_tasks_with_status();
+        }
         let conn = self.open()?;
         let mut stmt = conn.prepare(
             "SELECT
