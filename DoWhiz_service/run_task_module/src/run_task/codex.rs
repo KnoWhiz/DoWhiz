@@ -692,8 +692,13 @@ fn run_codex_task_azure_aci(
         combined_output.push_str(&container_logs);
     }
 
-    let (scheduled_tasks, scheduled_tasks_error) = extract_scheduled_tasks(&combined_output);
-    let (scheduler_actions, scheduler_actions_error) = extract_scheduler_actions(&combined_output);
+    let (scheduled_tasks, scheduled_tasks_error, scheduler_actions, scheduler_actions_error) =
+        parse_scheduling_from_outputs(
+            &output_content,
+            &container_logs,
+            &combined_output,
+            request.workspace_dir,
+        );
     let token_usage = extract_token_usage(&combined_output);
     let output_tail = tail_string(&combined_output, 4000);
 
