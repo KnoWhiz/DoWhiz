@@ -33,14 +33,23 @@ jobs:
             vm_ip_secret: STAGING_AZURE_VM_IP
             vm_user_secret: STAGING_AZURE_VM_USER
 
-    # Skip based on manual input
-    if: |
-      github.event_name != 'workflow_dispatch' ||
-      github.event.inputs.environment == 'both' ||
-      github.event.inputs.environment == matrix.env
-
     steps:
+      - name: Check if should run (${{ matrix.env }})
+        id: should_run
+        run: |
+          if [[ "${{ github.event_name }}" != "workflow_dispatch" ]]; then
+            echo "run=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event.inputs.environment }}" == "both" ]]; then
+            echo "run=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event.inputs.environment }}" == "${{ matrix.env }}" ]]; then
+            echo "run=true" >> $GITHUB_OUTPUT
+          else
+            echo "run=false" >> $GITHUB_OUTPUT
+            echo "Skipping ${{ matrix.env }} - user selected ${{ github.event.inputs.environment }}"
+          fi
+
       - name: Setup SSH
+        if: steps.should_run.outputs.run == 'true'
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets[matrix.ssh_key_secret] }}" > ~/.ssh/id_rsa
@@ -48,6 +57,7 @@ jobs:
           ssh-keyscan -H ${{ secrets[matrix.vm_ip_secret] }} >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Check PM2 Processes (${{ matrix.env }})
+        if: steps.should_run.outputs.run == 'true'
         id: pm2
         run: |
           echo "## [${{ matrix.env }}] PM2 Process Status" >> $GITHUB_STEP_SUMMARY
@@ -73,6 +83,7 @@ jobs:
           fi
 
       - name: Check Health Endpoints (${{ matrix.env }})
+        if: steps.should_run.outputs.run == 'true'
         id: endpoints
         run: |
           echo "## [${{ matrix.env }}] Health Endpoints" >> $GITHUB_STEP_SUMMARY
@@ -99,6 +110,7 @@ jobs:
           fi
 
       - name: Check MongoDB Connection (${{ matrix.env }})
+        if: steps.should_run.outputs.run == 'true'
         id: mongodb
         run: |
           echo "## [${{ matrix.env }}] MongoDB Status" >> $GITHUB_STEP_SUMMARY
@@ -153,6 +165,7 @@ jobs:
           fi
 
       - name: Check SQLite Remnants (${{ matrix.env }})
+        if: steps.should_run.outputs.run == 'true'
         id: sqlite_remnants
         run: |
           echo "## [${{ matrix.env }}] SQLite Remnants Check" >> $GITHUB_STEP_SUMMARY
@@ -281,6 +294,7 @@ jobs:
           fi
 
       - name: Check Disk Space (${{ matrix.env }})
+        if: steps.should_run.outputs.run == 'true'
         id: disk
         run: |
           echo "## [${{ matrix.env }}] Disk Space" >> $GITHUB_STEP_SUMMARY
@@ -300,7 +314,7 @@ jobs:
           fi
 
       - name: Summary (${{ matrix.env }})
-        if: always()
+        if: always() && steps.should_run.outputs.run == 'true'
         run: |
           echo "## [${{ matrix.env }}] Health Check Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -316,6 +330,7 @@ jobs:
 
       - name: Fail if Critical Issues (${{ matrix.env }})
         if: |
+          steps.should_run.outputs.run == 'true' &&
           matrix.env == 'prod' && (
             steps.endpoints.outputs.worker_health != '200' ||
             steps.endpoints.outputs.gateway_health != '200' ||
