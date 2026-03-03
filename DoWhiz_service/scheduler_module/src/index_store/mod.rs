@@ -161,10 +161,11 @@ impl MongoIndexStore {
             .map_err(|err| IndexStoreError::MongoConfig(err.to_string()))?;
         let db = database_from_env(&client);
         let task_index = db.collection::<Document>("task_index");
+        // user_id must come first for sharded collections (Cosmos DB shard key compatibility)
         ensure_index_compatible(
             &task_index,
             IndexModel::builder()
-                .keys(doc! { "task_id": 1, "user_id": 1 })
+                .keys(doc! { "user_id": 1, "task_id": 1 })
                 .options(IndexOptions::builder().unique(Some(true)).build())
                 .build(),
         )?;
