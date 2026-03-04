@@ -141,12 +141,28 @@ jobs:
       - name: Write production .env on Azure VM
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'
-          mkdir -p /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
-          cat << 'ENVEOF' > /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/.env
+          set -e
+          APP_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
+          mkdir -p "$APP_DIR"
+          cat << 'ENVEOF' > "$APP_DIR/.env"
           ${{ secrets.ENV_COMMON }}
           ${{ secrets.ENV_PROD }}
           ENVEOF
-          chmod 600 /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/.env
+          chmod 600 "$APP_DIR/.env"
+
+          # Transform PROD_* vars to base names in .env file
+          # This allows the Rust service to read standard env var names
+          ENV_FILE="$APP_DIR/.env"
+          while IFS='=' read -r key value; do
+            [[ "$key" == PROD_* ]] || continue
+            base_key="${key#PROD_}"
+            # Only add if base key not already explicitly set
+            if ! grep -q "^${base_key}=" "$ENV_FILE"; then
+              echo "${base_key}=${value}" >> "$ENV_FILE"
+              echo "Added: ${base_key}"
+            fi
+          done < "$ENV_FILE"
+          echo "Transformed PROD_* vars to base names in .env"
           EOF
 
       - name: Restart DoWhiz services
