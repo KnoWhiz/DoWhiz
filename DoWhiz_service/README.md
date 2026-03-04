@@ -156,16 +156,14 @@ scripts/run_employee.sh <employee_id> [port]
 scripts/run_employee.sh --employee <id> --port <port> [--public-url <url>] [--skip-hook] [--skip-ngrok] [--host <host>]
 ```
 
-### Staging/Production Target Switching
+### Staging/Production Environment Files
 
-Use one `.env` and switch targets with:
-```bash
-export DEPLOY_TARGET=production   # or staging
-```
+Runtime services load unprefixed keys directly from `DoWhiz_service/.env`.
+Use environment-specific secret sets to generate `.env` per VM:
+- `ENV_COMMON + ENV_PROD` for production
+- `ENV_COMMON + ENV_STAGING` for staging
 
-All startup scripts now load `DoWhiz_service/.env` and, when `DEPLOY_TARGET=staging`,
-automatically map `STAGING_FOO -> FOO` (for example, `STAGING_SERVICE_BUS_CONNECTION_STRING`
-overrides `SERVICE_BUS_CONNECTION_STRING`).
+`DEPLOY_TARGET` is optional and only used for runtime policy (for example, `run_task` auto backend behavior).
 
 Current staging profile defaults:
 - sender + receiver mailbox: `dowhiz@deep-tutor.com` (via `employee.staging.toml`)
@@ -295,7 +293,7 @@ Optional webhook verification:
 
 This is the recommended Azure production flow. The Rust inbound gateway handles **all ingress** (email + Slack/Discord/etc), stores raw payloads in Azure Blob, and enqueues messages into Azure Service Bus. Workers (`rust_service`) run on VMs or containers and poll Service Bus.
 
-For staging/prod split deployment with a single `.env` (`DEPLOY_TARGET` + `STAGING_` overrides), see:
+For staging/prod deployment with separate secret sets and unprefixed keys, see:
 `DoWhiz_service/docs/staging_production_deploy.md`.
 
 **Step 1: Provision Azure resources**
@@ -1091,10 +1089,10 @@ This reduces API costs and latency for simple interactions while preserving full
 
 ## Environment Variables
 
-Single-file env split:
-- Use one `DoWhiz_service/.env`.
-- Base keys are production values.
-- Put staging-specific keys under `STAGING_*` and run with `DEPLOY_TARGET=staging`.
+Environment policy:
+- Services read one `DoWhiz_service/.env` with unprefixed keys.
+- Production and staging use different secret sets to generate that file.
+- `DEPLOY_TARGET` is optional and only affects runtime policy (not key selection).
 
 ### Service Configuration
 | Variable | Default | Description |

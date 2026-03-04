@@ -22,7 +22,7 @@
 - `./scripts/run_gateway_local.sh`: start the inbound gateway locally.
 - The inbound gateway requires `INGESTION_QUEUE_BACKEND=servicebus`; raw payload storage backend is configurable (`supabase` default, `azure` recommended for production). Postgres ingestion remains legacy/worker-only.
 - `docker build -t dowhiz-service .`: build the container image.
-- For single-file staging/prod split (`DEPLOY_TARGET` + `STAGING_` overrides), follow `docs/staging_production_deploy.md`.
+- For staging/prod deployment with separate secret sets and unprefixed keys, follow `docs/staging_production_deploy.md`.
 
 ## Coding Style & Naming Conventions
 Use rustfmt defaults. Follow Rust naming: `snake_case` for functions/modules, `CamelCase` for types, and `SCREAMING_SNAKE_CASE` for constants. Keep files and modules focused; split large files instead of growing monoliths. Prefer explicit error handling and structured logging via `tracing`.

@@ -73,7 +73,7 @@ println!("Reply saved at: {}", result.reply_html_path.display());
 - Execution backend is controlled by `RUN_TASK_EXECUTION_BACKEND` (`local` / `azure_aci` / `auto`).
   - In `auto`, staging/production targets default to `azure_aci`; local/dev targets default to `local`.
   - In `DEPLOY_TARGET=staging|production`, local Codex execution is blocked.
-- Staging supports `STAGING_RUN_TASK_*` overrides for ACI/image/backend settings.
+- ACI/image/backend settings use unprefixed keys only (for example `RUN_TASK_AZURE_ACI_RESOURCE_GROUP`).
 
 ## Production Deployment
 
