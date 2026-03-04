@@ -11,7 +11,6 @@ use mongodb::sync::{Client, Collection, Database};
 use mongodb::IndexModel;
 use tracing::warn;
 
-use crate::env_alias::apply_deploy_target_overrides;
 use crate::storage_backend::StorageBackend;
 
 #[derive(Debug, thiserror::Error)]
@@ -23,7 +22,6 @@ pub enum MongoStoreError {
 }
 
 pub fn create_client_from_env() -> Result<Client, MongoStoreError> {
-    let _ = apply_deploy_target_overrides();
     let uri = env::var("MONGODB_URI")
         .ok()
         .map(|value| value.trim().to_string())

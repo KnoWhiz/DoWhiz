@@ -7,11 +7,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# 加载环境变量，并根据 DEPLOY_TARGET 应用 STAGING_* 覆盖
+# 加载环境变量
 # shellcheck source=./load_env_target.sh
 source "${SCRIPT_DIR}/load_env_target.sh"
 echo "✓ 已加载环境变量: ${ENV_FILE:-<shell environment only>}"
-echo "✓ DEPLOY_TARGET=${DEPLOY_TARGET:-production}"
 
 # Azure ACI backend requires VM-side shared mount before worker starts.
 "${SCRIPT_DIR}/ensure_aci_share_mount.sh"
@@ -104,7 +103,7 @@ echo "=== 4. 更新 Postmark Webhook ==="
 WEBHOOK_URL="${NGROK_URL}/postmark/inbound"
 
 if [[ -z "${POSTMARK_SERVER_TOKEN:-}" ]]; then
-    echo "✗ 缺少 POSTMARK_SERVER_TOKEN（当前 DEPLOY_TARGET=${DEPLOY_TARGET:-production}）"
+    echo "✗ 缺少 POSTMARK_SERVER_TOKEN"
     exit 1
 fi
 
@@ -141,10 +140,6 @@ echo ""
 echo "监控面板："
 echo "  Ngrok:   http://127.0.0.1:4040"
 echo ""
-if [[ "${DEPLOY_TARGET:-production}" == "staging" ]]; then
-  echo "测试发送邮件到: dowhiz@deep-tutor.com"
-else
-  echo "测试发送邮件到: proto@dowhiz.com 或 boiled-egg@dowhiz.com"
-fi
+echo "测试发送邮件到: ${POSTMARK_TEST_SERVICE_ADDRESS:-<请设置 POSTMARK_TEST_SERVICE_ADDRESS>}"
 echo ""
 echo "停止所有服务: pkill -f 'inbound_gateway|rust_service|ngrok'"
