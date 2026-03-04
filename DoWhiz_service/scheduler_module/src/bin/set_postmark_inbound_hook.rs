@@ -1,4 +1,3 @@
-use scheduler_module::env_alias::apply_deploy_target_overrides;
 use serde_json::json;
 use std::env;
 
@@ -39,7 +38,6 @@ fn help_text() -> String {
 
 fn main() -> Result<(), BoxError> {
     dotenvy::dotenv().ok();
-    apply_deploy_target_overrides().map_err(|err| -> BoxError { err.into() })?;
 
     let hook_url = match parse_args() {
         Ok(value) => value,

@@ -228,6 +228,7 @@ fn parse_datetime(value: &str) -> Result<DateTime<Utc>, chrono::ParseError> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use uuid::Uuid;
 
     fn test_store() -> (TempDir, SlackStore) {
         let temp = TempDir::new().expect("tempdir");
@@ -236,12 +237,17 @@ mod tests {
         (temp, store)
     }
 
+    fn unique_team_id(prefix: &str) -> String {
+        format!("{prefix}-{}", Uuid::new_v4().simple())
+    }
+
     #[test]
     fn upsert_and_get_installation() {
         let (_temp, store) = test_store();
+        let team_id = unique_team_id("T12345");
 
         let installation = SlackInstallation {
-            team_id: "T12345".to_string(),
+            team_id: team_id.clone(),
             team_name: Some("Test Workspace".to_string()),
             bot_token: "xoxb-test-token".to_string(),
             bot_user_id: "U12345".to_string(),
@@ -250,8 +256,8 @@ mod tests {
 
         store.upsert_installation(&installation).expect("upsert");
 
-        let retrieved = store.get_installation("T12345").expect("get");
-        assert_eq!(retrieved.team_id, "T12345");
+        let retrieved = store.get_installation(&team_id).expect("get");
+        assert_eq!(retrieved.team_id, team_id);
         assert_eq!(retrieved.team_name, Some("Test Workspace".to_string()));
         assert_eq!(retrieved.bot_token, "xoxb-test-token");
         assert_eq!(retrieved.bot_user_id, "U12345");
@@ -260,9 +266,10 @@ mod tests {
     #[test]
     fn upsert_updates_existing() {
         let (_temp, store) = test_store();
+        let team_id = unique_team_id("T12345");
 
         let installation1 = SlackInstallation {
-            team_id: "T12345".to_string(),
+            team_id: team_id.clone(),
             team_name: Some("Old Name".to_string()),
             bot_token: "xoxb-old-token".to_string(),
             bot_user_id: "U12345".to_string(),
@@ -271,7 +278,7 @@ mod tests {
         store.upsert_installation(&installation1).expect("upsert1");
 
         let installation2 = SlackInstallation {
-            team_id: "T12345".to_string(),
+            team_id: team_id.clone(),
             team_name: Some("New Name".to_string()),
             bot_token: "xoxb-new-token".to_string(),
             bot_user_id: "U67890".to_string(),
@@ -279,7 +286,7 @@ mod tests {
         };
         store.upsert_installation(&installation2).expect("upsert2");
 
-        let retrieved = store.get_installation("T12345").expect("get");
+        let retrieved = store.get_installation(&team_id).expect("get");
         assert_eq!(retrieved.team_name, Some("New Name".to_string()));
         assert_eq!(retrieved.bot_token, "xoxb-new-token");
         assert_eq!(retrieved.bot_user_id, "U67890");
@@ -289,16 +296,18 @@ mod tests {
     fn get_not_found() {
         let (_temp, store) = test_store();
 
-        let result = store.get_installation("TNOTEXIST");
+        let team_id = unique_team_id("TNOTEXIST");
+        let result = store.get_installation(&team_id);
         assert!(matches!(result, Err(SlackStoreError::NotFound(_))));
     }
 
     #[test]
     fn delete_installation() {
         let (_temp, store) = test_store();
+        let team_id = unique_team_id("T12345");
 
         let installation = SlackInstallation {
-            team_id: "T12345".to_string(),
+            team_id: team_id.clone(),
             team_name: None,
             bot_token: "xoxb-test".to_string(),
             bot_user_id: "U12345".to_string(),
@@ -306,29 +315,36 @@ mod tests {
         };
         store.upsert_installation(&installation).expect("upsert");
 
-        let deleted = store.delete_installation("T12345").expect("delete");
+        let deleted = store.delete_installation(&team_id).expect("delete");
         assert!(deleted);
 
-        let result = store.get_installation("T12345");
+        let result = store.get_installation(&team_id);
         assert!(matches!(result, Err(SlackStoreError::NotFound(_))));
     }
 
     #[test]
     fn list_installations() {
         let (_temp, store) = test_store();
+        let team_ids: Vec<String> = (1..=3)
+            .map(|i| unique_team_id(&format!("T{i}")))
+            .collect();
 
-        for i in 1..=3 {
+        for (i, team_id) in team_ids.iter().enumerate() {
             let installation = SlackInstallation {
-                team_id: format!("T{}", i),
-                team_name: Some(format!("Workspace {}", i)),
-                bot_token: format!("xoxb-token-{}", i),
-                bot_user_id: format!("U{}", i),
+                team_id: team_id.clone(),
+                team_name: Some(format!("Workspace {}", i + 1)),
+                bot_token: format!("xoxb-token-{}", i + 1),
+                bot_user_id: format!("U{}", i + 1),
                 installed_at: Utc::now(),
             };
             store.upsert_installation(&installation).expect("upsert");
         }
 
         let list = store.list_installations().expect("list");
-        assert_eq!(list.len(), 3);
+        let ids: std::collections::HashSet<String> =
+            list.into_iter().map(|value| value.team_id).collect();
+        for team_id in team_ids {
+            assert!(ids.contains(&team_id));
+        }
     }
 }

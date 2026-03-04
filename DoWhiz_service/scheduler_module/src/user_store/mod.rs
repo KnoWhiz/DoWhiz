@@ -241,9 +241,7 @@ impl MongoUserStore {
         )?;
         ensure_index_compatible(
             &users,
-            IndexModel::builder()
-                .keys(doc! { "created_at": 1 })
-                .build(),
+            IndexModel::builder().keys(doc! { "created_at": 1 }).build(),
         )?;
         Ok(Self { users })
     }

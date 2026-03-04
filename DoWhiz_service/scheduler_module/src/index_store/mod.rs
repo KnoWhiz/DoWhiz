@@ -21,7 +21,6 @@ pub struct IndexStore {
 #[derive(Debug, Clone)]
 struct MongoIndexStore {
     task_index: Collection<Document>,
-    scope: String,
 }
 
 #[derive(Debug, Clone)]
@@ -41,10 +40,9 @@ pub enum IndexStoreError {
 }
 
 impl IndexStore {
-    pub fn new(path: impl Into<PathBuf>) -> Result<Self, IndexStoreError> {
-        let scope = scope_from_path(path.into());
+    pub fn new(_path: impl Into<PathBuf>) -> Result<Self, IndexStoreError> {
         Ok(Self {
-            mongo: MongoIndexStore::new(scope)?,
+            mongo: MongoIndexStore::new()?,
         })
     }
 
@@ -74,7 +72,7 @@ impl IndexStore {
 }
 
 impl MongoIndexStore {
-    fn new(scope: String) -> Result<Self, IndexStoreError> {
+    fn new() -> Result<Self, IndexStoreError> {
         let client = create_client_from_env()
             .map_err(|err| IndexStoreError::MongoConfig(err.to_string()))?;
         let db = database_from_env(&client);
@@ -90,16 +88,10 @@ impl MongoIndexStore {
         ensure_index_compatible(
             &task_index,
             IndexModel::builder()
-                .keys(doc! { "scope": 1, "enabled": 1, "next_run": 1 })
+                .keys(doc! { "enabled": 1, "next_run": 1 })
                 .build(),
         )?;
-        ensure_index_compatible(
-            &task_index,
-            IndexModel::builder()
-                .keys(doc! { "scope": 1, "user_id": 1 })
-                .build(),
-        )?;
-        Ok(Self { task_index, scope })
+        Ok(Self { task_index })
     }
 
     fn sync_user_tasks(
@@ -115,13 +107,12 @@ impl MongoIndexStore {
 
         if task_ids.is_empty() {
             self.task_index
-                .delete_many(doc! { "scope": &self.scope, "user_id": user_id }, None)?;
+                .delete_many(doc! { "user_id": user_id }, None)?;
             return Ok(());
         }
 
         self.task_index.delete_many(
             doc! {
-                "scope": &self.scope,
                 "user_id": user_id,
                 "task_id": { "$nin": task_ids.clone() },
             },
@@ -131,14 +122,13 @@ impl MongoIndexStore {
         let options = UpdateOptions::builder().upsert(Some(true)).build();
         for (task_id, next_run) in task_rows {
             self.task_index.update_one(
-                doc! { "scope": &self.scope, "task_id": &task_id, "user_id": user_id },
+                doc! { "task_id": &task_id, "user_id": user_id },
                 doc! {
                     "$set": {
                         "next_run": BsonDateTime::from_chrono(next_run),
                         "enabled": true,
                     },
                     "$setOnInsert": {
-                        "scope": &self.scope,
                         "task_id": &task_id,
                         "user_id": user_id,
                     },
@@ -156,7 +146,6 @@ impl MongoIndexStore {
         limit: usize,
     ) -> Result<Vec<String>, IndexStoreError> {
         let filter = doc! {
-            "scope": &self.scope,
             "enabled": true,
             "next_run": { "$lte": BsonDateTime::from_chrono(now) },
         };
@@ -198,7 +187,6 @@ impl MongoIndexStore {
         limit: usize,
     ) -> Result<Vec<TaskRef>, IndexStoreError> {
         let filter = doc! {
-            "scope": &self.scope,
             "enabled": true,
             "next_run": { "$lte": BsonDateTime::from_chrono(now) },
         };
@@ -247,10 +235,6 @@ fn enabled_task_next_runs(tasks: &[ScheduledTask]) -> Vec<(String, DateTime<Utc>
         deduped.insert(task.id.to_string(), next_run);
     }
     deduped.into_iter().collect()
-}
-
-fn scope_from_path(path: PathBuf) -> String {
-    format!("{:x}", md5::compute(path.to_string_lossy().as_bytes()))
 }
 
 fn is_order_by_index_excluded(err: &mongodb::error::Error) -> bool {

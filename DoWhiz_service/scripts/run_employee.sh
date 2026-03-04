@@ -85,7 +85,7 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 service_root="$(cd "${script_dir}/.." && pwd)"
 
-# Load .env and apply DEPLOY_TARGET/STAGING_* overrides.
+# Load .env.
 # shellcheck source=./load_env_target.sh
 source "${script_dir}/load_env_target.sh"
 

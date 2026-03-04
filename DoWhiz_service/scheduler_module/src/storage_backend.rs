@@ -9,7 +9,6 @@ pub enum StorageBackend {
 
 impl StorageBackend {
     pub fn from_env() -> Self {
-        let _ = crate::env_alias::apply_deploy_target_overrides();
         let raw = env::var("STORAGE_BACKEND").unwrap_or_else(|_| "mongo".to_string());
         match raw.trim().to_ascii_lowercase().as_str() {
             "mongo" | "mongodb" => Self::Mongo,
