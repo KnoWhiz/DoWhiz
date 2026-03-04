@@ -1,270 +1,97 @@
-# Staging vs Production Deployment (Single `.env`)
+# Staging vs Production Deployment (Unprefixed Keys)
 
-This guide keeps one `DoWhiz_service/.env` file and uses:
-- base keys for production
-- `STAGING_`-prefixed keys for staging
-- `DEPLOY_TARGET=production|staging` to switch at startup time
+This guide uses one runtime file (`DoWhiz_service/.env`) per VM, with **unprefixed** keys only.
 
-`scripts/load_env_target.sh` loads `.env` and, in staging mode, maps `STAGING_FOO -> FOO`.
-It also mirrors key queue/storage vars from `FOO -> SCALE_OLIVER_FOO` in staging mode, so legacy code paths cannot accidentally read production `SCALE_OLIVER_*` values.
+- Staging VM `.env`: `${ENV_COMMON}` + `${ENV_STAGING}`
+- Production VM `.env`: `${ENV_COMMON}` + `${ENV_PROD}`
 
-## 1) Isolated staging Service Bus (created)
+`STAGING_*` and `PROD_*` key mapping is removed.
 
-Staging Service Bus resources:
-- Resource group: `dowhiz-staging-rg-260226124234`
-- Namespace: `dowhizsbstg260226124234`
-- Queues: `ingestion-little_bear`, `ingestion-test`
-- SAS rule: `dowhiz-staging-app` (Listen + Send)
+## 1) Deployment Contract
 
-Provisioning pattern (repeatable):
-```bash
-az group create -n <staging-rg> -l westus2
-az servicebus namespace create -g <staging-rg> -n <staging-namespace> -l westus2 --sku Standard --min-tls 1.2 --zone-redundant true
-az servicebus queue create -g <staging-rg> --namespace-name <staging-namespace> -n ingestion-little_bear --enable-duplicate-detection true --duplicate-detection-history-time-window PT10M
-az servicebus queue create -g <staging-rg> --namespace-name <staging-namespace> -n ingestion-test --enable-duplicate-detection true --duplicate-detection-history-time-window PT10M
-az servicebus namespace authorization-rule create -g <staging-rg> --namespace-name <staging-namespace> -n dowhiz-staging-app --rights Listen Send
-az servicebus namespace authorization-rule keys list -g <staging-rg> --namespace-name <staging-namespace> -n dowhiz-staging-app
-```
+1. Runtime code reads unprefixed keys only.
+2. `DEPLOY_TARGET` is optional and only affects runtime policy (for example `RUN_TASK_EXECUTION_BACKEND=auto` behavior).
+3. Config file selection is explicit via `.env`:
+- `GATEWAY_CONFIG_PATH`
+- `EMPLOYEE_CONFIG_PATH`
 
-## 2) Required key split (single `.env`)
+Expected values:
+- Staging: `gateway.staging.toml`, `employee.staging.toml`
+- Production: `gateway.toml`, `employee.toml`
 
-Most keys can be shared. Keep these isolated by environment:
+## 2) Required Environment Keys
 
-| Purpose | Production key | Staging key |
-|---|---|---|
-| Postmark server token | `POSTMARK_SERVER_TOKEN` | `STAGING_POSTMARK_SERVER_TOKEN` |
-| Postmark inbound hook URL | `POSTMARK_INBOUND_HOOK_URL` | `STAGING_POSTMARK_INBOUND_HOOK_URL` |
-| Live E2E service mailbox | `POSTMARK_TEST_SERVICE_ADDRESS` | `STAGING_POSTMARK_TEST_SERVICE_ADDRESS` |
-| Ingestion backend | `INGESTION_QUEUE_BACKEND` | `STAGING_INGESTION_QUEUE_BACKEND` |
-| Service Bus connection | `SERVICE_BUS_CONNECTION_STRING` | `STAGING_SERVICE_BUS_CONNECTION_STRING` |
-| Service Bus queue | `SERVICE_BUS_QUEUE_NAME` | `STAGING_SERVICE_BUS_QUEUE_NAME` |
-| Service Bus test queue | `SERVICE_BUS_TEST_QUEUE_NAME` | `STAGING_SERVICE_BUS_TEST_QUEUE_NAME` |
-| Queue-per-employee flag | `SERVICE_BUS_QUEUE_PER_EMPLOYEE` | `STAGING_SERVICE_BUS_QUEUE_PER_EMPLOYEE` |
-| Gateway route config | `GATEWAY_CONFIG_PATH` | `STAGING_GATEWAY_CONFIG_PATH` |
-| Employee config file | `EMPLOYEE_CONFIG_PATH` | `STAGING_EMPLOYEE_CONFIG_PATH` |
-| Raw payload blob path prefix | `RAW_PAYLOAD_PATH_PREFIX` | `STAGING_RAW_PAYLOAD_PATH_PREFIX` |
-| RunTask backend | `RUN_TASK_EXECUTION_BACKEND` | `STAGING_RUN_TASK_EXECUTION_BACKEND` |
-| ACI resource group | `RUN_TASK_AZURE_ACI_RESOURCE_GROUP` | `STAGING_RUN_TASK_AZURE_ACI_RESOURCE_GROUP` |
-| ACI region | `RUN_TASK_AZURE_ACI_LOCATION` | `STAGING_RUN_TASK_AZURE_ACI_LOCATION` |
-| ACI image | `RUN_TASK_AZURE_ACI_IMAGE` | `STAGING_RUN_TASK_AZURE_ACI_IMAGE` |
-| ACI CPU | `RUN_TASK_AZURE_ACI_CPU` | `STAGING_RUN_TASK_AZURE_ACI_CPU` |
-| ACI memory | `RUN_TASK_AZURE_ACI_MEMORY_GB` | `STAGING_RUN_TASK_AZURE_ACI_MEMORY_GB` |
-| ACI file share | `RUN_TASK_AZURE_ACI_FILE_SHARE` | `STAGING_RUN_TASK_AZURE_ACI_FILE_SHARE` |
-| VM share mount root | `RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT` | `STAGING_RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT` |
-| Container share mount root | `RUN_TASK_AZURE_ACI_CONTAINER_SHARE_ROOT` | `STAGING_RUN_TASK_AZURE_ACI_CONTAINER_SHARE_ROOT` |
-| ACI storage account | `RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT` | `STAGING_RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT` |
-| ACI storage key | `RUN_TASK_AZURE_ACI_STORAGE_KEY` | `STAGING_RUN_TASK_AZURE_ACI_STORAGE_KEY` |
-| ACI registry server | `RUN_TASK_AZURE_ACI_REGISTRY_SERVER` | `STAGING_RUN_TASK_AZURE_ACI_REGISTRY_SERVER` |
-| ACI registry username | `RUN_TASK_AZURE_ACI_REGISTRY_USERNAME` | `STAGING_RUN_TASK_AZURE_ACI_REGISTRY_USERNAME` |
-| ACI registry password | `RUN_TASK_AZURE_ACI_REGISTRY_PASSWORD` | `STAGING_RUN_TASK_AZURE_ACI_REGISTRY_PASSWORD` |
+Typical keys that differ by environment (still unprefixed):
+- `POSTMARK_SERVER_TOKEN`
+- `POSTMARK_INBOUND_HOOK_URL`
+- `POSTMARK_TEST_SERVICE_ADDRESS`
+- `INGESTION_QUEUE_BACKEND`
+- `SERVICE_BUS_CONNECTION_STRING`
+- `SERVICE_BUS_QUEUE_NAME`
+- `SERVICE_BUS_TEST_QUEUE_NAME`
+- `GATEWAY_CONFIG_PATH`
+- `EMPLOYEE_CONFIG_PATH`
+- `RAW_PAYLOAD_PATH_PREFIX`
+- `RUN_TASK_EXECUTION_BACKEND`
+- `RUN_TASK_AZURE_ACI_RESOURCE_GROUP`
+- `RUN_TASK_AZURE_ACI_IMAGE`
+- `RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT`
+- `RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT`
+- `RUN_TASK_AZURE_ACI_STORAGE_KEY`
 
-Optional but recommended split:
-- `WORKER_INSTANCE_ID_OLIVER` / `STAGING_WORKER_INSTANCE_ID_OLIVER`
-- `POSTMARK_SMTP_PORT` / `STAGING_POSTMARK_SMTP_PORT` (set staging to `2525` if outbound port `25` is blocked by cloud policy)
+## 3) VM Deployment
 
-## 3) Gateway routing isolation
-
-Use separate gateway configs:
-- Production: `gateway.toml`
-- Staging: `gateway.staging.toml`
-
-Use separate employee configs:
-- Production: `employee.toml`
-- Staging: `employee.staging.toml` (current default sender/receiver is only `dowhiz@deep-tutor.com`)
-
-`gateway.staging.toml` currently routes to `little_bear` for:
-- `dowhiz@deep-tutor.com`
-- no default Slack/Discord/Google Docs routes (email-only by default)
-
-## 4) Deploy commands
-
-Run from repo root unless noted.
-
-### Staging gateway + worker
-```bash
-export DEPLOY_TARGET=staging
-
-./DoWhiz_service/scripts/run_gateway_local.sh
-./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
-```
-
-If using one-command startup on VM:
-```bash
-export DEPLOY_TARGET=staging
-./DoWhiz_service/scripts/start_all.sh
-```
-
-### Production gateway + worker
-```bash
-export DEPLOY_TARGET=production
-
-./DoWhiz_service/scripts/run_gateway_local.sh
-./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
-```
-
-Do not use `start_all.sh` for production unless you explicitly want to start ngrok and update Postmark inbound hook to the ngrok URL.
-
-## 5) VM runbook (step-by-step)
-
-Use this section when you deploy directly on VM.
-
-### Branch / CI policy
-
-- Production VM deploys from `main` (current CI/CD baseline).
-- Staging VM CI/CD target branch is `dev` (planned rollout).
-- During transition or emergency hotfixes, staging can still be deployed manually from `staging-vm-setup`.
-
-### 5.1 Staging VM (`dowhizstaging`)
-
-1. SSH and enter repo:
+### Staging (`dev`)
 ```bash
 ssh dowhizstaging
 cd /home/azureuser/server/.dowhiz/DoWhiz
-```
-2. Pull staging deployment branch (default `dev`):
-```bash
 git fetch origin
 git checkout dev
 git pull --ff-only origin dev
-```
-Optional hotfix/testing branch:
-```bash
-git checkout staging-vm-setup
-git pull --ff-only origin staging-vm-setup
-```
-3. Confirm `.env` has staging split keys (single file, `STAGING_` prefix), especially:
-- `STAGING_POSTMARK_SERVER_TOKEN`
-- `STAGING_POSTMARK_INBOUND_HOOK_URL`
-- `STAGING_POSTMARK_TEST_SERVICE_ADDRESS=dowhiz@deep-tutor.com`
-- `STAGING_SERVICE_BUS_CONNECTION_STRING`
-- `STAGING_SERVICE_BUS_QUEUE_NAME=ingestion-little_bear`
-- `STAGING_SERVICE_BUS_TEST_QUEUE_NAME=ingestion-test`
-- `STAGING_GATEWAY_CONFIG_PATH=gateway.staging.toml`
-- `STAGING_EMPLOYEE_CONFIG_PATH=employee.staging.toml`
-- `STAGING_RAW_PAYLOAD_PATH_PREFIX=staging/ingestion_raw`
-- `STAGING_RUN_TASK_EXECUTION_BACKEND=azure_aci`
-- `STAGING_RUN_TASK_AZURE_ACI_RESOURCE_GROUP`
-- `STAGING_RUN_TASK_AZURE_ACI_IMAGE`
-- `STAGING_RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT`
-- `STAGING_RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT`
-- `STAGING_RUN_TASK_AZURE_ACI_STORAGE_KEY`
-4. Start staging services:
-```bash
-export DEPLOY_TARGET=staging
 ./DoWhiz_service/scripts/start_all.sh
 ```
-5. Verify health and routing:
-```bash
-curl -sS http://127.0.0.1:9100/health
-curl -sS http://127.0.0.1:9001/health
-```
-- Gateway should be `ok`
-- Worker should be `ok`
-- Inbound route should only process `dowhiz@deep-tutor.com` (from `gateway.staging.toml`)
-- Outbound sender should default to `dowhiz@deep-tutor.com` (from `employee.staging.toml`)
-6. Optional live E2E (staging mailbox):
-```bash
-export DEPLOY_TARGET=staging
-RUN_CODEX_E2E=1 POSTMARK_LIVE_TEST=1 cargo test -p scheduler_module --test service_real_email -- --nocapture
-```
 
-### 5.2 Production VM (`dowhizprod1`)
-
-1. SSH and enter repo:
+### Production (`main`)
 ```bash
 ssh dowhizprod1
 cd /home/azureuser/server/.dowhiz/DoWhiz
-```
-2. Pull production branch:
-```bash
 git fetch origin
 git checkout main
 git pull --ff-only origin main
-```
-3. One-time Azure Files mount bootstrap (required for ACI backend):
-```bash
-sudo mkdir -p /etc/smbcredentials
-sudo tee /etc/smbcredentials/<storage-account-name> >/dev/null <<'EOF'
-username=<storage-account-name>
-password=<storage-account-key>
-EOF
-sudo chmod 600 /etc/smbcredentials/<storage-account-name>
-
-sudo mkdir -p /home/azureuser/server/.dowhiz/DoWhiz/run_task
-echo '//<storage-account-name>.file.core.windows.net/<prod-file-share> /home/azureuser/server/.dowhiz/DoWhiz/run_task cifs vers=3.0,credentials=/etc/smbcredentials/<storage-account-name>,dir_mode=0777,file_mode=0777,serverino,uid=1000,gid=1000,mfsymlinks,_netdev,nofail 0 0' | sudo tee -a /etc/fstab
-sudo mount /home/azureuser/server/.dowhiz/DoWhiz/run_task
-findmnt -T /home/azureuser/server/.dowhiz/DoWhiz/run_task
-```
-Current prod example:
-- share: `//dwhzoliverdev.file.core.windows.net/dowhiz-run-task-prod`
-- host path: `/home/azureuser/server/.dowhiz/DoWhiz/run_task`
-
-4. Start production target:
-```bash
-export DEPLOY_TARGET=production
 ./DoWhiz_service/scripts/run_gateway_local.sh
 ./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
 ```
-`run_employee.sh` now includes `scripts/ensure_aci_share_mount.sh`, which auto-checks the mount and runs `mount <RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT>` from `/etc/fstab` when needed.
 
-5. Verify:
+## 4) CI/CD Expectations
+
+Deployment workflows should:
+1. Write `.env` from `ENV_COMMON + ENV_STAGING/ENV_PROD`.
+2. Fail if `.env` contains keys matching `^(STAGING_|PROD_)`.
+3. Validate `GATEWAY_CONFIG_PATH` and `EMPLOYEE_CONFIG_PATH` exist and match expected target files.
+
+## 5) Health Checks
+
 ```bash
 curl -sS http://127.0.0.1:9100/health
 curl -sS http://127.0.0.1:9001/health
 ```
-- Ensure Postmark inbound hook points to production endpoint
-- Ensure production Service Bus namespace/queue are used
-- Ensure `findmnt -T /home/azureuser/server/.dowhiz/DoWhiz/run_task` returns Azure Files (`cifs`)
 
-## 6) Webhook notes (current staging URL)
-
-Current staging inbound hook:
-- `https://oliver.dowhiz.prod.ngrok.app/postmark/inbound`
-
-When `DEPLOY_TARGET=staging`, scripts use `STAGING_POSTMARK_SERVER_TOKEN` and `STAGING_POSTMARK_INBOUND_HOOK_URL` automatically via env mapping.
-
-## 7) Shared container with staging folder prefix
-
-Using a dedicated staging folder in the same Azure Blob container is supported by:
-- `STAGING_RAW_PAYLOAD_PATH_PREFIX="staging/ingestion_raw"`
-
-This keeps payload object paths separated while sharing the same container and SAS credentials.
-
-Tradeoffs:
-- Pro: easy setup, no extra Azure resources.
-- Con: not a hard security boundary (same SAS can read/write both prod and staging paths).
-- Con: lifecycle/retention policies apply at container level unless you add prefix-aware jobs.
-
-If you need stricter isolation later, move staging to a separate container or storage account.
-
-## 8) Rollback (staging -> production)
-
-1. Stop staging processes:
+If PM2 is used:
 ```bash
-./DoWhiz_service/scripts/stop_all.sh
-```
-2. Switch target:
-```bash
-export DEPLOY_TARGET=production
-```
-3. Restart gateway/worker:
-```bash
-./DoWhiz_service/scripts/run_gateway_local.sh
-./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
-```
-4. Verify:
-- `curl http://127.0.0.1:9100/health`
-- `curl http://127.0.0.1:9001/health`
-- confirm Postmark inbound hook points to production endpoint
-
-## 9) Sanity checks
-
-Queue counts:
-```bash
-az servicebus queue show -g dowhiz-staging-rg-260226124234 --namespace-name dowhizsbstg260226124234 -n ingestion-little_bear --query countDetails
+pm2 list
 ```
 
-Confirm active environment mapping at runtime:
+## 6) Live Email E2E
+
 ```bash
-DEPLOY_TARGET=staging bash -lc 'source DoWhiz_service/scripts/load_env_target.sh; echo \"$DEPLOY_TARGET|$SERVICE_BUS_QUEUE_NAME|$GATEWAY_CONFIG_PATH\"'
+RUN_CODEX_E2E=1 POSTMARK_LIVE_TEST=1 cargo test -p scheduler_module --test service_real_email -- --nocapture
 ```
+
+If SMTP 25 is blocked on the VM, set `POSTMARK_SMTP_PORT=2525` in `.env`.
+
+## 7) Rollback
+
+1. Revert the deployment commit.
+2. Re-run target environment workflow.
+3. Re-check health endpoints.
+4. If needed, restore previous `ENV_COMMON` / `ENV_STAGING` / `ENV_PROD` secret values.

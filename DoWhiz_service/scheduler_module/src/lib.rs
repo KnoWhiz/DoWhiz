@@ -1,7 +1,6 @@
 pub mod adapters;
 pub mod artifact_extractor;
 pub mod channel;
-pub mod collaboration_store;
 pub mod discord_gateway;
 pub mod employee_config;
 pub mod env_alias;
@@ -14,9 +13,11 @@ pub mod ingestion;
 pub mod ingestion_queue;
 pub mod mailbox;
 pub mod message_router;
+pub mod mongo_store;
 pub mod raw_payload_store;
 pub mod service_bus_queue;
 pub mod slack_store;
+pub mod storage_backend;
 pub(crate) mod thread_state;
 
 pub mod account_store;

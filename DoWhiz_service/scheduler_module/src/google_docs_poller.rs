@@ -4,9 +4,11 @@
 //! mentioning the digital employee and creates tasks to handle them.
 
 use chrono::Utc;
-use rusqlite::{params, Connection};
+use mongodb::bson::{doc, Bson, DateTime as BsonDateTime, Document};
+use mongodb::options::IndexOptions;
+use mongodb::sync::Collection;
+use mongodb::IndexModel;
 use std::collections::HashSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -15,8 +17,8 @@ use tracing::{debug, error, info, warn};
 
 use crate::adapters::google_docs::{ActionableComment, GoogleDocsInboundAdapter};
 use crate::channel::Channel;
-use crate::collaboration_store::CollaborationStore;
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
+use crate::mongo_store::{create_client_from_env, database_from_env, ensure_index_compatible};
 use crate::{RunTaskTask, Scheduler, SchedulerError, TaskExecutor, TaskKind};
 
 /// Configuration for Google Docs polling.
@@ -113,58 +115,23 @@ impl GoogleDocsPollerConfig {
     }
 }
 
-/// Database schema for tracking processed comments.
-const GOOGLE_DOCS_SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS google_docs_documents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id TEXT UNIQUE NOT NULL,
-    document_name TEXT,
-    owner_email TEXT,
-    last_checked_at TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS google_docs_processed_comments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id TEXT NOT NULL,
-    comment_id TEXT NOT NULL,
-    processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(document_id, comment_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_processed_comments_document
-ON google_docs_processed_comments(document_id);
-"#;
-
 /// Store for tracking processed Google Docs comments.
 #[derive(Debug)]
 pub struct GoogleDocsProcessedStore {
-    path: PathBuf,
+    mongo: MongoDocsProcessedStore,
+}
+
+#[derive(Debug, Clone)]
+struct MongoDocsProcessedStore {
+    processed_comments: Collection<Document>,
+    workspace_files: Collection<Document>,
 }
 
 impl GoogleDocsProcessedStore {
-    pub fn new(path: PathBuf) -> Result<Self, SchedulerError> {
-        let store = Self { path };
-        store.init()?;
-        Ok(store)
-    }
-
-    fn init(&self) -> Result<(), SchedulerError> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let conn = Connection::open(&self.path)?;
-        // NOTE: Do NOT use WAL mode here. The database may be on Azure Files (CIFS),
-        // which doesn't support mmap() properly, causing WAL to fail with "database is locked".
-        conn.execute_batch(GOOGLE_DOCS_SCHEMA)?;
-        Ok(())
-    }
-
-    fn open(&self) -> Result<Connection, SchedulerError> {
-        let conn = Connection::open(&self.path)?;
-        // NOTE: Do NOT use WAL mode - incompatible with Azure Files (CIFS).
-        conn.busy_timeout(Duration::from_secs(30))?;
-        Ok(conn)
+    pub fn new(_path: PathBuf) -> Result<Self, SchedulerError> {
+        Ok(Self {
+            mongo: MongoDocsProcessedStore::new()?,
+        })
     }
 
     /// Check if a comment has been processed.
@@ -173,13 +140,7 @@ impl GoogleDocsProcessedStore {
         document_id: &str,
         comment_id: &str,
     ) -> Result<bool, SchedulerError> {
-        let conn = self.open()?;
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM google_docs_processed_comments WHERE document_id = ?1 AND comment_id = ?2",
-            params![document_id, comment_id],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
+        self.mongo.is_processed(document_id, comment_id)
     }
 
     /// Mark a comment as processed.
@@ -188,12 +149,7 @@ impl GoogleDocsProcessedStore {
         document_id: &str,
         comment_id: &str,
     ) -> Result<(), SchedulerError> {
-        let conn = self.open()?;
-        conn.execute(
-            "INSERT OR IGNORE INTO google_docs_processed_comments (document_id, comment_id, processed_at) VALUES (?1, ?2, ?3)",
-            params![document_id, comment_id, Utc::now().to_rfc3339()],
-        )?;
-        Ok(())
+        self.mongo.mark_processed(document_id, comment_id)
     }
 
     /// Get all processed comment IDs for a document.
@@ -202,16 +158,7 @@ impl GoogleDocsProcessedStore {
         &self,
         document_id: &str,
     ) -> Result<HashSet<String>, SchedulerError> {
-        let conn = self.open()?;
-        let mut stmt = conn.prepare(
-            "SELECT comment_id FROM google_docs_processed_comments WHERE document_id = ?1",
-        )?;
-        let rows = stmt.query_map(params![document_id], |row| row.get::<_, String>(0))?;
-        let mut result = HashSet::new();
-        for row in rows {
-            result.insert(row?);
-        }
-        Ok(result)
+        self.mongo.get_processed_ids(document_id)
     }
 
     /// Get all processed tracking IDs for a document.
@@ -228,12 +175,7 @@ impl GoogleDocsProcessedStore {
         document_id: &str,
         tracking_id: &str,
     ) -> Result<(), SchedulerError> {
-        let conn = self.open()?;
-        conn.execute(
-            "INSERT OR IGNORE INTO google_docs_processed_comments (document_id, comment_id, processed_at) VALUES (?1, ?2, ?3)",
-            params![document_id, tracking_id, Utc::now().to_rfc3339()],
-        )?;
-        Ok(())
+        self.mongo.mark_processed(document_id, tracking_id)
     }
 
     /// Register a document for tracking.
@@ -243,24 +185,141 @@ impl GoogleDocsProcessedStore {
         document_name: Option<&str>,
         owner_email: Option<&str>,
     ) -> Result<(), SchedulerError> {
-        let conn = self.open()?;
-        conn.execute(
-            "INSERT OR REPLACE INTO google_docs_documents (document_id, document_name, owner_email, last_checked_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, COALESCE((SELECT created_at FROM google_docs_documents WHERE document_id = ?1), ?4))",
-            params![document_id, document_name, owner_email, Utc::now().to_rfc3339()],
-        )?;
-        Ok(())
+        self.mongo
+            .register_document(document_id, document_name, owner_email)
     }
 
     /// Update last checked time for a document.
     pub fn update_last_checked(&self, document_id: &str) -> Result<(), SchedulerError> {
-        let conn = self.open()?;
-        conn.execute(
-            "UPDATE google_docs_documents SET last_checked_at = ?1 WHERE document_id = ?2",
-            params![Utc::now().to_rfc3339(), document_id],
-        )?;
+        self.mongo.update_last_checked(document_id)
+    }
+}
+
+impl MongoDocsProcessedStore {
+    fn new() -> Result<Self, SchedulerError> {
+        let client = create_client_from_env()
+            .map_err(|err| SchedulerError::Storage(format!("mongo config error: {err}")))?;
+        let db = database_from_env(&client);
+        let processed_comments = db.collection::<Document>("processed_comments");
+        ensure_index_compatible(
+            &processed_comments,
+            IndexModel::builder()
+                .keys(doc! { "file_id": 1, "tracking_id": 1 })
+                .options(IndexOptions::builder().unique(Some(true)).build())
+                .build(),
+        )
+        .map_err(mongo_scheduler_err)?;
+        let workspace_files = db.collection::<Document>("workspace_files");
+        ensure_index_compatible(
+            &workspace_files,
+            IndexModel::builder()
+                .keys(doc! { "file_id": 1, "file_type": 1 })
+                .options(IndexOptions::builder().unique(Some(true)).build())
+                .build(),
+        )
+        .map_err(mongo_scheduler_err)?;
+        Ok(Self {
+            processed_comments,
+            workspace_files,
+        })
+    }
+
+    fn is_processed(&self, document_id: &str, comment_id: &str) -> Result<bool, SchedulerError> {
+        let found = self
+            .processed_comments
+            .find_one(
+                doc! {
+                    "file_id": document_id,
+                    "file_type": "docs",
+                    "tracking_id": comment_id,
+                },
+                None,
+            )
+            .map_err(mongo_scheduler_err)?
+            .is_some();
+        Ok(found)
+    }
+
+    fn mark_processed(&self, document_id: &str, tracking_id: &str) -> Result<(), SchedulerError> {
+        self.processed_comments
+            .update_one(
+                doc! {
+                    "file_id": document_id,
+                    "file_type": "docs",
+                    "tracking_id": tracking_id,
+                },
+                doc! {
+                    "$setOnInsert": {
+                        "processed_at": BsonDateTime::from_chrono(Utc::now()),
+                    }
+                },
+                mongodb::options::UpdateOptions::builder()
+                    .upsert(true)
+                    .build(),
+            )
+            .map_err(mongo_scheduler_err)?;
         Ok(())
     }
+
+    fn get_processed_ids(&self, document_id: &str) -> Result<HashSet<String>, SchedulerError> {
+        let cursor = self
+            .processed_comments
+            .find(doc! { "file_id": document_id, "file_type": "docs" }, None)
+            .map_err(mongo_scheduler_err)?;
+        let mut ids = HashSet::new();
+        for row in cursor {
+            let doc = row.map_err(mongo_scheduler_err)?;
+            if let Ok(value) = doc.get_str("tracking_id") {
+                ids.insert(value.to_string());
+            }
+        }
+        Ok(ids)
+    }
+
+    fn register_document(
+        &self,
+        document_id: &str,
+        document_name: Option<&str>,
+        owner_email: Option<&str>,
+    ) -> Result<(), SchedulerError> {
+        let now = BsonDateTime::from_chrono(Utc::now());
+        self.workspace_files
+            .update_one(
+                doc! { "file_id": document_id, "file_type": "docs" },
+                doc! {
+                    "$set": {
+                        "file_name": document_name.map(Bson::from).unwrap_or(Bson::Null),
+                        "owner_email": owner_email.map(Bson::from).unwrap_or(Bson::Null),
+                        "last_checked_at": now,
+                    },
+                    "$setOnInsert": {
+                        "created_at": now,
+                    }
+                },
+                mongodb::options::UpdateOptions::builder()
+                    .upsert(true)
+                    .build(),
+            )
+            .map_err(mongo_scheduler_err)?;
+        Ok(())
+    }
+
+    fn update_last_checked(&self, document_id: &str) -> Result<(), SchedulerError> {
+        self.workspace_files
+            .update_one(
+                doc! { "file_id": document_id, "file_type": "docs" },
+                doc! {
+                    "$set": { "last_checked_at": BsonDateTime::from_chrono(Utc::now()) }
+                },
+                None,
+            )
+            .map_err(mongo_scheduler_err)?;
+        Ok(())
+    }
+}
+
+fn mongo_scheduler_err(err: mongodb::error::Error) -> SchedulerError {
+    SchedulerError::Storage(format!("mongodb error: {err}"))
 }
 
 /// Google Docs polling service.
@@ -433,266 +492,6 @@ impl GoogleDocsPoller {
         }
 
         Ok(tasks_created)
-    }
-
-    /// Run one polling cycle with collaboration session support.
-    ///
-    /// This method looks up existing collaboration sessions for each document
-    /// and writes collaboration context to the workspace if a session exists.
-    pub fn poll_once_with_collaboration<E: TaskExecutor>(
-        &self,
-        scheduler: &mut Scheduler<E>,
-        collaboration_store: &CollaborationStore,
-    ) -> Result<usize, SchedulerError> {
-        let adapter =
-            GoogleDocsInboundAdapter::new(self.auth.clone(), self.config.employee_emails.clone());
-
-        // List all shared documents
-        let documents = adapter
-            .list_shared_documents()
-            .map_err(|e| SchedulerError::TaskFailed(format!("Failed to list documents: {}", e)))?;
-
-        debug!(
-            "Found {} shared documents (with collaboration support)",
-            documents.len()
-        );
-
-        let mut tasks_created = 0;
-
-        for doc in documents {
-            // Register document for tracking
-            let owner_email = doc
-                .owners
-                .as_ref()
-                .and_then(|owners| owners.first())
-                .and_then(|o| o.email_address.as_deref());
-
-            self.store
-                .register_document(&doc.id, doc.name.as_deref(), owner_email)?;
-
-            // Look up existing collaboration session for this document (any user)
-            let existing_session = collaboration_store
-                .find_session_by_artifact("google_docs", &doc.id, None)
-                .ok()
-                .flatten();
-
-            if existing_session.is_some() {
-                debug!(
-                    "Found existing collaboration session for document {}",
-                    doc.id
-                );
-            }
-
-            // Get comments for this document
-            let comments = match adapter.list_comments(&doc.id) {
-                Ok(c) => c,
-                Err(e) => {
-                    warn!("Failed to list comments for {}: {}", doc.id, e);
-                    continue;
-                }
-            };
-
-            // Get already processed comments/replies (using tracking IDs)
-            let processed = self.store.get_processed_ids(&doc.id)?;
-
-            // Filter for actionable comments (returns ActionableComment items)
-            let actionable_items = adapter.filter_actionable_comments(&comments, &processed);
-
-            for actionable in actionable_items {
-                // Convert to inbound message using the new method
-                let doc_name = doc.name.as_deref().unwrap_or("Untitled");
-                let message = adapter.actionable_to_inbound_message_with_owner(
-                    &doc.id,
-                    doc_name,
-                    &actionable,
-                    owner_email,
-                );
-
-                // Determine workspace directory
-                let workspace_dir = if let Some(ref session) = existing_session {
-                    // Use session's workspace if available, otherwise create new
-                    if let Some(ref ws_path) = session.workspace_path {
-                        let ws = PathBuf::from(ws_path);
-                        if ws.exists() {
-                            info!("Reusing collaboration session workspace: {}", ws.display());
-                            ws
-                        } else {
-                            self.create_workspace(&doc.id, &actionable.tracking_id)?
-                        }
-                    } else {
-                        self.create_workspace(&doc.id, &actionable.tracking_id)?
-                    }
-                } else {
-                    self.create_workspace(&doc.id, &actionable.tracking_id)?
-                };
-
-                // Write incoming comment to workspace
-                self.write_incoming_actionable(&workspace_dir, &message, &actionable)?;
-
-                // Add message to collaboration session if exists
-                if let Some(ref session) = existing_session {
-                    let comment_content: &str = actionable
-                        .triggering_reply
-                        .as_ref()
-                        .map(|r| r.content.as_str())
-                        .unwrap_or(&actionable.comment.content);
-                    let preview_len = comment_content.len().min(500);
-
-                    if let Err(err) = collaboration_store.add_message(
-                        &session.id,
-                        "google_docs",
-                        Some(&actionable.tracking_id),
-                        &session.user_id,
-                        Some(&comment_content[..preview_len]),
-                        false,
-                        None,
-                    ) {
-                        warn!("Failed to add message to collaboration session: {}", err);
-                    }
-
-                    // Write collaboration context to workspace
-                    self.write_collaboration_context(
-                        &workspace_dir,
-                        session,
-                        &doc.id,
-                        comment_content,
-                        collaboration_store,
-                    );
-                }
-
-                // Fetch and save document content for agent context
-                match adapter.read_document_content(&doc.id) {
-                    Ok(doc_content) => {
-                        let doc_content_path = workspace_dir
-                            .join("incoming_email")
-                            .join("document_content.txt");
-                        if let Err(e) = fs::write(&doc_content_path, &doc_content) {
-                            warn!("Failed to save document content for {}: {}", doc.id, e);
-                        } else {
-                            info!(
-                                "Saved document content ({} chars) to {}",
-                                doc_content.len(),
-                                doc_content_path.display()
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Failed to fetch document content for {}: {}", doc.id, e);
-                    }
-                }
-
-                // Create RunTask
-                let run_task = RunTaskTask {
-                    workspace_dir: workspace_dir.clone(),
-                    input_email_dir: PathBuf::from("incoming_email"),
-                    input_attachments_dir: PathBuf::from("incoming_attachments"),
-                    memory_dir: PathBuf::from("memory"),
-                    reference_dir: PathBuf::from("references"),
-                    model_name: self.config.model_name.clone(),
-                    runner: self.config.runner.clone(),
-                    codex_disabled: false,
-                    reply_to: vec![message.sender.clone()],
-                    reply_from: Some("oliver@dowhiz.com".to_string()),
-                    archive_root: None,
-                    thread_id: Some(message.thread_id.clone()),
-                    thread_epoch: None,
-                    thread_state_path: None,
-                    channel: Channel::GoogleDocs,
-                    slack_team_id: None,
-                    employee_id: Some(self.config.employee_id.clone()),
-                };
-
-                // Schedule the task
-                scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
-
-                // Mark as processed using the tracking_id
-                self.store
-                    .mark_processed_id(&doc.id, &actionable.tracking_id)?;
-
-                tasks_created += 1;
-                let item_type = if actionable.triggering_reply.is_some() {
-                    "reply"
-                } else {
-                    "comment"
-                };
-                let session_info = if existing_session.is_some() {
-                    " (with collaboration session)"
-                } else {
-                    ""
-                };
-                info!(
-                    "Created task for Google Docs {} {} on {} ({}){}",
-                    item_type, actionable.tracking_id, doc_name, doc.id, session_info
-                );
-            }
-
-            // Update last checked time
-            self.store.update_last_checked(&doc.id)?;
-        }
-
-        Ok(tasks_created)
-    }
-
-    /// Write collaboration context to workspace.
-    fn write_collaboration_context(
-        &self,
-        workspace_dir: &Path,
-        session: &crate::collaboration_store::CollaborationSession,
-        document_id: &str,
-        current_comment: &str,
-        collaboration_store: &CollaborationStore,
-    ) {
-        let collab_dir = workspace_dir.join("collaboration");
-        if let Err(err) = fs::create_dir_all(&collab_dir) {
-            warn!("Failed to create collaboration dir: {}", err);
-            return;
-        }
-
-        // Write session info
-        if let Ok(session_json) = serde_json::to_string_pretty(session) {
-            let _ = fs::write(collab_dir.join("session_info.json"), &session_json);
-        }
-
-        // Get message history
-        if let Ok(messages) = collaboration_store.get_messages(&session.id) {
-            if let Ok(messages_json) = serde_json::to_string_pretty(&messages) {
-                let _ = fs::write(collab_dir.join("message_history.json"), &messages_json);
-            }
-        }
-
-        // Write context summary for the agent
-        let summary = format!(
-            "# Collaboration Context\n\n\
-            ## Session\n\
-            - Session ID: {}\n\
-            - Primary Channel: {}\n\
-            - Primary Artifact: google_docs:{}\n\
-            - Status: active\n\
-            - This is a CONTINUATION of an earlier conversation\n\n\
-            ## Original Request\n\
-            {}\n\n\
-            ## Current Comment\n\
-            {}\n\n\
-            ## Instructions\n\
-            This Google Docs comment continues an earlier collaboration session. \
-            Review the original request and message history in this directory. \
-            The user's attachments from earlier interactions may be in incoming_attachments/.\n",
-            session.id,
-            session.primary_channel,
-            document_id,
-            session
-                .original_request
-                .as_deref()
-                .unwrap_or("(not recorded)"),
-            current_comment,
-        );
-        let _ = fs::write(collab_dir.join("context_summary.md"), &summary);
-
-        debug!(
-            "Wrote collaboration context for session {} to {}",
-            session.id,
-            collab_dir.display()
-        );
     }
 
     fn create_workspace(

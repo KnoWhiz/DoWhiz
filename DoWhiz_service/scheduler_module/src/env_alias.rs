@@ -9,7 +9,16 @@ fn read_trimmed_env(key: &str) -> Option<String> {
 
 pub fn var_with_scale_oliver(key: &str) -> Option<String> {
     let prefixed = format!("SCALE_OLIVER_{key}");
-    read_trimmed_env(&prefixed).or_else(|| read_trimmed_env(key))
+    let deploy_target = env::var("DEPLOY_TARGET")
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "production".to_string());
+    if deploy_target == "production" {
+        read_trimmed_env(key).or_else(|| read_trimmed_env(&prefixed))
+    } else {
+        read_trimmed_env(&prefixed).or_else(|| read_trimmed_env(key))
+    }
 }
 
 pub fn bool_with_scale_oliver(key: &str, default_value: bool) -> bool {
@@ -75,4 +84,42 @@ pub fn apply_deploy_target_overrides() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::var_with_scale_oliver;
+    use std::env;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn var_with_scale_oliver_prefers_base_in_production() {
+        let _guard = env_lock().lock().expect("env lock");
+        env::set_var("DEPLOY_TARGET", "production");
+        env::set_var("TEST_ALIAS_KEY", "base-value");
+        env::set_var("SCALE_OLIVER_TEST_ALIAS_KEY", "scale-value");
+        let value = var_with_scale_oliver("TEST_ALIAS_KEY").expect("value");
+        assert_eq!(value, "base-value");
+        env::remove_var("TEST_ALIAS_KEY");
+        env::remove_var("SCALE_OLIVER_TEST_ALIAS_KEY");
+        env::remove_var("DEPLOY_TARGET");
+    }
+
+    #[test]
+    fn var_with_scale_oliver_prefers_scale_in_staging() {
+        let _guard = env_lock().lock().expect("env lock");
+        env::set_var("DEPLOY_TARGET", "staging");
+        env::set_var("TEST_ALIAS_KEY", "base-value");
+        env::set_var("SCALE_OLIVER_TEST_ALIAS_KEY", "scale-value");
+        let value = var_with_scale_oliver("TEST_ALIAS_KEY").expect("value");
+        assert_eq!(value, "scale-value");
+        env::remove_var("TEST_ALIAS_KEY");
+        env::remove_var("SCALE_OLIVER_TEST_ALIAS_KEY");
+        env::remove_var("DEPLOY_TARGET");
+    }
 }

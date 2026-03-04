@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    env:
+      CARGO_INCREMENTAL: 0
 
     defaults:
       run:
@@ -24,15 +26,18 @@ jobs:
           ref: ${{ github.ref }}
 
       - name: Build
-        run: cargo build --verbose
+        run: cargo build
 
       - name: Run tests (scheduler_module)
-        run: cargo test -p scheduler_module --verbose
+        run: cargo test -p scheduler_module
         continue-on-error: true
 
       - name: Run tests (run_task_module)
-        run: cargo test -p run_task_module --verbose
+        run: cargo test -p run_task_module
         continue-on-error: true
+
+      - name: Clean target before release build
+        run: cargo clean
 
       - name: Build release binaries
         run: cargo build -p scheduler_module --bins --release
@@ -141,12 +146,56 @@ jobs:
       - name: Write production .env on Azure VM
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'
-          mkdir -p /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
-          cat << 'ENVEOF' > /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/.env
+          set -e
+          APP_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
+          mkdir -p "$APP_DIR"
+          COMMON_ENV_FILE="$APP_DIR/.env.common.tmp"
+          TARGET_ENV_FILE="$APP_DIR/.env.target.tmp"
+          cat << 'ENV_COMMON_EOF' > "$COMMON_ENV_FILE"
           ${{ secrets.ENV_COMMON }}
+          ENV_COMMON_EOF
+          cat << 'ENV_TARGET_EOF' > "$TARGET_ENV_FILE"
           ${{ secrets.ENV_PROD }}
-          ENVEOF
-          chmod 600 /home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/.env
+          ENV_TARGET_EOF
+
+          ENV_FILE="$APP_DIR/.env"
+          # Merge key/value pairs with target env taking precedence over common env.
+          awk '
+            function trim(value) {
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", value);
+              return value;
+            }
+            {
+              line = $0;
+              sub(/\r$/, "", line);
+              if (line ~ /^[[:space:]]*($|#)/) next;
+              if (line ~ /^export[[:space:]]+/) sub(/^export[[:space:]]+/, "", line);
+              pos = index(line, "=");
+              if (pos == 0) next;
+              key = trim(substr(line, 1, pos - 1));
+              if (key == "") next;
+              value = substr(line, pos + 1);
+              if (!(key in seen)) {
+                seen[key] = 1;
+                order[++count] = key;
+              }
+              env[key] = value;
+            }
+            END {
+              for (i = 1; i <= count; i++) {
+                key = order[i];
+                print key "=" env[key];
+              }
+            }
+          ' "$COMMON_ENV_FILE" "$TARGET_ENV_FILE" > "$ENV_FILE"
+          rm -f "$COMMON_ENV_FILE" "$TARGET_ENV_FILE"
+
+          if grep -Eq '^(STAGING_|PROD_)' "$ENV_FILE"; then
+            echo "ERROR: Prefixed env keys are not allowed in deployment .env" >&2
+            grep -En '^(STAGING_|PROD_)' "$ENV_FILE" >&2 || true
+            exit 1
+          fi
+          chmod 600 "$APP_DIR/.env"
           EOF
 
       - name: Restart DoWhiz services
@@ -157,7 +206,41 @@ jobs:
             source /home/${{ secrets.PROD_AZURE_VM_USER }}/.nvm/nvm.sh
           fi
           APP_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
-          export DEPLOY_TARGET=production
+          ENV_FILE="$APP_DIR/.env"
+          read_env_value() {
+            local key="$1"
+            local value
+            value="$(grep -E "^${key}=" "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+            value="${value#\"}"
+            value="${value%\"}"
+            value="${value#\'}"
+            value="${value%\'}"
+            printf '%s' "$value"
+          }
+          GATEWAY_CONFIG_PATH="$(read_env_value GATEWAY_CONFIG_PATH)"
+          EMPLOYEE_CONFIG_PATH="$(read_env_value EMPLOYEE_CONFIG_PATH)"
+          [[ -n "$GATEWAY_CONFIG_PATH" ]] || { echo "GATEWAY_CONFIG_PATH is required in .env" >&2; exit 1; }
+          [[ -n "$EMPLOYEE_CONFIG_PATH" ]] || { echo "EMPLOYEE_CONFIG_PATH is required in .env" >&2; exit 1; }
+          resolve_path() {
+            local path="$1"
+            if [[ "$path" = /* ]]; then
+              echo "$path"
+            else
+              echo "$APP_DIR/$path"
+            fi
+          }
+          GATEWAY_CONFIG_PATH_RESOLVED="$(resolve_path "$GATEWAY_CONFIG_PATH")"
+          EMPLOYEE_CONFIG_PATH_RESOLVED="$(resolve_path "$EMPLOYEE_CONFIG_PATH")"
+          [[ -f "$GATEWAY_CONFIG_PATH_RESOLVED" ]] || { echo "Missing gateway config: $GATEWAY_CONFIG_PATH_RESOLVED" >&2; exit 1; }
+          [[ -f "$EMPLOYEE_CONFIG_PATH_RESOLVED" ]] || { echo "Missing employee config: $EMPLOYEE_CONFIG_PATH_RESOLVED" >&2; exit 1; }
+          [[ "$(basename "$GATEWAY_CONFIG_PATH_RESOLVED")" == "gateway.toml" ]] || {
+            echo "Expected production gateway config (gateway.toml), got: $GATEWAY_CONFIG_PATH_RESOLVED" >&2
+            exit 1
+          }
+          [[ "$(basename "$EMPLOYEE_CONFIG_PATH_RESOLVED")" == "employee.toml" ]] || {
+            echo "Expected production employee config (employee.toml), got: $EMPLOYEE_CONFIG_PATH_RESOLVED" >&2
+            exit 1
+          }
 
           # Ensure Azure Files mount is present before starting worker
           # so ACI tasks share workspace/memory paths correctly.

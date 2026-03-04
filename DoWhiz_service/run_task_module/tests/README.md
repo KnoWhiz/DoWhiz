@@ -1,7 +1,7 @@
 # Tests for run_task_module
 
-This module includes a lightweight Cargo test harness that runs offline using a
-fake Codex CLI script.
+This module includes an offline Cargo test harness built around fake Codex/Claude
+executables plus an optional live Codex E2E path.
 
 ## Run tests
 
@@ -10,11 +10,13 @@ cd DoWhiz_service/run_task_module
 cargo test
 ```
 
-The tests spin up a temporary workspace, inject a fake `codex` executable, and
-verify that `run_task` writes channel-appropriate reply files
-(`reply_email_draft.html` for email-style channels, `reply_message.txt` for chat-style channels),
-creates the attachments directory, and handles error cases (missing env, missing CLI,
-failed CLI, missing output, invalid paths).
+The tests spin up temporary workspaces and verify:
+- channel-aware output files (`reply_email_draft.html` vs `reply_message.txt`)
+- config block generation/update
+- sandbox/bypass flag wiring (`--yolo`, `sandbox`)
+- timeout and runtime-failure handling
+- env propagation for GitHub and x402 keys
+- missing env/CLI/output/path validation errors
 
 ## Optional real Codex E2E test (RUN_CODEX_E2E)
 
@@ -36,7 +38,7 @@ cargo test -p run_task_module --test run_task_tests -- --nocapture
 Prereqs (Dockerfile parity):
 ```
 sudo apt-get update
-sudo apt-get install -y ca-certificates libsqlite3-dev libssl-dev pkg-config curl
+sudo apt-get install -y ca-certificates libssl-dev pkg-config curl
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 sudo npm install -g @openai/codex@latest @playwright/cli@latest

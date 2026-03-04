@@ -3,10 +3,15 @@ use postgres_native_tls::MakeTlsConnector;
 use r2d2::{Pool, PooledConnection};
 use r2d2_postgres::PostgresConnectionManager;
 use std::env;
-use tracing::error;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::env_alias::bool_with_scale_oliver;
+
+type PgPool = Pool<PostgresConnectionManager<MakeTlsConnector>>;
+type PgConn = PooledConnection<PostgresConnectionManager<MakeTlsConnector>>;
 
 #[derive(Debug, Clone)]
 pub struct Account {
@@ -58,7 +63,7 @@ pub enum AccountStoreError {
     Postgres(#[from] postgres::Error),
     #[error("pool error: {0}")]
     Pool(#[from] r2d2::Error),
-    #[error("missing SUPABASE_DB_URL")]
+    #[error("missing SUPABASE_DB_URL and SUPABASE_POOLER_URL")]
     MissingDbUrl,
     #[error("account not found")]
     NotFound,
@@ -72,29 +77,89 @@ pub enum AccountStoreError {
 
 /// Custom error handler that logs connection errors
 #[derive(Debug)]
-struct LoggingErrorHandler;
+struct LoggingErrorHandler {
+    pool_name: &'static str,
+}
 
 impl r2d2::HandleError<postgres::Error> for LoggingErrorHandler {
     fn handle_error(&self, err: postgres::Error) {
-        error!("account_store postgres pool error: {:?}", err);
+        error!(
+            "account_store {} postgres pool error: {:?}",
+            self.pool_name, err
+        );
     }
 }
 
 #[derive(Clone)]
 pub struct AccountStore {
-    pool: Option<Pool<PostgresConnectionManager<MakeTlsConnector>>>,
+    primary_pool: Option<PgPool>,
+    fallback_pool: Option<PgPool>,
+    prefer_fallback: Arc<AtomicBool>,
 }
 
 impl AccountStore {
     pub fn from_env() -> Result<Self, AccountStoreError> {
-        let db_url = env::var("SUPABASE_DB_URL")
+        let primary_db_url = env::var("SUPABASE_DB_URL")
             .ok()
             .filter(|v| !v.trim().is_empty())
-            .ok_or(AccountStoreError::MissingDbUrl)?;
-        Self::new(&db_url)
+            .map(|v| v.trim().to_string());
+        let fallback_db_url = env::var("SUPABASE_POOLER_URL")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .map(|v| v.trim().to_string());
+
+        if primary_db_url.is_none() && fallback_db_url.is_none() {
+            return Err(AccountStoreError::MissingDbUrl);
+        }
+
+        let primary_pool = match primary_db_url {
+            Some(db_url) => match Self::build_pool(&db_url, "primary") {
+                Ok(pool) => Some(pool),
+                Err(err) => {
+                    if fallback_db_url.is_some() {
+                        warn!(
+                            "account_store failed to initialize SUPABASE_DB_URL pool ({}), will rely on SUPABASE_POOLER_URL fallback",
+                            err
+                        );
+                        None
+                    } else {
+                        return Err(err);
+                    }
+                }
+            },
+            None => None,
+        };
+
+        let fallback_pool = match fallback_db_url {
+            Some(db_url) => Some(Self::build_pool(&db_url, "pooler_fallback")?),
+            None => None,
+        };
+
+        if primary_pool.is_none() && fallback_pool.is_none() {
+            return Err(AccountStoreError::MissingDbUrl);
+        }
+
+        if primary_pool.is_none() && fallback_pool.is_some() {
+            info!("account_store initialized with SUPABASE_POOLER_URL only");
+        }
+
+        Ok(Self {
+            primary_pool,
+            fallback_pool,
+            prefer_fallback: Arc::new(AtomicBool::new(false)),
+        })
     }
 
     pub fn new(db_url: &str) -> Result<Self, AccountStoreError> {
+        let primary_pool = Self::build_pool(db_url, "primary")?;
+        Ok(Self {
+            primary_pool: Some(primary_pool),
+            fallback_pool: None,
+            prefer_fallback: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    fn build_pool(db_url: &str, pool_name: &'static str) -> Result<PgPool, AccountStoreError> {
         let config: postgres::Config = db_url.parse()?;
 
         let mut tls_builder = native_tls::TlsConnector::builder();
@@ -108,28 +173,57 @@ impl AccountStore {
         let tls = MakeTlsConnector::new(tls_connector);
 
         let manager = PostgresConnectionManager::new(config, tls);
-        let pool = Pool::builder()
+        Pool::builder()
             .max_size(10)
             .min_idle(Some(0))
             .connection_timeout(std::time::Duration::from_secs(10))
             .idle_timeout(Some(std::time::Duration::from_secs(30)))
             .max_lifetime(Some(std::time::Duration::from_secs(300)))
             .test_on_check_out(true)
-            .error_handler(Box::new(LoggingErrorHandler))
-            .build(manager)?;
-
-        Ok(Self { pool: Some(pool) })
+            .error_handler(Box::new(LoggingErrorHandler { pool_name }))
+            .build(manager)
+            .map_err(AccountStoreError::from)
     }
 
-    fn conn(
-        &self,
-    ) -> Result<PooledConnection<PostgresConnectionManager<MakeTlsConnector>>, AccountStoreError>
-    {
-        let pool = self
-            .pool
-            .as_ref()
-            .ok_or_else(|| AccountStoreError::Config("account store pool dropped".to_string()))?;
-        Ok(pool.get()?)
+    fn conn(&self) -> Result<PgConn, AccountStoreError> {
+        if self.prefer_fallback.load(Ordering::Relaxed) {
+            if let Some(pool) = self.fallback_pool.as_ref() {
+                match pool.get() {
+                    Ok(conn) => return Ok(conn),
+                    Err(fallback_err) => {
+                        warn!(
+                            "account_store pooler fallback connection failed: {}, retrying primary db",
+                            fallback_err
+                        );
+                    }
+                }
+            }
+        }
+
+        if let Some(pool) = self.primary_pool.as_ref() {
+            match pool.get() {
+                Ok(conn) => return Ok(conn),
+                Err(primary_err) => {
+                    if let Some(fallback_pool) = self.fallback_pool.as_ref() {
+                        warn!(
+                            "account_store primary db connection failed ({}), switching to SUPABASE_POOLER_URL",
+                            primary_err
+                        );
+                        self.prefer_fallback.store(true, Ordering::Relaxed);
+                        return Ok(fallback_pool.get()?);
+                    }
+                    return Err(primary_err.into());
+                }
+            }
+        }
+
+        if let Some(pool) = self.fallback_pool.as_ref() {
+            return Ok(pool.get()?);
+        }
+
+        Err(AccountStoreError::Config(
+            "account store pools dropped".to_string(),
+        ))
     }
 
     /// Get a connection from the pool (primarily for tests)
@@ -523,8 +617,13 @@ impl AccountStore {
 
 impl Drop for AccountStore {
     fn drop(&mut self) {
-        if let Some(pool) = self.pool.take() {
-            std::thread::spawn(move || drop(pool));
+        let primary_pool = self.primary_pool.take();
+        let fallback_pool = self.fallback_pool.take();
+        if primary_pool.is_some() || fallback_pool.is_some() {
+            std::thread::spawn(move || {
+                drop(primary_pool);
+                drop(fallback_pool);
+            });
         }
     }
 }
@@ -532,8 +631,6 @@ impl Drop for AccountStore {
 // ============================================================================
 // Global AccountStore accessor
 // ============================================================================
-
-use std::sync::Arc;
 
 /// Lazy-initialized global AccountStore
 static ACCOUNT_STORE: std::sync::OnceLock<Option<Arc<AccountStore>>> = std::sync::OnceLock::new();

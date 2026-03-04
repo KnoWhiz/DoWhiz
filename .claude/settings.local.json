@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check -p scheduler_module)",
+      "Bash(sudo apt-get update)",
+      "Bash(sudo apt-get install -y pkg-config libssl-dev)",
+      "Bash(git add DoWhiz_service/scheduler_module/src/collaboration_store.rs DoWhiz_service/scheduler_module/src/google_docs_poller.rs DoWhiz_service/scheduler_module/src/lib.rs DoWhiz_service/scheduler_module/src/service/email.rs)",
+      "Bash(git commit:*)",
+      "Bash(git push origin dev)",
+      "Bash(git remote set-url origin git@github.com:KnoWhiz/DoWhiz.git)",
+      "Bash(git remote set-url origin https://github.com/KnoWhiz/DoWhiz.git)",
+      "Bash(gh --version)",
+      "Bash(gh auth login --with-token)",
+      "Bash(gh auth status)",
+      "Bash(gh auth setup-git)",
+      "Bash(git fetch origin)",
+      "Bash(git revert --no-edit 6f377fe 0b27311)",
+      "Bash(git checkout -b bingran/remove-collaboration-store 6f377fe)",
+      "Bash(git branch -m bingran/remove-collaboration-store cleanup/remove-dead-collaboration-store)",
+      "Bash(git push -u origin cleanup/remove-dead-collaboration-store)",
+      "Bash(gh pr:*)",
+      "Bash(git rebase origin/dev)",
+      "Bash(git reset --hard origin/dev)",
+      "Bash(git push -f origin cleanup/remove-dead-collaboration-store)",
+      "Bash(git checkout cleanup/remove-dead-collaboration-store)",
+      "Bash(git merge origin/dev --no-commit --no-ff)",
+      "Bash(git rm DoWhiz_service/scheduler_module/src/collaboration_store.rs)"
+    ]
+  }
+}

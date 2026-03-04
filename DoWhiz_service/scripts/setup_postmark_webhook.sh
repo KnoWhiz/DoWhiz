@@ -7,14 +7,14 @@ set -euo pipefail
 PORT="${1:-9100}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Load .env and apply DEPLOY_TARGET/STAGING_* overrides.
+# Load .env.
 # shellcheck source=./load_env_target.sh
 source "${SCRIPT_DIR}/load_env_target.sh"
 
 POSTMARK_TOKEN="${POSTMARK_SERVER_TOKEN:-}"
 
 if [[ -z "${POSTMARK_TOKEN}" ]]; then
-    echo "ERROR: POSTMARK_SERVER_TOKEN is required (DEPLOY_TARGET=${DEPLOY_TARGET:-production})."
+    echo "ERROR: POSTMARK_SERVER_TOKEN is required."
     exit 1
 fi
 

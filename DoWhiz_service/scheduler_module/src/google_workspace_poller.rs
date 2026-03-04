@@ -4,7 +4,10 @@
 //! comments mentioning the digital employee and creates tasks to handle them.
 
 use chrono::Utc;
-use rusqlite::{params, Connection};
+use mongodb::bson::{doc, Bson, DateTime as BsonDateTime, Document};
+use mongodb::options::IndexOptions;
+use mongodb::sync::Collection;
+use mongodb::IndexModel;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -19,6 +22,7 @@ use crate::adapters::google_sheets::GoogleSheetsInboundAdapter;
 use crate::adapters::google_slides::GoogleSlidesInboundAdapter;
 use crate::channel::{Channel, InboundMessage};
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
+use crate::mongo_store::{create_client_from_env, database_from_env, ensure_index_compatible};
 use crate::SchedulerError;
 
 /// Default TTL for file list cache (5 minutes).
@@ -280,74 +284,28 @@ impl GoogleWorkspacePollerConfig {
     }
 }
 
-/// Database schema for tracking processed comments.
-const WORKSPACE_SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS google_workspace_files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    file_id TEXT UNIQUE NOT NULL,
-    file_name TEXT,
-    file_type TEXT NOT NULL,
-    owner_email TEXT,
-    last_checked_at TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS google_workspace_processed_comments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    file_id TEXT NOT NULL,
-    comment_id TEXT NOT NULL,
-    file_type TEXT NOT NULL,
-    processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(file_id, comment_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_workspace_processed_file
-ON google_workspace_processed_comments(file_id);
-"#;
-
 /// Store for tracking processed Google Workspace comments.
 #[derive(Debug)]
 pub struct GoogleWorkspaceProcessedStore {
-    path: PathBuf,
+    mongo: MongoWorkspaceProcessedStore,
+}
+
+#[derive(Debug, Clone)]
+struct MongoWorkspaceProcessedStore {
+    processed_comments: Collection<Document>,
+    workspace_files: Collection<Document>,
 }
 
 impl GoogleWorkspaceProcessedStore {
-    pub fn new(path: PathBuf) -> Result<Self, SchedulerError> {
-        let store = Self { path };
-        store.init()?;
-        Ok(store)
-    }
-
-    fn init(&self) -> Result<(), SchedulerError> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let conn = Connection::open(&self.path)?;
-        // NOTE: Do NOT use WAL mode here. The database may be on Azure Files (CIFS),
-        // which doesn't support mmap() properly, causing WAL to fail with "database is locked".
-        conn.execute_batch(WORKSPACE_SCHEMA)?;
-        Ok(())
-    }
-
-    fn open(&self) -> Result<Connection, SchedulerError> {
-        let conn = Connection::open(&self.path)?;
-        // NOTE: Do NOT use WAL mode - incompatible with Azure Files (CIFS).
-        conn.busy_timeout(Duration::from_secs(30))?;
-        Ok(conn)
+    pub fn new(_path: PathBuf) -> Result<Self, SchedulerError> {
+        Ok(Self {
+            mongo: MongoWorkspaceProcessedStore::new()?,
+        })
     }
 
     /// Get all processed tracking IDs for a file.
     pub fn get_processed_ids(&self, file_id: &str) -> Result<HashSet<String>, SchedulerError> {
-        let conn = self.open()?;
-        let mut stmt = conn.prepare(
-            "SELECT comment_id FROM google_workspace_processed_comments WHERE file_id = ?1",
-        )?;
-        let rows = stmt.query_map(params![file_id], |row| row.get::<_, String>(0))?;
-        let mut result = HashSet::new();
-        for row in rows {
-            result.insert(row?);
-        }
-        Ok(result)
+        self.mongo.get_processed_ids(file_id)
     }
 
     /// Mark a tracking ID as processed.
@@ -357,12 +315,8 @@ impl GoogleWorkspaceProcessedStore {
         tracking_id: &str,
         file_type: WorkspaceFileType,
     ) -> Result<(), SchedulerError> {
-        let conn = self.open()?;
-        conn.execute(
-            "INSERT OR IGNORE INTO google_workspace_processed_comments (file_id, comment_id, file_type, processed_at) VALUES (?1, ?2, ?3, ?4)",
-            params![file_id, tracking_id, file_type.name(), Utc::now().to_rfc3339()],
-        )?;
-        Ok(())
+        self.mongo
+            .mark_processed_id(file_id, tracking_id, file_type)
     }
 
     /// Register a file for tracking.
@@ -373,24 +327,129 @@ impl GoogleWorkspaceProcessedStore {
         file_type: WorkspaceFileType,
         owner_email: Option<&str>,
     ) -> Result<(), SchedulerError> {
-        let conn = self.open()?;
-        conn.execute(
-            "INSERT OR REPLACE INTO google_workspace_files (file_id, file_name, file_type, owner_email, last_checked_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, COALESCE((SELECT created_at FROM google_workspace_files WHERE file_id = ?1), ?5))",
-            params![file_id, file_name, file_type.name(), owner_email, Utc::now().to_rfc3339()],
-        )?;
-        Ok(())
+        self.mongo
+            .register_file(file_id, file_name, file_type, owner_email)
     }
 
     /// Update last checked time for a file.
     pub fn update_last_checked(&self, file_id: &str) -> Result<(), SchedulerError> {
-        let conn = self.open()?;
-        conn.execute(
-            "UPDATE google_workspace_files SET last_checked_at = ?1 WHERE file_id = ?2",
-            params![Utc::now().to_rfc3339(), file_id],
-        )?;
+        self.mongo.update_last_checked(file_id)
+    }
+}
+
+impl MongoWorkspaceProcessedStore {
+    fn new() -> Result<Self, SchedulerError> {
+        let client = create_client_from_env()
+            .map_err(|err| SchedulerError::Storage(format!("mongo config error: {err}")))?;
+        let db = database_from_env(&client);
+        let processed_comments = db.collection::<Document>("processed_comments");
+        ensure_index_compatible(
+            &processed_comments,
+            IndexModel::builder()
+                .keys(doc! { "file_id": 1, "tracking_id": 1 })
+                .options(IndexOptions::builder().unique(Some(true)).build())
+                .build(),
+        )
+        .map_err(mongo_scheduler_err)?;
+        let workspace_files = db.collection::<Document>("workspace_files");
+        ensure_index_compatible(
+            &workspace_files,
+            IndexModel::builder()
+                .keys(doc! { "file_id": 1, "file_type": 1 })
+                .options(IndexOptions::builder().unique(Some(true)).build())
+                .build(),
+        )
+        .map_err(mongo_scheduler_err)?;
+        Ok(Self {
+            processed_comments,
+            workspace_files,
+        })
+    }
+
+    fn get_processed_ids(&self, file_id: &str) -> Result<HashSet<String>, SchedulerError> {
+        let cursor = self
+            .processed_comments
+            .find(doc! { "file_id": file_id }, None)
+            .map_err(mongo_scheduler_err)?;
+        let mut ids = HashSet::new();
+        for row in cursor {
+            let document = row.map_err(mongo_scheduler_err)?;
+            if let Ok(value) = document.get_str("tracking_id") {
+                ids.insert(value.to_string());
+            }
+        }
+        Ok(ids)
+    }
+
+    fn mark_processed_id(
+        &self,
+        file_id: &str,
+        tracking_id: &str,
+        file_type: WorkspaceFileType,
+    ) -> Result<(), SchedulerError> {
+        self.processed_comments
+            .update_one(
+                doc! {
+                    "file_id": file_id,
+                    "file_type": file_type.name(),
+                    "tracking_id": tracking_id,
+                },
+                doc! {
+                    "$setOnInsert": {
+                        "processed_at": BsonDateTime::from_chrono(Utc::now()),
+                    }
+                },
+                mongodb::options::UpdateOptions::builder()
+                    .upsert(true)
+                    .build(),
+            )
+            .map_err(mongo_scheduler_err)?;
         Ok(())
     }
+
+    fn register_file(
+        &self,
+        file_id: &str,
+        file_name: Option<&str>,
+        file_type: WorkspaceFileType,
+        owner_email: Option<&str>,
+    ) -> Result<(), SchedulerError> {
+        let now = BsonDateTime::from_chrono(Utc::now());
+        self.workspace_files
+            .update_one(
+                doc! { "file_id": file_id, "file_type": file_type.name() },
+                doc! {
+                    "$set": {
+                        "file_name": file_name.map(Bson::from).unwrap_or(Bson::Null),
+                        "owner_email": owner_email.map(Bson::from).unwrap_or(Bson::Null),
+                        "last_checked_at": now,
+                    },
+                    "$setOnInsert": {
+                        "created_at": now,
+                    }
+                },
+                mongodb::options::UpdateOptions::builder()
+                    .upsert(true)
+                    .build(),
+            )
+            .map_err(mongo_scheduler_err)?;
+        Ok(())
+    }
+
+    fn update_last_checked(&self, file_id: &str) -> Result<(), SchedulerError> {
+        self.workspace_files
+            .update_one(
+                doc! { "file_id": file_id },
+                doc! { "$set": { "last_checked_at": BsonDateTime::from_chrono(Utc::now()) } },
+                None,
+            )
+            .map_err(mongo_scheduler_err)?;
+        Ok(())
+    }
+}
+
+fn mongo_scheduler_err(err: mongodb::error::Error) -> SchedulerError {
+    SchedulerError::Storage(format!("mongodb error: {err}"))
 }
 
 /// Google Workspace polling service.

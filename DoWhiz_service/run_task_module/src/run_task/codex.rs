@@ -97,13 +97,9 @@ pub(super) fn run_codex_task(
     }
     ensure_local_execution_allowed()?;
     let docker_image = read_env_trimmed("RUN_TASK_DOCKER_IMAGE");
-    let docker_requested =
-        env_enabled_targeted("RUN_TASK_USE_DOCKER", "STAGING_RUN_TASK_USE_DOCKER");
+    let docker_requested = env_enabled("RUN_TASK_USE_DOCKER");
     let docker_available = docker_requested && docker_cli_available();
-    let docker_required = env_enabled_targeted(
-        "RUN_TASK_DOCKER_REQUIRED",
-        "STAGING_RUN_TASK_DOCKER_REQUIRED",
-    );
+    let docker_required = env_enabled("RUN_TASK_DOCKER_REQUIRED");
     let use_docker = docker_requested && docker_available;
     if docker_requested && !docker_available {
         if docker_required {
@@ -444,13 +440,10 @@ pub(super) fn run_codex_task(
 }
 
 fn resolve_execution_backend() -> ExecutionBackend {
-    match read_targeted_env(
-        "RUN_TASK_EXECUTION_BACKEND",
-        "STAGING_RUN_TASK_EXECUTION_BACKEND",
-    )
-    .unwrap_or_else(|| "auto".to_string())
-    .to_ascii_lowercase()
-    .as_str()
+    match read_env_trimmed("RUN_TASK_EXECUTION_BACKEND")
+        .unwrap_or_else(|| "auto".to_string())
+        .to_ascii_lowercase()
+        .as_str()
     {
         "azure_aci" => ExecutionBackend::AzureAci,
         "local" => ExecutionBackend::Local,
@@ -472,45 +465,8 @@ fn normalized_deploy_target() -> String {
         .to_ascii_lowercase()
 }
 
-fn is_staging_deploy_target() -> bool {
-    normalized_deploy_target() == "staging"
-}
-
-fn read_targeted_env(base_key: &'static str, staging_key: &'static str) -> Option<String> {
-    if is_staging_deploy_target() {
-        read_env_trimmed(staging_key)
-    } else {
-        read_env_trimmed(base_key)
-    }
-}
-
-fn required_targeted_env(
-    base_key: &'static str,
-    staging_key: &'static str,
-) -> Result<String, RunTaskError> {
-    let key = if is_staging_deploy_target() {
-        staging_key
-    } else {
-        base_key
-    };
+fn required_env(key: &'static str) -> Result<String, RunTaskError> {
     read_env_trimmed(key).ok_or(RunTaskError::MissingEnv { key })
-}
-
-fn targeted_key(base_key: &'static str, staging_key: &'static str) -> &'static str {
-    if is_staging_deploy_target() {
-        staging_key
-    } else {
-        base_key
-    }
-}
-
-fn env_enabled_targeted(base_key: &'static str, staging_key: &'static str) -> bool {
-    let key = if is_staging_deploy_target() {
-        staging_key
-    } else {
-        base_key
-    };
-    env_enabled(key)
 }
 
 fn ensure_local_execution_allowed() -> Result<(), RunTaskError> {
@@ -692,8 +648,13 @@ fn run_codex_task_azure_aci(
         combined_output.push_str(&container_logs);
     }
 
-    let (scheduled_tasks, scheduled_tasks_error) = extract_scheduled_tasks(&combined_output);
-    let (scheduler_actions, scheduler_actions_error) = extract_scheduler_actions(&combined_output);
+    let (scheduled_tasks, scheduled_tasks_error, scheduler_actions, scheduler_actions_error) =
+        parse_scheduling_from_outputs(
+            &output_content,
+            &container_logs,
+            &combined_output,
+            request.workspace_dir,
+        );
     let token_usage = extract_token_usage(&combined_output);
     let output_tail = tail_string(&combined_output, 4000);
 
@@ -732,29 +693,14 @@ fn run_codex_task_azure_aci(
 }
 
 fn load_azure_aci_config() -> Result<AzureAciConfig, RunTaskError> {
-    let resource_group = required_targeted_env(
-        "RUN_TASK_AZURE_ACI_RESOURCE_GROUP",
-        "STAGING_RUN_TASK_AZURE_ACI_RESOURCE_GROUP",
-    )?;
-    let image = read_targeted_env(
-        "RUN_TASK_AZURE_ACI_IMAGE",
-        "STAGING_RUN_TASK_AZURE_ACI_IMAGE",
-    )
-    .or_else(|| read_targeted_env("RUN_TASK_DOCKER_IMAGE", "STAGING_RUN_TASK_DOCKER_IMAGE"))
-    .ok_or(RunTaskError::MissingEnv {
-        key: targeted_key(
-            "RUN_TASK_AZURE_ACI_IMAGE",
-            "STAGING_RUN_TASK_AZURE_ACI_IMAGE",
-        ),
-    })?;
-    let location = read_targeted_env(
-        "RUN_TASK_AZURE_ACI_LOCATION",
-        "STAGING_RUN_TASK_AZURE_ACI_LOCATION",
-    );
-    let mut registry_server = read_targeted_env(
-        "RUN_TASK_AZURE_ACI_REGISTRY_SERVER",
-        "STAGING_RUN_TASK_AZURE_ACI_REGISTRY_SERVER",
-    );
+    let resource_group = required_env("RUN_TASK_AZURE_ACI_RESOURCE_GROUP")?;
+    let image = read_env_trimmed("RUN_TASK_AZURE_ACI_IMAGE")
+        .or_else(|| read_env_trimmed("RUN_TASK_DOCKER_IMAGE"))
+        .ok_or(RunTaskError::MissingEnv {
+            key: "RUN_TASK_AZURE_ACI_IMAGE",
+        })?;
+    let location = read_env_trimmed("RUN_TASK_AZURE_ACI_LOCATION");
+    let mut registry_server = read_env_trimmed("RUN_TASK_AZURE_ACI_REGISTRY_SERVER");
     if registry_server.is_none() {
         registry_server = image
             .split('/')
@@ -762,100 +708,57 @@ fn load_azure_aci_config() -> Result<AzureAciConfig, RunTaskError> {
             .filter(|candidate| candidate.contains('.'))
             .map(|value| value.to_string());
     }
-    let registry_username = read_targeted_env(
-        "RUN_TASK_AZURE_ACI_REGISTRY_USERNAME",
-        "STAGING_RUN_TASK_AZURE_ACI_REGISTRY_USERNAME",
-    );
-    let registry_password = read_targeted_env(
-        "RUN_TASK_AZURE_ACI_REGISTRY_PASSWORD",
-        "STAGING_RUN_TASK_AZURE_ACI_REGISTRY_PASSWORD",
-    );
+    let registry_username = read_env_trimmed("RUN_TASK_AZURE_ACI_REGISTRY_USERNAME");
+    let registry_password = read_env_trimmed("RUN_TASK_AZURE_ACI_REGISTRY_PASSWORD");
     if registry_username.is_some() && registry_password.is_none() {
         return Err(RunTaskError::MissingEnv {
-            key: targeted_key(
-                "RUN_TASK_AZURE_ACI_REGISTRY_PASSWORD",
-                "STAGING_RUN_TASK_AZURE_ACI_REGISTRY_PASSWORD",
-            ),
+            key: "RUN_TASK_AZURE_ACI_REGISTRY_PASSWORD",
         });
     }
     if registry_password.is_some() && registry_username.is_none() {
         return Err(RunTaskError::MissingEnv {
-            key: targeted_key(
-                "RUN_TASK_AZURE_ACI_REGISTRY_USERNAME",
-                "STAGING_RUN_TASK_AZURE_ACI_REGISTRY_USERNAME",
-            ),
+            key: "RUN_TASK_AZURE_ACI_REGISTRY_USERNAME",
         });
     }
     if registry_username.is_some() && registry_server.is_none() {
         return Err(RunTaskError::MissingEnv {
-            key: targeted_key(
-                "RUN_TASK_AZURE_ACI_REGISTRY_SERVER",
-                "STAGING_RUN_TASK_AZURE_ACI_REGISTRY_SERVER",
-            ),
+            key: "RUN_TASK_AZURE_ACI_REGISTRY_SERVER",
         });
     }
-    let cpu = read_targeted_env("RUN_TASK_AZURE_ACI_CPU", "STAGING_RUN_TASK_AZURE_ACI_CPU")
-        .unwrap_or_else(|| "2.0".to_string());
-    let memory_gb = read_targeted_env(
-        "RUN_TASK_AZURE_ACI_MEMORY_GB",
-        "STAGING_RUN_TASK_AZURE_ACI_MEMORY_GB",
-    )
-    .unwrap_or_else(|| "4.0".to_string());
-    let file_share = read_targeted_env(
-        "RUN_TASK_AZURE_ACI_FILE_SHARE",
-        "STAGING_RUN_TASK_AZURE_ACI_FILE_SHARE",
-    )
-    .unwrap_or_else(|| "dowhiz-run-task".to_string());
+    let cpu = read_env_trimmed("RUN_TASK_AZURE_ACI_CPU").unwrap_or_else(|| "2.0".to_string());
+    let memory_gb =
+        read_env_trimmed("RUN_TASK_AZURE_ACI_MEMORY_GB").unwrap_or_else(|| "4.0".to_string());
+    let file_share = read_env_trimmed("RUN_TASK_AZURE_ACI_FILE_SHARE")
+        .unwrap_or_else(|| "dowhiz-run-task".to_string());
 
-    let host_share_root = PathBuf::from(required_targeted_env(
-        "RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT",
-        "STAGING_RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT",
-    )?);
+    let host_share_root = PathBuf::from(required_env("RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT")?);
     let container_share_root = PathBuf::from(
-        read_targeted_env(
-            "RUN_TASK_AZURE_ACI_CONTAINER_SHARE_ROOT",
-            "STAGING_RUN_TASK_AZURE_ACI_CONTAINER_SHARE_ROOT",
-        )
-        .unwrap_or_else(|| "/mnt/dowhiz-share".to_string()),
+        read_env_trimmed("RUN_TASK_AZURE_ACI_CONTAINER_SHARE_ROOT")
+            .unwrap_or_else(|| "/mnt/dowhiz-share".to_string()),
     );
 
-    let storage_account = read_targeted_env(
-        "RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT",
-        "STAGING_RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT",
-    )
-    .or_else(|| read_env_trimmed("AZURE_STORAGE_ACCOUNT"))
-    .or_else(|| {
-        read_env_trimmed("AZURE_STORAGE_CONNECTION_STRING")
-            .and_then(|cs| parse_connection_string_component(&cs, "AccountName"))
-    })
-    .ok_or(RunTaskError::MissingEnv {
-        key: targeted_key(
-            "RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT",
-            "STAGING_RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT",
-        ),
-    })?;
+    let storage_account = read_env_trimmed("RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT")
+        .or_else(|| read_env_trimmed("AZURE_STORAGE_ACCOUNT"))
+        .or_else(|| {
+            read_env_trimmed("AZURE_STORAGE_CONNECTION_STRING")
+                .and_then(|cs| parse_connection_string_component(&cs, "AccountName"))
+        })
+        .ok_or(RunTaskError::MissingEnv {
+            key: "RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT",
+        })?;
 
-    let storage_key = read_targeted_env(
-        "RUN_TASK_AZURE_ACI_STORAGE_KEY",
-        "STAGING_RUN_TASK_AZURE_ACI_STORAGE_KEY",
-    )
-    .or_else(|| {
-        read_targeted_env(
-            "RUN_TASK_AZURE_ACI_STORAGE_CONNECTION_STRING",
-            "STAGING_RUN_TASK_AZURE_ACI_STORAGE_CONNECTION_STRING",
-        )
-        .and_then(|cs| parse_connection_string_component(&cs, "AccountKey"))
-    })
-    .or_else(|| {
-        read_env_trimmed("AZURE_STORAGE_CONNECTION_STRING")
-            .and_then(|cs| parse_connection_string_component(&cs, "AccountKey"))
-    })
-    .ok_or(RunTaskError::MissingEnv {
-        key: targeted_key(
-            "RUN_TASK_AZURE_ACI_STORAGE_KEY",
-            "STAGING_RUN_TASK_AZURE_ACI_STORAGE_KEY",
-        ),
-    })?;
+    let storage_key = read_env_trimmed("RUN_TASK_AZURE_ACI_STORAGE_KEY")
+        .or_else(|| {
+            read_env_trimmed("RUN_TASK_AZURE_ACI_STORAGE_CONNECTION_STRING")
+                .and_then(|cs| parse_connection_string_component(&cs, "AccountKey"))
+        })
+        .or_else(|| {
+            read_env_trimmed("AZURE_STORAGE_CONNECTION_STRING")
+                .and_then(|cs| parse_connection_string_component(&cs, "AccountKey"))
+        })
+        .ok_or(RunTaskError::MissingEnv {
+            key: "RUN_TASK_AZURE_ACI_STORAGE_KEY",
+        })?;
 
     Ok(AzureAciConfig {
         resource_group,
@@ -944,51 +847,68 @@ fn run_azure_aci_execution(
     let workspace_sh = shell_quote(&container_workspace_dir.to_string_lossy());
     let output_file = shell_quote(REMOTE_OUTPUT_FILENAME);
     let exit_file = shell_quote(REMOTE_EXIT_CODE_FILENAME);
-
-    let mut codex_parts = vec![
-        "codex".to_string(),
-        "exec".to_string(),
-        "--json".to_string(),
-    ];
-    if bypass_sandbox {
-        codex_parts.push("--yolo".to_string());
-    }
-    for add_dir in add_dirs {
-        codex_parts.push("--add-dir".to_string());
-        codex_parts.push(add_dir.clone());
-    }
-    codex_parts.push("--skip-git-repo-check".to_string());
-    codex_parts.push("-m".to_string());
-    codex_parts.push(model_name.to_string());
-    codex_parts.push("-c".to_string());
-    codex_parts.push("web_search=\"live\"".to_string());
-    codex_parts.push("-c".to_string());
-    codex_parts.push("ask_for_approval=\"never\"".to_string());
-    codex_parts.push("-c".to_string());
-    codex_parts.push(format!("sandbox=\"{}\"", sandbox_mode));
-    codex_parts.push("-c".to_string());
-    codex_parts.push("model_providers.azure.env_key=\"AZURE_OPENAI_API_KEY_BACKUP\"".to_string());
-    codex_parts.push("--cd".to_string());
-    codex_parts.push(container_workspace_dir.to_string_lossy().into_owned());
-    codex_parts.push("\"$(cat .codex_remote_prompt.txt)\"".to_string());
-    let codex_command = codex_parts
+    let model_name_sh = shell_quote(model_name);
+    let sandbox_mode_sh = shell_quote(sandbox_mode);
+    let web_search_cfg = shell_quote("web_search=\"live\"");
+    let ask_for_approval_cfg = shell_quote("ask_for_approval=\"never\"");
+    let sandbox_cfg = shell_quote(&format!("sandbox=\"{}\"", sandbox_mode));
+    let azure_env_cfg =
+        shell_quote("model_providers.azure.env_key=\"AZURE_OPENAI_API_KEY_BACKUP\"");
+    let add_dir_lines = add_dirs
         .iter()
-        .map(|part| {
-            if part.starts_with("\"$(cat ") {
-                part.to_string()
-            } else {
-                shell_quote(part)
-            }
-        })
+        .map(|dir| format!("codex_cmd+=(--add-dir {})", shell_quote(dir)))
         .collect::<Vec<_>>()
-        .join(" ");
+        .join("\n");
+    let bypass_enabled = if bypass_sandbox { "1" } else { "0" };
 
     let script = format!(
-        "set -euo pipefail\nexport PATH=/app/bin:$PATH\ncd {workspace}\nmkdir -p .config/gh .codex\nrm -f {output} {exit}\nset +e\n{codex} > {output} 2>&1\nstatus=$?\nprintf '%s' \"$status\" > {exit}\nexit \"$status\"\n",
+        "set -euo pipefail\n\
+export PATH=/app/bin:$PATH\n\
+cd {workspace}\n\
+mkdir -p .config/gh .codex\n\
+rm -f {output} {exit}\n\
+codex_help=\"$(codex exec --help 2>/dev/null || true)\"\n\
+codex_cmd=(codex exec --json)\n\
+if printf '%s' \"$codex_help\" | grep -q -- '--search'; then\n\
+  codex_cmd+=(--search)\n\
+else\n\
+  codex_cmd+=(-c {web_search_cfg})\n\
+fi\n\
+if printf '%s' \"$codex_help\" | grep -q -- '--ask-for-approval'; then\n\
+  codex_cmd+=(--ask-for-approval never)\n\
+else\n\
+  codex_cmd+=(-c {ask_for_approval_cfg})\n\
+fi\n\
+if printf '%s' \"$codex_help\" | grep -q -- '--sandbox'; then\n\
+  codex_cmd+=(--sandbox {sandbox_mode})\n\
+else\n\
+  codex_cmd+=(-c {sandbox_cfg})\n\
+fi\n\
+if [ \"{bypass}\" = \"1\" ]; then\n\
+  if printf '%s' \"$codex_help\" | grep -q -- '--dangerously-bypass-approvals-and-sandbox'; then\n\
+    codex_cmd+=(--dangerously-bypass-approvals-and-sandbox)\n\
+  elif printf '%s' \"$codex_help\" | grep -q -- '--yolo'; then\n\
+    codex_cmd+=(--yolo)\n\
+  fi\n\
+fi\n\
+{add_dirs}\n\
+codex_cmd+=(--skip-git-repo-check -m {model_name} -c {azure_env_cfg} --cd {workspace} \"$(cat .codex_remote_prompt.txt)\")\n\
+set +e\n\
+\"${{codex_cmd[@]}}\" > {output} 2>&1\n\
+status=$?\n\
+printf '%s' \"$status\" > {exit}\n\
+exit \"$status\"\n",
         workspace = workspace_sh,
-        codex = codex_command,
         output = output_file,
         exit = exit_file,
+        web_search_cfg = web_search_cfg,
+        ask_for_approval_cfg = ask_for_approval_cfg,
+        sandbox_mode = sandbox_mode_sh,
+        sandbox_cfg = sandbox_cfg,
+        bypass = bypass_enabled,
+        add_dirs = add_dir_lines,
+        model_name = model_name_sh,
+        azure_env_cfg = azure_env_cfg,
     );
 
     let mut create_cmd = Command::new("az");
@@ -1250,7 +1170,7 @@ fn effective_codex_sandbox_mode(sandbox_mode: &str, bypass_sandbox: bool) -> Str
 }
 
 fn codex_bypass_sandbox() -> bool {
-    matches!(env::var("CODEX_BYPASS_SANDBOX"), Ok(value) if value.trim() == "1")
+    env_enabled("CODEX_BYPASS_SANDBOX")
 }
 
 fn employee_id_default_env_prefix(employee_id: &str) -> Option<&'static str> {
@@ -1948,11 +1868,29 @@ mod tests {
     }
 
     #[test]
+    fn test_codex_sandbox_mode_prefers_codex_sandbox_mode() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set("CODEX_SANDBOX_MODE", "danger-full-access"),
+            EnvVarGuard::set("RUN_TASK_CODEX_SANDBOX_MODE", "workspace-write"),
+        ];
+
+        assert_eq!(codex_sandbox_mode(), "danger-full-access");
+    }
+
+    #[test]
+    fn test_codex_bypass_sandbox_respects_unprefixed_key() {
+        let _lock = env_lock();
+        let _guards = vec![EnvVarGuard::set("CODEX_BYPASS_SANDBOX", "1")];
+
+        assert!(codex_bypass_sandbox());
+    }
+
+    #[test]
     fn test_resolve_execution_backend_defaults_to_local() {
         let _lock = env_lock();
         let _guards = vec![
             EnvVarGuard::unset("RUN_TASK_EXECUTION_BACKEND"),
-            EnvVarGuard::unset("STAGING_RUN_TASK_EXECUTION_BACKEND"),
             EnvVarGuard::unset("DEPLOY_TARGET"),
         ];
         assert_eq!(resolve_execution_backend(), ExecutionBackend::Local);
@@ -1963,7 +1901,6 @@ mod tests {
         let _lock = env_lock();
         let _guards = vec![
             EnvVarGuard::unset("RUN_TASK_EXECUTION_BACKEND"),
-            EnvVarGuard::unset("STAGING_RUN_TASK_EXECUTION_BACKEND"),
             EnvVarGuard::set("DEPLOY_TARGET", "staging"),
         ];
         assert_eq!(resolve_execution_backend(), ExecutionBackend::AzureAci);
@@ -1974,52 +1911,37 @@ mod tests {
         let _lock = env_lock();
         let _guards = vec![
             EnvVarGuard::unset("RUN_TASK_EXECUTION_BACKEND"),
-            EnvVarGuard::unset("STAGING_RUN_TASK_EXECUTION_BACKEND"),
             EnvVarGuard::set("DEPLOY_TARGET", "production"),
         ];
         assert_eq!(resolve_execution_backend(), ExecutionBackend::AzureAci);
     }
 
     #[test]
-    fn test_resolve_execution_backend_staging_uses_staging_key() {
+    fn test_resolve_execution_backend_uses_run_task_execution_backend_when_set() {
         let _lock = env_lock();
         let _guards = vec![
             EnvVarGuard::set("DEPLOY_TARGET", "staging"),
-            EnvVarGuard::set("RUN_TASK_EXECUTION_BACKEND", "local"),
-            EnvVarGuard::set("STAGING_RUN_TASK_EXECUTION_BACKEND", "azure_aci"),
+            EnvVarGuard::set("RUN_TASK_EXECUTION_BACKEND", "azure_aci"),
         ];
         assert_eq!(resolve_execution_backend(), ExecutionBackend::AzureAci);
     }
 
     #[test]
-    fn test_load_azure_aci_config_staging_uses_staging_keys() {
+    fn test_load_azure_aci_config_uses_unprefixed_keys() {
         let _lock = env_lock();
         let _guards = vec![
-            EnvVarGuard::set("DEPLOY_TARGET", "staging"),
-            EnvVarGuard::set("RUN_TASK_AZURE_ACI_RESOURCE_GROUP", "prod-rg"),
-            EnvVarGuard::set("STAGING_RUN_TASK_AZURE_ACI_RESOURCE_GROUP", "stg-rg"),
+            EnvVarGuard::set("RUN_TASK_AZURE_ACI_RESOURCE_GROUP", "stg-rg"),
             EnvVarGuard::set(
                 "RUN_TASK_AZURE_ACI_IMAGE",
-                "prod.azurecr.io/dowhiz-service:prod",
-            ),
-            EnvVarGuard::set(
-                "STAGING_RUN_TASK_AZURE_ACI_IMAGE",
                 "stg.azurecr.io/dowhiz-service:staging",
             ),
-            EnvVarGuard::set("RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT", "/prod/run_task"),
-            EnvVarGuard::set(
-                "STAGING_RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT",
-                "/stg/run_task",
-            ),
-            EnvVarGuard::set("RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT", "prodaccount"),
-            EnvVarGuard::set("STAGING_RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT", "stgaccount"),
-            EnvVarGuard::set("RUN_TASK_AZURE_ACI_STORAGE_KEY", "prod-key"),
-            EnvVarGuard::set("STAGING_RUN_TASK_AZURE_ACI_STORAGE_KEY", "stg-key"),
-            EnvVarGuard::set("RUN_TASK_AZURE_ACI_FILE_SHARE", "prod-share"),
-            EnvVarGuard::set("STAGING_RUN_TASK_AZURE_ACI_FILE_SHARE", "stg-share"),
+            EnvVarGuard::set("RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT", "/stg/run_task"),
+            EnvVarGuard::set("RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT", "stgaccount"),
+            EnvVarGuard::set("RUN_TASK_AZURE_ACI_STORAGE_KEY", "stg-key"),
+            EnvVarGuard::set("RUN_TASK_AZURE_ACI_FILE_SHARE", "stg-share"),
         ];
 
-        let config = load_azure_aci_config().expect("load staging aci config");
+        let config = load_azure_aci_config().expect("load aci config");
         assert_eq!(config.resource_group, "stg-rg");
         assert_eq!(config.image, "stg.azurecr.io/dowhiz-service:staging");
         assert_eq!(config.host_share_root, PathBuf::from("/stg/run_task"));
@@ -2029,28 +1951,23 @@ mod tests {
     }
 
     #[test]
-    fn test_load_azure_aci_config_staging_requires_staging_keys() {
+    fn test_load_azure_aci_config_requires_unprefixed_resource_group() {
         let _lock = env_lock();
         let _guards = vec![
-            EnvVarGuard::set("DEPLOY_TARGET", "staging"),
-            EnvVarGuard::set("RUN_TASK_AZURE_ACI_RESOURCE_GROUP", "prod-rg"),
-            EnvVarGuard::unset("STAGING_RUN_TASK_AZURE_ACI_RESOURCE_GROUP"),
+            EnvVarGuard::unset("RUN_TASK_AZURE_ACI_RESOURCE_GROUP"),
             EnvVarGuard::set(
-                "STAGING_RUN_TASK_AZURE_ACI_IMAGE",
+                "RUN_TASK_AZURE_ACI_IMAGE",
                 "stg.azurecr.io/dowhiz-service:staging",
             ),
-            EnvVarGuard::set(
-                "STAGING_RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT",
-                "/stg/run_task",
-            ),
-            EnvVarGuard::set("STAGING_RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT", "stgaccount"),
-            EnvVarGuard::set("STAGING_RUN_TASK_AZURE_ACI_STORAGE_KEY", "stg-key"),
+            EnvVarGuard::set("RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT", "/stg/run_task"),
+            EnvVarGuard::set("RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT", "stgaccount"),
+            EnvVarGuard::set("RUN_TASK_AZURE_ACI_STORAGE_KEY", "stg-key"),
         ];
 
-        let err = load_azure_aci_config().expect_err("staging should require STAGING_* key");
+        let err = load_azure_aci_config().expect_err("aci config should require resource group");
         match err {
             RunTaskError::MissingEnv { key } => {
-                assert_eq!(key, "STAGING_RUN_TASK_AZURE_ACI_RESOURCE_GROUP")
+                assert_eq!(key, "RUN_TASK_AZURE_ACI_RESOURCE_GROUP")
             }
             other => panic!("unexpected error variant: {other}"),
         }

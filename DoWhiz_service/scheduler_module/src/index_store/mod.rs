@@ -1,14 +1,26 @@
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection};
-use std::fs;
+use mongodb::bson::{doc, DateTime as BsonDateTime, Document};
+use mongodb::error::ErrorKind;
+use mongodb::options::FindOptions;
+use mongodb::options::IndexOptions;
+use mongodb::options::UpdateOptions;
+use mongodb::sync::Collection;
+use mongodb::IndexModel;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::time::Duration;
+use tracing::warn;
 
+use crate::mongo_store::{create_client_from_env, database_from_env, ensure_index_compatible};
 use crate::{Schedule, ScheduledTask};
 
 #[derive(Debug)]
 pub struct IndexStore {
-    path: PathBuf,
+    mongo: MongoIndexStore,
+}
+
+#[derive(Debug, Clone)]
+struct MongoIndexStore {
+    task_index: Collection<Document>,
 }
 
 #[derive(Debug, Clone)]
@@ -19,17 +31,19 @@ pub struct TaskRef {
 
 #[derive(Debug, thiserror::Error)]
 pub enum IndexStoreError {
-    #[error("sqlite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
+    #[error("mongodb error: {0}")]
+    Mongo(#[from] mongodb::error::Error),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("mongo config error: {0}")]
+    MongoConfig(String),
 }
 
 impl IndexStore {
-    pub fn new(path: impl Into<PathBuf>) -> Result<Self, IndexStoreError> {
-        let store = Self { path: path.into() };
-        let _ = store.open()?;
-        Ok(store)
+    pub fn new(_path: impl Into<PathBuf>) -> Result<Self, IndexStoreError> {
+        Ok(Self {
+            mongo: MongoIndexStore::new()?,
+        })
     }
 
     pub fn sync_user_tasks(
@@ -37,35 +51,7 @@ impl IndexStore {
         user_id: &str,
         tasks: &[ScheduledTask],
     ) -> Result<(), IndexStoreError> {
-        let mut conn = self.open()?;
-        let tx = conn.transaction()?;
-        tx.execute(
-            "DELETE FROM task_index WHERE user_id = ?1",
-            params![user_id],
-        )?;
-        {
-            let mut stmt = tx.prepare(
-                "INSERT INTO task_index (task_id, user_id, next_run, enabled)
-                 VALUES (?1, ?2, ?3, ?4)",
-            )?;
-            for task in tasks {
-                if !task.enabled {
-                    continue;
-                }
-                let next_run = match &task.schedule {
-                    Schedule::Cron { next_run, .. } => next_run,
-                    Schedule::OneShot { run_at } => run_at,
-                };
-                stmt.execute(params![
-                    task.id.to_string(),
-                    user_id,
-                    format_datetime(next_run),
-                    1i64
-                ])?;
-            }
-        }
-        tx.commit()?;
-        Ok(())
+        self.mongo.sync_user_tasks(user_id, tasks)
     }
 
     pub fn due_user_ids(
@@ -73,22 +59,7 @@ impl IndexStore {
         now: DateTime<Utc>,
         limit: usize,
     ) -> Result<Vec<String>, IndexStoreError> {
-        let conn = self.open()?;
-        let mut stmt = conn.prepare(
-            "SELECT DISTINCT user_id
-             FROM task_index
-             WHERE enabled = 1 AND next_run <= ?1
-             ORDER BY next_run
-             LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(params![format_datetime(&now), limit as i64], |row| {
-            row.get::<_, String>(0)
-        })?;
-        let mut user_ids = Vec::new();
-        for row in rows {
-            user_ids.push(row?);
-        }
-        Ok(user_ids)
+        self.mongo.due_user_ids(now, limit)
     }
 
     pub fn due_task_refs(
@@ -96,51 +67,187 @@ impl IndexStore {
         now: DateTime<Utc>,
         limit: usize,
     ) -> Result<Vec<TaskRef>, IndexStoreError> {
-        let conn = self.open()?;
-        let mut stmt = conn.prepare(
-            "SELECT task_id, user_id
-             FROM task_index
-             WHERE enabled = 1 AND next_run <= ?1
-             ORDER BY next_run
-             LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(params![format_datetime(&now), limit as i64], |row| {
-            Ok(TaskRef {
-                task_id: row.get::<_, String>(0)?,
-                user_id: row.get::<_, String>(1)?,
-            })
-        })?;
-        let mut task_refs = Vec::new();
-        for row in rows {
-            task_refs.push(row?);
-        }
-        Ok(task_refs)
-    }
-
-    fn open(&self) -> Result<Connection, IndexStoreError> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let conn = Connection::open(&self.path)?;
-        conn.busy_timeout(Duration::from_secs(30))?;
-        conn.execute_batch(INDEX_SCHEMA)?;
-        Ok(conn)
+        self.mongo.due_task_refs(now, limit)
     }
 }
 
-const INDEX_SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS task_index (
-    task_id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    next_run TEXT NOT NULL,
-    enabled INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_task_index_next_run ON task_index (next_run);
-CREATE INDEX IF NOT EXISTS idx_task_index_user_id ON task_index (user_id);
-"#;
+impl MongoIndexStore {
+    fn new() -> Result<Self, IndexStoreError> {
+        let client = create_client_from_env()
+            .map_err(|err| IndexStoreError::MongoConfig(err.to_string()))?;
+        let db = database_from_env(&client);
+        let task_index = db.collection::<Document>("task_index");
+        // user_id must come first for sharded collections (Cosmos DB shard key compatibility)
+        ensure_index_compatible(
+            &task_index,
+            IndexModel::builder()
+                .keys(doc! { "user_id": 1, "task_id": 1 })
+                .options(IndexOptions::builder().unique(Some(true)).build())
+                .build(),
+        )?;
+        ensure_index_compatible(
+            &task_index,
+            IndexModel::builder()
+                .keys(doc! { "enabled": 1, "next_run": 1 })
+                .build(),
+        )?;
+        Ok(Self { task_index })
+    }
 
-fn format_datetime(value: &DateTime<Utc>) -> String {
-    value.to_rfc3339()
+    fn sync_user_tasks(
+        &self,
+        user_id: &str,
+        tasks: &[ScheduledTask],
+    ) -> Result<(), IndexStoreError> {
+        let task_rows = enabled_task_next_runs(tasks);
+        let task_ids: Vec<String> = task_rows
+            .iter()
+            .map(|(task_id, _)| task_id.clone())
+            .collect();
+
+        if task_ids.is_empty() {
+            self.task_index
+                .delete_many(doc! { "user_id": user_id }, None)?;
+            return Ok(());
+        }
+
+        self.task_index.delete_many(
+            doc! {
+                "user_id": user_id,
+                "task_id": { "$nin": task_ids.clone() },
+            },
+            None,
+        )?;
+
+        let options = UpdateOptions::builder().upsert(Some(true)).build();
+        for (task_id, next_run) in task_rows {
+            self.task_index.update_one(
+                doc! { "task_id": &task_id, "user_id": user_id },
+                doc! {
+                    "$set": {
+                        "next_run": BsonDateTime::from_chrono(next_run),
+                        "enabled": true,
+                    },
+                    "$setOnInsert": {
+                        "task_id": &task_id,
+                        "user_id": user_id,
+                    },
+                },
+                options.clone(),
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn due_user_ids(
+        &self,
+        now: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<String>, IndexStoreError> {
+        let filter = doc! {
+            "enabled": true,
+            "next_run": { "$lte": BsonDateTime::from_chrono(now) },
+        };
+        let sorted_options = FindOptions::builder()
+            .sort(doc! { "next_run": 1 })
+            .limit(limit as i64)
+            .build();
+        let unsorted_limit = (limit as i64).saturating_mul(8).max(limit as i64);
+        let unsorted_options = FindOptions::builder().limit(unsorted_limit).build();
+        let cursor = match self.task_index.find(filter.clone(), sorted_options) {
+            Ok(cursor) => cursor,
+            Err(err) if is_order_by_index_excluded(&err) => {
+                warn!(
+                    "task_index next_run sort rejected by backend; falling back to unsorted due-user query"
+                );
+                self.task_index.find(filter, unsorted_options)?
+            }
+            Err(err) => return Err(err.into()),
+        };
+        let mut ids = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for row in cursor {
+            let doc = row?;
+            if let Ok(user_id) = doc.get_str("user_id") {
+                if seen.insert(user_id.to_string()) {
+                    ids.push(user_id.to_string());
+                    if ids.len() >= limit {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(ids)
+    }
+
+    fn due_task_refs(
+        &self,
+        now: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<TaskRef>, IndexStoreError> {
+        let filter = doc! {
+            "enabled": true,
+            "next_run": { "$lte": BsonDateTime::from_chrono(now) },
+        };
+        let sorted_options = FindOptions::builder()
+            .sort(doc! { "next_run": 1 })
+            .limit(limit as i64)
+            .build();
+        let unsorted_options = FindOptions::builder().limit(limit as i64).build();
+        let cursor = match self.task_index.find(filter.clone(), sorted_options) {
+            Ok(cursor) => cursor,
+            Err(err) if is_order_by_index_excluded(&err) => {
+                warn!(
+                    "task_index next_run sort rejected by backend; falling back to unsorted due-task query"
+                );
+                self.task_index.find(filter, unsorted_options)?
+            }
+            Err(err) => return Err(err.into()),
+        };
+        let mut refs = Vec::new();
+        for row in cursor {
+            let doc = row?;
+            let task_id = match doc.get_str("task_id") {
+                Ok(value) => value.to_string(),
+                Err(_) => continue,
+            };
+            let user_id = match doc.get_str("user_id") {
+                Ok(value) => value.to_string(),
+                Err(_) => continue,
+            };
+            refs.push(TaskRef { task_id, user_id });
+        }
+        Ok(refs)
+    }
+}
+
+fn enabled_task_next_runs(tasks: &[ScheduledTask]) -> Vec<(String, DateTime<Utc>)> {
+    let mut deduped: BTreeMap<String, DateTime<Utc>> = BTreeMap::new();
+    for task in tasks {
+        if !task.enabled {
+            continue;
+        }
+        let next_run = match &task.schedule {
+            Schedule::Cron { next_run, .. } => *next_run,
+            Schedule::OneShot { run_at } => *run_at,
+        };
+        deduped.insert(task.id.to_string(), next_run);
+    }
+    deduped.into_iter().collect()
+}
+
+fn is_order_by_index_excluded(err: &mongodb::error::Error) -> bool {
+    let ErrorKind::Command(command_error) = err.kind.as_ref() else {
+        return false;
+    };
+    if command_error.code != 2 {
+        return false;
+    }
+    command_error
+        .message
+        .to_ascii_lowercase()
+        .contains("the index path corresponding to the specified order-by item is excluded")
 }
 
 #[cfg(test)]

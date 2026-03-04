@@ -1,7 +1,6 @@
 use lettre::message::header::{ContentType, HeaderName, HeaderValue};
 use lettre::message::{Attachment as LettreAttachment, MultiPart, SinglePart};
 use lettre::Transport;
-use rusqlite::OptionalExtension;
 use scheduler_module::employee_config::{
     load_employee_directory, EmployeeDirectory, EmployeeProfile,
 };
@@ -155,12 +154,6 @@ fn resolve_postmark_hook_url() -> String {
     if let Ok(value) = env::var("POSTMARK_INBOUND_HOOK_URL") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
-            let lower = trimmed.to_ascii_lowercase();
-            if lower.contains("api.staging.dowhiz.com")
-                || lower.contains("api.production1.dowhiz.com")
-            {
-                return DEFAULT_NGROK_HOOK_URL.to_string();
-            }
             return trimmed.to_string();
         }
     }
@@ -179,6 +172,18 @@ fn env_with_scale_oliver(key: &str) -> Option<String> {
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
         })
+}
+
+fn create_live_test_tempdir() -> Result<TempDir, BoxError> {
+    if let Some(host_root) = env_with_scale_oliver("RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT") {
+        let base = PathBuf::from(host_root).join("service_real_email_e2e");
+        fs::create_dir_all(&base)?;
+        let temp = tempfile::Builder::new()
+            .prefix("live_e2e_")
+            .tempdir_in(base)?;
+        return Ok(temp);
+    }
+    Ok(TempDir::new()?)
 }
 
 struct HookRestore {
@@ -581,16 +586,14 @@ fn wait_for_tasks_complete(
 ) -> Result<Vec<ScheduledTask>, BoxError> {
     let start = SystemTime::now();
     loop {
-        if tasks_path.exists() {
-            let scheduler = Scheduler::load(tasks_path, NoopExecutor)?;
-            let tasks = scheduler.tasks().to_vec();
-            if !tasks.is_empty()
-                && tasks
-                    .iter()
-                    .all(|task| !task.enabled && task.last_run.is_some())
-            {
-                return Ok(tasks);
-            }
+        let scheduler = Scheduler::load(tasks_path, NoopExecutor)?;
+        let tasks = scheduler.tasks().to_vec();
+        if !tasks.is_empty()
+            && tasks
+                .iter()
+                .all(|task| !task.enabled && task.last_run.is_some())
+        {
+            return Ok(tasks);
         }
         if start.elapsed().unwrap_or_default() >= timeout {
             return Err("timed out waiting for tasks to complete".into());
@@ -600,30 +603,13 @@ fn wait_for_tasks_complete(
 }
 
 fn wait_for_user_id(
-    users_db_path: &Path,
+    _users_db_path: &Path,
     users_root: &Path,
-    email: &str,
+    _email: &str,
     timeout: Duration,
 ) -> Option<String> {
-    let normalized = normalize_email(email)?;
     let start = SystemTime::now();
     loop {
-        if users_db_path.exists() {
-            if let Ok(conn) = rusqlite::Connection::open(users_db_path) {
-                if let Ok(row) = conn
-                    .query_row(
-                        "SELECT id FROM users WHERE email = ?1",
-                        rusqlite::params![normalized.as_str()],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()
-                {
-                    if let Some(user_id) = row {
-                        return Some(user_id);
-                    }
-                }
-            }
-        }
         if let Ok(entries) = fs::read_dir(users_root) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -733,7 +719,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
     }
     env::set_var("SCALE_OLIVER_INGESTION_QUEUE_BACKEND", "servicebus");
     env::set_var("SCALE_OLIVER_RAW_PAYLOAD_STORAGE_BACKEND", "azure");
-    let temp = TempDir::new()?;
+    let temp = create_live_test_tempdir()?;
     let workspace_root = temp.path().join("workspaces");
     let state_dir = temp.path().join("state");
     let users_root = temp.path().join("users");
@@ -964,7 +950,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         .unwrap_or_else(|poison| poison.into_inner());
     let logs = String::from_utf8_lossy(&log_guard);
     if logs.contains("unable to open database file") {
-        return Err("sqlite warning detected after cleanup".into());
+        return Err("database warning detected after cleanup".into());
     }
 
     Ok(())

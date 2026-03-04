@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `scheduler_module/`: inbound gateway (Service Bus ingestion + Azure Blob raw payloads), scheduling, and service binaries. Postgres ingestion remains available for legacy/worker-only setups.
+- `scheduler_module/`: inbound gateway (Service Bus ingestion + Azure Blob raw payloads), scheduling, service binaries, and Mongo-backed scheduler/user/index persistence. Postgres ingestion remains available for legacy/worker-only setups.
 - `send_emails_module/`: Postmark integration and email sending.
 - `run_task_module/`: task execution and workspace orchestration (`src/run_task/`).
 - `scripts/`: local run helpers (gateway, employees, E2E).
@@ -22,7 +22,7 @@
 - `./scripts/run_gateway_local.sh`: start the inbound gateway locally.
 - The inbound gateway requires `INGESTION_QUEUE_BACKEND=servicebus`; raw payload storage backend is configurable (`supabase` default, `azure` recommended for production). Postgres ingestion remains legacy/worker-only.
 - `docker build -t dowhiz-service .`: build the container image.
-- For single-file staging/prod split (`DEPLOY_TARGET` + `STAGING_` overrides), follow `docs/staging_production_deploy.md`.
+- For staging/prod deployment with separate secret sets and unprefixed keys, follow `docs/staging_production_deploy.md`.
 
 ## Coding Style & Naming Conventions
 Use rustfmt defaults. Follow Rust naming: `snake_case` for functions/modules, `CamelCase` for types, and `SCREAMING_SNAKE_CASE` for constants. Keep files and modules focused; split large files instead of growing monoliths. Prefer explicit error handling and structured logging via `tracing`.
@@ -39,6 +39,6 @@ After completing code changes, you must design targeted, detailed unit tests and
 Recent history uses short, imperative, sentence-case messages (e.g., “Update .env.example”, “Refactor inbound gateway logic”). Conventional Commit prefixes appear occasionally (e.g., `fix(runtime): ...`, `feat: ...`); use them when helpful, but keep subject lines concise. PRs should include a summary, the exact test commands run, and any config/env changes. Update `.env.example` when adding new required variables.
 
 ## Configuration & Secrets
-Copy `.env.example` to `.env` and keep secrets out of git. `employee.toml` selects employee profiles; `gateway.toml` routes inbound webhooks. For agent behavior changes, check `employees/<id>/AGENTS.md` and `employees/<id>/CLAUDE.md`.
+Copy `.env.example` to `.env` and keep secrets out of git. `employee.toml` selects employee profiles; `gateway.toml` routes inbound webhooks. `MONGODB_URI` is required for worker scheduler/user/index/slack stores; `SUPABASE_DB_URL` is required for account/auth flows used by both worker and gateway. For agent behavior changes, check `employees/<id>/AGENTS.md` and `employees/<id>/CLAUDE.md`.
 
 **Contributor principle:** Keep the codebase modular and easy to maintain. If a file grows too large (roughly 500–1000 lines), consider splitting it into smaller, well-defined modules with clear responsibilities.

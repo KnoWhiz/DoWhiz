@@ -66,8 +66,11 @@ For full dependency install steps, see `DoWhiz_service/README.md`.
 
 ```bash
 cp .env.example DoWhiz_service/.env
-# Edit DoWhiz_service/.env and add your POSTMARK_SERVER_TOKEN
-# For Codex/Claude runners, also set AZURE_OPENAI_API_KEY_BACKUP
+# Edit DoWhiz_service/.env and set required keys:
+# - POSTMARK_SERVER_TOKEN
+# - AZURE_OPENAI_API_KEY_BACKUP
+# - MONGODB_URI
+# - SUPABASE_DB_URL
 ```
 
 ### 3. Start Service
@@ -155,11 +158,12 @@ Inbound message -> Ingress (Rust gateway) -> Raw payload storage (Azure Blob; Su
 | `external/openclaw/` | Reference implementation for multi-agent patterns |
 
 ## DoWhiz Account [Slack and Discord]
-- Currently, DoWhiz Account Integration is only supported on local testing. We are working hard to polish and push this feature.
-- DoWhiz Accounts use AWS Cognito Authorization, and auth information is stored in Supabase.
-- DoWhiz accounts also have the ability to view and edit agent memory directly, allowing more control and optimization of a user's employees.
+- Account/auth APIs run in both `rust_service` and `inbound_gateway` (`/auth/*`).
+- Billing APIs (`/billing/*`) are exposed by `rust_service` when Stripe env is configured.
+- DoWhiz accounts use Supabase access-token validation (local JWT verification with `SUPABASE_JWT_SECRET`, with Supabase API fallback).
+- Account, identifier, email verification, and payment records are stored in Supabase Postgres (`SUPABASE_DB_URL`).
 - Support for Slack and Discord OAuth for DoWhiz accounts in Integration panel
-- Simultaenous Slack support for `boiled_egg` (Proto) and `little_bear` (Oliver)
+- Simultaneous Slack support for `boiled_egg` (Proto) and `little_bear` (Oliver)
 
 ## Documentation
 
