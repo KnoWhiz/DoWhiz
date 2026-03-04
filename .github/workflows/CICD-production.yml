@@ -242,6 +242,35 @@ jobs:
             exit 1
           }
 
+          set -a
+          source "$ENV_FILE"
+          set +a
+
+          default_employee_id="$(awk -F'"' '/^[[:space:]]*default_employee_id[[:space:]]*=/{print $2; exit}' "$EMPLOYEE_CONFIG_PATH_RESOLVED")"
+          if [[ -z "${EMPLOYEE_ID:-}" ]]; then
+            EMPLOYEE_ID="$default_employee_id"
+            export EMPLOYEE_ID
+          fi
+          [[ -n "${EMPLOYEE_ID:-}" ]] || {
+            echo "EMPLOYEE_ID is missing in .env and employee config has no default_employee_id" >&2
+            exit 1
+          }
+          if ! awk -v id="$EMPLOYEE_ID" -F'"' '
+            /^[[:space:]]*id[[:space:]]*=/ {
+              if ($2 == id) {
+                found = 1
+              }
+            }
+            END { exit(found ? 0 : 1) }
+          ' "$EMPLOYEE_CONFIG_PATH_RESOLVED"; then
+            echo "Configured EMPLOYEE_ID '$EMPLOYEE_ID' not found in $EMPLOYEE_CONFIG_PATH_RESOLVED" >&2
+            exit 1
+          fi
+
+          echo "Using EMPLOYEE_ID=$EMPLOYEE_ID"
+          echo "Using GATEWAY_CONFIG_PATH=$GATEWAY_CONFIG_PATH"
+          echo "Using EMPLOYEE_CONFIG_PATH=$EMPLOYEE_CONFIG_PATH"
+
           # Ensure Azure Files mount is present before starting worker
           # so ACI tasks share workspace/memory paths correctly.
           bash "$APP_DIR/scripts/ensure_aci_share_mount.sh"
@@ -249,19 +278,19 @@ jobs:
           worker_running=0
           for service in dw_worker dowhiz_rust_service dowhiz-rust-service; do
             if pm2 describe "$service" >/dev/null 2>&1; then
-              pm2 restart "$service"
+              pm2 restart "$service" --update-env
               worker_running=1
             fi
           done
           if [ "$worker_running" -eq 0 ]; then
             echo "No worker process found in PM2, starting dw_worker."
-            pm2 start "$APP_DIR/target/release/rust_service" --name dw_worker --cwd "$APP_DIR" -- --host 0.0.0.0 --port 9001
+            pm2 start "$APP_DIR/target/release/rust_service" --name dw_worker --cwd "$APP_DIR" -- --host 0.0.0.0 --port "${RUST_SERVICE_PORT:-9001}"
           fi
 
           gateway_running=0
           for service in dw_gateway dowhiz_inbound_gateway dowhiz_gateway dowhiz-inbound-gateway; do
             if pm2 describe "$service" >/dev/null 2>&1; then
-              pm2 restart "$service"
+              pm2 restart "$service" --update-env
               gateway_running=1
             fi
           done
