@@ -93,9 +93,54 @@ pub(super) fn run_codex_task(
         }
     }
     if backend == ExecutionBackend::AzureAci {
-        return run_codex_task_azure_aci(request, runner, reply_html_path, reply_attachments_dir);
+        match run_codex_task_azure_aci(
+            &request,
+            runner,
+            reply_html_path.clone(),
+            reply_attachments_dir.clone(),
+        ) {
+            Ok(output) => return Ok(output),
+            Err(err) => {
+                if should_fallback_to_local_on_aci_error(&err) {
+                    if allow_aci_local_fallback() {
+                        eprintln!(
+                            "[run_task] azure_aci capacity error detected; falling back to local execution"
+                        );
+                        return run_codex_task_local(
+                            &request,
+                            runner,
+                            reply_html_path,
+                            reply_attachments_dir,
+                            false,
+                        );
+                    }
+                    eprintln!(
+                        "[run_task] azure_aci capacity error detected; local fallback disabled"
+                    );
+                }
+                return Err(err);
+            }
+        }
     }
-    ensure_local_execution_allowed()?;
+    run_codex_task_local(
+        &request,
+        runner,
+        reply_html_path,
+        reply_attachments_dir,
+        true,
+    )
+}
+
+fn run_codex_task_local(
+    request: &RunTaskRequest<'_>,
+    runner: &str,
+    reply_html_path: PathBuf,
+    reply_attachments_dir: PathBuf,
+    enforce_local_execution_guard: bool,
+) -> Result<RunTaskOutput, RunTaskError> {
+    if enforce_local_execution_guard {
+        ensure_local_execution_allowed()?;
+    }
     let docker_image = read_env_trimmed("RUN_TASK_DOCKER_IMAGE");
     let docker_requested = env_enabled("RUN_TASK_USE_DOCKER");
     let docker_available = docker_requested && docker_cli_available();
@@ -479,8 +524,33 @@ fn ensure_local_execution_allowed() -> Result<(), RunTaskError> {
     Ok(())
 }
 
+fn allow_aci_local_fallback() -> bool {
+    if let Some(raw) = read_env_trimmed("RUN_TASK_AZURE_ACI_FALLBACK_TO_LOCAL") {
+        return matches!(
+            raw.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        );
+    }
+    normalized_deploy_target() == "staging"
+}
+
+fn should_fallback_to_local_on_aci_error(err: &RunTaskError) -> bool {
+    match err {
+        RunTaskError::CodexFailed { output, .. } => is_aci_capacity_error_output(output),
+        RunTaskError::CommandTimeout { output, .. } => is_aci_capacity_error_output(output),
+        _ => false,
+    }
+}
+
+fn is_aci_capacity_error_output(output: &str) -> bool {
+    let lowered = output.to_ascii_lowercase();
+    lowered.contains("containergroupquotareached")
+        || (lowered.contains("container group quota")
+            && lowered.contains("microsoft.containerinstance/containergroups"))
+}
+
 fn run_codex_task_azure_aci(
-    request: RunTaskRequest<'_>,
+    request: &RunTaskRequest<'_>,
     runner: &str,
     reply_html_path: PathBuf,
     reply_attachments_dir: PathBuf,
@@ -1924,6 +1994,54 @@ mod tests {
             EnvVarGuard::set("RUN_TASK_EXECUTION_BACKEND", "azure_aci"),
         ];
         assert_eq!(resolve_execution_backend(), ExecutionBackend::AzureAci);
+    }
+
+    #[test]
+    fn test_allow_aci_local_fallback_defaults_true_on_staging() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set("DEPLOY_TARGET", "staging"),
+            EnvVarGuard::unset("RUN_TASK_AZURE_ACI_FALLBACK_TO_LOCAL"),
+        ];
+        assert!(allow_aci_local_fallback());
+    }
+
+    #[test]
+    fn test_allow_aci_local_fallback_defaults_false_on_production() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set("DEPLOY_TARGET", "production"),
+            EnvVarGuard::unset("RUN_TASK_AZURE_ACI_FALLBACK_TO_LOCAL"),
+        ];
+        assert!(!allow_aci_local_fallback());
+    }
+
+    #[test]
+    fn test_allow_aci_local_fallback_respects_env_override() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set("DEPLOY_TARGET", "production"),
+            EnvVarGuard::set("RUN_TASK_AZURE_ACI_FALLBACK_TO_LOCAL", "1"),
+        ];
+        assert!(allow_aci_local_fallback());
+    }
+
+    #[test]
+    fn test_should_fallback_to_local_on_aci_error_detects_quota_error() {
+        let err = RunTaskError::CodexFailed {
+            status: Some(1),
+            output: "ERROR: (ContainerGroupQuotaReached) quota exceeded".to_string(),
+        };
+        assert!(should_fallback_to_local_on_aci_error(&err));
+    }
+
+    #[test]
+    fn test_should_fallback_to_local_on_aci_error_ignores_unrelated_error() {
+        let err = RunTaskError::CodexFailed {
+            status: Some(1),
+            output: "ERROR: some unrelated failure".to_string(),
+        };
+        assert!(!should_fallback_to_local_on_aci_error(&err));
     }
 
     #[test]
