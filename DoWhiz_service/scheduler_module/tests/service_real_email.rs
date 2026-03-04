@@ -154,12 +154,6 @@ fn resolve_postmark_hook_url() -> String {
     if let Ok(value) = env::var("POSTMARK_INBOUND_HOOK_URL") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
-            let lower = trimmed.to_ascii_lowercase();
-            if lower.contains("api.staging.dowhiz.com")
-                || lower.contains("api.production1.dowhiz.com")
-            {
-                return DEFAULT_NGROK_HOOK_URL.to_string();
-            }
             return trimmed.to_string();
         }
     }

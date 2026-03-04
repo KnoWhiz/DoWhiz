@@ -233,6 +233,13 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         let path = temp.path().join("slack.db");
         let store = SlackStore::new(&path).expect("store");
+        // SlackStore is Mongo-backed and does not scope by path; wipe test data so
+        // each test starts from a deterministic empty collection.
+        store
+            .mongo
+            .installations
+            .delete_many(doc! {}, None)
+            .expect("clear slack_installations");
         (temp, store)
     }
 
@@ -329,6 +336,10 @@ mod tests {
         }
 
         let list = store.list_installations().expect("list");
-        assert_eq!(list.len(), 3);
+        let ids: std::collections::HashSet<String> =
+            list.into_iter().map(|value| value.team_id).collect();
+        assert!(ids.contains("T1"));
+        assert!(ids.contains("T2"));
+        assert!(ids.contains("T3"));
     }
 }
