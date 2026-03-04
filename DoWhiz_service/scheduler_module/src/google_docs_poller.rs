@@ -8,7 +8,6 @@ use mongodb::bson::{doc, Bson, DateTime as BsonDateTime, Document};
 use mongodb::options::IndexOptions;
 use mongodb::sync::Collection;
 use mongodb::IndexModel;
-use rusqlite::{params, Connection};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,7 +19,6 @@ use crate::adapters::google_docs::{ActionableComment, GoogleDocsInboundAdapter};
 use crate::channel::Channel;
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
 use crate::mongo_store::{create_client_from_env, database_from_env, ensure_index_compatible};
-use crate::storage_backend::StorageBackend;
 use crate::{RunTaskTask, Scheduler, SchedulerError, TaskExecutor, TaskKind};
 
 /// Configuration for Google Docs polling.
@@ -117,34 +115,10 @@ impl GoogleDocsPollerConfig {
     }
 }
 
-/// Database schema for tracking processed comments.
-const GOOGLE_DOCS_SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS google_docs_documents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id TEXT UNIQUE NOT NULL,
-    document_name TEXT,
-    owner_email TEXT,
-    last_checked_at TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS google_docs_processed_comments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id TEXT NOT NULL,
-    comment_id TEXT NOT NULL,
-    processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(document_id, comment_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_processed_comments_document
-ON google_docs_processed_comments(document_id);
-"#;
-
 /// Store for tracking processed Google Docs comments.
 #[derive(Debug)]
 pub struct GoogleDocsProcessedStore {
-    path: PathBuf,
-    mongo: Option<MongoDocsProcessedStore>,
+    mongo: MongoDocsProcessedStore,
 }
 
 #[derive(Debug, Clone)]
@@ -154,36 +128,10 @@ struct MongoDocsProcessedStore {
 }
 
 impl GoogleDocsProcessedStore {
-    pub fn new(path: PathBuf) -> Result<Self, SchedulerError> {
-        let backend = StorageBackend::from_env();
-        let mongo = if backend.uses_mongo() {
-            Some(MongoDocsProcessedStore::new()?)
-        } else {
-            None
-        };
-        let store = Self { path, mongo };
-        if store.mongo.is_none() {
-            store.init()?;
-        }
-        Ok(store)
-    }
-
-    fn init(&self) -> Result<(), SchedulerError> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let conn = Connection::open(&self.path)?;
-        // NOTE: Do NOT use WAL mode here. The database may be on Azure Files (CIFS),
-        // which doesn't support mmap() properly, causing WAL to fail with "database is locked".
-        conn.execute_batch(GOOGLE_DOCS_SCHEMA)?;
-        Ok(())
-    }
-
-    fn open(&self) -> Result<Connection, SchedulerError> {
-        let conn = Connection::open(&self.path)?;
-        // NOTE: Do NOT use WAL mode - incompatible with Azure Files (CIFS).
-        conn.busy_timeout(Duration::from_secs(30))?;
-        Ok(conn)
+    pub fn new(_path: PathBuf) -> Result<Self, SchedulerError> {
+        Ok(Self {
+            mongo: MongoDocsProcessedStore::new()?,
+        })
     }
 
     /// Check if a comment has been processed.
@@ -192,16 +140,7 @@ impl GoogleDocsProcessedStore {
         document_id: &str,
         comment_id: &str,
     ) -> Result<bool, SchedulerError> {
-        if let Some(mongo) = &self.mongo {
-            return mongo.is_processed(document_id, comment_id);
-        }
-        let conn = self.open()?;
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM google_docs_processed_comments WHERE document_id = ?1 AND comment_id = ?2",
-            params![document_id, comment_id],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
+        self.mongo.is_processed(document_id, comment_id)
     }
 
     /// Mark a comment as processed.
@@ -210,15 +149,7 @@ impl GoogleDocsProcessedStore {
         document_id: &str,
         comment_id: &str,
     ) -> Result<(), SchedulerError> {
-        if let Some(mongo) = &self.mongo {
-            return mongo.mark_processed(document_id, comment_id);
-        }
-        let conn = self.open()?;
-        conn.execute(
-            "INSERT OR IGNORE INTO google_docs_processed_comments (document_id, comment_id, processed_at) VALUES (?1, ?2, ?3)",
-            params![document_id, comment_id, Utc::now().to_rfc3339()],
-        )?;
-        Ok(())
+        self.mongo.mark_processed(document_id, comment_id)
     }
 
     /// Get all processed comment IDs for a document.
@@ -227,19 +158,7 @@ impl GoogleDocsProcessedStore {
         &self,
         document_id: &str,
     ) -> Result<HashSet<String>, SchedulerError> {
-        if let Some(mongo) = &self.mongo {
-            return mongo.get_processed_ids(document_id);
-        }
-        let conn = self.open()?;
-        let mut stmt = conn.prepare(
-            "SELECT comment_id FROM google_docs_processed_comments WHERE document_id = ?1",
-        )?;
-        let rows = stmt.query_map(params![document_id], |row| row.get::<_, String>(0))?;
-        let mut result = HashSet::new();
-        for row in rows {
-            result.insert(row?);
-        }
-        Ok(result)
+        self.mongo.get_processed_ids(document_id)
     }
 
     /// Get all processed tracking IDs for a document.
@@ -256,15 +175,7 @@ impl GoogleDocsProcessedStore {
         document_id: &str,
         tracking_id: &str,
     ) -> Result<(), SchedulerError> {
-        if let Some(mongo) = &self.mongo {
-            return mongo.mark_processed(document_id, tracking_id);
-        }
-        let conn = self.open()?;
-        conn.execute(
-            "INSERT OR IGNORE INTO google_docs_processed_comments (document_id, comment_id, processed_at) VALUES (?1, ?2, ?3)",
-            params![document_id, tracking_id, Utc::now().to_rfc3339()],
-        )?;
-        Ok(())
+        self.mongo.mark_processed(document_id, tracking_id)
     }
 
     /// Register a document for tracking.
@@ -274,29 +185,13 @@ impl GoogleDocsProcessedStore {
         document_name: Option<&str>,
         owner_email: Option<&str>,
     ) -> Result<(), SchedulerError> {
-        if let Some(mongo) = &self.mongo {
-            return mongo.register_document(document_id, document_name, owner_email);
-        }
-        let conn = self.open()?;
-        conn.execute(
-            "INSERT OR REPLACE INTO google_docs_documents (document_id, document_name, owner_email, last_checked_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, COALESCE((SELECT created_at FROM google_docs_documents WHERE document_id = ?1), ?4))",
-            params![document_id, document_name, owner_email, Utc::now().to_rfc3339()],
-        )?;
-        Ok(())
+        self.mongo
+            .register_document(document_id, document_name, owner_email)
     }
 
     /// Update last checked time for a document.
     pub fn update_last_checked(&self, document_id: &str) -> Result<(), SchedulerError> {
-        if let Some(mongo) = &self.mongo {
-            return mongo.update_last_checked(document_id);
-        }
-        let conn = self.open()?;
-        conn.execute(
-            "UPDATE google_docs_documents SET last_checked_at = ?1 WHERE document_id = ?2",
-            params![Utc::now().to_rfc3339(), document_id],
-        )?;
-        Ok(())
+        self.mongo.update_last_checked(document_id)
     }
 }
 

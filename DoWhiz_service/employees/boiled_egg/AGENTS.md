@@ -7,7 +7,7 @@ This is a Rust workspace with three crates:
 - `scheduler_module/`: inbound webhook handling, scheduling, and service binaries.
 - `send_emails_module/`: Postmark email sending and integration tests.
 - `run_task_module/`: task execution and workspace orchestration.
-Runtime state lives under `.workspace/` (SQLite state, user archives, and generated drafts). Build outputs go to `target/`.
+Runtime state lives under `.workspace/` (Mongo-backed state, user archives, and generated drafts). Build outputs go to `target/`.
 
 ## Build, Test, and Development Commands
 - `cargo build`: build the full workspace.

@@ -8,12 +8,9 @@ use mongodb::options::FindOptions;
 use mongodb::options::IndexOptions;
 use mongodb::sync::Collection;
 use mongodb::IndexModel;
-use rusqlite::{params, Connection, OptionalExtension};
 use std::path::PathBuf;
-use std::time::Duration;
 
 use crate::mongo_store::{create_client_from_env, database_from_env, ensure_index_compatible};
-use crate::storage_backend::StorageBackend;
 
 /// A Slack workspace installation record.
 #[derive(Debug, Clone)]
@@ -27,8 +24,6 @@ pub struct SlackInstallation {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SlackStoreError {
-    #[error("sqlite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
     #[error("mongodb error: {0}")]
     Mongo(#[from] mongodb::error::Error),
     #[error("io error: {0}")]
@@ -44,8 +39,7 @@ pub enum SlackStoreError {
 /// Store for Slack workspace installations.
 #[derive(Debug, Clone)]
 pub struct SlackStore {
-    path: PathBuf,
-    mongo: Option<MongoSlackStore>,
+    mongo: MongoSlackStore,
 }
 
 #[derive(Debug, Clone)]
@@ -54,22 +48,11 @@ struct MongoSlackStore {
 }
 
 impl SlackStore {
-    /// Create a new SlackStore, initializing the database if needed.
-    pub fn new(path: impl Into<PathBuf>) -> Result<Self, SlackStoreError> {
-        let backend = StorageBackend::from_env();
-        let mongo = if backend.uses_mongo() {
-            Some(MongoSlackStore::new()?)
-        } else {
-            None
-        };
-        let store = Self {
-            path: path.into(),
-            mongo,
-        };
-        if store.mongo.is_none() {
-            let _ = store.open()?;
-        }
-        Ok(store)
+    /// Create a new SlackStore.
+    pub fn new(_path: impl Into<PathBuf>) -> Result<Self, SlackStoreError> {
+        Ok(Self {
+            mongo: MongoSlackStore::new()?,
+        })
     }
 
     /// Save or update an installation for a workspace.
@@ -77,65 +60,12 @@ impl SlackStore {
         &self,
         installation: &SlackInstallation,
     ) -> Result<(), SlackStoreError> {
-        if let Some(mongo) = &self.mongo {
-            return mongo.upsert_installation(installation);
-        }
-        let conn = self.open()?;
-        conn.execute(
-            "INSERT INTO slack_installations (team_id, team_name, bot_token, bot_user_id, installed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(team_id) DO UPDATE SET
-                team_name = excluded.team_name,
-                bot_token = excluded.bot_token,
-                bot_user_id = excluded.bot_user_id,
-                installed_at = excluded.installed_at",
-            params![
-                installation.team_id,
-                installation.team_name,
-                installation.bot_token,
-                installation.bot_user_id,
-                format_datetime(installation.installed_at),
-            ],
-        )?;
-        Ok(())
+        self.mongo.upsert_installation(installation)
     }
 
     /// Get installation by team_id.
     pub fn get_installation(&self, team_id: &str) -> Result<SlackInstallation, SlackStoreError> {
-        if let Some(mongo) = &self.mongo {
-            return mongo.get_installation(team_id);
-        }
-        let conn = self.open()?;
-        let row = conn
-            .query_row(
-                "SELECT team_id, team_name, bot_token, bot_user_id, installed_at
-                 FROM slack_installations
-                 WHERE team_id = ?1",
-                params![team_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                    ))
-                },
-            )
-            .optional()?;
-
-        match row {
-            Some((team_id, team_name, bot_token, bot_user_id, installed_at)) => {
-                Ok(SlackInstallation {
-                    team_id,
-                    team_name,
-                    bot_token,
-                    bot_user_id,
-                    installed_at: parse_datetime(&installed_at)?,
-                })
-            }
-            None => Err(SlackStoreError::NotFound(team_id.to_string())),
-        }
+        self.mongo.get_installation(team_id)
     }
 
     /// Get installation by team_id, with fallback to environment variables.
@@ -147,7 +77,6 @@ impl SlackStore {
         match self.get_installation(team_id) {
             Ok(installation) => Ok(installation),
             Err(SlackStoreError::NotFound(_)) => {
-                // Fallback to environment variables for backward compatibility
                 let bot_token = std::env::var("SLACK_BOT_TOKEN")
                     .map_err(|_| SlackStoreError::NotFound(team_id.to_string()))?;
                 let bot_user_id = std::env::var("SLACK_BOT_USER_ID").unwrap_or_default();
@@ -166,70 +95,12 @@ impl SlackStore {
 
     /// Delete an installation (e.g., when app is uninstalled).
     pub fn delete_installation(&self, team_id: &str) -> Result<bool, SlackStoreError> {
-        if let Some(mongo) = &self.mongo {
-            return mongo.delete_installation(team_id);
-        }
-        let conn = self.open()?;
-        let rows_affected = conn.execute(
-            "DELETE FROM slack_installations WHERE team_id = ?1",
-            params![team_id],
-        )?;
-        Ok(rows_affected > 0)
+        self.mongo.delete_installation(team_id)
     }
 
     /// List all installations.
     pub fn list_installations(&self) -> Result<Vec<SlackInstallation>, SlackStoreError> {
-        if let Some(mongo) = &self.mongo {
-            return mongo.list_installations();
-        }
-        let conn = self.open()?;
-        let mut stmt = conn.prepare(
-            "SELECT team_id, team_name, bot_token, bot_user_id, installed_at
-             FROM slack_installations
-             ORDER BY installed_at DESC",
-        )?;
-
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        })?;
-
-        let mut installations = Vec::new();
-        for row in rows {
-            let (team_id, team_name, bot_token, bot_user_id, installed_at) = row?;
-            installations.push(SlackInstallation {
-                team_id,
-                team_name,
-                bot_token,
-                bot_user_id,
-                installed_at: parse_datetime(&installed_at)?,
-            });
-        }
-        Ok(installations)
-    }
-
-    fn open(&self) -> Result<Connection, SlackStoreError> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let conn = Connection::open(&self.path)?;
-        conn.busy_timeout(Duration::from_secs(5))?;
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS slack_installations (
-                team_id TEXT PRIMARY KEY,
-                team_name TEXT,
-                bot_token TEXT NOT NULL,
-                bot_user_id TEXT NOT NULL,
-                installed_at TEXT NOT NULL
-            )",
-            [],
-        )?;
-        Ok(conn)
+        self.mongo.list_installations()
     }
 }
 
@@ -257,7 +128,9 @@ impl MongoSlackStore {
 
     fn upsert_installation(&self, installation: &SlackInstallation) -> Result<(), SlackStoreError> {
         self.installations.update_one(
-            doc! { "team_id": installation.team_id.as_str() },
+            doc! {
+                "team_id": installation.team_id.as_str(),
+            },
             doc! {
                 "$set": {
                     "team_id": installation.team_id.as_str(),
@@ -277,15 +150,23 @@ impl MongoSlackStore {
     fn get_installation(&self, team_id: &str) -> Result<SlackInstallation, SlackStoreError> {
         let document = self
             .installations
-            .find_one(doc! { "team_id": team_id }, None)?
+            .find_one(
+                doc! {
+                    "team_id": team_id,
+                },
+                None,
+            )?
             .ok_or_else(|| SlackStoreError::NotFound(team_id.to_string()))?;
         document_to_installation(document)
     }
 
     fn delete_installation(&self, team_id: &str) -> Result<bool, SlackStoreError> {
-        let result = self
-            .installations
-            .delete_one(doc! { "team_id": team_id }, None)?;
+        let result = self.installations.delete_one(
+            doc! {
+                "team_id": team_id,
+            },
+            None,
+        )?;
         Ok(result.deleted_count > 0)
     }
 
@@ -337,10 +218,6 @@ fn document_to_installation(document: Document) -> Result<SlackInstallation, Sla
         bot_user_id,
         installed_at,
     })
-}
-
-fn format_datetime(value: DateTime<Utc>) -> String {
-    value.to_rfc3339()
 }
 
 fn parse_datetime(value: &str) -> Result<DateTime<Utc>, chrono::ParseError> {

@@ -1,6 +1,6 @@
 # scheduler_module
 
-Cron-based scheduler (6-field format with seconds) that persists tasks to disk and runs them in UTC. Supports `SendReply` (multi-channel), `RunTask`, and `Noop` task types.
+Cron-based scheduler (6-field format with seconds) that runs in UTC. Task/user/index state is persisted in MongoDB and scoped by path-derived owner keys. Supports `SendReply` (multi-channel), `RunTask`, and `Noop` task types.
 
 ## Usage
 
@@ -16,9 +16,9 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-let storage_path = PathBuf::from("/tmp/dowhiz_tasks.db");
+let storage_scope_path = PathBuf::from("/tmp/dowhiz_tasks.db");
 let executor = ModuleExecutor::default();
-let mut scheduler = Scheduler::load(storage_path, executor)?;
+let mut scheduler = Scheduler::load(storage_scope_path, executor)?;
 
 let task = SendReplyTask {
     channel: Channel::Email,  // or Channel::Slack, Channel::Telegram, Channel::WhatsApp
@@ -50,8 +50,8 @@ scheduler.run_loop(Duration::from_secs(1), &stop_flag)?;
 
 ## Notes
 
-- Tasks are stored in a SQLite database at the provided storage path and reloaded on startup.
-- Execution attempts are recorded in the `task_executions` table with status and error details.
+- Tasks are stored in MongoDB and scoped by owner/user path so records reload across restarts.
+- Execution attempts are recorded in the `task_executions` collection with status and error details.
 - Use `add_one_shot_in` to schedule “N minutes from now” tasks based on local time converted to UTC.
 
 ## Production Deployment

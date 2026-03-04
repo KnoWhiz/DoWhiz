@@ -41,7 +41,7 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
 ## Prerequisites
 
 - Rust toolchain
-- System libs: `libsqlite3`, `libssl`, `pkg-config`, `ca-certificates`
+- System libs: `libssl`, `pkg-config`, `ca-certificates`
 - Node.js 20 + npm
 - `codex` CLI on your PATH (only required for local execution; optional when `RUN_TASK_USE_DOCKER=1` and the image includes Codex)
 - `claude` CLI on your PATH (only required for employees with `runner = "claude"`)
@@ -51,15 +51,17 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
 - OpenAI API key (optional; enables message router quick replies)
 
 **Required in `.env`** (copy from repo-root `.env.example` to `DoWhiz_service/.env`):
-- `POSTMARK_SERVER_TOKEN`
-- `AZURE_OPENAI_API_KEY_BACKUP` (required for Codex and Claude runners; Codex base URL is fixed in code)
+- `POSTMARK_SERVER_TOKEN` (email delivery)
+- `AZURE_OPENAI_API_KEY_BACKUP` (Codex/Claude runners; Codex base URL is fixed in code)
+- `MONGODB_URI` (scheduler/user/index/slack persistence)
+- `SUPABASE_DB_URL` (required by `AccountStore` for auth/account-link flows; billing routes use it when Stripe is enabled)
 
 **Optional in `.env`**:
 - GitHub auth: `GH_TOKEN`/`GITHUB_TOKEN`/`GITHUB_PERSONAL_ACCESS_TOKEN` + `GITHUB_USERNAME`. Per-employee prefixes are supported (`OLIVER_`, `MAGGIE_`, `DEVIN_`, `PROTO_`) and can be overridden with `EMPLOYEE_GITHUB_ENV_PREFIX` or `GITHUB_ENV_PREFIX`.
 - `RUN_TASK_USE_DOCKER=1` + `RUN_TASK_DOCKER_IMAGE` (run each task inside a disposable Docker container; use `dowhiz-service` for the repo image)
 - `RUN_TASK_DOCKER_AUTO_BUILD=1` to auto-build the image when missing (set `0` to disable)
-- `INGESTION_QUEUE_BACKEND=servicebus` + `SERVICE_BUS_CONNECTION_STRING` + `SERVICE_BUS_QUEUE_NAME` (ingestion queue)
-- `RAW_PAYLOAD_STORAGE_BACKEND=azure` + `AZURE_STORAGE_CONTAINER_INGEST` + `AZURE_STORAGE_SAS_TOKEN` (raw payload storage)
+- `INGESTION_QUEUE_BACKEND=servicebus` + `SERVICE_BUS_CONNECTION_STRING` + `SERVICE_BUS_QUEUE_NAME` (required by the inbound gateway path)
+- `RAW_PAYLOAD_STORAGE_BACKEND=azure` + `AZURE_STORAGE_CONTAINER_INGEST` + `AZURE_STORAGE_SAS_TOKEN` (recommended raw payload storage for gateway production flow)
 - `OPENAI_API_KEY` (enables message router quick replies)
 
 ---
@@ -70,7 +72,7 @@ Rust service for inbound channels (Postmark email, Slack, Discord, Twilio SMS, T
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates libsqlite3-dev libssl-dev pkg-config curl
+sudo apt-get install -y ca-certificates libssl-dev pkg-config curl
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 sudo npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest @playwright/cli@latest
@@ -88,7 +90,7 @@ sudo ln -sf "$chromium_path" /opt/google/chrome/chrome
 ### macOS (Homebrew)
 
 ```bash
-brew install node@20 openssl@3 sqlite pkg-config
+brew install node@20 openssl@3 pkg-config
 npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest @playwright/cli@latest
 npx playwright install chromium
 ```
@@ -178,6 +180,10 @@ For full split-key matrix, gateway/worker commands, and rollback steps, see:
 
 ### Manual Multi-Employee Setup
 
+Before starting gateway/workers, make sure baseline storage/auth envs are set:
+- `MONGODB_URI`
+- `SUPABASE_DB_URL`
+
 **Step 0: Configure Azure ingestion (required for gateway)**
 Add these to `DoWhiz_service/.env` (recommended) or export in each terminal before starting gateway/workers.
 ```bash
@@ -260,7 +266,7 @@ Outputs appear under:
 - Chat/SMS channel replies:
   - `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces/<message_id>/reply_message.txt`
   - `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/workspaces/<message_id>/reply_attachments/`
-- Scheduler state: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/tasks.db`
+- Scheduler scope path (used as Mongo owner scope key): `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/tasks.db`
 
 ### Inbound Gateway (Recommended)
 
@@ -448,7 +454,7 @@ Outbound SMTP (`25`) is often blocked on cloud VMs; run E2E senders from your lo
 3. Install dependencies + ngrok (VM):
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates libsqlite3-dev libssl-dev pkg-config curl git python3
+sudo apt-get install -y ca-certificates libssl-dev pkg-config curl git python3
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 curl https://sh.rustup.rs -sSf | sh -s -- -y
@@ -1098,17 +1104,17 @@ Single-file env split:
 | `EMPLOYEE_ID` | - | Selects employee profile from `employee.toml` |
 | `EMPLOYEE_CONFIG_PATH` | `DoWhiz_service/employee.toml` | Path to employee config |
 | `FRONTEND_URL` | `http://localhost:5173` | Frontend base URL for OAuth redirects |
-| `POSTMARK_INBOUND_MAX_BYTES` | `26214400` | Max inbound body size for worker endpoints |
+| `POSTMARK_INBOUND_MAX_BYTES` | `26214400` | Max request body size for the worker HTTP server |
 
 ### Paths
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `WORKSPACE_ROOT` | `<runtime_root>/workspaces` | Task workspace directory |
-| `SCHEDULER_STATE_PATH` | `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/tasks.db` | Scheduler state |
+| `SCHEDULER_STATE_PATH` | `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/tasks.db` | Scope key path for scheduler records in MongoDB |
 | `PROCESSED_IDS_PATH` | `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/postmark_processed_ids.txt` | Deduplication list |
 | `USERS_ROOT` | `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/users` | User data root |
-| `USERS_DB_PATH` | `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/users.db` | User registry |
-| `TASK_INDEX_PATH` | `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/task_index.db` | Task index |
+| `USERS_DB_PATH` | `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/users.db` | Scope key path for user registry records in MongoDB |
+| `TASK_INDEX_PATH` | `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/state/task_index.db` | Scope key path for due-task index records in MongoDB |
 
 ### Scheduler
 | Variable | Default | Description |
@@ -1117,13 +1123,21 @@ Single-file env split:
 | `SCHEDULER_MAX_CONCURRENCY` | `200` | Global max concurrent tasks |
 | `SCHEDULER_USER_MAX_CONCURRENCY` | `1` | Per-user max concurrent tasks |
 
+### Storage Backend + MongoDB
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STORAGE_BACKEND` | `mongo` | Storage backend selector (currently only `mongo` is supported) |
+| `MONGODB_URI` | - | Required MongoDB/Cosmos connection string for scheduler/user/index/slack stores |
+| `MONGODB_DATABASE` | `dowhiz_<deploy_target>_<employee_id>` | Optional DB name override |
+
 ### Ingestion Queue
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SUPABASE_DB_URL` | - | Legacy Postgres ingestion backend (not used by inbound gateway) |
-| `INGESTION_DB_URL` | - | Legacy alias for `SUPABASE_DB_URL` |
-| `DATABASE_URL` | - | Legacy Postgres connection string for ingestion |
+| `SUPABASE_DB_URL` | - | Required by `AccountStore`; also serves as Postgres ingestion URL when backend is `postgres` |
+| `INGESTION_DB_URL` | - | Optional Postgres ingestion URL override (falls back to `SUPABASE_DB_URL`) |
+| `DATABASE_URL` | - | Legacy alias for Postgres ingestion URL |
 | `SUPABASE_POOLER_URL` | - | Legacy PgBouncer/Pooler URL for Postgres ingestion |
+| `INGESTION_QUEUE_POOLER_URL` | - | Preferred pooler URL override for Postgres ingestion queue |
 | `SUPABASE_PROJECT_URL` | - | Supabase project URL (used when `RAW_PAYLOAD_STORAGE_BACKEND=supabase`) |
 | `SUPABASE_SECRET_KEY` | - | Supabase service key (used when `RAW_PAYLOAD_STORAGE_BACKEND=supabase`) |
 | `SUPABASE_STORAGE_BUCKET` | `ingestion-raw` | Supabase storage bucket for raw payloads |
@@ -1133,6 +1147,16 @@ Single-file env split:
 | `INGESTION_QUEUE_MAX_ATTEMPTS` | `5` | Max retry attempts before marking failed |
 | `INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS` | `0` | Set to `1` to allow self-signed Postgres certificates (local/dev only) |
 | `INGESTION_POLL_INTERVAL_SECS` | `1` | Poll interval for ingestion consumer |
+
+### Account/Auth/Billing (Supabase)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SUPABASE_DB_URL` | - | Required Postgres URL for accounts, identifiers, email verification tokens, and payment records |
+| `SUPABASE_PROJECT_URL` | `https://resmseutzmwumflevfqw.supabase.co` | Supabase base URL for token validation |
+| `SUPABASE_JWT_SECRET` | - | Optional local JWT verification secret for `/auth/*` and `/billing/*` |
+| `SUPABASE_ANON_KEY` | - | Optional fallback key for remote Supabase auth validation |
+| `STRIPE_SECRET_KEY` | - | Enables `/billing/*` checkout routes when set with webhook secret |
+| `STRIPE_WEBHOOK_SECRET` | - | Stripe webhook signature secret for `/billing/webhook` |
 
 ### Codex (OpenAI)
 | Variable | Default | Description |
@@ -1248,7 +1272,7 @@ sudo mount /home/azureuser/server/.dowhiz/DoWhiz/run_task
 | `SLACK_CLIENT_SECRET` | - | Slack OAuth client secret |
 | `SLACK_REDIRECT_URI` | - | Slack OAuth redirect URI |
 | `SLACK_AUTH_REDIRECT_URI` | - | Slack account-linking OAuth redirect URI (`/auth/slack/callback`) |
-| `SLACK_STORE_PATH` | `<runtime_root>/state/slack.db` | Slack installation store |
+| `SLACK_STORE_PATH` | `<runtime_root>/state/slack.db` | Scope key path for Slack installation records in MongoDB |
 | `SLACK_API_BASE_URL` | `https://slack.com/api` | Override Slack API base URL |
 
 ### Discord
@@ -1340,14 +1364,15 @@ Any address listed in `employee.toml` is ignored as a sender (prevents loops; di
 Default location: `$HOME/.dowhiz/DoWhiz/run_task/<employee_id>/`
 
 Each employee gets isolated directories unless you override paths with environment variables.
+Paths such as `tasks.db`, `users.db`, and `task_index.db` are used as stable scope keys; task/user/index records are stored in MongoDB.
 
 ```
 $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 ├── state/
-│   ├── tasks.db                    # Global scheduler state
-│   ├── users.db                    # User registry
-│   ├── task_index.db               # Due task index for polling
-│   └── postmark_processed_ids.txt  # Deduplication list
+│   ├── tasks.db                    # Scope key path for global scheduler records (MongoDB)
+│   ├── users.db                    # Scope key path for user registry records (MongoDB)
+│   ├── task_index.db               # Scope key path for due-task index records (MongoDB)
+│   └── postmark_processed_ids.txt  # Deduplication marker file
 ├── workspaces/<message_id>/
 │   ├── workspace/                  # Agent workspace
 │   ├── references/past_emails/     # Hydrated email history
@@ -1356,7 +1381,7 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 │   ├── reply_message.txt           # Chat/SMS reply (Slack/Discord/Telegram/SMS/WhatsApp/BlueBubbles)
 │   └── reply_attachments/          # Chat/SMS attachments
 └── users/<user_id>/
-    ├── state/tasks.db              # Per-user task queue
+    ├── state/tasks.db              # Scope key path for per-user scheduler records (MongoDB)
     ├── memory/                     # Agent context/memory
     └── mail/                       # Email archive
 ```
@@ -1365,23 +1390,26 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 
 ## Database Schema
 
-### users.db
-Table `users(id, identifier_type, identifier, created_at, last_seen_at)` stores normalized identifiers (email/phone/slack/etc), creation time, and last activity time (RFC3339 UTC). `last_seen_at` updates on inbound activity.
+### MongoDB Collections
+Scheduler/runtime state is stored in MongoDB collections:
 
-Upgrade note: if you have an older `users.db` with only the `email` column, delete it to rebuild or migrate by adding `identifier_type` + `identifier` and backfilling from `email`.
+- `users` - normalized user identifiers and last-seen timestamps.
+- `tasks` - scheduled task payloads and scheduling metadata.
+- `task_executions` - task run history/status/error.
+- `task_index` - due-task index for scheduler scanning.
+- `slack_installations` - Slack OAuth installations.
+- `processed_comments` / `workspace_files` - Google Docs/Workspace polling state.
+- `collaboration_sessions` / `collaboration_messages` / `collaboration_artifacts` - multi-channel collaboration context.
 
-### task_index.db
-Global task index for due work. Table `task_index(task_id, user_id, next_run, enabled)` plus indexes on `next_run` and `user_id`. This is a derived index synced from each user's `tasks.db` and used by the scheduler thread to query due tasks efficiently.
+Owner/user isolation is enforced with scoped fields (for example `owner_scope` on tasks and per-store scope keys), so one user's tasks cannot modify or read another user's scheduler records.
 
-### tasks.db (per-user)
-Per-user scheduler store (SQLite with foreign keys on). Key tables:
+### Supabase Postgres Tables (Account/Auth/Billing)
+Account and billing flows use `SUPABASE_DB_URL` with tables such as:
 
-- `tasks(id, kind, channel, enabled, created_at, last_run, schedule_type, cron_expression, next_run, run_at, retry_count)` - Scheduling metadata. `schedule_type` is `cron` or `one_shot`; cron uses `cron_expression` + `next_run`, one-shot uses `run_at`.
-- `send_email_tasks(task_id, subject, html_path, attachments_dir, from_address, in_reply_to, references_header, archive_root, thread_epoch, thread_state_path)` - Email payloads (also reused by Google Workspace comment replies).
-- `send_email_recipients(id, task_id, recipient_type, address)` - `to`/`cc`/`bcc` recipients.
-- `send_slack_tasks`, `send_discord_tasks`, `send_sms_tasks`, `send_telegram_tasks`, `send_bluebubbles_tasks`, `send_whatsapp_tasks` - Channel-specific outbound payloads for `SendReply`.
-- `run_task_tasks(task_id, workspace_dir, input_email_dir, input_attachments_dir, memory_dir, reference_dir, model_name, runner, codex_disabled, reply_to, reply_from, archive_root, thread_id, thread_epoch, thread_state_path, employee_id)` - RunTask parameters. `reply_to` is newline-separated; `reply_from` carries the inbound service mailbox used for replies.
-- `task_executions(id, task_id, started_at, finished_at, status, error_message)` - Execution history and errors.
+- `accounts` - account profile and purchased/used hour counters.
+- `account_identifiers` - verified channel identifiers linked to accounts.
+- `email_verification_tokens` - pending email verification tokens.
+- `payments` - Stripe session idempotency and payment audit records.
 
 ---
 
@@ -1456,7 +1484,7 @@ Entry directories are named `YYYY-MM-DD_<action>_<topic>_<shortid>`. `direction`
 
 ## Scheduled Follow-ups
 
-If the agent needs to send a follow-up later, it should emit a schedule block to stdout at the end of its response. The scheduler parses the block and stores follow-up tasks in SQLite.
+If the agent needs to send a follow-up later, it should emit a schedule block to stdout at the end of its response. The scheduler parses the block and stores follow-up tasks in MongoDB.
 `"type":"send_email"` remains the wire-format tag for backward compatibility, and is mapped to `SendReply` internally.
 
 **Example schedule block:**

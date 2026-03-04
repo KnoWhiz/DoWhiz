@@ -124,8 +124,6 @@ impl ScheduledTask {
 pub enum SchedulerError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("sqlite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
     #[error("datetime parse error: {0}")]
     DateTimeParse(#[from] chrono::ParseError),
     #[error("uuid parse error: {0}")]

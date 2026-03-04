@@ -356,8 +356,8 @@ fn execution_status_can_be_recorded_for_task() {
 
     // Verify execution status is persisted by loading tasks with status
     {
-        use super::store::SqliteSchedulerStore;
-        let store = SqliteSchedulerStore::new(tasks_db).expect("open store");
+        use super::store::SchedulerStore;
+        let store = SchedulerStore::new(tasks_db).expect("open store");
         let tasks = store.list_tasks_with_status().expect("list tasks");
 
         assert_eq!(tasks.len(), 1);
@@ -367,7 +367,7 @@ fn execution_status_can_be_recorded_for_task() {
 }
 
 #[test]
-fn scheduler_load_quarantines_zero_byte_db_and_recovers() {
+fn scheduler_load_ignores_zero_byte_placeholder_path() {
     let temp = TempDir::new().expect("tempdir");
     let tasks_db = temp.path().join("tasks.db");
     fs::write(&tasks_db, "").expect("create zero-byte db");
@@ -376,7 +376,10 @@ fn scheduler_load_quarantines_zero_byte_db_and_recovers() {
     assert!(scheduler.tasks().is_empty());
 
     let size = fs::metadata(&tasks_db).expect("metadata").len();
-    assert!(size > 0, "recreated tasks.db should be non-empty");
+    assert_eq!(
+        size, 0,
+        "mongo backend should not mutate placeholder state file"
+    );
 
     let mut quarantined = false;
     for entry in fs::read_dir(temp.path()).expect("read dir") {
@@ -388,8 +391,8 @@ fn scheduler_load_quarantines_zero_byte_db_and_recovers() {
         }
     }
     assert!(
-        quarantined,
-        "expected zero-byte db to be quarantined with tasks.db.corrupt.<timestamp>"
+        !quarantined,
+        "mongo backend should not emit legacy corruption quarantine files"
     );
 }
 
@@ -489,10 +492,9 @@ fn full_discord_flow_task_sync_and_status_update() {
 
     // Verify both have the task with same ID
     {
-        use super::store::SqliteSchedulerStore;
-        let workspace_store =
-            SqliteSchedulerStore::new(workspace_db.clone()).expect("open workspace");
-        let user_store = SqliteSchedulerStore::new(user_db.clone()).expect("open user");
+        use super::store::SchedulerStore;
+        let workspace_store = SchedulerStore::new(workspace_db.clone()).expect("open workspace");
+        let user_store = SchedulerStore::new(user_db.clone()).expect("open user");
 
         let workspace_tasks = workspace_store
             .list_tasks_with_status()
@@ -513,9 +515,8 @@ fn full_discord_flow_task_sync_and_status_update() {
     // Step 3: Simulate task execution in workspace (core.rs execute_task_at_index)
     let executed_at = Utc::now();
     {
-        use super::store::SqliteSchedulerStore;
-        let workspace_store =
-            SqliteSchedulerStore::new(workspace_db.clone()).expect("open workspace");
+        use super::store::SchedulerStore;
+        let workspace_store = SchedulerStore::new(workspace_db.clone()).expect("open workspace");
         let execution_id = workspace_store
             .record_execution_start(task_id, executed_at)
             .expect("record start");
@@ -526,8 +527,8 @@ fn full_discord_flow_task_sync_and_status_update() {
 
     // Step 4: Sync status to user storage (simulates sync_task_status_to_user_storage)
     {
-        use super::store::SqliteSchedulerStore;
-        let user_store = SqliteSchedulerStore::new(user_db.clone()).expect("open user");
+        use super::store::SchedulerStore;
+        let user_store = SchedulerStore::new(user_db.clone()).expect("open user");
         let execution_id = user_store
             .record_execution_start(task_id, executed_at)
             .expect("record start");
@@ -538,9 +539,9 @@ fn full_discord_flow_task_sync_and_status_update() {
 
     // Verify both now have success status
     {
-        use super::store::SqliteSchedulerStore;
-        let workspace_store = SqliteSchedulerStore::new(workspace_db).expect("open workspace");
-        let user_store = SqliteSchedulerStore::new(user_db).expect("open user");
+        use super::store::SchedulerStore;
+        let workspace_store = SchedulerStore::new(workspace_db).expect("open workspace");
+        let user_store = SchedulerStore::new(user_db).expect("open user");
 
         let workspace_tasks = workspace_store
             .list_tasks_with_status()
@@ -608,10 +609,9 @@ fn full_slack_flow_task_sync_and_status_update() {
 
     // Verify both have Slack channel type
     {
-        use super::store::SqliteSchedulerStore;
-        let workspace_store =
-            SqliteSchedulerStore::new(workspace_db.clone()).expect("open workspace");
-        let account_store = SqliteSchedulerStore::new(account_db.clone()).expect("open account");
+        use super::store::SchedulerStore;
+        let workspace_store = SchedulerStore::new(workspace_db.clone()).expect("open workspace");
+        let account_store = SchedulerStore::new(account_db.clone()).expect("open account");
 
         let workspace_tasks = workspace_store
             .list_tasks_with_status()
@@ -629,9 +629,8 @@ fn full_slack_flow_task_sync_and_status_update() {
     let executed_at = Utc::now();
     let error_message = "Task failed: API timeout";
     {
-        use super::store::SqliteSchedulerStore;
-        let workspace_store =
-            SqliteSchedulerStore::new(workspace_db.clone()).expect("open workspace");
+        use super::store::SchedulerStore;
+        let workspace_store = SchedulerStore::new(workspace_db.clone()).expect("open workspace");
         let execution_id = workspace_store
             .record_execution_start(task_id, executed_at)
             .expect("record start");
@@ -642,8 +641,8 @@ fn full_slack_flow_task_sync_and_status_update() {
 
     // Step 4: Sync failure status to account storage
     {
-        use super::store::SqliteSchedulerStore;
-        let account_store = SqliteSchedulerStore::new(account_db.clone()).expect("open account");
+        use super::store::SchedulerStore;
+        let account_store = SchedulerStore::new(account_db.clone()).expect("open account");
         let execution_id = account_store
             .record_execution_start(task_id, executed_at)
             .expect("record start");
@@ -654,9 +653,9 @@ fn full_slack_flow_task_sync_and_status_update() {
 
     // Verify both have failure status with error message
     {
-        use super::store::SqliteSchedulerStore;
-        let workspace_store = SqliteSchedulerStore::new(workspace_db).expect("open workspace");
-        let account_store = SqliteSchedulerStore::new(account_db).expect("open account");
+        use super::store::SchedulerStore;
+        let workspace_store = SchedulerStore::new(workspace_db).expect("open workspace");
+        let account_store = SchedulerStore::new(account_db).expect("open account");
 
         let workspace_tasks = workspace_store
             .list_tasks_with_status()
@@ -741,8 +740,8 @@ fn multiple_tasks_sync_independently() {
     // Mark task 1 as success, task 2 as failed
     let executed_at = Utc::now();
     {
-        use super::store::SqliteSchedulerStore;
-        let user_store = SqliteSchedulerStore::new(user_db.clone()).expect("open user");
+        use super::store::SchedulerStore;
+        let user_store = SchedulerStore::new(user_db.clone()).expect("open user");
 
         // Task 1: success
         let exec_id_1 = user_store
@@ -763,8 +762,8 @@ fn multiple_tasks_sync_independently() {
 
     // Verify each task has correct status
     {
-        use super::store::SqliteSchedulerStore;
-        let user_store = SqliteSchedulerStore::new(user_db).expect("open user");
+        use super::store::SchedulerStore;
+        let user_store = SchedulerStore::new(user_db).expect("open user");
         let tasks = user_store.list_tasks_with_status().expect("list");
 
         assert_eq!(tasks.len(), 2);
@@ -800,8 +799,8 @@ fn run_task_channel_is_preserved_in_sync() {
             .add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))
             .expect("add");
 
-        use super::store::SqliteSchedulerStore;
-        let store = SqliteSchedulerStore::new(db).expect("open");
+        use super::store::SchedulerStore;
+        let store = SchedulerStore::new(db).expect("open");
         let tasks = store.list_tasks_with_status().expect("list");
         assert_eq!(tasks[0].channel, "discord");
     }
@@ -815,8 +814,8 @@ fn run_task_channel_is_preserved_in_sync() {
             .add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))
             .expect("add");
 
-        use super::store::SqliteSchedulerStore;
-        let store = SqliteSchedulerStore::new(db).expect("open");
+        use super::store::SchedulerStore;
+        let store = SchedulerStore::new(db).expect("open");
         let tasks = store.list_tasks_with_status().expect("list");
         assert_eq!(tasks[0].channel, "slack");
     }
@@ -832,8 +831,8 @@ fn run_task_channel_is_preserved_in_sync() {
             .add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))
             .expect("add");
 
-        use super::store::SqliteSchedulerStore;
-        let store = SqliteSchedulerStore::new(db).expect("open");
+        use super::store::SchedulerStore;
+        let store = SchedulerStore::new(db).expect("open");
         let tasks = store.list_tasks_with_status().expect("list");
         assert_eq!(tasks[0].channel, "email");
     }
