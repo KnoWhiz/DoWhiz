@@ -107,7 +107,8 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         | Channel::BlueBubbles
         | Channel::Telegram
         | Channel::WhatsApp
-        | Channel::Sms => ("reply_message.txt", "reply_attachments"),
+        | Channel::Sms
+        | Channel::Notion => ("reply_message.txt", "reply_attachments"),
         Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
             ("reply_email_draft.html", "reply_email_attachments")
         }

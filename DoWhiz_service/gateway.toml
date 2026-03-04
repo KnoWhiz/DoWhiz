@@ -34,3 +34,10 @@ channel = "google_docs"
 key = "*"
 employee_id = "little_bear"
 tenant_id = "default"
+
+# Notion routing - route all Notion comments to Oliver (little_bear)
+[[routes]]
+channel = "notion"
+key = "*"
+employee_id = "little_bear"
+tenant_id = "default"

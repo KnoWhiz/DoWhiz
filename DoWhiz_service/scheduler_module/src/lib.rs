@@ -10,6 +10,7 @@ pub mod google_docs_poller;
 pub mod google_drive_changes;
 pub mod google_workspace_poller;
 pub mod ingestion;
+pub mod notion_browser;
 pub mod ingestion_queue;
 pub mod mailbox;
 pub mod message_router;

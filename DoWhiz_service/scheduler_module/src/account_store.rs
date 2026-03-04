@@ -666,6 +666,7 @@ pub fn channel_to_identifier_type(channel: &crate::channel::Channel) -> &'static
         Channel::Discord => "discord",
         Channel::BlueBubbles => "phone",
         Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => "email",
+        Channel::Notion => "email", // Notion accounts are linked by email
     }
 }
 

@@ -363,6 +363,13 @@ impl TaskExecutor for ModuleExecutor {
                     Channel::Email => {
                         execute_email_send(task)?;
                     }
+                    Channel::Notion => {
+                        // TODO: Implement browser-based Notion reply
+                        warn!(
+                            "Notion channel reply not yet implemented, skipping task to {:?}",
+                            task.to
+                        );
+                    }
                 }
                 Ok(TaskExecution::empty())
             }

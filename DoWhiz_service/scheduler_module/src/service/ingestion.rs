@@ -230,6 +230,19 @@ fn process_ingestion_envelope(
             let raw_payload = envelope.raw_payload_bytes();
             process_whatsapp_event(config, user_store, index_store, &message, &raw_payload)
         }
+        Channel::Notion => {
+            // Process Notion comments similar to Google Workspace
+            let message = envelope.to_inbound_message();
+            let raw_payload = envelope.raw_payload_bytes();
+            process_google_workspace_message(
+                config,
+                user_store,
+                index_store,
+                account_store,
+                &message,
+                &raw_payload,
+            )
+        }
     }
 }
 

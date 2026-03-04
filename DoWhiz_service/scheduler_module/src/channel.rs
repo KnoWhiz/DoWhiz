@@ -30,6 +30,8 @@ pub enum Channel {
     GoogleSlides,
     /// iMessage via BlueBubbles bridge
     BlueBubbles,
+    /// Notion collaboration via comments (browser automation)
+    Notion,
 }
 
 impl Default for Channel {
@@ -51,6 +53,7 @@ impl std::fmt::Display for Channel {
             Channel::GoogleSheets => write!(f, "google_sheets"),
             Channel::GoogleSlides => write!(f, "google_slides"),
             Channel::BlueBubbles => write!(f, "bluebubbles"),
+            Channel::Notion => write!(f, "notion"),
         }
     }
 }
@@ -70,6 +73,7 @@ impl std::str::FromStr for Channel {
             "google_sheets" | "googlesheets" => Ok(Channel::GoogleSheets),
             "google_slides" | "googleslides" => Ok(Channel::GoogleSlides),
             "bluebubbles" | "imessage" => Ok(Channel::BlueBubbles),
+            "notion" => Ok(Channel::Notion),
             _ => Err(format!("unknown channel: {}", s)),
         }
     }
@@ -179,6 +183,20 @@ pub struct ChannelMetadata {
     pub google_slides_owner_email: Option<String>,
     /// BlueBubbles-specific: Chat GUID (e.g., "iMessage;-;+1234567890")
     pub bluebubbles_chat_guid: Option<String>,
+    /// Notion-specific: Workspace ID
+    pub notion_workspace_id: Option<String>,
+    /// Notion-specific: Workspace name
+    pub notion_workspace_name: Option<String>,
+    /// Notion-specific: Page ID where comment is located
+    pub notion_page_id: Option<String>,
+    /// Notion-specific: Page title
+    pub notion_page_title: Option<String>,
+    /// Notion-specific: Comment/discussion ID to reply to
+    pub notion_comment_id: Option<String>,
+    /// Notion-specific: Block ID where comment is attached
+    pub notion_block_id: Option<String>,
+    /// Notion-specific: Notification ID (for deduplication)
+    pub notion_notification_id: Option<String>,
 
     // =========================================================================
     // Multi-channel collaboration support
