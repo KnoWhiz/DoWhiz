@@ -144,11 +144,47 @@ jobs:
           set -e
           APP_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
           mkdir -p "$APP_DIR"
-          cat << 'ENVEOF' > "$APP_DIR/.env"
+          COMMON_ENV_FILE="$APP_DIR/.env.common.tmp"
+          TARGET_ENV_FILE="$APP_DIR/.env.target.tmp"
+          cat << 'ENV_COMMON_EOF' > "$COMMON_ENV_FILE"
           ${{ secrets.ENV_COMMON }}
+          ENV_COMMON_EOF
+          cat << 'ENV_TARGET_EOF' > "$TARGET_ENV_FILE"
           ${{ secrets.ENV_PROD }}
-          ENVEOF
+          ENV_TARGET_EOF
+
           ENV_FILE="$APP_DIR/.env"
+          # Merge key/value pairs with target env taking precedence over common env.
+          awk '
+            function trim(value) {
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", value);
+              return value;
+            }
+            {
+              line = $0;
+              sub(/\r$/, "", line);
+              if (line ~ /^[[:space:]]*($|#)/) next;
+              if (line ~ /^export[[:space:]]+/) sub(/^export[[:space:]]+/, "", line);
+              pos = index(line, "=");
+              if (pos == 0) next;
+              key = trim(substr(line, 1, pos - 1));
+              if (key == "") next;
+              value = substr(line, pos + 1);
+              if (!(key in seen)) {
+                seen[key] = 1;
+                order[++count] = key;
+              }
+              env[key] = value;
+            }
+            END {
+              for (i = 1; i <= count; i++) {
+                key = order[i];
+                print key "=" env[key];
+              }
+            }
+          ' "$COMMON_ENV_FILE" "$TARGET_ENV_FILE" > "$ENV_FILE"
+          rm -f "$COMMON_ENV_FILE" "$TARGET_ENV_FILE"
+
           if grep -Eq '^(STAGING_|PROD_)' "$ENV_FILE"; then
             echo "ERROR: Prefixed env keys are not allowed in deployment .env" >&2
             grep -En '^(STAGING_|PROD_)' "$ENV_FILE" >&2 || true
