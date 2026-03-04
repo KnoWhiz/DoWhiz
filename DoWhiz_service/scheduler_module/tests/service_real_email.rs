@@ -174,6 +174,18 @@ fn env_with_scale_oliver(key: &str) -> Option<String> {
         })
 }
 
+fn create_live_test_tempdir() -> Result<TempDir, BoxError> {
+    if let Some(host_root) = env_with_scale_oliver("RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT") {
+        let base = PathBuf::from(host_root).join("service_real_email_e2e");
+        fs::create_dir_all(&base)?;
+        let temp = tempfile::Builder::new()
+            .prefix("live_e2e_")
+            .tempdir_in(base)?;
+        return Ok(temp);
+    }
+    Ok(TempDir::new()?)
+}
+
 struct HookRestore {
     token: String,
     previous_hook: String,
@@ -707,7 +719,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
     }
     env::set_var("SCALE_OLIVER_INGESTION_QUEUE_BACKEND", "servicebus");
     env::set_var("SCALE_OLIVER_RAW_PAYLOAD_STORAGE_BACKEND", "azure");
-    let temp = TempDir::new()?;
+    let temp = create_live_test_tempdir()?;
     let workspace_root = temp.path().join("workspaces");
     let state_dir = temp.path().join("state");
     let users_root = temp.path().join("users");
