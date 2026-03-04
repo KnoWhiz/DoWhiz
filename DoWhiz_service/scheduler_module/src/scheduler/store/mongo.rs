@@ -360,12 +360,7 @@ fn resolve_owner_scope(path: &Path) -> (String, String) {
     for (idx, value) in components.iter().enumerate() {
         if value == "users" {
             if let Some(owner_id) = components.get(idx + 1) {
-                return ("legacy_user".to_string(), owner_id.to_string());
-            }
-        }
-        if value == "discord" {
-            if let Some(owner_id) = components.get(idx + 1) {
-                return ("discord_guild".to_string(), owner_id.to_string());
+                return ("user".to_string(), owner_id.to_string());
             }
         }
     }
@@ -375,7 +370,7 @@ fn resolve_owner_scope(path: &Path) -> (String, String) {
             if state_dir.file_name().and_then(|v| v.to_str()) == Some("state") {
                 if let Some(owner_dir) = state_dir.parent() {
                     if let Some(owner_id) = owner_dir.file_name().and_then(|v| v.to_str()) {
-                        return ("legacy_user".to_string(), owner_id.to_string());
+                        return ("user".to_string(), owner_id.to_string());
                     }
                 }
             }
@@ -417,18 +412,10 @@ mod tests {
     use super::resolve_owner_scope;
 
     #[test]
-    fn resolve_owner_scope_prefers_users_directory() {
+    fn resolve_owner_scope_extracts_user_id() {
         let path = PathBuf::from("/tmp/runtime/users/user-123/state/tasks.db");
         let scope = resolve_owner_scope(&path);
-        assert_eq!(scope.0, "legacy_user");
+        assert_eq!(scope.0, "user");
         assert_eq!(scope.1, "user-123");
-    }
-
-    #[test]
-    fn resolve_owner_scope_handles_discord_directory() {
-        let path = PathBuf::from("/tmp/runtime/workspaces/discord/guild-77/state/tasks.db");
-        let scope = resolve_owner_scope(&path);
-        assert_eq!(scope.0, "discord_guild");
-        assert_eq!(scope.1, "guild-77");
     }
 }
