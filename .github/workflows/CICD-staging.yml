@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    env:
+      CARGO_INCREMENTAL: 0
 
     defaults:
       run:
@@ -24,15 +26,18 @@ jobs:
           ref: ${{ github.ref }}
 
       - name: Build
-        run: cargo build --verbose
+        run: cargo build
 
       - name: Run tests (scheduler_module)
-        run: cargo test -p scheduler_module --verbose
+        run: cargo test -p scheduler_module
         continue-on-error: true
 
       - name: Run tests (run_task_module)
-        run: cargo test -p run_task_module --verbose
+        run: cargo test -p run_task_module
         continue-on-error: true
+
+      - name: Clean target before release build
+        run: cargo clean
 
       - name: Build release binaries
         run: cargo build -p scheduler_module --bins --release
