@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `scheduler_module/`: inbound gateway (Service Bus ingestion + Azure Blob raw payloads), scheduling, and service binaries. Postgres ingestion remains available for legacy/worker-only setups.
+- `scheduler_module/`: inbound gateway (Service Bus ingestion + Azure Blob raw payloads), scheduling, service binaries, and Mongo-backed scheduler/user/index persistence. Postgres ingestion remains available for legacy/worker-only setups.
 - `send_emails_module/`: Postmark integration and email sending.
 - `run_task_module/`: task execution and workspace orchestration (`src/run_task/`).
 - `scripts/`: local run helpers (gateway, employees, E2E).
@@ -39,6 +39,6 @@ After completing code changes, you must design targeted, detailed unit tests and
 Recent history uses short, imperative, sentence-case messages (e.g., “Update .env.example”, “Refactor inbound gateway logic”). Conventional Commit prefixes appear occasionally (e.g., `fix(runtime): ...`, `feat: ...`); use them when helpful, but keep subject lines concise. PRs should include a summary, the exact test commands run, and any config/env changes. Update `.env.example` when adding new required variables.
 
 ## Configuration & Secrets
-Copy `.env.example` to `.env` and keep secrets out of git. `employee.toml` selects employee profiles; `gateway.toml` routes inbound webhooks. For agent behavior changes, check `employees/<id>/AGENTS.md` and `employees/<id>/CLAUDE.md`.
+Copy `.env.example` to `.env` and keep secrets out of git. `employee.toml` selects employee profiles; `gateway.toml` routes inbound webhooks. `MONGODB_URI` is required for worker scheduler/user/index/slack stores; `SUPABASE_DB_URL` is required for account/auth flows used by both worker and gateway. For agent behavior changes, check `employees/<id>/AGENTS.md` and `employees/<id>/CLAUDE.md`.
 
 **Contributor principle:** Keep the codebase modular and easy to maintain. If a file grows too large (roughly 500–1000 lines), consider splitting it into smaller, well-defined modules with clear responsibilities.

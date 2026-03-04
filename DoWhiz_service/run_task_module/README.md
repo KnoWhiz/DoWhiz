@@ -57,7 +57,7 @@ println!("Reply saved at: {}", result.reply_html_path.display());
 ## Folder structure
 
 - `DoWhiz_service/run_task_module/src/lib.rs` : Codex CLI runner and prompt builder.
-- `DoWhiz_service/run_task_module/tests/` : Basic test that verifies output file creation when Codex is disabled.
+- `DoWhiz_service/run_task_module/tests/` : Integration tests covering config generation, sandbox flags, env mapping, timeout/error handling, and optional live Codex E2E.
 
 ## Notes
 
@@ -70,6 +70,10 @@ println!("Reply saved at: {}", result.reply_html_path.display());
 - Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.
 - Codex runs use `params.model_name` (fallback `CODEX_MODEL`, then `gpt-5.3-codex`), with fixed `workspace-write` sandbox and fixed endpoint `https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1`.
 - Codex exec adds `--add-dir $HOME/.config/gh` to allow GitHub CLI state writes under sandbox.
+- Execution backend is controlled by `RUN_TASK_EXECUTION_BACKEND` (`local` / `azure_aci` / `auto`).
+  - In `auto`, staging/production targets default to `azure_aci`; local/dev targets default to `local`.
+  - In `DEPLOY_TARGET=staging|production`, local Codex execution is blocked.
+- Staging supports `STAGING_RUN_TASK_*` overrides for ACI/image/backend settings.
 
 ## Production Deployment
 

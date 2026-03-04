@@ -58,7 +58,7 @@ docker run --rm -p 9001:9001 \
 ## Architecture
 
 ### Workspace Structure (Cargo workspace)
-- **scheduler_module**: Core HTTP worker server (Axum), task scheduler, SQLite persistence, inbound gateway binary (webhooks + dedupe)
+- **scheduler_module**: Core HTTP worker server (Axum), inbound gateway binary (webhooks + dedupe), scheduler and user/index stores backed by MongoDB, plus account/auth/billing flows backed by Supabase Postgres
 - **send_emails_module**: Postmark API wrapper for email delivery
 - **run_task_module**: Codex/Claude CLI invocation for task execution
 - **website**: React 19 + Vite marketing site
@@ -69,7 +69,7 @@ Inbound (Email/Slack/Discord/SMS/Telegram/WhatsApp/Google Docs/iMessage)
     → Ingestion Gateway (dedupe + raw payload storage in Azure Blob)
     → Ingestion Queue (Service Bus for gateway; Postgres optional/legacy)
     → Worker Service (per-employee)
-    → Scheduler (SQLite) → Task Execution (Codex/Claude) → Outbound Reply
+    → Scheduler/User Index (MongoDB) → Task Execution (Codex/Claude) → Outbound Reply
 ```
 
 ### Key Files
@@ -88,13 +88,13 @@ Inbound (Email/Slack/Discord/SMS/Telegram/WhatsApp/Google Docs/iMessage)
 ```
 $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 ├── state/
-│   ├── tasks.db              # Global scheduler state
-│   ├── users.db              # User registry
-│   ├── task_index.db         # Due task index
+│   ├── tasks.db              # Scope key path for scheduler records in MongoDB
+│   ├── users.db              # Scope key path for user records in MongoDB
+│   ├── task_index.db         # Scope key path for due-task index records in MongoDB
 │   └── postmark_processed_ids.txt
 ├── workspaces/<message_id>/  # Per-task execution
 └── users/<user_id>/
-    ├── state/tasks.db        # User's task queue
+    ├── state/tasks.db        # User-scope key path for per-user scheduler records in MongoDB
     ├── memory/               # Agent context
     └── mail/                 # Email archive
 ```
@@ -119,7 +119,7 @@ $HOME/.dowhiz/DoWhiz/run_task/<employee_id>/
 - **OneShot**: Single execution at specific DateTime
 
 ### Per-User Isolation
-Each user gets separate SQLite databases and workspace directories. Default concurrency limits are global 200 and per-user 200 (configurable via env).
+Each user gets isolated workspace/memory/mail directories plus Mongo owner scopes derived from per-user paths. Default concurrency limits are global 200 and per-user 1 (configurable via env).
 
 ### Follow-up Scheduling
 Agents emit scheduled tasks in stdout:
@@ -135,6 +135,8 @@ Copy `.env.example` to `DoWhiz_service/.env` and configure:
 - `POSTMARK_SERVER_TOKEN` - Postmark API key (required)
 - `AZURE_OPENAI_API_KEY_BACKUP` - Required for Codex and Claude runners (Foundry config)
 - `AZURE_OPENAI_ENDPOINT_BACKUP` - Optional endpoint override for components that use Azure OpenAI directly (Codex runner endpoint is fixed in code)
+- `MONGODB_URI` - Required for scheduler/user/index/slack persistence
+- `SUPABASE_DB_URL` - Required by `AccountStore` (auth/account-link flows in worker and gateway; billing routes in worker when Stripe is enabled)
 
 Optional:
 - `CODEX_DISABLED=1` - Bypass Codex CLI (uses placeholder replies)
@@ -143,6 +145,7 @@ Optional:
 - `OPENAI_API_KEY` - Enable message router quick replies
 - `INGESTION_QUEUE_BACKEND=servicebus` + `SERVICE_BUS_CONNECTION_STRING` + `SERVICE_BUS_QUEUE_NAME` - Required when running the inbound gateway
 - `AZURE_STORAGE_CONTAINER_INGEST` + `AZURE_STORAGE_SAS_TOKEN` (and optionally `AZURE_STORAGE_ACCOUNT` or `AZURE_STORAGE_CONTAINER_SAS_URL`) - Raw payload storage when `RAW_PAYLOAD_STORAGE_BACKEND=azure`
+- `SUPABASE_JWT_SECRET` + `SUPABASE_ANON_KEY` + `SUPABASE_PROJECT_URL` - Recommended for token validation in `/auth/*` and `/billing/*`
 
 ## Testing Expectations
 
