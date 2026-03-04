@@ -1051,11 +1051,15 @@
       import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
       // Configuration
+      // TODO: Update Supabase credentials for staging if using a separate Supabase project
       const SUPABASE_URL = 'https://resmseutzmwumflevfqw.supabase.co';
       const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlc21zZXV0em13dW1mbGV2ZnF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAxNTQ1MjIsImV4cCI6MjA4NTczMDUyMn0.-QMndwi4m8nBtjMeS5WbDmrHZSe2l1UFY-UQJCl0Frc';
+      const isStaging = window.location.hostname.includes('staging') || window.location.hostname.includes('dowhizstaging');
       const DOWHIZ_API_URL = window.location.hostname === 'localhost'
         ? 'http://localhost:9001'
-        : 'https://api.production1.dowhiz.com/service';
+        : isStaging
+          ? 'https://api.staging.dowhiz.com/service'
+          : 'https://api.production1.dowhiz.com/service';
 
       const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
