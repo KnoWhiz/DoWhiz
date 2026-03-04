@@ -154,12 +154,6 @@ fn resolve_postmark_hook_url() -> String {
     if let Ok(value) = env::var("POSTMARK_INBOUND_HOOK_URL") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
-            let lower = trimmed.to_ascii_lowercase();
-            if lower.contains("api.staging.dowhiz.com")
-                || lower.contains("api.production1.dowhiz.com")
-            {
-                return DEFAULT_NGROK_HOOK_URL.to_string();
-            }
             return trimmed.to_string();
         }
     }
@@ -178,6 +172,18 @@ fn env_with_scale_oliver(key: &str) -> Option<String> {
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
         })
+}
+
+fn create_live_test_tempdir() -> Result<TempDir, BoxError> {
+    if let Some(host_root) = env_with_scale_oliver("RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT") {
+        let base = PathBuf::from(host_root).join("service_real_email_e2e");
+        fs::create_dir_all(&base)?;
+        let temp = tempfile::Builder::new()
+            .prefix("live_e2e_")
+            .tempdir_in(base)?;
+        return Ok(temp);
+    }
+    Ok(TempDir::new()?)
 }
 
 struct HookRestore {
@@ -713,7 +719,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
     }
     env::set_var("SCALE_OLIVER_INGESTION_QUEUE_BACKEND", "servicebus");
     env::set_var("SCALE_OLIVER_RAW_PAYLOAD_STORAGE_BACKEND", "azure");
-    let temp = TempDir::new()?;
+    let temp = create_live_test_tempdir()?;
     let workspace_root = temp.path().join("workspaces");
     let state_dir = temp.path().join("state");
     let users_root = temp.path().join("users");

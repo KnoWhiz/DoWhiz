@@ -61,22 +61,42 @@ pub async fn run_server(
             .await
             .map_err(|err| -> BoxError { err.into() })??;
     let message_router = Arc::new(MessageRouter::new());
-    if let Ok(user_ids) = user_store.list_user_ids() {
-        for user_id in user_ids {
-            let paths = user_store.user_paths(&config.users_root, &user_id);
-            let scheduler = Scheduler::load(&paths.tasks_db_path, ModuleExecutor::default());
-            match scheduler {
-                Ok(scheduler) => {
-                    if let Err(err) = index_store.sync_user_tasks(&user_id, scheduler.tasks()) {
-                        error!("index bootstrap failed for {}: {}", user_id, err);
+    let bootstrap_user_store = user_store.clone();
+    let bootstrap_index_store = index_store.clone();
+    let bootstrap_users_root = config.users_root.clone();
+    task::spawn_blocking(move || match bootstrap_user_store.list_user_ids() {
+        Ok(user_ids) => {
+            let total = user_ids.len();
+            if total > 0 {
+                info!("index bootstrap started for {} user(s)", total);
+            }
+            for (idx, user_id) in user_ids.into_iter().enumerate() {
+                let paths = bootstrap_user_store.user_paths(&bootstrap_users_root, &user_id);
+                let scheduler = Scheduler::load(&paths.tasks_db_path, ModuleExecutor::default());
+                match scheduler {
+                    Ok(scheduler) => {
+                        if let Err(err) =
+                            bootstrap_index_store.sync_user_tasks(&user_id, scheduler.tasks())
+                        {
+                            error!("index bootstrap failed for {}: {}", user_id, err);
+                        }
+                    }
+                    Err(err) => {
+                        error!("scheduler bootstrap failed for {}: {}", user_id, err);
                     }
                 }
-                Err(err) => {
-                    error!("scheduler bootstrap failed for {}: {}", user_id, err);
+                if (idx + 1) % 100 == 0 {
+                    info!("index bootstrap progress: {}/{} user(s)", idx + 1, total);
                 }
             }
+            if total > 0 {
+                info!("index bootstrap finished for {} user(s)", total);
+            }
         }
-    }
+        Err(err) => {
+            error!("index bootstrap skipped: failed to list users: {}", err);
+        }
+    });
 
     let mut scheduler_control =
         start_scheduler_threads(config.clone(), user_store.clone(), index_store.clone());

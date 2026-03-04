@@ -2,6 +2,7 @@ use chrono::Utc;
 use scheduler_module::channel::{Channel, ChannelMetadata};
 use scheduler_module::ingestion::{IngestionEnvelope, IngestionPayload};
 use scheduler_module::ingestion_queue::build_queue_from_env;
+use scheduler_module::service_bus_queue::resolve_service_bus_config_from_env;
 use std::env;
 use uuid::Uuid;
 
@@ -21,6 +22,13 @@ fn parse_arg_usize(args: &[String], key: &str, default: usize) -> usize {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if let Ok(cfg) = resolve_service_bus_config_from_env() {
+        println!(
+            "SERVICEBUS_CONFIG namespace={:?} queue={:?} policy={:?}",
+            cfg.namespace, cfg.queue_name, cfg.policy_name
+        );
+    }
+
     let args: Vec<String> = env::args().collect();
     let count = parse_arg_usize(&args, "--count", 200);
     let employee_id = parse_arg(&args, "--employee-id", "little_bear");

@@ -317,7 +317,7 @@ impl Drop for ServiceBusIngestionQueue {
 }
 
 fn map_service_bus_error(err: AzureError) -> IngestionQueueError {
-    IngestionQueueError::ServiceBus(err.to_string())
+    IngestionQueueError::ServiceBus(format!("{err:?}"))
 }
 
 pub fn resolve_service_bus_config_from_env() -> Result<ServiceBusConfig, IngestionQueueError> {
