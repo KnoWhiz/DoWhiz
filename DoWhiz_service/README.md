@@ -1190,7 +1190,8 @@ Environment policy:
 ### Azure ACI Execution (Serverless Per Task)
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RUN_TASK_EXECUTION_BACKEND` | `auto` | `azure_aci`/`local`/`auto`. In `DEPLOY_TARGET=staging|production`, local Codex execution is blocked. |
+| `RUN_TASK_EXECUTION_BACKEND` | `auto` | `azure_aci`/`local`/`auto`. In `DEPLOY_TARGET=staging|production`, direct local Codex execution is blocked unless ACI fallback is enabled. |
+| `RUN_TASK_AZURE_ACI_FALLBACK_TO_LOCAL` | `1` on staging, `0` otherwise | When Azure ACI capacity is exhausted (for example `ContainerGroupQuotaReached`), fallback to local Codex execution. |
 | `RUN_TASK_AZURE_ACI_RESOURCE_GROUP` | - | Resource group used by `az container create` |
 | `RUN_TASK_AZURE_ACI_IMAGE` | `RUN_TASK_DOCKER_IMAGE` fallback | Container image for task execution |
 | `RUN_TASK_AZURE_ACI_LOCATION` | - | Optional ACI region override |
