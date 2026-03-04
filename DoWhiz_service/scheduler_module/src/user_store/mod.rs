@@ -19,7 +19,6 @@ pub struct UserStore {
 #[derive(Debug, Clone)]
 struct MongoUserStore {
     users: Collection<Document>,
-    scope: String,
 }
 
 #[derive(Debug, Clone)]
@@ -57,10 +56,9 @@ pub enum UserStoreError {
 }
 
 impl UserStore {
-    pub fn new(path: impl Into<PathBuf>) -> Result<Self, UserStoreError> {
-        let scope = scope_from_path(path.into());
+    pub fn new(_path: impl Into<PathBuf>) -> Result<Self, UserStoreError> {
         Ok(Self {
-            mongo: MongoUserStore::new(scope)?,
+            mongo: MongoUserStore::new()?,
         })
     }
 
@@ -223,7 +221,7 @@ pub fn extract_emails(raw: &str) -> Vec<String> {
 }
 
 impl MongoUserStore {
-    fn new(scope: String) -> Result<Self, UserStoreError> {
+    fn new() -> Result<Self, UserStoreError> {
         let client =
             create_client_from_env().map_err(|err| UserStoreError::MongoConfig(err.to_string()))?;
         let db = database_from_env(&client);
@@ -231,23 +229,23 @@ impl MongoUserStore {
         ensure_index_compatible(
             &users,
             IndexModel::builder()
-                .keys(doc! { "scope": 1, "user_id": 1 })
+                .keys(doc! { "user_id": 1 })
                 .options(IndexOptions::builder().unique(Some(true)).build())
                 .build(),
         )?;
         ensure_index_compatible(
             &users,
             IndexModel::builder()
-                .keys(doc! { "scope": 1, "identifier_type": 1, "identifier": 1 })
+                .keys(doc! { "identifier_type": 1, "identifier": 1 })
                 .build(),
         )?;
         ensure_index_compatible(
             &users,
             IndexModel::builder()
-                .keys(doc! { "scope": 1, "created_at": 1 })
+                .keys(doc! { "created_at": 1 })
                 .build(),
         )?;
-        Ok(Self { users, scope })
+        Ok(Self { users })
     }
 
     fn get_user_by_identifier(
@@ -261,7 +259,6 @@ impl MongoUserStore {
             .users
             .find_one(
                 doc! {
-                    "scope": &self.scope,
                     "identifier_type": identifier_type,
                     "identifier": normalized.as_str(),
                 },
@@ -281,7 +278,6 @@ impl MongoUserStore {
             .ok_or_else(|| UserStoreError::InvalidIdentifier(identifier.to_string()))?;
         let now = Utc::now();
         let filter = doc! {
-            "scope": &self.scope,
             "identifier_type": identifier_type,
             "identifier": normalized.as_str(),
         };
@@ -291,7 +287,6 @@ impl MongoUserStore {
             if should_refresh_last_seen(record.last_seen_at, now) {
                 self.users.update_one(
                     doc! {
-                        "scope": &self.scope,
                         "user_id": record.user_id.as_str(),
                     },
                     doc! { "$set": { "last_seen_at": BsonDateTime::from_chrono(now) } },
@@ -305,7 +300,6 @@ impl MongoUserStore {
         let new_user_id = Uuid::new_v4().to_string();
         let insert_result = self.users.insert_one(
             doc! {
-                "scope": &self.scope,
                 "user_id": new_user_id.as_str(),
                 "identifier_type": identifier_type,
                 "identifier": normalized.as_str(),
@@ -335,7 +329,7 @@ impl MongoUserStore {
     fn list_user_ids(&self) -> Result<Vec<String>, UserStoreError> {
         let mut ids = Vec::new();
         let cursor = self.users.find(
-            doc! { "scope": &self.scope },
+            doc! {},
             FindOptions::builder()
                 .sort(doc! { "created_at": 1 })
                 .projection(doc! { "user_id": 1 })
@@ -395,10 +389,6 @@ fn should_refresh_last_seen(last_seen_at: DateTime<Utc>, now: DateTime<Utc>) -> 
 }
 
 const LAST_SEEN_UPDATE_INTERVAL_SECS: i64 = 5 * 60;
-
-fn scope_from_path(path: PathBuf) -> String {
-    format!("{:x}", md5::compute(path.to_string_lossy().as_bytes()))
-}
 
 #[cfg(test)]
 mod tests;

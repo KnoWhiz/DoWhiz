@@ -45,15 +45,13 @@ pub struct SlackStore {
 #[derive(Debug, Clone)]
 struct MongoSlackStore {
     installations: Collection<Document>,
-    scope: String,
 }
 
 impl SlackStore {
     /// Create a new SlackStore.
-    pub fn new(path: impl Into<PathBuf>) -> Result<Self, SlackStoreError> {
-        let scope = scope_from_path(path.into());
+    pub fn new(_path: impl Into<PathBuf>) -> Result<Self, SlackStoreError> {
         Ok(Self {
-            mongo: MongoSlackStore::new(scope)?,
+            mongo: MongoSlackStore::new()?,
         })
     }
 
@@ -107,7 +105,7 @@ impl SlackStore {
 }
 
 impl MongoSlackStore {
-    fn new(scope: String) -> Result<Self, SlackStoreError> {
+    fn new() -> Result<Self, SlackStoreError> {
         let client = create_client_from_env()
             .map_err(|err| SlackStoreError::MongoConfig(err.to_string()))?;
         let db = database_from_env(&client);
@@ -115,31 +113,26 @@ impl MongoSlackStore {
         ensure_index_compatible(
             &installations,
             IndexModel::builder()
-                .keys(doc! { "scope": 1, "team_id": 1 })
+                .keys(doc! { "team_id": 1 })
                 .options(IndexOptions::builder().unique(Some(true)).build())
                 .build(),
         )?;
         ensure_index_compatible(
             &installations,
             IndexModel::builder()
-                .keys(doc! { "scope": 1, "installed_at": -1 })
+                .keys(doc! { "installed_at": -1 })
                 .build(),
         )?;
-        Ok(Self {
-            installations,
-            scope,
-        })
+        Ok(Self { installations })
     }
 
     fn upsert_installation(&self, installation: &SlackInstallation) -> Result<(), SlackStoreError> {
         self.installations.update_one(
             doc! {
-                "scope": &self.scope,
                 "team_id": installation.team_id.as_str(),
             },
             doc! {
                 "$set": {
-                    "scope": &self.scope,
                     "team_id": installation.team_id.as_str(),
                     "team_name": installation.team_name.clone().map(Bson::from).unwrap_or(Bson::Null),
                     "bot_token": installation.bot_token.as_str(),
@@ -159,7 +152,6 @@ impl MongoSlackStore {
             .installations
             .find_one(
                 doc! {
-                    "scope": &self.scope,
                     "team_id": team_id,
                 },
                 None,
@@ -171,7 +163,6 @@ impl MongoSlackStore {
     fn delete_installation(&self, team_id: &str) -> Result<bool, SlackStoreError> {
         let result = self.installations.delete_one(
             doc! {
-                "scope": &self.scope,
                 "team_id": team_id,
             },
             None,
@@ -182,7 +173,7 @@ impl MongoSlackStore {
     fn list_installations(&self) -> Result<Vec<SlackInstallation>, SlackStoreError> {
         let mut values = Vec::new();
         let cursor = self.installations.find(
-            doc! { "scope": &self.scope },
+            doc! {},
             FindOptions::builder()
                 .sort(doc! { "installed_at": -1 })
                 .build(),
@@ -231,10 +222,6 @@ fn document_to_installation(document: Document) -> Result<SlackInstallation, Sla
 
 fn parse_datetime(value: &str) -> Result<DateTime<Utc>, chrono::ParseError> {
     Ok(DateTime::parse_from_rfc3339(value)?.with_timezone(&Utc))
-}
-
-fn scope_from_path(path: PathBuf) -> String {
-    format!("{:x}", md5::compute(path.to_string_lossy().as_bytes()))
 }
 
 #[cfg(test)]
