@@ -8,21 +8,10 @@ id = "boiled_egg"
 display_name = "Proto (Staging)"
 runner = "codex"
 model = "gpt-5.3-codex"
-addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com"]
+addresses = ["dowhiz@deep-tutor.com"]
 agents_path = "employees/boiled_egg/AGENTS.md"
 claude_path = "employees/boiled_egg/CLAUDE.md"
 soul_path = "employees/boiled_egg/SOUL.md"
 skills_dir = "skills"
 discord_enabled = true
 slack_enabled = true
-
-[[employees]]
-id = "little_bear"
-display_name = "Oliver (Staging)"
-runner = "codex"
-model = "gpt-5.3-codex"
-addresses = ["dowhiz@deep-tutor.com"]
-agents_path = "employees/little_bear/AGENTS.md"
-claude_path = "employees/little_bear/CLAUDE.md"
-soul_path = "employees/little_bear/SOUL.md"
-skills_dir = "skills"
