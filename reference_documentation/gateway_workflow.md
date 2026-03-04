@@ -6,6 +6,8 @@ Operational invariants:
 - Routing config is loaded from `GATEWAY_CONFIG_PATH` (default `gateway.toml`).
 - Employee directory is loaded from `EMPLOYEE_CONFIG_PATH` (default `employee.toml`).
 - Discord gateway starts only when Discord routes exist in gateway config.
+- Worker scheduler/user/index persistence is Mongo-backed (`MONGODB_URI` required).
+- Account/auth routes rely on Supabase Postgres (`SUPABASE_DB_URL` required).
 
 Staging/prod split:
 - Use one `.env` with `STAGING_` keys.
@@ -131,6 +133,7 @@ flowchart TD
   U --> V[Write incoming_email/attachments]
   V --> W[Create RunTask task]
   W --> Y[Scheduler executes RunTask]
+  W --> Y0[Persist task/user index in Mongo owner scopes]
   Y --> Z[run_task_module invokes Codex/Claude]
   Z --> AA[Create SendReply or follow-up tasks]
   AA --> AB[Send outbound reply by channel]

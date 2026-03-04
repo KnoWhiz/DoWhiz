@@ -219,7 +219,7 @@ curl -sS http://127.0.0.1:9001/health
 ## 6) Webhook notes (current staging URL)
 
 Current staging inbound hook:
-- `https://oliver.dowhiz.prod.ngrok.app/postmark/inbound`
+- `https://shayne-laminar-lillian.ngrok-free.dev/postmark/inbound`
 
 When `DEPLOY_TARGET=staging`, scripts use `STAGING_POSTMARK_SERVER_TOKEN` and `STAGING_POSTMARK_INBOUND_HOOK_URL` automatically via env mapping.
 
