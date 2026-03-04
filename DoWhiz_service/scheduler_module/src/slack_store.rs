@@ -234,13 +234,6 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         let path = temp.path().join("slack.db");
         let store = SlackStore::new(&path).expect("store");
-        // SlackStore is Mongo-backed and does not scope by path; wipe test data so
-        // each test starts from a deterministic empty collection.
-        store
-            .mongo
-            .installations
-            .delete_many(doc! {}, None)
-            .expect("clear slack_installations");
         (temp, store)
     }
 
@@ -303,7 +296,8 @@ mod tests {
     fn get_not_found() {
         let (_temp, store) = test_store();
 
-        let result = store.get_installation("TNOTEXIST");
+        let team_id = unique_team_id("TNOTEXIST");
+        let result = store.get_installation(&team_id);
         assert!(matches!(result, Err(SlackStoreError::NotFound(_))));
     }
 
