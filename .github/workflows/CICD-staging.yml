@@ -211,7 +211,10 @@ jobs:
             local key="$1"
             local value
             value="$(grep -E "^${key}=" "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
-            value="$(printf '%s' "$value" | sed -e 's/^\"//' -e 's/\"$//' -e \"s/^'//\" -e \"s/'$//\")"
+            value="${value#\"}"
+            value="${value%\"}"
+            value="${value#\'}"
+            value="${value%\'}"
             printf '%s' "$value"
           }
           GATEWAY_CONFIG_PATH="$(read_env_value GATEWAY_CONFIG_PATH)"
