@@ -17,7 +17,7 @@ use uuid::Uuid;
 use scheduler_module::adapters::bluebubbles::BlueBubblesInboundAdapter;
 use scheduler_module::adapters::postmark::PostmarkInboundPayload;
 use scheduler_module::adapters::slack::{
-    is_url_verification, SlackChallengeResponse, SlackInboundAdapter,
+    is_url_verification, SlackChallengeResponse, SlackEventWrapper, SlackInboundAdapter,
 };
 use scheduler_module::adapters::telegram::TelegramInboundAdapter;
 use scheduler_module::adapters::whatsapp::WhatsAppInboundAdapter;
@@ -121,25 +121,19 @@ pub(super) async fn ingest_slack(
         return (StatusCode::UNAUTHORIZED, Json(json!({"status": reason})));
     }
 
-    let wrapper: serde_json::Value = match serde_json::from_slice(&body) {
+    let wrapper: SlackEventWrapper = match serde_json::from_slice(&body) {
         Ok(value) => value,
         Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"}))),
     };
 
     // Extract api_app_id for routing (each Slack app has unique app_id)
-    let api_app_id = wrapper
-        .get("api_app_id")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
+    let api_app_id = wrapper.api_app_id.as_deref().unwrap_or("");
     if api_app_id.is_empty() {
         info!("gateway no api_app_id in slack payload");
         return (StatusCode::OK, Json(json!({"status": "no_route"})));
     }
 
-    let event_id = wrapper
-        .get("event_id")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
+    let event_id = wrapper.event_id.clone();
 
     let Some(route) = resolve_route(Channel::Slack, api_app_id, &state) else {
         info!("gateway no route for slack api_app_id={}", api_app_id);
@@ -151,7 +145,20 @@ pub(super) async fn ingest_slack(
         api_app_id, route.employee_id
     );
 
-    let adapter = SlackInboundAdapter::new(HashSet::new());
+    let bot_user_id = resolve_slack_bot_user_id_for_employee(&route.employee_id);
+    if !should_enqueue_slack_message(&wrapper, bot_user_id.as_deref()) {
+        info!(
+            "gateway ignoring slack event for employee={} api_app_id={} (not dm/app_mention/mention)",
+            route.employee_id, api_app_id
+        );
+        return (StatusCode::OK, Json(json!({"status": "ignored"})));
+    }
+
+    let mut bot_user_ids = HashSet::new();
+    if let Some(id) = bot_user_id {
+        bot_user_ids.insert(id);
+    }
+    let adapter = SlackInboundAdapter::new(bot_user_ids);
     let message = match adapter.parse(&body) {
         Ok(message) => message,
         Err(err) => {
@@ -171,6 +178,50 @@ pub(super) async fn ingest_slack(
         }
     };
     enqueue_envelope(state.queue.clone(), envelope).await
+}
+
+fn resolve_slack_bot_user_id_for_employee(employee_id: &str) -> Option<String> {
+    let employee_env = employee_id.to_uppercase().replace('-', "_");
+    let employee_key = format!("{}_SLACK_BOT_USER_ID", employee_env);
+
+    std::env::var(&employee_key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            std::env::var("SLACK_BOT_USER_ID")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+}
+
+fn should_enqueue_slack_message(wrapper: &SlackEventWrapper, bot_user_id: Option<&str>) -> bool {
+    let Some(event) = wrapper.event.as_ref() else {
+        return false;
+    };
+    if event.subtype.is_some() {
+        return false;
+    }
+
+    match event.event_type.as_str() {
+        "app_mention" => true,
+        "message" => {
+            if matches!(event.channel_type.as_deref(), Some("im") | Some("mpim")) {
+                return true;
+            }
+            let Some(bot_user_id) = bot_user_id else {
+                return false;
+            };
+            let mention = format!("<@{}>", bot_user_id.trim());
+            event
+                .text
+                .as_deref()
+                .map(|text| text.contains(&mention))
+                .unwrap_or(false)
+        }
+        _ => false,
+    }
 }
 
 pub(super) async fn ingest_bluebubbles(
@@ -715,6 +766,7 @@ pub(super) async fn build_envelope(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scheduler_module::adapters::slack::{SlackEventWrapper, SlackMessageEvent};
     use scheduler_module::channel::Attachment;
 
     #[test]
@@ -787,6 +839,93 @@ mod tests {
         };
         let payload = build_queue_payload(Channel::Slack, &message);
         assert_eq!(payload.attachments.len(), 1);
+    }
+
+    #[test]
+    fn should_enqueue_slack_message_accepts_app_mention() {
+        let wrapper = SlackEventWrapper {
+            event_type: "event_callback".to_string(),
+            challenge: None,
+            token: None,
+            team_id: Some("T1".to_string()),
+            api_app_id: Some("A1".to_string()),
+            event: Some(SlackMessageEvent {
+                event_type: "app_mention".to_string(),
+                subtype: None,
+                channel: Some("C1".to_string()),
+                user: Some("U1".to_string()),
+                text: Some("<@B1> hi".to_string()),
+                ts: "1.01".to_string(),
+                thread_ts: None,
+                bot_id: None,
+                app_id: None,
+                files: None,
+                channel_type: Some("channel".to_string()),
+                event_ts: None,
+            }),
+            event_id: Some("Ev1".to_string()),
+            event_time: None,
+        };
+
+        assert!(should_enqueue_slack_message(&wrapper, Some("B1")));
+    }
+
+    #[test]
+    fn should_enqueue_slack_message_rejects_channel_message_without_bot_mention() {
+        let wrapper = SlackEventWrapper {
+            event_type: "event_callback".to_string(),
+            challenge: None,
+            token: None,
+            team_id: Some("T1".to_string()),
+            api_app_id: Some("A1".to_string()),
+            event: Some(SlackMessageEvent {
+                event_type: "message".to_string(),
+                subtype: None,
+                channel: Some("C1".to_string()),
+                user: Some("U1".to_string()),
+                text: Some("hello world".to_string()),
+                ts: "1.02".to_string(),
+                thread_ts: None,
+                bot_id: None,
+                app_id: None,
+                files: None,
+                channel_type: Some("channel".to_string()),
+                event_ts: None,
+            }),
+            event_id: Some("Ev2".to_string()),
+            event_time: None,
+        };
+
+        assert!(!should_enqueue_slack_message(&wrapper, Some("B1")));
+    }
+
+    #[test]
+    fn should_enqueue_slack_message_accepts_dm_message() {
+        let wrapper = SlackEventWrapper {
+            event_type: "event_callback".to_string(),
+            challenge: None,
+            token: None,
+            team_id: Some("T1".to_string()),
+            api_app_id: Some("A1".to_string()),
+            event: Some(SlackMessageEvent {
+                event_type: "message".to_string(),
+                subtype: None,
+                channel: Some("D1".to_string()),
+                user: Some("U1".to_string()),
+                text: Some("hello in dm".to_string()),
+                ts: "1.03".to_string(),
+                thread_ts: None,
+                bot_id: None,
+                app_id: None,
+                files: None,
+                channel_type: Some("im".to_string()),
+                event_ts: None,
+            }),
+            event_id: Some("Ev3".to_string()),
+            event_time: None,
+        };
+
+        assert!(should_enqueue_slack_message(&wrapper, None));
     }
 }
 
