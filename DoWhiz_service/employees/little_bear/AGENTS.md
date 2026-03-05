@@ -13,8 +13,9 @@ Runtime state lives under `.workspace/` (Mongo-backed state, user archives, and 
 - `cargo build`: build the full workspace.
 - `cargo test`: run all unit and integration tests.
 - `cargo run -p scheduler_module --bin rust_service -- --host 0.0.0.0 --port 9001`: start the service locally.
-- `ngrok http 9001`: expose the service for Postmark inbound webhooks.
-- `cargo run -p scheduler_module --bin set_postmark_inbound_hook -- --hook-url https://<ngrok>/postmark/inbound`: update Postmark to the new URL.
+- `(Local only) ngrok http 9001`: expose the service for Postmark inbound webhook tests.
+- `(Staging/Prod) use existing public endpoint via POSTMARK_INBOUND_HOOK_URL; do not run ngrok on VM.`
+- `cargo run -p scheduler_module --bin set_postmark_inbound_hook -- --hook-url https://<public-domain>/postmark/inbound`: update Postmark to the target public URL.
 - `RUST_SERVICE_LIVE_TEST=1 POSTMARK_INBOUND_HOOK_URL=... POSTMARK_TEST_FROM=... cargo test -p scheduler_module --test service_real_email -- --nocapture`: run the real email end-to-end test.
 
 ## Coding Style & Naming Conventions

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Setup Postmark inbound webhook with ngrok
+# Setup Postmark inbound webhook with ngrok (local debugging helper)
 # Usage: ./scripts/setup_postmark_webhook.sh [gateway_port]
 
 PORT="${1:-9100}"
@@ -10,6 +10,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Load .env.
 # shellcheck source=./load_env_target.sh
 source "${SCRIPT_DIR}/load_env_target.sh"
+
+DEPLOY_TARGET_NORMALIZED="$(echo "${DEPLOY_TARGET:-}" | tr '[:upper:]' '[:lower:]')"
+if [[ "$DEPLOY_TARGET_NORMALIZED" == "staging" || "$DEPLOY_TARGET_NORMALIZED" == "production" ]]; then
+    echo "ERROR: setup_postmark_webhook.sh is local-only because it rewrites Postmark to an ngrok URL."
+    echo "Set POSTMARK_INBOUND_HOOK_URL to your VM public endpoint and use set_postmark_inbound_hook instead."
+    exit 1
+fi
 
 POSTMARK_TOKEN="${POSTMARK_SERVER_TOKEN:-}"
 

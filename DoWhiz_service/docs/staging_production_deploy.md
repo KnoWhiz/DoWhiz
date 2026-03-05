@@ -53,7 +53,8 @@ cd /home/azureuser/server/.dowhiz/DoWhiz
 git fetch origin
 git checkout dev
 git pull --ff-only origin dev
-./DoWhiz_service/scripts/start_all.sh
+./DoWhiz_service/scripts/run_gateway_local.sh
+./DoWhiz_service/scripts/run_employee.sh boiled_egg 9001 --skip-hook --skip-ngrok
 ```
 
 ### Production (`main`)
@@ -66,6 +67,8 @@ git pull --ff-only origin main
 ./DoWhiz_service/scripts/run_gateway_local.sh
 ./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
 ```
+
+Do not use `scripts/start_all.sh` on staging/production VMs; it is local-only and will start ngrok plus rewrite Postmark inbound hook.
 
 ## 4) CI/CD Expectations
 

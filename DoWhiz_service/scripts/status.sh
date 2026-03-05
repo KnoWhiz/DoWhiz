@@ -26,7 +26,7 @@ if pgrep -f "ngrok http" > /dev/null; then
     NGROK_URL=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null | python3 -c "import sys,json; print([t['public_url'] for t in json.load(sys.stdin).get('tunnels',[]) if t.get('public_url','').startswith('https')][0])" 2>/dev/null || echo "无法获取")
     echo "✅ Ngrok:   运行中 → $NGROK_URL"
 else
-    echo "❌ Ngrok:   未运行"
+    echo "Ngrok:      未运行（可选，本地 webhook 调试时才需要）"
 fi
 
 # 2. 健康检查
@@ -56,5 +56,5 @@ echo ""
 echo "=========================================="
 echo "监控命令："
 echo "  实时日志: tail -f $SERVICE_DIR/worker.log"
-echo "  Ngrok:    http://127.0.0.1:4040"
+echo "  Ngrok(可选): http://127.0.0.1:4040"
 echo "=========================================="

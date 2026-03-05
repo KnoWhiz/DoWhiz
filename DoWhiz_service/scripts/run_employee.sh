@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Run the Rust email service for a single employee with optional ngrok + Postmark hook.
+Run the Rust email service for a single employee with optional Postmark hook update.
 
 Usage:
   scripts/run_employee.sh <employee_id> [port]
@@ -14,8 +14,9 @@ Options:
   --port, -p       Port to bind (default: 9001)
   --host           Host to bind (default: 0.0.0.0)
   --public-url     Public base URL (or full /postmark/inbound). Skips ngrok.
+                   If omitted, POSTMARK_INBOUND_HOOK_URL is used when set.
   --skip-hook      Do not update Postmark inbound hook.
-  --skip-ngrok     Do not start ngrok (requires --public-url or --skip-hook).
+  --skip-ngrok     Do not start ngrok (local-only fallback).
   --help, -h       Show this help.
 
 Examples:
@@ -156,9 +157,20 @@ PY
 
 cd "$service_root"
 
+deploy_target="$(echo "${DEPLOY_TARGET:-}" | tr '[:upper:]' '[:lower:]')"
 hook_base_url=""
 if [[ -n "$public_url" ]]; then
   hook_base_url="$public_url"
+  skip_ngrok="true"
+fi
+
+if [[ -z "$hook_base_url" ]] && [[ -n "${POSTMARK_INBOUND_HOOK_URL:-}" ]]; then
+  hook_base_url="${POSTMARK_INBOUND_HOOK_URL}"
+  skip_ngrok="true"
+fi
+
+if [[ "$skip_ngrok" != "true" ]] && [[ "$deploy_target" == "staging" || "$deploy_target" == "production" ]]; then
+  echo "DEPLOY_TARGET=${deploy_target}: skipping ngrok and expecting configured public hook URL."
   skip_ngrok="true"
 fi
 
@@ -168,11 +180,11 @@ fi
 
 if [[ "$skip_ngrok" != "true" ]]; then
   if ! command -v ngrok >/dev/null 2>&1; then
-    echo "ngrok not found. Install ngrok or pass --public-url to skip it." >&2
+    echo "ngrok not found. Install ngrok or set --public-url/POSTMARK_INBOUND_HOOK_URL." >&2
     exit 1
   fi
   if ! command -v python3 >/dev/null 2>&1; then
-    echo "python3 not found. Install python3 or pass --public-url to skip ngrok." >&2
+    echo "python3 not found. Install python3 or set --public-url/POSTMARK_INBOUND_HOOK_URL." >&2
     exit 1
   fi
 
@@ -204,7 +216,7 @@ if [[ -n "$hook_base_url" ]]; then
   fi
 else
   if [[ "$skip_hook" != "true" ]]; then
-    echo "No public URL available for hook. Pass --public-url or remove --skip-ngrok." >&2
+    echo "No public URL available for hook. Set --public-url, POSTMARK_INBOUND_HOOK_URL, or use --skip-hook." >&2
     exit 1
   fi
 fi
