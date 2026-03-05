@@ -531,55 +531,16 @@ fn execute_due_task(
             Ok(())
         }
         Err(err) => {
-            // Task execution failed - increment retry count
-            error!(
-                "scheduler task failed task_id={} user_id={} error={}",
-                task_ref.task_id, task_ref.user_id, err
-            );
-
-            match scheduler.increment_retry_count(&task_ref.task_id) {
-                Ok(new_count) => {
-                    if new_count >= MAX_TASK_RETRIES {
-                        warn!(
-                            "Task {} exceeded max retries ({}), disabling task",
-                            task_ref.task_id, MAX_TASK_RETRIES
-                        );
-                        if let Err(disable_err) = scheduler.disable_task_by_id(&task_ref.task_id) {
-                            error!(
-                                "Failed to disable task {} after max retries: {}",
-                                task_ref.task_id, disable_err
-                            );
-                        }
-                    } else {
-                        // Apply exponential backoff before next retry
-                        let backoff_idx = (new_count as usize).saturating_sub(1);
-                        let backoff_secs = RETRY_BACKOFF_SECS
-                            .get(backoff_idx)
-                            .copied()
-                            .unwrap_or(RETRY_BACKOFF_SECS[RETRY_BACKOFF_SECS.len() - 1]);
-                        info!(
-                            "Task {} failed, retry {}/{}, backing off for {}s",
-                            task_ref.task_id, new_count, MAX_TASK_RETRIES, backoff_secs
-                        );
-                        thread::sleep(Duration::from_secs(backoff_secs));
-                    }
-                }
-                Err(retry_err) => {
-                    warn!(
-                        "Failed to increment retry count for task {}: {}",
-                        task_ref.task_id, retry_err
-                    );
-                }
-            }
-
-            // Sync index to reflect any state changes
-            if let Err(sync_err) = index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks()) {
+            if let Err(sync_err) = index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks())
+            {
                 warn!(
-                    "scheduler sync failed after task failure task_id={} user_id={} error={}",
+                    "scheduler sync failed after task error task_id={} user_id={} error={}",
                     task_ref.task_id, task_ref.user_id, sync_err
                 );
+            } else {
+                let summary = summarize_tasks(scheduler.tasks(), Utc::now());
+                log_task_snapshot(&task_ref.user_id, "after_execute_failed", &summary);
             }
-
             Err(Box::new(err))
         }
     }
