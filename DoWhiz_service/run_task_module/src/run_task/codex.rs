@@ -101,7 +101,7 @@ pub fn cleanup_all_aci_containers() -> usize {
     let mut cleaned = 0;
     for container_name in &containers {
         eprintln!("[cleanup] deleting ACI container: {}", container_name);
-        match delete_aci_container(&config, container_name) {
+        match delete_aci_container_with_retry(&config, container_name) {
             Ok(()) => {
                 eprintln!("[cleanup] successfully deleted: {}", container_name);
                 cleaned += 1;
@@ -163,54 +163,9 @@ pub(super) fn run_codex_task(
         }
     }
     if backend == ExecutionBackend::AzureAci {
-        match run_codex_task_azure_aci(
-            &request,
-            runner,
-            reply_html_path.clone(),
-            reply_attachments_dir.clone(),
-        ) {
-            Ok(output) => return Ok(output),
-            Err(err) => {
-                if should_fallback_to_local_on_aci_error(&err) {
-                    if allow_aci_local_fallback() {
-                        eprintln!(
-                            "[run_task] azure_aci capacity error detected; falling back to local execution"
-                        );
-                        return run_codex_task_local(
-                            &request,
-                            runner,
-                            reply_html_path,
-                            reply_attachments_dir,
-                            false,
-                        );
-                    }
-                    eprintln!(
-                        "[run_task] azure_aci capacity error detected; local fallback disabled"
-                    );
-                }
-                return Err(err);
-            }
-        }
+        return run_codex_task_azure_aci(request, runner, reply_html_path, reply_attachments_dir);
     }
-    run_codex_task_local(
-        &request,
-        runner,
-        reply_html_path,
-        reply_attachments_dir,
-        true,
-    )
-}
-
-fn run_codex_task_local(
-    request: &RunTaskRequest<'_>,
-    runner: &str,
-    reply_html_path: PathBuf,
-    reply_attachments_dir: PathBuf,
-    enforce_local_execution_guard: bool,
-) -> Result<RunTaskOutput, RunTaskError> {
-    if enforce_local_execution_guard {
-        ensure_local_execution_allowed()?;
-    }
+    ensure_local_execution_allowed()?;
     let docker_image = read_env_trimmed("RUN_TASK_DOCKER_IMAGE");
     let docker_requested = env_enabled("RUN_TASK_USE_DOCKER");
     let docker_available = docker_requested && docker_cli_available();
@@ -594,33 +549,8 @@ fn ensure_local_execution_allowed() -> Result<(), RunTaskError> {
     Ok(())
 }
 
-fn allow_aci_local_fallback() -> bool {
-    if let Some(raw) = read_env_trimmed("RUN_TASK_AZURE_ACI_FALLBACK_TO_LOCAL") {
-        return matches!(
-            raw.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        );
-    }
-    normalized_deploy_target() == "staging"
-}
-
-fn should_fallback_to_local_on_aci_error(err: &RunTaskError) -> bool {
-    match err {
-        RunTaskError::CodexFailed { output, .. } => is_aci_capacity_error_output(output),
-        RunTaskError::CommandTimeout { output, .. } => is_aci_capacity_error_output(output),
-        _ => false,
-    }
-}
-
-fn is_aci_capacity_error_output(output: &str) -> bool {
-    let lowered = output.to_ascii_lowercase();
-    lowered.contains("containergroupquotareached")
-        || (lowered.contains("container group quota")
-            && lowered.contains("microsoft.containerinstance/containergroups"))
-}
-
 fn run_codex_task_azure_aci(
-    request: &RunTaskRequest<'_>,
+    request: RunTaskRequest<'_>,
     runner: &str,
     reply_html_path: PathBuf,
     reply_attachments_dir: PathBuf,
@@ -772,7 +702,12 @@ fn run_codex_task_azure_aci(
         "[run_task] azure_aci delete container={} resource_group={}",
         container_name, config.resource_group
     );
-    let _ = delete_aci_container(&config, &container_name);
+    if let Err(cleanup_err) = delete_aci_container_with_retry(&config, &container_name) {
+        eprintln!(
+            "[run_task] azure_aci delete failed container={} resource_group={} error={}",
+            container_name, config.resource_group, cleanup_err
+        );
+    }
     deregister_aci_container(&container_name);
 
     let (container_state, container_logs) = execution?;
@@ -1055,78 +990,31 @@ exit \"$status\"\n",
         azure_env_cfg = azure_env_cfg,
     );
 
-    let mut create_cmd = Command::new("az");
-    create_cmd
-        .arg("container")
-        .arg("create")
-        .arg("--name")
-        .arg(container_name)
-        .arg("--resource-group")
-        .arg(&config.resource_group)
-        .arg("--image")
-        .arg(&config.image)
-        .arg("--os-type")
-        .arg("Linux")
-        .arg("--restart-policy")
-        .arg("Never")
-        .arg("--cpu")
-        .arg(&config.cpu)
-        .arg("--memory")
-        .arg(&config.memory_gb)
-        .arg("--azure-file-volume-account-name")
-        .arg(&config.storage_account)
-        .arg("--azure-file-volume-account-key")
-        .arg(&config.storage_key)
-        .arg("--azure-file-volume-share-name")
-        .arg(&config.file_share)
-        .arg("--azure-file-volume-mount-path")
-        .arg(&config.container_share_root)
-        .arg("--command-line")
-        .arg(format!("/bin/bash -lc {}", shell_quote(&script)))
-        .arg("--only-show-errors")
-        .arg("--output")
-        .arg("json");
-    if let Some(location) = &config.location {
-        create_cmd.arg("--location").arg(location);
-    }
-    if let (Some(server), Some(username), Some(password)) = (
-        &config.registry_server,
-        &config.registry_username,
-        &config.registry_password,
-    ) {
-        create_cmd
-            .arg("--registry-login-server")
-            .arg(server)
-            .arg("--registry-username")
-            .arg(username)
-            .arg("--registry-password")
-            .arg(password);
-    }
-
-    if !env_overrides.is_empty() {
-        create_cmd.arg("--environment-variables");
-        for (key, value) in env_overrides {
-            create_cmd.arg(format!("{key}={value}"));
-        }
-    }
-
-    let create_output =
-        match run_command_with_timeout(create_cmd, Duration::from_secs(300), "az container create")
-        {
-            Ok(output) => output,
-            Err(RunTaskError::Io(err)) if err.kind() == io::ErrorKind::NotFound => {
-                return Err(RunTaskError::AzureCliNotFound)
+    let create_command = format!("/bin/bash -lc {}", shell_quote(&script));
+    match create_aci_container(config, container_name, &create_command, env_overrides) {
+        Ok(()) => {}
+        Err(err) if is_aci_quota_error(&err) => {
+            eprintln!(
+                "[run_task] azure_aci quota reached for container={}, attempting stale cleanup",
+                container_name
+            );
+            match cleanup_stale_aci_containers(config) {
+                Ok(cleaned) => {
+                    eprintln!(
+                        "[run_task] azure_aci stale cleanup deleted {} container(s)",
+                        cleaned
+                    );
+                }
+                Err(cleanup_err) => {
+                    eprintln!(
+                        "[run_task] azure_aci stale cleanup failed before retry: {}",
+                        cleanup_err
+                    );
+                }
             }
-            Err(err) => return Err(err),
-        };
-    if !create_output.status.success() {
-        let mut combined = String::new();
-        combined.push_str(&String::from_utf8_lossy(&create_output.stdout));
-        combined.push_str(&String::from_utf8_lossy(&create_output.stderr));
-        return Err(RunTaskError::CodexFailed {
-            status: create_output.status.code(),
-            output: tail_string(&combined, 4000),
-        });
+            create_aci_container(config, container_name, &create_command, env_overrides)?;
+        }
+        Err(err) => return Err(err),
     }
 
     let container_state = poll_aci_state(config, container_name, timeout)?;
@@ -1203,6 +1091,141 @@ fn fetch_aci_logs(config: &AzureAciConfig, container_name: &str) -> Result<Strin
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+fn create_aci_container(
+    config: &AzureAciConfig,
+    container_name: &str,
+    create_command: &str,
+    env_overrides: &[(String, String)],
+) -> Result<(), RunTaskError> {
+    let mut create_cmd = build_aci_create_command(config, container_name, create_command);
+    if !env_overrides.is_empty() {
+        create_cmd.arg("--environment-variables");
+        for (key, value) in env_overrides {
+            create_cmd.arg(format!("{key}={value}"));
+        }
+    }
+
+    let create_output =
+        match run_command_with_timeout(create_cmd, Duration::from_secs(300), "az container create")
+        {
+            Ok(output) => output,
+            Err(RunTaskError::Io(err)) if err.kind() == io::ErrorKind::NotFound => {
+                return Err(RunTaskError::AzureCliNotFound)
+            }
+            Err(err) => return Err(err),
+        };
+    if !create_output.status.success() {
+        let mut combined = String::new();
+        combined.push_str(&String::from_utf8_lossy(&create_output.stdout));
+        combined.push_str(&String::from_utf8_lossy(&create_output.stderr));
+        return Err(RunTaskError::CodexFailed {
+            status: create_output.status.code(),
+            output: tail_string(&combined, 4000),
+        });
+    }
+    Ok(())
+}
+
+fn build_aci_create_command(
+    config: &AzureAciConfig,
+    container_name: &str,
+    create_command: &str,
+) -> Command {
+    let mut create_cmd = Command::new("az");
+    create_cmd
+        .arg("container")
+        .arg("create")
+        .arg("--name")
+        .arg(container_name)
+        .arg("--resource-group")
+        .arg(&config.resource_group)
+        .arg("--image")
+        .arg(&config.image)
+        .arg("--os-type")
+        .arg("Linux")
+        .arg("--restart-policy")
+        .arg("Never")
+        .arg("--cpu")
+        .arg(&config.cpu)
+        .arg("--memory")
+        .arg(&config.memory_gb)
+        .arg("--azure-file-volume-account-name")
+        .arg(&config.storage_account)
+        .arg("--azure-file-volume-account-key")
+        .arg(&config.storage_key)
+        .arg("--azure-file-volume-share-name")
+        .arg(&config.file_share)
+        .arg("--azure-file-volume-mount-path")
+        .arg(&config.container_share_root)
+        .arg("--command-line")
+        .arg(create_command)
+        .arg("--only-show-errors")
+        .arg("--output")
+        .arg("json");
+
+    if let Some(location) = &config.location {
+        create_cmd.arg("--location").arg(location);
+    }
+    if let (Some(server), Some(username), Some(password)) = (
+        &config.registry_server,
+        &config.registry_username,
+        &config.registry_password,
+    ) {
+        create_cmd
+            .arg("--registry-login-server")
+            .arg(server)
+            .arg("--registry-username")
+            .arg(username)
+            .arg("--registry-password")
+            .arg(password);
+    }
+    create_cmd
+}
+
+fn cleanup_stale_aci_containers(config: &AzureAciConfig) -> Result<usize, RunTaskError> {
+    let mut list_cmd = Command::new("az");
+    list_cmd
+        .arg("container")
+        .arg("list")
+        .arg("--resource-group")
+        .arg(&config.resource_group)
+        .arg("--query")
+        .arg("[?starts_with(name, 'dwz-codex-') && (instanceView.state == null || instanceView.state == 'Succeeded' || instanceView.state == 'Failed' || instanceView.state == 'Terminated' || instanceView.state == 'Stopped')].name")
+        .arg("--output")
+        .arg("tsv")
+        .arg("--only-show-errors");
+    let output = run_command_with_timeout(list_cmd, Duration::from_secs(120), "az container list")?;
+    if !output.status.success() {
+        let mut combined = String::new();
+        combined.push_str(&String::from_utf8_lossy(&output.stdout));
+        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+        return Err(RunTaskError::CodexFailed {
+            status: output.status.code(),
+            output: tail_string(&combined, 4000),
+        });
+    }
+    let names = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>();
+
+    let mut cleaned = 0usize;
+    for name in names {
+        match delete_aci_container_with_retry(config, &name) {
+            Ok(()) => cleaned += 1,
+            Err(err) => {
+                eprintln!(
+                    "[run_task] azure_aci stale cleanup delete failed container={} error={}",
+                    name, err
+                );
+            }
+        }
+    }
+    Ok(cleaned)
+}
+
 fn delete_aci_container(config: &AzureAciConfig, container_name: &str) -> Result<(), RunTaskError> {
     let mut delete_cmd = Command::new("az");
     delete_cmd
@@ -1226,6 +1249,105 @@ fn delete_aci_container(config: &AzureAciConfig, container_name: &str) -> Result
         });
     }
     Ok(())
+}
+
+fn delete_aci_container_with_retry(
+    config: &AzureAciConfig,
+    container_name: &str,
+) -> Result<(), RunTaskError> {
+    const DELETE_ATTEMPTS: usize = 3;
+    const DELETE_WAIT_TIMEOUT: Duration = Duration::from_secs(180);
+
+    let mut last_error: Option<RunTaskError> = None;
+    for attempt in 1..=DELETE_ATTEMPTS {
+        match delete_aci_container(config, container_name) {
+            Ok(()) => {
+                match wait_for_aci_container_deleted(config, container_name, DELETE_WAIT_TIMEOUT) {
+                    Ok(()) => return Ok(()),
+                    Err(err) => {
+                        last_error = Some(err);
+                    }
+                }
+            }
+            Err(err) if is_aci_not_found_error(&err) => return Ok(()),
+            Err(err) => {
+                last_error = Some(err);
+            }
+        }
+
+        if attempt < DELETE_ATTEMPTS {
+            thread::sleep(Duration::from_secs((attempt as u64) * 5));
+        }
+    }
+
+    Err(last_error.expect("delete_aci_container_with_retry exhausted without error"))
+}
+
+fn wait_for_aci_container_deleted(
+    config: &AzureAciConfig,
+    container_name: &str,
+    timeout: Duration,
+) -> Result<(), RunTaskError> {
+    let started = Instant::now();
+    loop {
+        let mut show_cmd = Command::new("az");
+        show_cmd
+            .arg("container")
+            .arg("show")
+            .arg("--name")
+            .arg(container_name)
+            .arg("--resource-group")
+            .arg(&config.resource_group)
+            .arg("--only-show-errors")
+            .arg("--output")
+            .arg("json");
+        let output =
+            run_command_with_timeout(show_cmd, Duration::from_secs(60), "az container show")?;
+        if output.status.success() {
+            if started.elapsed() >= timeout {
+                return Err(RunTaskError::CommandTimeout {
+                    command: "az container delete",
+                    timeout_secs: timeout.as_secs(),
+                    output: format!("container {} still exists", container_name),
+                });
+            }
+            thread::sleep(Duration::from_secs(5));
+            continue;
+        }
+
+        let mut combined = String::new();
+        combined.push_str(&String::from_utf8_lossy(&output.stdout));
+        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+        if is_aci_not_found_output(&combined) {
+            return Ok(());
+        }
+        return Err(RunTaskError::CodexFailed {
+            status: output.status.code(),
+            output: tail_string(&combined, 4000),
+        });
+    }
+}
+
+fn is_aci_quota_error(err: &RunTaskError) -> bool {
+    let message = err.to_string().to_ascii_lowercase();
+    message.contains("containergroupquotareached")
+        || (message.contains("container group quota")
+            && message.contains("microsoft.containerinstance/containergroups"))
+        || message.contains("resource quota of container groups")
+}
+
+fn is_aci_not_found_error(err: &RunTaskError) -> bool {
+    match err {
+        RunTaskError::CodexFailed { output, .. } => is_aci_not_found_output(output),
+        _ => false,
+    }
+}
+
+fn is_aci_not_found_output(output: &str) -> bool {
+    let lowered = output.to_ascii_lowercase();
+    lowered.contains("resourcenotfound")
+        || lowered.contains("could not be found")
+        || lowered.contains("was not found")
 }
 
 fn read_remote_exit_code(path: &Path) -> Option<i32> {
@@ -2071,51 +2193,21 @@ mod tests {
     }
 
     #[test]
-    fn test_allow_aci_local_fallback_defaults_true_on_staging() {
-        let _lock = env_lock();
-        let _guards = vec![
-            EnvVarGuard::set("DEPLOY_TARGET", "staging"),
-            EnvVarGuard::unset("RUN_TASK_AZURE_ACI_FALLBACK_TO_LOCAL"),
-        ];
-        assert!(allow_aci_local_fallback());
-    }
-
-    #[test]
-    fn test_allow_aci_local_fallback_defaults_false_on_production() {
-        let _lock = env_lock();
-        let _guards = vec![
-            EnvVarGuard::set("DEPLOY_TARGET", "production"),
-            EnvVarGuard::unset("RUN_TASK_AZURE_ACI_FALLBACK_TO_LOCAL"),
-        ];
-        assert!(!allow_aci_local_fallback());
-    }
-
-    #[test]
-    fn test_allow_aci_local_fallback_respects_env_override() {
-        let _lock = env_lock();
-        let _guards = vec![
-            EnvVarGuard::set("DEPLOY_TARGET", "production"),
-            EnvVarGuard::set("RUN_TASK_AZURE_ACI_FALLBACK_TO_LOCAL", "1"),
-        ];
-        assert!(allow_aci_local_fallback());
-    }
-
-    #[test]
-    fn test_should_fallback_to_local_on_aci_error_detects_quota_error() {
+    fn test_is_aci_quota_error_detects_container_group_quota_reached() {
         let err = RunTaskError::CodexFailed {
             status: Some(1),
             output: "ERROR: (ContainerGroupQuotaReached) quota exceeded".to_string(),
         };
-        assert!(should_fallback_to_local_on_aci_error(&err));
+        assert!(is_aci_quota_error(&err));
     }
 
     #[test]
-    fn test_should_fallback_to_local_on_aci_error_ignores_unrelated_error() {
+    fn test_is_aci_not_found_error_detects_missing_container_group() {
         let err = RunTaskError::CodexFailed {
-            status: Some(1),
-            output: "ERROR: some unrelated failure".to_string(),
+            status: Some(3),
+            output: "ERROR: (ResourceNotFound) The Resource 'Microsoft.ContainerInstance/containerGroups/dwz-codex-abc' under resource group 'rg' was not found.".to_string(),
         };
-        assert!(!should_fallback_to_local_on_aci_error(&err));
+        assert!(is_aci_not_found_error(&err));
     }
 
     #[test]
