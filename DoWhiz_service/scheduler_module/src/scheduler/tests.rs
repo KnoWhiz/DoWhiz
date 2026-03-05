@@ -385,7 +385,7 @@ fn execution_status_can_be_recorded_for_task() {
             .expect("record start");
         scheduler
             .store
-            .record_execution_finish(execution_id, now, "success", None)
+            .record_execution_finish(specific_id, execution_id, now, "success", None)
             .expect("record finish");
     }
 
@@ -556,7 +556,7 @@ fn full_discord_flow_task_sync_and_status_update() {
             .record_execution_start(task_id, executed_at)
             .expect("record start");
         workspace_store
-            .record_execution_finish(execution_id, executed_at, "success", None)
+            .record_execution_finish(task_id, execution_id, executed_at, "success", None)
             .expect("record finish");
     }
 
@@ -568,7 +568,7 @@ fn full_discord_flow_task_sync_and_status_update() {
             .record_execution_start(task_id, executed_at)
             .expect("record start");
         user_store
-            .record_execution_finish(execution_id, executed_at, "success", None)
+            .record_execution_finish(task_id, execution_id, executed_at, "success", None)
             .expect("record finish");
     }
 
@@ -670,7 +670,7 @@ fn full_slack_flow_task_sync_and_status_update() {
             .record_execution_start(task_id, executed_at)
             .expect("record start");
         workspace_store
-            .record_execution_finish(execution_id, executed_at, "failed", Some(error_message))
+            .record_execution_finish(task_id, execution_id, executed_at, "failed", Some(error_message))
             .expect("record finish");
     }
 
@@ -682,7 +682,7 @@ fn full_slack_flow_task_sync_and_status_update() {
             .record_execution_start(task_id, executed_at)
             .expect("record start");
         account_store
-            .record_execution_finish(execution_id, executed_at, "failed", Some(error_message))
+            .record_execution_finish(task_id, execution_id, executed_at, "failed", Some(error_message))
             .expect("record finish");
     }
 
@@ -783,7 +783,7 @@ fn multiple_tasks_sync_independently() {
             .record_execution_start(task_id_1, executed_at)
             .expect("start 1");
         user_store
-            .record_execution_finish(exec_id_1, executed_at, "success", None)
+            .record_execution_finish(task_id_1, exec_id_1, executed_at, "success", None)
             .expect("finish 1");
 
         // Task 2: failed
@@ -791,7 +791,7 @@ fn multiple_tasks_sync_independently() {
             .record_execution_start(task_id_2, executed_at)
             .expect("start 2");
         user_store
-            .record_execution_finish(exec_id_2, executed_at, "failed", Some("timeout"))
+            .record_execution_finish(task_id_2, exec_id_2, executed_at, "failed", Some("timeout"))
             .expect("finish 2");
     }
 

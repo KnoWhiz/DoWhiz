@@ -215,7 +215,7 @@ impl<E: TaskExecutor> Scheduler<E> {
                     );
                 }
                 self.store
-                    .record_execution_finish(execution_id, executed_at, "success", None)?;
+                    .record_execution_finish(task_id, execution_id, executed_at, "success", None)?;
                 self.tasks[index].last_run = Some(executed_at);
                 match &mut self.tasks[index].schedule {
                     Schedule::Cron {
@@ -268,6 +268,7 @@ impl<E: TaskExecutor> Scheduler<E> {
             Err(err) => {
                 let message = err.to_string();
                 self.store.record_execution_finish(
+                    task_id,
                     execution_id,
                     executed_at,
                     "failed",
@@ -436,6 +437,7 @@ fn sync_task_status_to_user_storage(
             match store.record_execution_start(task_id, executed_at) {
                 Ok(execution_id) => {
                     if let Err(err) = store.record_execution_finish(
+                        task_id,
                         execution_id,
                         executed_at,
                         status,
