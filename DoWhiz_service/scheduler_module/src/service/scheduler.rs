@@ -875,7 +875,10 @@ mod tests {
             .copied()
             .unwrap_or(RETRY_BACKOFF_SECS[RETRY_BACKOFF_SECS.len() - 1]);
 
-        assert_eq!(backoff_secs, 1000, "high retry counts should clamp to max backoff");
+        assert_eq!(
+            backoff_secs, 1000,
+            "high retry counts should clamp to max backoff"
+        );
     }
 
     #[test]
