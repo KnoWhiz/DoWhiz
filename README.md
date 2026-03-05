@@ -1,4 +1,4 @@
-# DoWhiz - OpenClaw, but scalable, accessible, and safe.
+# DoWhiz - OpenClaw🦞, but scalable, accessible, and safe.
 
 <p align="center"><strong>Product Shorts</strong></p>
 
