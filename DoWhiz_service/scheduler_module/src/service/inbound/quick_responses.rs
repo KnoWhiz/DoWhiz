@@ -25,6 +25,23 @@ use super::persist_discord_ingest_context;
 const DISCORD_QUICK_RESPONSE_DEDUPE_FILE: &str = "discord_quick_response_dedupe.json";
 const DISCORD_QUICK_RESPONSE_MAX_THREADS: usize = 512;
 const DISCORD_QUICK_RESPONSE_MAX_MESSAGE_IDS_PER_THREAD: usize = 256;
+const SLACK_QUICK_RESPONSE_DEDUPE_FILE: &str = "slack_quick_response_dedupe.json";
+const SLACK_QUICK_RESPONSE_MAX_THREADS: usize = 512;
+const SLACK_QUICK_RESPONSE_MAX_MESSAGE_IDS_PER_THREAD: usize = 256;
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct SlackQuickResponseDedupeStore {
+    #[serde(default)]
+    threads: HashMap<String, SlackQuickResponseThreadStore>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct SlackQuickResponseThreadStore {
+    #[serde(default)]
+    message_ids: Vec<String>,
+    #[serde(default)]
+    updated_at_unix_secs: i64,
+}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct DiscordQuickResponseDedupeStore {
@@ -100,6 +117,113 @@ fn write_memory_update(
     global_memory_queue()
         .submit(request)
         .map_err(|e| e.to_string())
+}
+
+fn slack_quick_response_dedupe_path(state_dir: &Path) -> std::path::PathBuf {
+    state_dir.join(SLACK_QUICK_RESPONSE_DEDUPE_FILE)
+}
+
+fn slack_quick_response_scope_key(message: &crate::channel::InboundMessage) -> Option<String> {
+    let channel_id = message.metadata.slack_channel_id.as_deref()?;
+    let team = message
+        .metadata
+        .slack_team_id
+        .as_deref()
+        .unwrap_or("unknown");
+    Some(format!(
+        "slack:{}:{}:{}",
+        team, channel_id, message.thread_id
+    ))
+}
+
+fn slack_inbound_message_id(message: &crate::channel::InboundMessage) -> Option<&str> {
+    message.message_id.as_deref()
+}
+
+fn slack_quick_response_already_sent(state_dir: &Path, scope_key: &str, message_id: &str) -> bool {
+    let path = slack_quick_response_dedupe_path(state_dir);
+    let store = load_slack_quick_response_dedupe_store(&path);
+    store
+        .threads
+        .get(scope_key)
+        .map(|thread| thread.message_ids.iter().any(|entry| entry == message_id))
+        .unwrap_or(false)
+}
+
+fn record_slack_quick_response_sent(
+    state_dir: &Path,
+    scope_key: &str,
+    message_id: &str,
+) -> Result<(), BoxError> {
+    let path = slack_quick_response_dedupe_path(state_dir);
+    let mut store = load_slack_quick_response_dedupe_store(&path);
+
+    let thread = store.threads.entry(scope_key.to_string()).or_default();
+    if !thread.message_ids.iter().any(|entry| entry == message_id) {
+        thread.message_ids.push(message_id.to_string());
+    }
+    let overflow = thread
+        .message_ids
+        .len()
+        .saturating_sub(SLACK_QUICK_RESPONSE_MAX_MESSAGE_IDS_PER_THREAD);
+    if overflow > 0 {
+        thread.message_ids.drain(0..overflow);
+    }
+    thread.updated_at_unix_secs = now_unix_secs();
+
+    prune_slack_quick_response_store(&mut store);
+    write_slack_quick_response_dedupe_store(&path, &store)?;
+    Ok(())
+}
+
+fn load_slack_quick_response_dedupe_store(path: &Path) -> SlackQuickResponseDedupeStore {
+    let Ok(raw) = std::fs::read(path) else {
+        return SlackQuickResponseDedupeStore::default();
+    };
+    match serde_json::from_slice::<SlackQuickResponseDedupeStore>(&raw) {
+        Ok(store) => store,
+        Err(err) => {
+            warn!(
+                "failed to parse slack quick response dedupe store at {}: {}",
+                path.display(),
+                err
+            );
+            SlackQuickResponseDedupeStore::default()
+        }
+    }
+}
+
+fn write_slack_quick_response_dedupe_store(
+    path: &Path,
+    store: &SlackQuickResponseDedupeStore,
+) -> Result<(), BoxError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension(format!("tmp-{}", Uuid::new_v4()));
+    let serialized = serde_json::to_vec_pretty(store)?;
+    std::fs::write(&tmp, serialized)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+fn prune_slack_quick_response_store(store: &mut SlackQuickResponseDedupeStore) {
+    if store.threads.len() <= SLACK_QUICK_RESPONSE_MAX_THREADS {
+        return;
+    }
+    let mut thread_by_age = store
+        .threads
+        .iter()
+        .map(|(key, value)| (key.clone(), value.updated_at_unix_secs))
+        .collect::<Vec<_>>();
+    thread_by_age.sort_by_key(|(_, updated_at)| *updated_at);
+    let overflow = store
+        .threads
+        .len()
+        .saturating_sub(SLACK_QUICK_RESPONSE_MAX_THREADS);
+    for (key, _) in thread_by_age.into_iter().take(overflow) {
+        store.threads.remove(&key);
+    }
 }
 
 fn discord_quick_response_dedupe_path(state_dir: &Path) -> std::path::PathBuf {
@@ -244,6 +368,18 @@ pub(crate) fn try_quick_response_slack(
     let user = user_store.get_or_create_user("slack", &message.sender)?;
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
+    let dedupe_scope = slack_quick_response_scope_key(message);
+    let inbound_message_id = slack_inbound_message_id(message);
+
+    if let (Some(scope), Some(inbound_id)) = (dedupe_scope.as_deref(), inbound_message_id) {
+        if slack_quick_response_already_sent(&user_paths.state_dir, scope, inbound_id) {
+            info!(
+                "slack quick response dedupe hit employee={} sender={} scope={} message_id={}",
+                config.employee_profile.id, message.sender, scope, inbound_id
+            );
+            return Ok(true);
+        }
+    }
 
     let cleaned_text = text
         .split_whitespace()
@@ -289,6 +425,20 @@ pub(crate) fn try_quick_response_slack(
                     ))
                     .is_ok()
                 {
+                    if let (Some(scope), Some(inbound_id)) =
+                        (dedupe_scope.as_deref(), inbound_message_id)
+                    {
+                        if let Err(err) = record_slack_quick_response_sent(
+                            &user_paths.state_dir,
+                            scope,
+                            inbound_id,
+                        ) {
+                            warn!(
+                                "failed to record slack quick response dedupe key scope={} message_id={}: {}",
+                                scope, inbound_id, err
+                            );
+                        }
+                    }
                     return Ok(true);
                 }
             }
@@ -746,6 +896,33 @@ mod tests {
     use crate::channel::{Channel, ChannelMetadata, InboundMessage};
     use tempfile::TempDir;
 
+    fn build_slack_message(
+        thread_id: &str,
+        message_id: Option<&str>,
+        team_id: Option<&str>,
+        channel_id: Option<&str>,
+    ) -> InboundMessage {
+        InboundMessage {
+            channel: Channel::Slack,
+            sender: "U1234".to_string(),
+            sender_name: Some("Bingran".to_string()),
+            recipient: "C1234".to_string(),
+            subject: None,
+            text_body: Some("Hi".to_string()),
+            html_body: None,
+            thread_id: thread_id.to_string(),
+            message_id: message_id.map(str::to_string),
+            attachments: Vec::new(),
+            reply_to: Vec::new(),
+            raw_payload: Vec::new(),
+            metadata: ChannelMetadata {
+                slack_team_id: team_id.map(str::to_string),
+                slack_channel_id: channel_id.map(str::to_string),
+                ..Default::default()
+            },
+        }
+    }
+
     fn build_discord_message(
         thread_id: &str,
         message_id: Option<&str>,
@@ -839,5 +1016,41 @@ mod tests {
 
         let message_id = discord_inbound_message_id(&message).expect("message id");
         assert_eq!(message_id, "meta-msg-id");
+    }
+
+    #[test]
+    fn slack_quick_response_dedupe_records_and_matches() -> Result<(), BoxError> {
+        let temp = TempDir::new()?;
+        let state_dir = temp.path().join("state");
+        let scope = "slack:T123:C123:thread-1";
+        let message_id = "1712345678.000100";
+
+        assert!(!slack_quick_response_already_sent(
+            &state_dir, scope, message_id
+        ));
+
+        record_slack_quick_response_sent(&state_dir, scope, message_id)?;
+
+        assert!(slack_quick_response_already_sent(
+            &state_dir, scope, message_id
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn slack_scope_key_uses_team_channel_thread() {
+        let message = build_slack_message(
+            "1712345678.000100",
+            Some("1712345678.000100"),
+            Some("T123"),
+            Some("C123"),
+        );
+
+        let scope = slack_quick_response_scope_key(&message).expect("scope key");
+        assert_eq!(scope, "slack:T123:C123:1712345678.000100");
+
+        let message_id = slack_inbound_message_id(&message).expect("message id");
+        assert_eq!(message_id, "1712345678.000100");
     }
 }
