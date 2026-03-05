@@ -132,7 +132,8 @@ pub(crate) fn process_slack_event(
         model_name,
         runner: config.employee_profile.runner.clone(),
         codex_disabled: config.codex_disabled,
-        reply_to: vec![channel_id.clone()], // Reply to the same channel
+        // reply_to[0] = user_id (for account lookup), reply_to[1] = channel_id
+        reply_to: vec![message.sender.clone(), channel_id.clone()],
         reply_from: None,                   // Slack uses bot token, not a "from" address
         archive_root: Some(user_paths.mail_root.clone()),
         thread_id: Some(thread_key.clone()),

@@ -105,7 +105,8 @@ pub(crate) fn execute_slack_send(task: &SendReplyTask) -> Result<(), SchedulerEr
         attachments_dir: Some(task.attachments_dir.clone()),
         thread_id: task.in_reply_to.clone(), // Use in_reply_to as thread_ts for Slack
         metadata: ChannelMetadata {
-            slack_channel_id: task.to.first().cloned(),
+            // For Slack, reply_to[0] = user_id, reply_to[1] = channel_id
+            slack_channel_id: task.to.get(1).cloned(),
             ..Default::default()
         },
     };
