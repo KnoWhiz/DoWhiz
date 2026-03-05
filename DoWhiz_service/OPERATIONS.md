@@ -1,178 +1,158 @@
 # DoWhiz Operations Guide
 
-This runbook covers VM operations for:
-- `inbound_gateway`
-- `rust_service`
-- optional ngrok ingress for local/live testing
+Operational runbook for VM-based DoWhiz service operation.
 
-For complete staging/production rollout and rollback details, see:
+Covers:
+- `inbound_gateway`
+- `rust_service` worker
+- shared runtime `.env` policy
+- health checks and incident triage
+
+For deployment pipeline details, see:
 - `DoWhiz_service/docs/staging_production_deploy.md`
 
 ## 1) Deployment Policy
 
-- Production deploy branch: `main`
 - Staging deploy branch: `dev`
+- Production deploy branch: `main`
 
-Environment policy:
-- Services read unprefixed keys from `DoWhiz_service/.env`.
-- Production VM `.env` is built from `ENV_COMMON + ENV_PROD`.
-- Staging VM `.env` is built from `ENV_COMMON + ENV_STAGING`.
-- Do not use `STAGING_*`/`PROD_*` keys in runtime `.env`.
-- `DEPLOY_TARGET` is optional and used only for runtime policy (for example run_task backend behavior).
+Runtime environment policy:
+- Runtime services read unprefixed keys from `DoWhiz_service/.env`.
+- VM `.env` is generated from `ENV_COMMON + ENV_STAGING/ENV_PROD` in CI/CD.
+- Runtime `.env` must not include `STAGING_*`/`PROD_*` keys.
+- `DEPLOY_TARGET` is optional and used for runtime policy decisions.
 
-## 2) VM Paths and Logs
+## 2) Expected Config Selection
 
-Common repo paths:
-- `/home/azureuser/server/.dowhiz/DoWhiz` (current)
-- `/home/azureuser/server/DoWhiz` (legacy)
+- Staging:
+  - `GATEWAY_CONFIG_PATH=gateway.staging.toml`
+  - `EMPLOYEE_CONFIG_PATH=employee.staging.toml`
+- Production:
+  - `GATEWAY_CONFIG_PATH=gateway.toml`
+  - `EMPLOYEE_CONFIG_PATH=employee.toml`
+
+## 3) Common Paths
+
+Typical repo location on VM:
+- `/home/azureuser/server/.dowhiz/DoWhiz`
 
 Service directory:
 - `/home/azureuser/server/.dowhiz/DoWhiz/DoWhiz_service`
 
-Script logs:
+Common logs:
 - `DoWhiz_service/gateway.log`
 - `DoWhiz_service/worker.log`
-- `/tmp/ngrok.log` or `/tmp/ngrok-dowhiz.log`
+- `/tmp/ngrok.log` (if ngrok used)
 
-PM2 logs (if used):
-- `/home/azureuser/server/.pm2/logs/dowhiz-inbound-gateway-out.log`
-- `/home/azureuser/server/.pm2/logs/dowhiz-rust-service-out.log`
-- `/home/azureuser/server/.pm2/logs/dowhiz-rust-service-error.log`
+PM2 logs (if PM2-managed):
+- `/home/azureuser/server/.pm2/logs/dw_gateway-out.log`
+- `/home/azureuser/server/.pm2/logs/dw_worker-out.log`
+- `/home/azureuser/server/.pm2/logs/dw_worker-error.log`
 
-## 3) Azure Files Mount (Required for ACI Worker)
+## 4) Start / Restart Patterns
 
-When `RUN_TASK_EXECUTION_BACKEND=azure_aci`, worker state/workspaces must live on Azure Files at:
-- `RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT`
-
-One-time bootstrap on VM:
-```bash
-sudo mkdir -p /etc/smbcredentials
-sudo tee /etc/smbcredentials/<storage-account-name> >/dev/null <<'EOF_CRED'
-username=<storage-account-name>
-password=<storage-account-key>
-EOF_CRED
-sudo chmod 600 /etc/smbcredentials/<storage-account-name>
-
-sudo mkdir -p /home/azureuser/server/.dowhiz/DoWhiz/run_task
-echo '//<storage-account-name>.file.core.windows.net/<file-share> /home/azureuser/server/.dowhiz/DoWhiz/run_task cifs vers=3.0,credentials=/etc/smbcredentials/<storage-account-name>,dir_mode=0777,file_mode=0777,serverino,uid=1000,gid=1000,mfsymlinks,_netdev,nofail 0 0' | sudo tee -a /etc/fstab
-sudo mount /home/azureuser/server/.dowhiz/DoWhiz/run_task
-findmnt -T /home/azureuser/server/.dowhiz/DoWhiz/run_task
-```
-
-Guardrails:
-- `DoWhiz_service/scripts/ensure_aci_share_mount.sh` runs in local scripts and CI deploy flows.
-- If backend is `azure_aci`, startup fails fast when mount is unavailable.
-
-## 4) Safety Rules
-
-- Do not run destructive git commands on shared VMs.
-- Do not restart production unless planned.
-- Do not run `start_all.sh` on production unless you explicitly want ngrok + webhook overwrite.
-
-## 5) Staging Runbook (`dowhizstaging`)
+### 4.1 Script-based (foreground/local style)
 
 ```bash
-ssh dowhizstaging
 cd /home/azureuser/server/.dowhiz/DoWhiz
-
-git fetch origin
-git checkout dev
-git pull --ff-only origin dev
-
-./DoWhiz_service/scripts/start_all.sh
-```
-
-Health checks:
-```bash
-curl -sS http://127.0.0.1:9100/health
-curl -sS http://127.0.0.1:9001/health
-```
-
-Expected staging profile:
-- `GATEWAY_CONFIG_PATH` points to `gateway.staging.toml`
-- `EMPLOYEE_CONFIG_PATH` points to `employee.staging.toml`
-- staging mailbox defaults to `dowhiz@deep-tutor.com`
-
-## 6) Production Runbook (`dowhizprod1`)
-
-```bash
-ssh dowhizprod1
-cd /home/azureuser/server/.dowhiz/DoWhiz
-
-git fetch origin
-git checkout main
-git pull --ff-only origin main
-
 ./DoWhiz_service/scripts/run_gateway_local.sh
 ./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
 ```
 
-Health checks:
+### 4.2 PM2-based (recommended on VM)
+
+```bash
+cd /home/azureuser/server/.dowhiz/DoWhiz/DoWhiz_service
+set -a
+source .env
+set +a
+
+# worker
+pm2 restart dw_worker --update-env || \
+  pm2 start ./target/release/rust_service --name dw_worker --cwd "$PWD" -- --host 0.0.0.0 --port "${RUST_SERVICE_PORT:-9001}"
+
+# gateway
+pm2 restart dw_gateway --update-env || \
+  pm2 start ./target/release/inbound_gateway --name dw_gateway --cwd "$PWD"
+
+pm2 save
+pm2 list
+```
+
+## 5) Health Checks
+
 ```bash
 curl -sS http://127.0.0.1:9100/health
 curl -sS http://127.0.0.1:9001/health
 ```
 
-Expected production profile:
-- `GATEWAY_CONFIG_PATH` points to `gateway.toml`
-- `EMPLOYEE_CONFIG_PATH` points to `employee.toml`
+Queue/config sanity:
 
-## 7) Quick Verification
-
-Check runtime env file:
 ```bash
 cd /home/azureuser/server/.dowhiz/DoWhiz/DoWhiz_service
-grep -E '^(GATEWAY_CONFIG_PATH|EMPLOYEE_CONFIG_PATH|RUN_TASK_EXECUTION_BACKEND|DEPLOY_TARGET)=' .env
-if grep -Eq '^(STAGING_|PROD_)' .env; then echo 'unexpected prefixed keys'; fi
+grep -E '^(INGESTION_QUEUE_BACKEND|SERVICE_BUS_CONNECTION_STRING|SERVICE_BUS_NAMESPACE|SERVICE_BUS_POLICY_NAME|SERVICE_BUS_POLICY_KEY|SERVICE_BUS_QUEUE_NAME|GATEWAY_CONFIG_PATH|EMPLOYEE_CONFIG_PATH|RUN_TASK_EXECUTION_BACKEND|DEPLOY_TARGET)=' .env
 ```
 
-Check processes:
+Process sanity:
+
 ```bash
 pgrep -af inbound_gateway
 pgrep -af rust_service
-pgrep -af "ngrok http"
-```
-
-If PM2 is used:
-```bash
 HOME=/home/azureuser/server pm2 list
-pm2 logs dowhiz-inbound-gateway
-pm2 logs dowhiz-rust-service
 ```
 
-## 8) Live E2E Notes
+## 6) Azure ACI Prerequisite (Worker)
 
-- `scheduler_module/tests/service_real_email.rs` supports SMTP port override via `POSTMARK_SMTP_PORT`.
-- On cloud VMs where SMTP port `25` is blocked, use `POSTMARK_SMTP_PORT=2525`.
+When `RUN_TASK_EXECUTION_BACKEND=azure_aci`, the worker requires Azure Files mount at `RUN_TASK_AZURE_ACI_HOST_SHARE_ROOT`.
 
-Example:
+Check/mount helper:
+
 ```bash
+cd /home/azureuser/server/.dowhiz/DoWhiz/DoWhiz_service
+./scripts/ensure_aci_share_mount.sh
+```
+
+If the mount is missing, worker startup should fail fast.
+
+## 7) Live Email E2E Notes
+
+```bash
+cd /home/azureuser/server/.dowhiz/DoWhiz/DoWhiz_service
 RUN_CODEX_E2E=1 POSTMARK_LIVE_TEST=1 cargo test -p scheduler_module --test service_real_email -- --nocapture
 ```
 
-## 9) Common Failure Patterns
+If SMTP 25 is blocked by cloud policy, set:
+- `POSTMARK_SMTP_PORT=2525`
 
-1. Gateway backend error
+## 8) Common Failure Patterns
+
+1. Gateway startup error about backend
 - Cause: `INGESTION_QUEUE_BACKEND` is not `servicebus`.
-- Fix: verify queue-related unprefixed keys in `.env`.
+- Fix: set queue backend + Service Bus credentials.
 
-2. Enqueue works but worker does not process
-- Cause: queue mismatch between gateway and worker.
-- Fix: verify `SERVICE_BUS_CONNECTION_STRING` and `SERVICE_BUS_QUEUE_NAME` in `.env`.
+2. Messages enqueued but worker idle
+- Cause: queue mismatch or wrong `EMPLOYEE_ID` routing target.
+- Fix: align queue/env and route targets.
 
-3. Worker startup fails before tasks
-- Cause: `RUN_TASK_EXECUTION_BACKEND=azure_aci` but Azure Files mount missing.
-- Fix: verify `/etc/fstab` entry and run `scripts/ensure_aci_share_mount.sh`.
+3. Worker run_task fails immediately in staging/prod
+- Cause: local backend selected while target policy forbids local execution.
+- Fix: configure Azure ACI backend vars or adjust dev target for local environments.
 
-4. No outbound email in live tests
-- Cause: SMTP blocked or sender not verified.
-- Fix: set `POSTMARK_SMTP_PORT=2525` and verify Postmark sender/domain.
+4. Raw payload fetch/store failures
+- Cause: storage backend credentials incomplete.
+- Fix: verify selected backend and full credential set.
 
-## 10) Rollback
+## 9) Rollback
 
-Minimal rollback:
+Operational rollback (same code, restart services):
+
 ```bash
-./DoWhiz_service/scripts/stop_all.sh
-./DoWhiz_service/scripts/run_gateway_local.sh
-./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
+cd /home/azureuser/server/.dowhiz/DoWhiz/DoWhiz_service
+pm2 restart dw_gateway --update-env
+pm2 restart dw_worker --update-env
 ```
+
+Code rollback:
+1. Checkout previous known-good commit on target branch.
+2. Redeploy binaries and `.env` via CI/CD workflow.
+3. Re-run health checks.
