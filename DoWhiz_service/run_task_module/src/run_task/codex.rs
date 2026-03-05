@@ -1,9 +1,11 @@
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -49,6 +51,74 @@ const PAYMENT_ENV_KEYS: &[&str] = &[
 const REMOTE_OUTPUT_FILENAME: &str = ".codex_remote_output.log";
 const REMOTE_EXIT_CODE_FILENAME: &str = ".codex_remote_exit_code";
 static ACI_CONTAINER_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Global registry of active ACI containers created by this process.
+/// Used for cleanup on shutdown to prevent orphaned containers.
+static ACTIVE_ACI_CONTAINERS: LazyLock<Mutex<HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn register_aci_container(name: &str) {
+    if let Ok(mut containers) = ACTIVE_ACI_CONTAINERS.lock() {
+        containers.insert(name.to_string());
+    }
+}
+
+fn deregister_aci_container(name: &str) {
+    if let Ok(mut containers) = ACTIVE_ACI_CONTAINERS.lock() {
+        containers.remove(name);
+    }
+}
+
+/// Clean up all active ACI containers created by this process.
+/// Called on shutdown to prevent orphaned containers.
+/// Returns the number of containers that were cleaned up.
+pub fn cleanup_all_aci_containers() -> usize {
+    let containers: Vec<String> = match ACTIVE_ACI_CONTAINERS.lock() {
+        Ok(mut guard) => guard.drain().collect(),
+        Err(poisoned) => poisoned.into_inner().drain().collect(),
+    };
+
+    if containers.is_empty() {
+        return 0;
+    }
+
+    eprintln!(
+        "[cleanup] cleaning up {} active ACI container(s) on shutdown",
+        containers.len()
+    );
+
+    let config = match load_azure_aci_config() {
+        Ok(config) => config,
+        Err(err) => {
+            eprintln!(
+                "[cleanup] failed to load ACI config, cannot clean up containers: {:?}",
+                err
+            );
+            return 0;
+        }
+    };
+
+    let mut cleaned = 0;
+    for container_name in &containers {
+        eprintln!("[cleanup] deleting ACI container: {}", container_name);
+        match delete_aci_container_with_retry(&config, container_name) {
+            Ok(()) => {
+                eprintln!("[cleanup] successfully deleted: {}", container_name);
+                cleaned += 1;
+            }
+            Err(err) => {
+                eprintln!("[cleanup] failed to delete {}: {:?}", container_name, err);
+            }
+        }
+    }
+
+    eprintln!(
+        "[cleanup] finished cleaning up {}/{} ACI container(s)",
+        cleaned,
+        containers.len()
+    );
+    cleaned
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExecutionBackend {
@@ -609,6 +679,9 @@ fn run_codex_task_azure_aci(
     }
 
     let container_name = build_aci_container_name();
+    // Register container BEFORE creation so it gets cleaned up on shutdown
+    // even if creation succeeds but execution fails partway through
+    register_aci_container(&container_name);
     eprintln!(
         "[run_task] azure_aci create container={} resource_group={} image={}",
         container_name, config.resource_group, config.image
@@ -635,6 +708,7 @@ fn run_codex_task_azure_aci(
             container_name, config.resource_group, cleanup_err
         );
     }
+    deregister_aci_container(&container_name);
 
     let (container_state, container_logs) = execution?;
     eprintln!(
@@ -2205,5 +2279,105 @@ mod tests {
         let first = build_aci_container_name();
         let second = build_aci_container_name();
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn test_register_and_deregister_aci_container() {
+        let name = "test-container-12345";
+        register_aci_container(name);
+        {
+            let containers = ACTIVE_ACI_CONTAINERS.lock().unwrap();
+            assert!(containers.contains(name));
+        }
+        deregister_aci_container(name);
+        {
+            let containers = ACTIVE_ACI_CONTAINERS.lock().unwrap();
+            assert!(!containers.contains(name));
+        }
+    }
+
+    /// E2E test that creates a real ACI container and verifies cleanup works.
+    /// Run with: cargo test -p run_task_module test_aci_cleanup_e2e -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn test_aci_cleanup_e2e() {
+        // Skip if Azure credentials not configured
+        let config = match load_azure_aci_config() {
+            Ok(config) => config,
+            Err(err) => {
+                eprintln!("Skipping ACI cleanup E2E test: {:?}", err);
+                return;
+            }
+        };
+
+        // Create a minimal container that just sleeps
+        let container_name = build_aci_container_name();
+        eprintln!("[test] Creating ACI container: {}", container_name);
+
+        let mut create_cmd = Command::new("az");
+        create_cmd
+            .arg("container")
+            .arg("create")
+            .arg("--name")
+            .arg(&container_name)
+            .arg("--resource-group")
+            .arg(&config.resource_group)
+            .arg("--image")
+            .arg("mcr.microsoft.com/azuredocs/aci-helloworld:latest")
+            .arg("--os-type")
+            .arg("Linux")
+            .arg("--restart-policy")
+            .arg("Never")
+            .arg("--cpu")
+            .arg("0.5")
+            .arg("--memory")
+            .arg("0.5")
+            .arg("--only-show-errors")
+            .arg("--output")
+            .arg("json");
+
+        let create_output = create_cmd.output().expect("failed to run az container create");
+        if !create_output.status.success() {
+            let stderr = String::from_utf8_lossy(&create_output.stderr);
+            panic!("Failed to create test container: {}", stderr);
+        }
+        eprintln!("[test] Container created successfully");
+
+        // Register it (simulating what run_codex_task_azure_aci does)
+        register_aci_container(&container_name);
+        {
+            let containers = ACTIVE_ACI_CONTAINERS.lock().unwrap();
+            assert!(containers.contains(&container_name), "Container should be registered");
+        }
+
+        // Now call cleanup (simulating shutdown without normal deletion)
+        eprintln!("[test] Calling cleanup_all_aci_containers...");
+        let cleaned = cleanup_all_aci_containers();
+        assert_eq!(cleaned, 1, "Should have cleaned up 1 container");
+
+        // Verify the registry is empty
+        {
+            let containers = ACTIVE_ACI_CONTAINERS.lock().unwrap();
+            assert!(containers.is_empty(), "Registry should be empty after cleanup");
+        }
+
+        // Verify container is actually deleted by trying to show it
+        eprintln!("[test] Verifying container is deleted...");
+        let mut show_cmd = Command::new("az");
+        show_cmd
+            .arg("container")
+            .arg("show")
+            .arg("--name")
+            .arg(&container_name)
+            .arg("--resource-group")
+            .arg(&config.resource_group)
+            .arg("--only-show-errors");
+
+        let show_output = show_cmd.output().expect("failed to run az container show");
+        assert!(
+            !show_output.status.success(),
+            "Container should not exist after cleanup"
+        );
+        eprintln!("[test] SUCCESS: Container was deleted by cleanup!");
     }
 }
