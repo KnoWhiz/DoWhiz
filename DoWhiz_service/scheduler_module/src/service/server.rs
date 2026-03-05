@@ -49,6 +49,17 @@ pub async fn run_server(
         );
     }
 
+    // Bind to the HTTP port FIRST, before starting any background tasks.
+    // This ensures we fail fast if the port is already in use, rather than
+    // starting the scheduler (which may create ACI containers) only to fail later.
+    let host: IpAddr = config
+        .host
+        .parse()
+        .map_err(|_| format!("invalid host: {}", config.host))?;
+    let addr = SocketAddr::new(host, config.port);
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    info!("Rust email service listening on {}", addr);
+
     // Export SLACK_STORE_PATH so execute_slack_send can find the OAuth tokens
     std::env::set_var("SLACK_STORE_PATH", &config.slack_store_path);
     let config = Arc::new(config);
@@ -167,13 +178,6 @@ pub async fn run_server(
     };
     let agent_market_state = AgentMarketState::from_env();
 
-    let host: IpAddr = config
-        .host
-        .parse()
-        .map_err(|_| format!("invalid host: {}", config.host))?;
-    let addr = SocketAddr::new(host, config.port);
-    info!("Rust email service listening on {}", addr);
-
     let mut app = Router::new()
         .route("/", get(health))
         .route("/health", get(health))
@@ -197,7 +201,6 @@ pub async fn run_server(
                 .allow_headers(Any),
         );
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
         .await;
