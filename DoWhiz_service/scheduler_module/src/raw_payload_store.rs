@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use reqwest::{Client, StatusCode};
 use serde_json::json;
+use std::future::Future;
 use std::sync::OnceLock;
 use uuid::Uuid;
 
@@ -464,14 +465,47 @@ fn download_raw_payload_azure_via_connection_string(
         resolve_account_from_connection_string().ok_or(RawPayloadStoreError::MissingAzureConfig)?;
     let key = resolve_access_key_from_connection_string()
         .ok_or(RawPayloadStoreError::MissingAzureConfig)?;
-    let creds = StorageCredentials::access_key(&account, key);
-    let blob_client = BlobServiceClient::new(&account, creds)
-        .container_client(container.to_string())
-        .blob_client(path.to_string());
+    let container = container.to_string();
+    let path = path.to_string();
 
-    futures::executor::block_on(blob_client.get_content()).map_err(|err| {
-        RawPayloadStoreError::Storage(format!("download failed via connection string: {}", err))
+    run_with_tokio_runtime(async move {
+        let creds = StorageCredentials::access_key(&account, key);
+        let blob_client = BlobServiceClient::new(&account, creds)
+            .container_client(container)
+            .blob_client(path);
+
+        blob_client.get_content().await.map_err(|err| {
+            RawPayloadStoreError::Storage(format!("download failed via connection string: {}", err))
+        })
     })
+}
+
+fn run_with_tokio_runtime<F, T>(future: F) -> Result<T, RawPayloadStoreError>
+where
+    F: Future<Output = Result<T, RawPayloadStoreError>> + Send + 'static,
+    T: Send + 'static,
+{
+    let handle = std::thread::Builder::new()
+        .name("raw-payload-azure-download".to_string())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|err| {
+                    RawPayloadStoreError::Storage(format!(
+                        "failed to initialize tokio runtime: {}",
+                        err
+                    ))
+                })?;
+            runtime.block_on(future)
+        })
+        .map_err(|err| {
+            RawPayloadStoreError::Storage(format!("failed to spawn azure download thread: {}", err))
+        })?;
+
+    handle
+        .join()
+        .map_err(|_| RawPayloadStoreError::Storage("azure download thread panicked".to_string()))?
 }
 
 pub fn resolve_azure_blob_url(reference: &str) -> Result<String, RawPayloadStoreError> {
@@ -809,5 +843,23 @@ mod tests {
             Some(value) => env::set_var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING", value),
             None => env::remove_var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING"),
         }
+    }
+
+    #[test]
+    fn run_with_tokio_runtime_executes_without_runtime_context() {
+        let result = run_with_tokio_runtime(async { Ok::<_, RawPayloadStoreError>(123usize) })
+            .expect("run_with_tokio_runtime should return value");
+        assert_eq!(result, 123);
+    }
+
+    #[test]
+    fn run_with_tokio_runtime_executes_inside_existing_tokio_runtime() {
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let result = runtime
+            .block_on(async {
+                run_with_tokio_runtime(async { Ok::<_, RawPayloadStoreError>(456usize) })
+            })
+            .expect("run_with_tokio_runtime should return value");
+        assert_eq!(result, 456);
     }
 }

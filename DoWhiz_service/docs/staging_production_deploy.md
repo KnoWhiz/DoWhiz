@@ -39,6 +39,11 @@ Typical keys that differ by environment (still unprefixed):
 - `RUN_TASK_AZURE_ACI_STORAGE_ACCOUNT`
 - `RUN_TASK_AZURE_ACI_STORAGE_KEY`
 
+Raw payload download auth for Azure Blob can use any one of:
+- `AZURE_STORAGE_CONTAINER_SAS_URL`
+- `AZURE_STORAGE_CONTAINER_INGEST` + `AZURE_STORAGE_SAS_TOKEN` + `AZURE_STORAGE_ACCOUNT`
+- `AZURE_STORAGE_CONNECTION_STRING_INGEST` (or `AZURE_STORAGE_CONNECTION_STRING`)
+
 ## 3) VM Deployment
 
 ### Staging (`dev`)
