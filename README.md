@@ -1,4 +1,33 @@
-# DoWhiz
+# DoWhiz - OpenClaw, but scalable, accessible, and safe.
+
+<p align="center"><strong>Product Shorts</strong></p>
+
+<table align="center">
+  <tr>
+    <td align="center">
+      <a href="https://www.youtube.com/shorts/SI9mxW_Top0">
+        <img src="assets/readme-shorts/short-1.gif" alt="DoWhiz short 1 preview" width="170" />
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://www.youtube.com/shorts/PSsJ7WBk71w">
+        <img src="assets/readme-shorts/short-2.gif" alt="DoWhiz short 2 preview" width="170" />
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://www.youtube.com/shorts/5H9g3LOGkMc">
+        <img src="assets/readme-shorts/short-3.gif" alt="DoWhiz short 3 preview" width="170" />
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><sub><a href="https://www.youtube.com/shorts/SI9mxW_Top0">DoWhiz employee in Notion</a></sub></td>
+    <td align="center"><sub><a href="https://www.youtube.com/shorts/PSsJ7WBk71w">DoWhiz employee in Email</a></sub></td>
+    <td align="center"><sub><a href="https://www.youtube.com/shorts/5H9g3LOGkMc">DoWhiz employee in Discord</a></sub></td>
+  </tr>
+</table>
+
+<p align="center"><sub>Tap any preview to watch the full Shorts video.</sub></p>
 
 DoWhiz is a multi-channel digital employee platform.
 
