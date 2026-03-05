@@ -7,7 +7,9 @@ use tracing::{info, warn};
 
 use crate::account_store::{
     get_global_account_store, lookup_account_by_channel, lookup_account_by_identifier,
+    AccountIdentifier,
 };
+use run_task_module::UserIdentities;
 use crate::blob_store::get_blob_store;
 use crate::channel::Channel;
 use crate::github_inbound::{
@@ -129,6 +131,65 @@ fn resolve_account_for_run_task(
     }
 
     None
+}
+
+/// Fetch user identities from the account store for cross-channel routing.
+fn fetch_user_identities(account_id: Option<Uuid>) -> UserIdentities {
+    let Some(account_id) = account_id else {
+        return UserIdentities::default();
+    };
+
+    let Some(store) = get_global_account_store() else {
+        warn!("Account store not available for fetching user identities");
+        return UserIdentities::default();
+    };
+
+    let identifiers = match store.list_identifiers(account_id) {
+        Ok(ids) => ids,
+        Err(e) => {
+            warn!(
+                "Failed to fetch identifiers for account {}: {}",
+                account_id, e
+            );
+            return UserIdentities::default();
+        }
+    };
+
+    identifiers_to_user_identities(account_id, &identifiers)
+}
+
+/// Convert account identifiers to UserIdentities struct for cross-channel routing.
+fn identifiers_to_user_identities(
+    account_id: Uuid,
+    identifiers: &[AccountIdentifier],
+) -> UserIdentities {
+    let mut result = UserIdentities {
+        account_id: Some(account_id.to_string()),
+        ..Default::default()
+    };
+
+    for identifier in identifiers.iter().filter(|id| id.verified) {
+        match identifier.identifier_type.as_str() {
+            "email" => result.emails.push(identifier.identifier.clone()),
+            "slack" | "slack_user_id" => {
+                result.slack_user_ids.push(identifier.identifier.clone())
+            }
+            "discord" | "discord_user_id" => {
+                result.discord_user_ids.push(identifier.identifier.clone())
+            }
+            "phone" | "sms" | "whatsapp" | "bluebubbles" => {
+                result.phone_numbers.push(identifier.identifier.clone())
+            }
+            "telegram" | "telegram_user_id" => {
+                result.telegram_user_ids.push(identifier.identifier.clone())
+            }
+            _ => {
+                // Unknown identifier type, skip
+            }
+        }
+    }
+
+    result
 }
 
 fn write_github_link_required_reply(
@@ -503,6 +564,7 @@ impl TaskExecutor for ModuleExecutor {
                     }
                 }
 
+                let user_identities = fetch_user_identities(account_id);
                 let params = run_task_module::RunTaskParams {
                     workspace_dir: task.workspace_dir.clone(),
                     input_email_dir: task.input_email_dir.clone(),
@@ -516,6 +578,7 @@ impl TaskExecutor for ModuleExecutor {
                     channel: task.channel.to_string(),
                     google_access_token: load_google_access_token_from_service_env(),
                     has_unified_account: account_id.is_some(),
+                    user_identities,
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -771,5 +834,115 @@ mod tests {
     fn typing_channel_id_returns_none_when_reply_to_is_not_numeric() {
         let task = run_task_with_reply_to(Channel::Discord, vec!["abc", "def"]);
         assert_eq!(discord_typing_channel_id(&task), None);
+    }
+
+    fn make_identifier(
+        account_id: Uuid,
+        identifier_type: &str,
+        identifier: &str,
+        verified: bool,
+    ) -> AccountIdentifier {
+        AccountIdentifier {
+            id: Uuid::new_v4(),
+            account_id,
+            identifier_type: identifier_type.to_string(),
+            identifier: identifier.to_string(),
+            verified,
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn identifiers_to_user_identities_maps_email() {
+        let account_id = Uuid::new_v4();
+        let identifiers = vec![make_identifier(account_id, "email", "test@example.com", true)];
+
+        let result = identifiers_to_user_identities(account_id, &identifiers);
+
+        assert_eq!(result.account_id, Some(account_id.to_string()));
+        assert_eq!(result.emails, vec!["test@example.com"]);
+    }
+
+    #[test]
+    fn identifiers_to_user_identities_maps_slack() {
+        let account_id = Uuid::new_v4();
+        let identifiers = vec![
+            make_identifier(account_id, "slack", "U123456", true),
+            make_identifier(account_id, "slack_user_id", "U789012", true),
+        ];
+
+        let result = identifiers_to_user_identities(account_id, &identifiers);
+
+        assert_eq!(result.slack_user_ids, vec!["U123456", "U789012"]);
+    }
+
+    #[test]
+    fn identifiers_to_user_identities_maps_discord() {
+        let account_id = Uuid::new_v4();
+        let identifiers = vec![make_identifier(
+            account_id,
+            "discord_user_id",
+            "123456789012345678",
+            true,
+        )];
+
+        let result = identifiers_to_user_identities(account_id, &identifiers);
+
+        assert_eq!(result.discord_user_ids, vec!["123456789012345678"]);
+    }
+
+    #[test]
+    fn identifiers_to_user_identities_maps_phone_channels() {
+        let account_id = Uuid::new_v4();
+        let identifiers = vec![
+            make_identifier(account_id, "phone", "+15551234567", true),
+            make_identifier(account_id, "sms", "+15559876543", true),
+        ];
+
+        let result = identifiers_to_user_identities(account_id, &identifiers);
+
+        assert_eq!(
+            result.phone_numbers,
+            vec!["+15551234567", "+15559876543"]
+        );
+    }
+
+    #[test]
+    fn identifiers_to_user_identities_maps_telegram() {
+        let account_id = Uuid::new_v4();
+        let identifiers = vec![make_identifier(account_id, "telegram", "12345678", true)];
+
+        let result = identifiers_to_user_identities(account_id, &identifiers);
+
+        assert_eq!(result.telegram_user_ids, vec!["12345678"]);
+    }
+
+    #[test]
+    fn identifiers_to_user_identities_skips_unverified() {
+        let account_id = Uuid::new_v4();
+        let identifiers = vec![
+            make_identifier(account_id, "email", "verified@example.com", true),
+            make_identifier(account_id, "email", "unverified@example.com", false),
+        ];
+
+        let result = identifiers_to_user_identities(account_id, &identifiers);
+
+        assert_eq!(result.emails, vec!["verified@example.com"]);
+    }
+
+    #[test]
+    fn identifiers_to_user_identities_skips_unknown_types() {
+        let account_id = Uuid::new_v4();
+        let identifiers = vec![
+            make_identifier(account_id, "email", "test@example.com", true),
+            make_identifier(account_id, "fax", "555-1234", true),
+            make_identifier(account_id, "carrier_pigeon", "coo-coo", true),
+        ];
+
+        let result = identifiers_to_user_identities(account_id, &identifiers);
+
+        assert_eq!(result.emails, vec!["test@example.com"]);
+        assert!(result.slack_user_ids.is_empty());
+        assert!(result.discord_user_ids.is_empty());
     }
 }

@@ -96,6 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             channel: "email".to_string(),
             google_access_token: None,
             has_unified_account: false,
+            user_identities: Default::default(),
         });
     }
 

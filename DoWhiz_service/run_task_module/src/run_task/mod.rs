@@ -17,5 +17,5 @@ pub use core::run_task;
 pub use errors::RunTaskError;
 pub use types::{
     RunTaskOutput, RunTaskParams, ScheduleRequest, ScheduledSendEmailTask, ScheduledTaskRequest,
-    SchedulerActionRequest,
+    SchedulerActionRequest, UserIdentities,
 };

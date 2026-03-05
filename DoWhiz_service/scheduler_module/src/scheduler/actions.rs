@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -14,6 +15,46 @@ use super::reply::load_reply_context;
 use super::schedule::{next_run_after, validate_cron_expression};
 use super::types::{RunTaskTask, Schedule, SchedulerError, SendReplyTask, TaskKind};
 use super::utils::parse_datetime;
+
+/// Cross-channel routing configuration written by codex.
+#[derive(Debug, Clone, Deserialize)]
+struct ReplyRouting {
+    channel: String,
+    identifier: String,
+}
+
+/// Load cross-channel routing from reply_routing.json if it exists.
+fn load_reply_routing(workspace_dir: &Path) -> Option<ReplyRouting> {
+    let path = workspace_dir.join("reply_routing.json");
+    let content = std::fs::read_to_string(&path).ok()?;
+    match serde_json::from_str(&content) {
+        Ok(routing) => {
+            info!("Loaded cross-channel routing from {}", path.display());
+            Some(routing)
+        }
+        Err(e) => {
+            warn!("Failed to parse reply_routing.json: {}", e);
+            None
+        }
+    }
+}
+
+/// Parse channel string to Channel enum.
+fn parse_channel(channel_str: &str) -> Option<Channel> {
+    match channel_str.to_lowercase().as_str() {
+        "email" => Some(Channel::Email),
+        "slack" => Some(Channel::Slack),
+        "discord" => Some(Channel::Discord),
+        "telegram" => Some(Channel::Telegram),
+        "sms" => Some(Channel::Sms),
+        "whatsapp" => Some(Channel::WhatsApp),
+        "bluebubbles" => Some(Channel::BlueBubbles),
+        _ => {
+            warn!("Unknown channel in reply_routing.json: {}", channel_str);
+            None
+        }
+    }
+}
 
 fn thread_epoch_matches(task: &RunTaskTask) -> bool {
     let expected = match task.thread_epoch {
@@ -99,9 +140,27 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         return Ok(false);
     }
 
+    // Check for cross-channel routing override
+    let (target_channel, target_recipients) = if let Some(routing) = load_reply_routing(&task.workspace_dir) {
+        if let Some(channel) = parse_channel(&routing.channel) {
+            info!(
+                "Cross-channel routing: {} -> {:?} (identifier: {})",
+                task.channel, channel, routing.identifier
+            );
+            (channel, vec![routing.identifier])
+        } else {
+            // Invalid channel in routing file, fall back to inbound
+            (task.channel.clone(), task.reply_to.clone())
+        }
+    } else {
+        // No routing file, use inbound channel
+        (task.channel.clone(), task.reply_to.clone())
+    };
+
     // Non-email channels use plain text reply_message.txt
     // Email and Google Workspace use HTML reply_email_draft.html
-    let (reply_filename, attachments_dirname) = match task.channel {
+    // Use TARGET channel to determine reply format (for cross-channel routing)
+    let (reply_filename, attachments_dirname) = match target_channel {
         Channel::Slack
         | Channel::Discord
         | Channel::BlueBubbles
@@ -127,12 +186,12 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
     let reply_from = task.reply_from.clone().or(reply_context.from.clone());
 
     let send_task = SendReplyTask {
-        channel: task.channel.clone(),
+        channel: target_channel,
         subject: reply_context.subject,
         html_path,
         attachments_dir,
         from: reply_from,
-        to: task.reply_to.clone(),
+        to: target_recipients,
         cc: Vec::new(),
         bcc: Vec::new(),
         in_reply_to: reply_context.in_reply_to,
@@ -466,4 +525,80 @@ fn resolve_rel_path(root: &Path, raw: &str) -> Option<PathBuf> {
         return None;
     }
     Some(root.join(rel))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn parse_channel_valid_channels() {
+        assert_eq!(parse_channel("email"), Some(Channel::Email));
+        assert_eq!(parse_channel("slack"), Some(Channel::Slack));
+        assert_eq!(parse_channel("discord"), Some(Channel::Discord));
+        assert_eq!(parse_channel("telegram"), Some(Channel::Telegram));
+        assert_eq!(parse_channel("sms"), Some(Channel::Sms));
+        assert_eq!(parse_channel("whatsapp"), Some(Channel::WhatsApp));
+        assert_eq!(parse_channel("bluebubbles"), Some(Channel::BlueBubbles));
+    }
+
+    #[test]
+    fn parse_channel_case_insensitive() {
+        assert_eq!(parse_channel("EMAIL"), Some(Channel::Email));
+        assert_eq!(parse_channel("Slack"), Some(Channel::Slack));
+        assert_eq!(parse_channel("DISCORD"), Some(Channel::Discord));
+    }
+
+    #[test]
+    fn parse_channel_unknown_returns_none() {
+        assert_eq!(parse_channel("unknown"), None);
+        assert_eq!(parse_channel("fax"), None);
+        assert_eq!(parse_channel(""), None);
+    }
+
+    #[test]
+    fn load_reply_routing_parses_valid_json() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        let routing_json = r#"{"channel": "discord", "identifier": "123456789"}"#;
+        fs::write(workspace.join("reply_routing.json"), routing_json).expect("write");
+
+        let routing = load_reply_routing(workspace).expect("should parse");
+        assert_eq!(routing.channel, "discord");
+        assert_eq!(routing.identifier, "123456789");
+    }
+
+    #[test]
+    fn load_reply_routing_returns_none_when_missing() {
+        let temp = TempDir::new().expect("tempdir");
+        let routing = load_reply_routing(temp.path());
+        assert!(routing.is_none());
+    }
+
+    #[test]
+    fn load_reply_routing_returns_none_for_invalid_json() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        fs::write(workspace.join("reply_routing.json"), "not valid json").expect("write");
+
+        let routing = load_reply_routing(workspace);
+        assert!(routing.is_none());
+    }
+
+    #[test]
+    fn load_reply_routing_returns_none_for_missing_fields() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        // Missing identifier field
+        let routing_json = r#"{"channel": "discord"}"#;
+        fs::write(workspace.join("reply_routing.json"), routing_json).expect("write");
+
+        let routing = load_reply_routing(workspace);
+        assert!(routing.is_none());
+    }
 }
