@@ -294,7 +294,8 @@ pub(crate) fn execute_discord_send(task: &SendReplyTask) -> Result<(), Scheduler
     };
     let text_body = append_discord_attachment_links(&base_text_body, &task.attachments_dir);
 
-    let channel_id = task.to.first().and_then(|value| value.parse::<u64>().ok());
+    // For Discord, reply_to[0] = user_id, reply_to[1] = channel_id
+    let channel_id = task.to.get(1).and_then(|value| value.parse::<u64>().ok());
 
     let message = OutboundMessage {
         channel: Channel::Discord,
