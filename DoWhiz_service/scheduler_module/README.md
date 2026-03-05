@@ -1,59 +1,54 @@
 # scheduler_module
 
-Cron-based scheduler (6-field format with seconds) that runs in UTC. Task/user/index state is persisted in MongoDB and scoped by path-derived owner keys. Supports `SendReply` (multi-channel), `RunTask`, and `Noop` task types.
+Core orchestration module for DoWhiz backend.
 
-## Usage
+Responsibilities:
+- task scheduling (`cron` + `one-shot`)
+- queue-consumer execution path in `rust_service`
+- ingress path in `inbound_gateway`
+- outbound delivery (`SendReply`) across channels
+- user/task index integration with Mongo-backed stores
 
-- Cron format: `sec min hour day month weekday` (6 fields).
-- All scheduling is evaluated in UTC.
-- One-shot tasks convert local time to UTC before scheduling.
+## Task Model
 
-Example:
-```rust
-use scheduler_module::{ModuleExecutor, Scheduler, TaskKind, SendReplyTask};
-use scheduler_module::channel::Channel;
-use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
-use std::time::Duration;
+`TaskKind`:
+- `SendReply` (serialized as `send_email` for backward compatibility)
+- `RunTask`
+- `Noop`
 
-let storage_scope_path = PathBuf::from("/tmp/dowhiz_tasks.db");
-let executor = ModuleExecutor::default();
-let mut scheduler = Scheduler::load(storage_scope_path, executor)?;
+Schedules:
+- `Cron` (6 fields: `sec min hour day month weekday`, UTC)
+- `OneShot` (`run_at` timestamp)
 
-let task = SendReplyTask {
-    channel: Channel::Email,  // or Channel::Slack, Channel::Telegram, Channel::WhatsApp
-    subject: "Hello".to_string(),
-    html_path: PathBuf::from("/path/to/reply_email_draft.html"),
-    attachments_dir: PathBuf::from("/path/to/reply_email_attachments"),
-    from: None,
-    to: vec!["mini-mouse@deep-tutor.com".to_string()],
-    cc: Vec::new(),
-    bcc: Vec::new(),
-    in_reply_to: None,
-    references: None,
-    archive_root: None,
-    thread_epoch: None,
-    thread_state_path: None,
-    employee_id: None,
-};
+## Channels
 
-scheduler.add_cron_task("0 */5 * * * *", TaskKind::SendReply(task))?;
+Supported channel enum values:
+- `email`, `slack`, `discord`, `sms`, `telegram`, `whatsapp`
+- `google_docs`, `google_sheets`, `google_slides`
+- `bluebubbles`
 
-let stop_flag = AtomicBool::new(false);
-scheduler.run_loop(Duration::from_secs(1), &stop_flag)?;
+## Key Entry Points
+
+- `src/bin/inbound_gateway.rs`
+- `src/bin/rust_service.rs`
+- `src/service/*`
+- `src/scheduler/*`
+- `src/ingestion_queue.rs`
+
+## Test Commands
+
+```bash
+cd DoWhiz_service
+cargo test -p scheduler_module
+cargo test -p scheduler_module --test scheduler_basic
+cargo test -p scheduler_module --test send_reply_outbound_e2e
 ```
 
-## Folder structure
+Live tests and manual scripts are listed in:
+- `reference_documentation/test_plans/DoWhiz_service_tests.md`
 
-- `DoWhiz_service/scheduler_module/src/lib.rs` : Scheduler core, task definitions, persistence.
-- `DoWhiz_service/scheduler_module/tests/` : Cron validation, persistence, and tick tests.
+## Deployment Notes
 
-## Notes
-
-- Tasks are stored in MongoDB and scoped by owner/user path so records reload across restarts.
-- Execution attempts are recorded in the `task_executions` collection with status and error details.
-- Use `add_one_shot_in` to schedule “N minutes from now” tasks based on local time converted to UTC.
-
-## Production Deployment
-
-For Azure deployment (Rust Gateway + Service Bus + Blob + workers) or VM-based setups, follow the workflows in `DoWhiz_service/README.md` under “Azure Deployment (Rust Gateway + Service Bus + Blob + Workers)” and “VM Deployment (Gateway + ngrok)”.
+For gateway/worker runtime and env policy, use:
+- `DoWhiz_service/README.md`
+- `DoWhiz_service/OPERATIONS.md`
