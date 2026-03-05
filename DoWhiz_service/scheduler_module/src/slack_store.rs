@@ -325,9 +325,7 @@ mod tests {
     #[test]
     fn list_installations() {
         let (_temp, store) = test_store();
-        let team_ids: Vec<String> = (1..=3)
-            .map(|i| unique_team_id(&format!("T{i}")))
-            .collect();
+        let team_ids: Vec<String> = (1..=3).map(|i| unique_team_id(&format!("T{i}"))).collect();
 
         for (i, team_id) in team_ids.iter().enumerate() {
             let installation = SlackInstallation {
