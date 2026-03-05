@@ -4,6 +4,9 @@ use serde_json::json;
 use std::sync::OnceLock;
 use uuid::Uuid;
 
+use azure_storage::StorageCredentials;
+use azure_storage_blobs::prelude::*;
+
 use crate::env_alias::var_with_scale_oliver;
 
 const DEFAULT_BUCKET: &str = "ingestion-raw";
@@ -67,8 +70,19 @@ fn resolve_azure_container_sas_url() -> Result<String, RawPayloadStoreError> {
 }
 
 fn resolve_account_from_connection_string() -> Option<String> {
-    let conn_str = var_with_scale_oliver("AZURE_STORAGE_CONNECTION_STRING_INGEST")?;
+    let conn_str = resolve_connection_string_for_ingest()?;
     parse_connection_string_kv(&conn_str, "AccountName")
+}
+
+fn resolve_access_key_from_connection_string() -> Option<String> {
+    let conn_str = resolve_connection_string_for_ingest()?;
+    parse_connection_string_kv(&conn_str, "AccountKey")
+}
+
+fn resolve_connection_string_for_ingest() -> Option<String> {
+    var_with_scale_oliver("AZURE_STORAGE_CONNECTION_STRING_INGEST")
+        .or_else(|| var_with_scale_oliver("AZURE_STORAGE_CONNECTION_STRING"))
+        .or_else(|| var_with_scale_oliver("DOWHIZ_AZURE_STORAGE_CONNECTION_STRING"))
 }
 
 fn parse_connection_string_kv(conn_str: &str, key: &str) -> Option<String> {
@@ -387,21 +401,26 @@ pub fn upload_raw_payload_blocking(
 
 pub fn download_raw_payload(reference: &str) -> Result<Vec<u8>, RawPayloadStoreError> {
     if reference.starts_with("azure://") {
-        let (_container, path) = parse_azure_ref(reference)?;
-        let container_sas_url = resolve_azure_container_sas_url()?;
-        let url = build_azure_blob_url(&container_sas_url, &path);
-        let client = reqwest::blocking::Client::new();
-        let response = client.get(url).send()?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().unwrap_or_default();
-            return Err(RawPayloadStoreError::Storage(format!(
-                "download failed (status {}): {}",
-                status, body
-            )));
+        let (container, path) = parse_azure_ref(reference)?;
+        if let Ok(container_sas_url) = resolve_azure_container_sas_url() {
+            let url = build_azure_blob_url(&container_sas_url, &path);
+            let client = reqwest::blocking::Client::new();
+            let response = client.get(url).send()?;
+            if response.status().is_success() {
+                let bytes = response.bytes()?.to_vec();
+                return Ok(bytes);
+            }
+            // Fall through to connection-string auth if available.
+            if resolve_connection_string_for_ingest().is_none() {
+                let status = response.status();
+                let body = response.text().unwrap_or_default();
+                return Err(RawPayloadStoreError::Storage(format!(
+                    "download failed (status {}): {}",
+                    status, body
+                )));
+            }
         }
-        let bytes = response.bytes()?.to_vec();
-        return Ok(bytes);
+        return download_raw_payload_azure_via_connection_string(&container, &path);
     }
     let base = resolve_project_url()?;
     let key = resolve_service_key()?;
@@ -435,6 +454,24 @@ pub fn download_raw_payload(reference: &str) -> Result<Vec<u8>, RawPayloadStoreE
 
     let bytes = response.bytes()?.to_vec();
     Ok(bytes)
+}
+
+fn download_raw_payload_azure_via_connection_string(
+    container: &str,
+    path: &str,
+) -> Result<Vec<u8>, RawPayloadStoreError> {
+    let account =
+        resolve_account_from_connection_string().ok_or(RawPayloadStoreError::MissingAzureConfig)?;
+    let key = resolve_access_key_from_connection_string()
+        .ok_or(RawPayloadStoreError::MissingAzureConfig)?;
+    let creds = StorageCredentials::access_key(&account, key);
+    let blob_client = BlobServiceClient::new(&account, creds)
+        .container_client(container.to_string())
+        .blob_client(path.to_string());
+
+    futures::executor::block_on(blob_client.get_content()).map_err(|err| {
+        RawPayloadStoreError::Storage(format!("download failed via connection string: {}", err))
+    })
 }
 
 pub fn resolve_azure_blob_url(reference: &str) -> Result<String, RawPayloadStoreError> {
@@ -724,6 +761,53 @@ mod tests {
         match original_prefixed {
             Some(value) => env::set_var("SCALE_OLIVER_RAW_PAYLOAD_PATH_PREFIX", value),
             None => env::remove_var("SCALE_OLIVER_RAW_PAYLOAD_PATH_PREFIX"),
+        }
+    }
+
+    #[test]
+    fn resolve_connection_string_for_ingest_falls_back_to_generic_key() {
+        let _guard = lock_env();
+        let original_ingest = env::var("AZURE_STORAGE_CONNECTION_STRING_INGEST").ok();
+        let original_prefixed_ingest =
+            env::var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING_INGEST").ok();
+        let original_generic = env::var("AZURE_STORAGE_CONNECTION_STRING").ok();
+        let original_prefixed_generic =
+            env::var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING").ok();
+
+        env::remove_var("AZURE_STORAGE_CONNECTION_STRING_INGEST");
+        env::remove_var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING_INGEST");
+        env::set_var(
+            "AZURE_STORAGE_CONNECTION_STRING",
+            "DefaultEndpointsProtocol=https;AccountName=fallbackacct;AccountKey=fallbackkey;EndpointSuffix=core.windows.net",
+        );
+        env::remove_var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING");
+
+        assert_eq!(
+            resolve_account_from_connection_string().as_deref(),
+            Some("fallbackacct")
+        );
+        assert_eq!(
+            resolve_access_key_from_connection_string().as_deref(),
+            Some("fallbackkey")
+        );
+
+        match original_ingest {
+            Some(value) => env::set_var("AZURE_STORAGE_CONNECTION_STRING_INGEST", value),
+            None => env::remove_var("AZURE_STORAGE_CONNECTION_STRING_INGEST"),
+        }
+        match original_prefixed_ingest {
+            Some(value) => {
+                env::set_var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING_INGEST", value)
+            }
+            None => env::remove_var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING_INGEST"),
+        }
+        match original_generic {
+            Some(value) => env::set_var("AZURE_STORAGE_CONNECTION_STRING", value),
+            None => env::remove_var("AZURE_STORAGE_CONNECTION_STRING"),
+        }
+        match original_prefixed_generic {
+            Some(value) => env::set_var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING", value),
+            None => env::remove_var("SCALE_OLIVER_AZURE_STORAGE_CONNECTION_STRING"),
         }
     }
 }
