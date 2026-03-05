@@ -1144,6 +1144,7 @@ Environment policy:
 | `INGESTION_QUEUE_LEASE_SECS` | `60` | Lease timeout before reclaiming stuck jobs |
 | `INGESTION_QUEUE_MAX_ATTEMPTS` | `5` | Max retry attempts before marking failed |
 | `INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS` | `0` | Set to `1` to allow self-signed Postgres certificates (local/dev only) |
+| `ACCOUNT_STORE_TLS_ALLOW_INVALID_CERTS` | `staging:1 / production:0` | Optional override for AccountStore TLS validation; when unset, it follows `INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS` and defaults to enabled in staging |
 | `INGESTION_POLL_INTERVAL_SECS` | `1` | Poll interval for ingestion consumer |
 
 ### Account/Auth/Billing (Supabase)

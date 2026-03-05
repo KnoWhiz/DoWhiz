@@ -8,10 +8,30 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::env_alias::bool_with_scale_oliver;
+use crate::env_alias::var_with_scale_oliver;
 
 type PgPool = Pool<PostgresConnectionManager<MakeTlsConnector>>;
 type PgConn = PooledConnection<PostgresConnectionManager<MakeTlsConnector>>;
+
+fn parse_bool_env(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn account_store_allow_invalid_certs() -> bool {
+    if let Some(value) = var_with_scale_oliver("ACCOUNT_STORE_TLS_ALLOW_INVALID_CERTS") {
+        return parse_bool_env(&value);
+    }
+    if let Some(value) = var_with_scale_oliver("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS") {
+        return parse_bool_env(&value);
+    }
+    env::var("DEPLOY_TARGET")
+        .ok()
+        .map(|value| value.trim().eq_ignore_ascii_case("staging"))
+        .unwrap_or(false)
+}
 
 #[derive(Debug, Clone)]
 pub struct Account {
@@ -163,7 +183,11 @@ impl AccountStore {
         let config: postgres::Config = db_url.parse()?;
 
         let mut tls_builder = native_tls::TlsConnector::builder();
-        if bool_with_scale_oliver("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS", false) {
+        if account_store_allow_invalid_certs() {
+            warn!(
+                "account_store {} TLS verification relaxed (invalid certs/hostnames allowed)",
+                pool_name
+            );
             tls_builder.danger_accept_invalid_certs(true);
             tls_builder.danger_accept_invalid_hostnames(true);
         }
@@ -756,4 +780,54 @@ pub fn lookup_account_by_channel(
 ) -> Option<Uuid> {
     let identifier_type = channel_to_identifier_type(channel);
     lookup_account_by_identifier(identifier_type, identifier)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::account_store_allow_invalid_certs;
+    use std::env;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn reset_tls_env() {
+        env::remove_var("DEPLOY_TARGET");
+        env::remove_var("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS");
+        env::remove_var("ACCOUNT_STORE_TLS_ALLOW_INVALID_CERTS");
+        env::remove_var("SCALE_OLIVER_INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS");
+        env::remove_var("SCALE_OLIVER_ACCOUNT_STORE_TLS_ALLOW_INVALID_CERTS");
+    }
+
+    #[test]
+    fn account_store_tls_defaults_enabled_on_staging() {
+        let _guard = env_lock().lock().expect("env lock");
+        reset_tls_env();
+        env::set_var("DEPLOY_TARGET", "staging");
+        assert!(account_store_allow_invalid_certs());
+        reset_tls_env();
+    }
+
+    #[test]
+    fn account_store_tls_defaults_disabled_on_production() {
+        let _guard = env_lock().lock().expect("env lock");
+        reset_tls_env();
+        env::set_var("DEPLOY_TARGET", "production");
+        assert!(!account_store_allow_invalid_certs());
+        reset_tls_env();
+    }
+
+    #[test]
+    fn account_store_tls_respects_explicit_override() {
+        let _guard = env_lock().lock().expect("env lock");
+        reset_tls_env();
+        env::set_var("DEPLOY_TARGET", "staging");
+        env::set_var("ACCOUNT_STORE_TLS_ALLOW_INVALID_CERTS", "0");
+        assert!(!account_store_allow_invalid_certs());
+        env::set_var("ACCOUNT_STORE_TLS_ALLOW_INVALID_CERTS", "1");
+        assert!(account_store_allow_invalid_certs());
+        reset_tls_env();
+    }
 }

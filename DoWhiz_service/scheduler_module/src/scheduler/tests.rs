@@ -23,6 +23,24 @@ impl TaskExecutor for NoopExecutor {
     }
 }
 
+struct FailingExecutor {
+    message: String,
+}
+
+impl FailingExecutor {
+    fn new(message: &str) -> Self {
+        Self {
+            message: message.to_string(),
+        }
+    }
+}
+
+impl TaskExecutor for FailingExecutor {
+    fn execute(&self, _task: &TaskKind) -> Result<TaskExecution, SchedulerError> {
+        Err(SchedulerError::TaskFailed(self.message.clone()))
+    }
+}
+
 fn base_run_task(workspace: &Path, mail_root: &Path) -> RunTaskTask {
     RunTaskTask {
         workspace_dir: workspace.to_path_buf(),
@@ -43,6 +61,23 @@ fn base_run_task(workspace: &Path, mail_root: &Path) -> RunTaskTask {
         slack_team_id: None,
         employee_id: None,
     }
+}
+
+fn force_one_shot_due<E: TaskExecutor>(scheduler: &mut Scheduler<E>, task_id: Uuid) {
+    let index = scheduler
+        .tasks
+        .iter()
+        .position(|task| task.id == task_id)
+        .expect("task exists");
+    scheduler.tasks[index].enabled = true;
+    scheduler.tasks[index].schedule = Schedule::OneShot {
+        run_at: Utc::now() - chrono::Duration::seconds(1),
+    };
+    let updated = scheduler.tasks[index].clone();
+    scheduler
+        .store
+        .update_task(&updated)
+        .expect("persist forced one-shot schedule");
 }
 
 #[test]
@@ -782,6 +817,72 @@ fn multiple_tasks_sync_independently() {
         assert!(task_1.error_message.is_none());
         assert_eq!(task_2.error_message, Some("timeout".to_string()));
     }
+}
+
+#[test]
+fn run_task_failures_persist_retry_count_and_disable_at_limit() {
+    let temp = TempDir::new().expect("tempdir");
+    let tasks_db = temp.path().join("tasks.db");
+    let workspace = temp.path().join("workspace");
+    let mail_root = temp.path().join("mail");
+    fs::create_dir_all(&workspace).expect("workspace");
+    fs::create_dir_all(&mail_root).expect("mail");
+    let run_task = base_run_task(&workspace, &mail_root);
+    let quota_error = "ContainerGroupQuotaReached: container group quota reached";
+
+    let mut scheduler =
+        Scheduler::load(&tasks_db, FailingExecutor::new(quota_error)).expect("load scheduler");
+    let task_id = scheduler
+        .add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))
+        .expect("add run_task");
+    assert!(scheduler.execute_task_by_id(task_id).is_err());
+
+    let mut scheduler =
+        Scheduler::load(&tasks_db, FailingExecutor::new(quota_error)).expect("reload scheduler");
+    let first_retry_task = scheduler
+        .tasks()
+        .iter()
+        .find(|task| task.id == task_id)
+        .expect("task exists");
+    let first_retry_at = match first_retry_task.schedule {
+        Schedule::OneShot { run_at } => run_at,
+        _ => panic!("expected one-shot schedule"),
+    };
+    assert!(first_retry_task.enabled);
+    assert!(first_retry_at > Utc::now() + chrono::Duration::seconds(120));
+    assert_eq!(
+        scheduler
+            .get_retry_count(&task_id.to_string())
+            .expect("retry count"),
+        1
+    );
+
+    force_one_shot_due(&mut scheduler, task_id);
+    assert!(scheduler.execute_task_by_id(task_id).is_err());
+    assert_eq!(
+        scheduler
+            .get_retry_count(&task_id.to_string())
+            .expect("retry count"),
+        2
+    );
+
+    force_one_shot_due(&mut scheduler, task_id);
+    assert!(scheduler.execute_task_by_id(task_id).is_err());
+
+    let scheduler =
+        Scheduler::load(&tasks_db, FailingExecutor::new(quota_error)).expect("final reload");
+    let final_task = scheduler
+        .tasks()
+        .iter()
+        .find(|task| task.id == task_id)
+        .expect("final task exists");
+    assert!(!final_task.enabled);
+    assert_eq!(
+        scheduler
+            .get_retry_count(&task_id.to_string())
+            .expect("retry count"),
+        0
+    );
 }
 
 #[test]

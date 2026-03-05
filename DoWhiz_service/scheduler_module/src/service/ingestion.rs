@@ -127,6 +127,11 @@ fn process_ingestion_envelope(
 ) -> Result<(), BoxError> {
     match envelope.channel {
         Channel::Email => {
+            let sender = envelope.payload.sender.trim();
+            if is_blacklisted_email_sender(sender, &config.employee_directory.service_addresses) {
+                info!("skipping blacklisted sender: {}", sender);
+                return Ok(());
+            }
             let (payload, raw_payload) = resolve_email_payload(envelope)?;
             process_inbound_payload(config, user_store, index_store, &payload, &raw_payload)
         }
@@ -233,6 +238,13 @@ fn process_ingestion_envelope(
     }
 }
 
+fn is_blacklisted_email_sender(
+    sender: &str,
+    service_addresses: &std::collections::HashSet<String>,
+) -> bool {
+    super::email::is_blacklisted_sender(sender, service_addresses)
+}
+
 fn resolve_email_payload(
     envelope: &IngestionEnvelope,
 ) -> Result<(PostmarkInbound, Vec<u8>), BoxError> {
@@ -295,10 +307,11 @@ fn resolve_email_payload(
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_email_payload;
+    use super::{is_blacklisted_email_sender, resolve_email_payload};
     use crate::channel::{Attachment, Channel, ChannelMetadata};
     use crate::ingestion::{IngestionEnvelope, IngestionPayload};
     use chrono::Utc;
+    use std::collections::HashSet;
     use uuid::Uuid;
 
     #[test]
@@ -348,5 +361,25 @@ mod tests {
             Some("<message-1@example.com>")
         );
         assert_eq!(payload.attachments.as_ref().map(|v| v.len()), Some(1));
+    }
+
+    #[test]
+    fn blacklisted_email_sender_detects_service_address() {
+        let mut service_addresses = HashSet::new();
+        service_addresses.insert("dowhiz@deep-tutor.com".to_string());
+        assert!(is_blacklisted_email_sender(
+            "DoWhiz <dowhiz@deep-tutor.com>",
+            &service_addresses
+        ));
+    }
+
+    #[test]
+    fn blacklisted_email_sender_allows_external_sender() {
+        let mut service_addresses = HashSet::new();
+        service_addresses.insert("dowhiz@deep-tutor.com".to_string());
+        assert!(!is_blacklisted_email_sender(
+            "user@example.com",
+            &service_addresses
+        ));
     }
 }

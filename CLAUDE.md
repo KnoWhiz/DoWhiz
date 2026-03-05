@@ -1,8 +1,16 @@
 # CLAUDE.md
 
+## Overall guidance
+
 `external/` folder contains information about other projects that we can use as reference but we never need to touch the code in it.
 
-By default open RUN_CODEX_E2E=1 and POSTMARK_LIVE_TEST=1 to use real emails address (mini-mouse@dowhiz.com / deep-tutor@deep-tutor.com to send emails to proto@dowhiz.com / oliver@dowhiz.com / maggie@dowhiz.com). For ngrok domain you can use: `https://shayne-laminar-lillian.ngrok-free.dev`
+By default open RUN_CODEX_E2E=1 and POSTMARK_LIVE_TEST=1 to use real emails address (mini-mouse@deep-tutor.com / deep-tutor@deep-tutor.com) to send emails to oliver@dowhiz.com for prod VM service test; or send emails to dowhiz@deep-tutor.com for staging VM service test. On staging / prod VM no ngrok domain / service needed since they have corresponding public urls. If locally you need ngrok domain you can use: `https://shayne-laminar-lillian.ngrok-free.dev`
+
+When solving challenging problems, create a new branch based on latest dev branch and push commits for each steps to make the development process trackable and easy to debug. You can `ssh dowhizprod1` to connect to prod VM, or use `ssh dowhizstaging` to connect to staging VM. I will let you know if I have completed `az login` so you can use Azure CLI to manage cloud resources. I will also point you the latest local path for ENV_COMMON; ENV_STAGING; and ENV_PROD (named as `.env.common`, `.env.staging`, and `.env.prod` accordingly). For loading keys in prod VM we follow same logic as in `.github/workflows/CICD-production.yml`; for loading keys in staging VM we follow same logic as in `.github/workflows/CICD-staging.yml`.
+
+Currently, for staging VM we use `proto` / `boiled_egg` as employee, with email account `dowhiz@deep-tutor.com`. And for prod VM we use `oliver` / `little_bear` as employee, with email account `oliver@dowhiz.com`.
+
+Make sure codebase is clean and easy to maintain. Each time you done changing codebase, update all related docs accordingly as well.
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -158,7 +166,6 @@ After completing code changes, you must design targeted, detailed unit tests and
 - After any DoWhiz_service change, run all relevant AUTO tests from the checklist.
 - For LIVE/MANUAL/PLANNED entries, mark SKIP with a reason unless explicitly run.
 - If the user asks so, include the Test Report table from the checklist in your final response (PASS/FAIL/SKIP per Test ID). Otherwise by default summarize the tests results.
-- For real end-to-end tests requiring a public ngrok URL, use `https://shayne-laminar-lillian.ngrok-free.dev` and set up the environment accordingly.
 
 ## Coding Guidelines
 

@@ -290,7 +290,7 @@ pub fn process_inbound_payload(
     Ok(())
 }
 
-fn is_blacklisted_sender(sender: &str, service_addresses: &HashSet<String>) -> bool {
+pub(super) fn is_blacklisted_sender(sender: &str, service_addresses: &HashSet<String>) -> bool {
     if sender.is_empty() {
         return false;
     }
