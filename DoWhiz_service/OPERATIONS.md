@@ -21,6 +21,7 @@ Runtime environment policy:
 - VM `.env` is generated from `ENV_COMMON + ENV_STAGING/ENV_PROD` in CI/CD.
 - Runtime `.env` must not include `STAGING_*`/`PROD_*` keys.
 - `DEPLOY_TARGET` is optional and used for runtime policy decisions.
+- `POSTMARK_INBOUND_HOOK_URL` should point to the VM public endpoint; ngrok is local-only and should not run on staging/production VMs.
 
 ## 2) Expected Config Selection
 
@@ -56,8 +57,10 @@ PM2 logs (if PM2-managed):
 ```bash
 cd /home/azureuser/server/.dowhiz/DoWhiz
 ./DoWhiz_service/scripts/run_gateway_local.sh
-./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
+./DoWhiz_service/scripts/run_employee.sh <employee_id> 9001 --skip-hook --skip-ngrok
 ```
+
+Use `boiled_egg` on staging and `little_bear` on production.
 
 ### 4.2 PM2-based (recommended on VM)
 

@@ -45,7 +45,7 @@ Status legend:
 
 | Test ID | Command / Script | Scope | Required Env |
 |---|---|---|---|
-| LIVE-SCH-01 | `cargo test -p scheduler_module --test service_real_email -- --nocapture` | real inbound/outbound email flow | `RUST_SERVICE_LIVE_TEST=1` + Postmark/ngrok/public hook |
+| LIVE-SCH-01 | `cargo test -p scheduler_module --test service_real_email -- --nocapture` | real inbound/outbound email flow | `RUST_SERVICE_LIVE_TEST=1` + Postmark + public hook URL (`POSTMARK_TEST_HOOK_URL`/`POSTMARK_INBOUND_HOOK_URL`; ngrok only for local tunneling) |
 | LIVE-SCH-02 | `cargo test -p scheduler_module --test google_docs_cli_e2e -- --nocapture` | real Google Docs CLI behavior | Google OAuth creds + target docs |
 | LIVE-SCH-03 | `cargo test -p scheduler_module --test unified_memo_e2e -- --ignored --nocapture` | unified memo/account/blob flow | service URL + supabase + azure blob creds + test account |
 | LIVE-SCH-04 | `cargo test -p scheduler_module --test billing_e2e -- --nocapture` | billing/account db logic vs real DB | `SUPABASE_DB_URL` + test account data |

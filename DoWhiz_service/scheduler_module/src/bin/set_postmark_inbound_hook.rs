@@ -27,7 +27,7 @@ fn help_text() -> String {
         "Set Postmark inbound hook URL",
         "",
         "Usage:",
-        "  cargo run -p scheduler_module --bin set_postmark_inbound_hook -- --hook-url https://YOUR-NGROK-URL.ngrok-free.dev/postmark/inbound",
+        "  cargo run -p scheduler_module --bin set_postmark_inbound_hook -- --hook-url https://YOUR-PUBLIC-DOMAIN/postmark/inbound",
         "",
         "Environment:",
         "  POSTMARK_SERVER_TOKEN (required)",
