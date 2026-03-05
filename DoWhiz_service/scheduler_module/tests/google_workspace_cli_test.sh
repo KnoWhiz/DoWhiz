@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Google Workspace CLI Test Script
 #
 # This script tests the CLI tools for Google Docs, Sheets, and Slides.
@@ -14,10 +14,17 @@
 #   export GOOGLE_ACCESS_TOKEN="your_token"
 #   ./google_workspace_cli_test.sh
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+BUILD_MODE="${BUILD_MODE:-release}"
+BUILD_FLAG="--release"
+TARGET_SUBDIR="release"
+if [ "$BUILD_MODE" = "debug" ] || [ "$BUILD_MODE" = "dev" ]; then
+    BUILD_FLAG=""
+    TARGET_SUBDIR="debug"
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -31,7 +38,7 @@ echo "=========================================="
 echo ""
 
 # Check if credentials are available
-if [ -z "$GOOGLE_ACCESS_TOKEN" ] && [ -z "$GOOGLE_REFRESH_TOKEN" ]; then
+if [ -z "${GOOGLE_ACCESS_TOKEN:-}" ] && [ -z "${GOOGLE_REFRESH_TOKEN:-}" ]; then
     echo -e "${RED}Error: No Google credentials found.${NC}"
     echo "Set GOOGLE_ACCESS_TOKEN or (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN)"
     exit 1
@@ -40,15 +47,15 @@ fi
 # Build the binaries
 echo "Building CLI binaries..."
 cd "$PROJECT_DIR"
-cargo build --release --bin google-docs --bin google-sheets --bin google-slides 2>&1 | grep -E "(Compiling|Finished|error)" || true
+cargo build ${BUILD_FLAG} --bin google-docs --bin google-sheets --bin google-slides 2>&1 | grep -E "(Compiling|Finished|error)" || true
 
-GOOGLE_DOCS="$PROJECT_DIR/target/release/google-docs"
-GOOGLE_SHEETS="$PROJECT_DIR/target/release/google-sheets"
-GOOGLE_SLIDES="$PROJECT_DIR/target/release/google-slides"
+GOOGLE_DOCS="$PROJECT_DIR/target/${TARGET_SUBDIR}/google-docs"
+GOOGLE_SHEETS="$PROJECT_DIR/target/${TARGET_SUBDIR}/google-sheets"
+GOOGLE_SLIDES="$PROJECT_DIR/target/${TARGET_SUBDIR}/google-slides"
 
 # Check binaries exist
 for bin in "$GOOGLE_DOCS" "$GOOGLE_SHEETS" "$GOOGLE_SLIDES"; do
-    if [ ! -f "$bin" ]; then
+    if [ ! -x "$bin" ]; then
         echo -e "${RED}Error: Binary not found: $bin${NC}"
         exit 1
     fi
@@ -70,7 +77,7 @@ run_test() {
     if output=$(eval "$cmd" 2>&1); then
         echo -e "${GREEN}PASSED${NC}"
         TESTS_PASSED=$((TESTS_PASSED + 1))
-        if [ "$VERBOSE" = "1" ]; then
+        if [ "${VERBOSE:-0}" = "1" ]; then
             echo "Output: $output"
         fi
         return 0
@@ -81,6 +88,10 @@ run_test() {
         TESTS_FAILED=$((TESTS_FAILED + 1))
         return 1
     fi
+}
+
+extract_first_id() {
+    sed -n 's/.*(\([A-Za-z0-9_-][A-Za-z0-9_-]*\)).*/\1/p' | head -1
 }
 
 # ==========================================
@@ -95,7 +106,7 @@ run_test "google-docs --help" "'$GOOGLE_DOCS' --help"
 run_test "google-docs list-documents" "'$GOOGLE_DOCS' list-documents"
 
 # Get first document ID for further tests
-DOC_ID=$("$GOOGLE_DOCS" list-documents 2>&1 | grep -oP '\(\K[a-zA-Z0-9_-]+(?=\))' | head -1)
+DOC_ID="$("$GOOGLE_DOCS" list-documents 2>&1 | extract_first_id)"
 if [ -n "$DOC_ID" ]; then
     echo -e "${YELLOW}Found document ID: $DOC_ID${NC}"
     run_test "google-docs read-document" "'$GOOGLE_DOCS' read-document '$DOC_ID'"
@@ -117,7 +128,7 @@ run_test "google-sheets --help" "'$GOOGLE_SHEETS' --help"
 run_test "google-sheets list-spreadsheets" "'$GOOGLE_SHEETS' list-spreadsheets"
 
 # Get first spreadsheet ID for further tests
-SHEET_ID=$("$GOOGLE_SHEETS" list-spreadsheets 2>&1 | grep -oP '\(\K[a-zA-Z0-9_-]+(?=\))' | head -1)
+SHEET_ID="$("$GOOGLE_SHEETS" list-spreadsheets 2>&1 | extract_first_id)"
 if [ -n "$SHEET_ID" ]; then
     echo -e "${YELLOW}Found spreadsheet ID: $SHEET_ID${NC}"
     run_test "google-sheets read-spreadsheet" "'$GOOGLE_SHEETS' read-spreadsheet '$SHEET_ID'"
@@ -140,7 +151,7 @@ run_test "google-slides --help" "'$GOOGLE_SLIDES' --help"
 run_test "google-slides list-presentations" "'$GOOGLE_SLIDES' list-presentations"
 
 # Get first presentation ID for further tests
-SLIDES_ID=$("$GOOGLE_SLIDES" list-presentations 2>&1 | grep -oP '\(\K[a-zA-Z0-9_-]+(?=\))' | head -1)
+SLIDES_ID="$("$GOOGLE_SLIDES" list-presentations 2>&1 | extract_first_id)"
 if [ -n "$SLIDES_ID" ]; then
     echo -e "${YELLOW}Found presentation ID: $SLIDES_ID${NC}"
     run_test "google-slides read-presentation" "'$GOOGLE_SLIDES' read-presentation '$SLIDES_ID'"
