@@ -8,6 +8,12 @@ key = "dowhiz@deep-tutor.com"
 employee_id = "boiled_egg"
 tenant_id = "staging"
 
+[[routes]]
+channel = "discord"
+key = "*"
+employee_id = "boiled_egg"
+tenant_id = "staging"
+
 # Google Workspace routing for staging (using dowhiz@deep-tutor.com account)
 [[routes]]
 channel = "google_docs"
