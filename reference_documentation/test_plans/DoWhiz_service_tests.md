@@ -17,6 +17,14 @@ Target/env rule:
 - Production and staging should use separate secret sets to generate `.env`.
 - `DEPLOY_TARGET` is optional and only affects runtime policy (not key selection).
 
+## Test Method Baseline (Environment/Service Configuration)
+- All shell tests must run with `set -euo pipefail` and fail on first non-2xx API status unless the step explicitly expects an error.
+- Shell tests that touch auth/account data must require explicit `TEST_EMAIL`/`TEST_PASSWORD` input (argument or env); avoid hardcoded personal defaults.
+- `.env` loading in scripts should only fill missing values and never silently override explicit environment variables.
+- Manual Google Workspace scripts must remain cross-platform (no GNU-only `grep -P`) and support configurable build mode (`BUILD_MODE=release|debug`).
+- Blob storage scripts must validate upload/download roundtrip content and use cleanup-on-exit to avoid leaving test artifacts.
+- For staging/prod VM runs, prefer VM public URLs directly; ngrok is only needed for local public callbacks.
+
 ## Unit Tests: run_task_module
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
 |---|---|---|---|---|---|---|---|
@@ -173,8 +181,8 @@ Note: ingestion-queue tests use Postgres by default; set `SUPABASE_DB_URL` (or `
 | IT-SCH-04 | tick_sets_last_run_for_one_shot | scheduler_module::Scheduler | DoWhiz_service/scheduler_module/tests/scheduler_basic.rs | last_run set | Retry metadata | AUTO | cargo test -p scheduler_module --test scheduler_basic |
 | IT-SCH-05 | run_loop_stops_when_flag_set | scheduler_module::Scheduler | DoWhiz_service/scheduler_module/tests/scheduler_basic.rs | stop flag | Thread leak | AUTO | cargo test -p scheduler_module --test scheduler_basic |
 | IT-SCH-06 | scheduler_actions_end_to_end | run_task + scheduler actions | DoWhiz_service/scheduler_module/tests/scheduler_agent_e2e.rs | cancel/reschedule/create + follow-up | Real codex output | AUTO | cargo test -p scheduler_module --test scheduler_agent_e2e |
-| IT-SCH-07 | inbound_email_html_is_sanitized | service/email.rs::process_inbound_payload | DoWhiz_service/scheduler_module/tests/email_html_e2e.rs | HTML sanitization | Complex HTML | AUTO | cargo test -p scheduler_module --test email_html_e2e |
-| IT-SCH-08 | inbound_email_html_is_sanitized (dup) | service/email.rs::process_inbound_payload | DoWhiz_service/scheduler_module/tests/email_html_e2e_2.rs | Duplicate of IT-SCH-07 | No additional coverage | AUTO | cargo test -p scheduler_module --test email_html_e2e_2 |
+| IT-SCH-07 | inbound_email_html_is_sanitized | service/email.rs::process_inbound_payload | DoWhiz_service/scheduler_module/tests/email_html_e2e.rs | Baseline HTML sanitization | Complex HTML and fallback behavior | AUTO | cargo test -p scheduler_module --test email_html_e2e |
+| IT-SCH-08 | inbound_email_complex_html_is_sanitized | service/email.rs::process_inbound_payload | DoWhiz_service/scheduler_module/tests/email_html_e2e_2.rs | Complex HTML cleanup: hidden blocks, tracking pixels, unsafe links, footer removal | Client-specific rendering differences | AUTO | cargo test -p scheduler_module --test email_html_e2e_2 |
 | IT-SCH-09 | email_flow_injects_github_env | process_inbound_payload + run_task | DoWhiz_service/scheduler_module/tests/github_env_e2e.rs | GH env injection | Real gh auth | AUTO | cargo test -p scheduler_module --test github_env_e2e |
 | IT-SCH-10 | email_flow_injects_employee_github_env | process_inbound_payload + run_task | DoWhiz_service/scheduler_module/tests/github_env_e2e.rs | Employee GH env | Multi-employee conflicts | AUTO | cargo test -p scheduler_module --test github_env_e2e |
 | IT-SCH-11 | memory_sync_roundtrip_via_run_task | ModuleExecutor::execute | DoWhiz_service/scheduler_module/tests/memory_e2e.rs | Memory sync roundtrip | Large file sets | AUTO | cargo test -p scheduler_module --test memory_e2e |
@@ -194,6 +202,7 @@ Note: ingestion-queue tests use Postgres by default; set `SUPABASE_DB_URL` (or `
 | IT-SCH-25 | scheduler_run_task_injects_employee_prefixed_x402_env_from_dotenv | scheduler run_task env bridge | DoWhiz_service/scheduler_module/tests/scheduler_x402_env_e2e.rs | Employee-prefixed x402 env precedence in scheduler path | Real payment backend | AUTO | cargo test -p scheduler_module --test scheduler_x402_env_e2e |
 | IT-SCH-26 | send_reply_slack_includes_thread_ts_when_present | SendReplyTask outbound | DoWhiz_service/scheduler_module/tests/send_reply_outbound_e2e.rs | Slack thread reply wiring (`thread_ts`) | Real Slack API | AUTO | cargo test -p scheduler_module --test send_reply_outbound_e2e |
 | IT-SCH-27 | send_reply_discord_uploads_attachments_and_includes_blob_links | SendReplyTask outbound | DoWhiz_service/scheduler_module/tests/send_reply_outbound_e2e.rs | Discord outbound with attachment upload + blob URL sidecar | Real Discord/Azure APIs | AUTO | cargo test -p scheduler_module --test send_reply_outbound_e2e |
+| IT-SCH-28 | inbound_email_falls_back_to_text_when_html_is_removed | service/email.rs::process_inbound_payload | DoWhiz_service/scheduler_module/tests/email_html_e2e_2.rs | Falls back to escaped plain text when sanitized HTML becomes empty | MIME/encoding variants | AUTO | cargo test -p scheduler_module --test email_html_e2e_2 |
 | LIVE-SCH-01 | google_docs_cli_e2e_list_documents | google-docs CLI | DoWhiz_service/scheduler_module/tests/google_docs_cli_e2e.rs | Real docs list | Rate limits | LIVE | GOOGLE_DOCS_CLI_E2E=1 + creds |
 | LIVE-SCH-02 | google_docs_cli_e2e_read_document | google-docs CLI | DoWhiz_service/scheduler_module/tests/google_docs_cli_e2e.rs | Real doc read | Permission issues | LIVE | GOOGLE_DOCS_CLI_E2E=1 + doc id |
 | LIVE-SCH-03 | google_docs_cli_e2e_list_comments | google-docs CLI | DoWhiz_service/scheduler_module/tests/google_docs_cli_e2e.rs | Real comments list | Pagination | LIVE | GOOGLE_DOCS_CLI_E2E=1 + doc id |
@@ -210,6 +219,13 @@ Note: ingestion-queue tests use Postgres by default; set `SUPABASE_DB_URL` (or `
 | LIVE-SCH-14 | email_verification_e2e_token_and_linking | account email verification flows | DoWhiz_service/scheduler_module/tests/email_verification_e2e.rs | Token creation/replace/consume, identifier linking/unlinking | Real SMTP delivery | LIVE | SUPABASE_DB_URL + TEST_ACCOUNT_ID + cargo test -p scheduler_module --test email_verification_e2e |
 | MAN-SCH-01 | google_workspace_cli_smoke | Google Workspace CLI (Docs/Sheets/Slides) | DoWhiz_service/scheduler_module/tests/google_workspace_cli_test.sh | CLI list/read/comment flows | Full ingestion pipeline | MANUAL | GOOGLE_CLIENT_ID/SECRET + GOOGLE_REFRESH_TOKEN (or GOOGLE_ACCESS_TOKEN) + ./scheduler_module/tests/google_workspace_cli_test.sh |
 | MAN-SCH-02 | google_workspace_comment_workflow | Google Workspace comment E2E | DoWhiz_service/scheduler_module/tests/google_workspace_e2e_test.sh | Comment discovery + reply workflows | Gateway routing + queue handling | MANUAL | GOOGLE_CLIENT_ID/SECRET + GOOGLE_REFRESH_TOKEN (or GOOGLE_ACCESS_TOKEN) + shared Docs/Sheets/Slides + ./scheduler_module/tests/google_workspace_e2e_test.sh |
+
+## Operational Script Tests (Manual)
+| ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
+|---|---|---|---|---|---|---|---|
+| MAN-OPS-01 | auth_api_endpoints_roundtrip | Auth HTTP endpoints | DoWhiz_service/scripts/test_auth_api.sh | signup/account/link/verify/unlink/delete flow with HTTP status assertions | OTP/email delivery outside test code | MANUAL | `SERVICE_URL=... TEST_EMAIL=... TEST_PASSWORD=... ./scripts/test_auth_api.sh` |
+| MAN-OPS-02 | auth_link_only_persists_identifier | Auth HTTP endpoints | DoWhiz_service/scripts/test_auth_link_only.sh | link + verify flow while keeping linked identifier for DB inspection | unlink/delete flows | MANUAL | `SERVICE_URL=... TEST_EMAIL=... TEST_PASSWORD=... ./scripts/test_auth_link_only.sh` |
+| MAN-OPS-03 | blob_store_roundtrip_script | Azure Blob CLI path | DoWhiz_service/scripts/test_blob_store.sh | upload/download/list with byte-for-byte roundtrip verification | Service-side lifecycle policies | MANUAL | `AZURE_STORAGE_CONNECTION_STRING=... AZURE_STORAGE_CONTAINER=... ./scripts/test_blob_store.sh` |
 
 ## Integration/E2E: send_emails_module
 | ID | Test | Target (file::function/module) | Test File | Verifies | Does Not Verify | Status | Run/Env |
@@ -229,7 +245,7 @@ Note: ingestion-queue tests use Postgres by default; set `SUPABASE_DB_URL` (or `
 | GAP-03 | P0 | Outbound failure retry for Slack/Discord/SMS | outbound adapters + retry logic | Only success mocks covered | PLANNED | Return 5xx from mock, check retries |
 | GAP-04 | P0 | Non-email channels thread cancel/latest-epoch | cancel_pending_thread_tasks for non-email | Only email thread scenario covered | PLANNED | Manual multi-message per channel |
 | GAP-05 | P0 | Ingestion queue concurrency claim | ingestion_queue::claim_next | No multi-worker race test | PLANNED | Parallel claims with threads |
-| GAP-06 | P1 | HTML sanitizer complex cases | service/email.rs::render_email_html | Only simple HTML cases | MANUAL | Feed complex HTML samples |
+| GAP-06 | P1 | HTML sanitizer client-specific rendering edge cases | service/email.rs::render_email_html | Complex cleanup is automated, but Outlook/Gmail rendering compatibility still lacks coverage | MANUAL | Validate output snapshots against real Outlook/Gmail samples |
 | GAP-07 | P1 | Large attachment and size cap behavior | past_emails::hydrate_past_emails | No max size behavior test | MANUAL | Create large attachment samples |
 | GAP-08 | P1 | Router HTTP failure handling | message_router::classify | No network failure test | MANUAL | Simulate OpenAI down |
 | GAP-09 | P1 | SlackStore env fallback | slack_store::get_installation_or_env | Not tested | PLANNED | Set env + call fallback path |
