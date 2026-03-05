@@ -168,6 +168,7 @@ impl MongoSchedulerStore {
 
     pub(crate) fn record_execution_finish(
         &self,
+        task_id: Uuid,
         execution_id: i64,
         finished_at: chrono::DateTime<Utc>,
         status: &str,
@@ -178,6 +179,7 @@ impl MongoSchedulerStore {
                 doc! {
                     "owner_scope.kind": &self.owner_kind,
                     "owner_scope.id": &self.owner_id,
+                    "task_id": task_id.to_string(),
                     "execution_id": execution_id,
                 },
                 doc! {
