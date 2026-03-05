@@ -142,7 +142,10 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
 
     // Check for cross-channel routing override
     let (target_channel, target_recipients) = if let Some(routing) = load_reply_routing(&task.workspace_dir) {
-        if let Some(channel) = parse_channel(&routing.channel) {
+        if routing.identifier.trim().is_empty() {
+            warn!("Empty identifier in reply_routing.json, falling back to inbound channel");
+            (task.channel.clone(), task.reply_to.clone())
+        } else if let Some(channel) = parse_channel(&routing.channel) {
             info!(
                 "Cross-channel routing: {} -> {:?} (identifier: {})",
                 task.channel, channel, routing.identifier
@@ -174,11 +177,21 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
 
     let html_path = task.workspace_dir.join(reply_filename);
     if !html_path.exists() {
-        warn!(
-            "auto reply missing {} in workspace {}",
-            reply_filename,
-            task.workspace_dir.display()
-        );
+        if task.channel != target_channel {
+            // Cross-channel routing was requested but codex likely wrote the wrong file format
+            warn!(
+                "Cross-channel routing to {:?} requested but {} not found in {} (codex may have written wrong format)",
+                target_channel,
+                reply_filename,
+                task.workspace_dir.display()
+            );
+        } else {
+            warn!(
+                "auto reply missing {} in workspace {}",
+                reply_filename,
+                task.workspace_dir.display()
+            );
+        }
         return Ok(false);
     }
     let attachments_dir = task.workspace_dir.join(attachments_dirname);
