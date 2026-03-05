@@ -158,7 +158,6 @@ Rules:
 }
 
 fn build_user_identities_section(identities: &UserIdentities) -> String {
-    // Only show if user has linked channels
     let has_any = identities.account_id.is_some()
         || !identities.emails.is_empty()
         || !identities.slack_user_ids.is_empty()
@@ -167,65 +166,69 @@ fn build_user_identities_section(identities: &UserIdentities) -> String {
         || !identities.telegram_user_ids.is_empty();
 
     if !has_any {
-        return String::new();
+        return "Cross-channel routing: Not available (user has no linked DoWhiz account). \
+If the user requests a reply on a different channel, politely explain they need to link \
+their accounts at dowhiz.com first.\n".to_string();
     }
 
-    let mut lines = vec!["Cross-channel routing (user's linked channels):".to_string()];
-
-    if let Some(account_id) = &identities.account_id {
-        lines.push(format!("- DoWhiz Account ID: {}", account_id));
+    let mut channels = Vec::new();
+    if let Some(id) = &identities.account_id {
+        channels.push(format!("- DoWhiz Account ID: {}", id));
     }
     if !identities.emails.is_empty() {
-        lines.push(format!("- Email: {}", identities.emails.join(", ")));
+        channels.push(format!("- Email: {}", identities.emails.join(", ")));
     }
     if !identities.slack_user_ids.is_empty() {
-        lines.push(format!("- Slack User IDs: {}", identities.slack_user_ids.join(", ")));
+        channels.push(format!("- Slack User IDs: {}", identities.slack_user_ids.join(", ")));
     }
     if !identities.discord_user_ids.is_empty() {
-        lines.push(format!("- Discord User IDs: {}", identities.discord_user_ids.join(", ")));
+        channels.push(format!("- Discord User IDs: {}", identities.discord_user_ids.join(", ")));
     }
     if !identities.phone_numbers.is_empty() {
-        lines.push(format!("- Phone Numbers: {}", identities.phone_numbers.join(", ")));
+        channels.push(format!("- Phone Numbers: {}", identities.phone_numbers.join(", ")));
     }
     if !identities.telegram_user_ids.is_empty() {
-        lines.push(format!("- Telegram User IDs: {}", identities.telegram_user_ids.join(", ")));
+        channels.push(format!("- Telegram User IDs: {}", identities.telegram_user_ids.join(", ")));
     }
 
-    lines.push(String::new());
-    lines.push("Cross-channel Reply Routing:".to_string());
-    lines.push("If the user requests a reply on a different channel than the inbound channel,".to_string());
-    lines.push("write a `reply_routing.json` file in the workspace root to route the reply.".to_string());
-    lines.push("If no routing file is written, the reply goes to the original inbound channel.".to_string());
-    lines.push(String::new());
-    lines.push("reply_routing.json schema:".to_string());
-    lines.push("```json".to_string());
-    lines.push(r#"{
+    format!(
+        r#"Cross-channel routing (user's linked channels):
+{channels}
+
+Cross-channel Reply Routing:
+If the user requests a reply on a different channel than the inbound channel,
+write a `reply_routing.json` file in the workspace root to route the reply.
+If no routing file is written, the reply goes to the original inbound channel.
+
+reply_routing.json schema:
+```json
+{{
   "channel": "email" | "slack" | "discord" | "telegram" | "sms" | "whatsapp" | "bluebubbles",
   "identifier": "<target identifier for the channel>"
-}"#.to_string());
-    lines.push("```".to_string());
-    lines.push(String::new());
-    lines.push("Identifier format per channel:".to_string());
-    lines.push("- email: email address (e.g., \"user@example.com\")".to_string());
-    lines.push("- slack: Slack user ID (e.g., \"U1234567890\")".to_string());
-    lines.push("- discord: Discord user ID (e.g., \"123456789012345678\")".to_string());
-    lines.push("- telegram: Telegram user ID (e.g., \"123456789\")".to_string());
-    lines.push("- sms/whatsapp/bluebubbles: phone number (e.g., \"+15551234567\")".to_string());
-    lines.push(String::new());
-    lines.push("IMPORTANT: When using cross-channel routing, write the reply in the TARGET channel's format:".to_string());
-    lines.push("- email target: reply_email_draft.html (HTML), attachments in reply_email_attachments/".to_string());
-    lines.push("- slack target: reply_message.txt (Slack mrkdwn: *bold*, _italic_, `code`)".to_string());
-    lines.push("- discord target: reply_message.txt (Discord markdown: **bold**, *italic*, `code`)".to_string());
-    lines.push("- telegram target: reply_message.txt (MarkdownV2)".to_string());
-    lines.push("- sms/whatsapp/bluebubbles target: reply_message.txt (plain text)".to_string());
-    lines.push("- Attachments for non-email channels go in reply_attachments/".to_string());
-    lines.push(String::new());
-    lines.push("Example: Inbound is email, user says \"reply to my Discord instead\"".to_string());
-    lines.push("1. Write reply_routing.json: {\"channel\": \"discord\", \"identifier\": \"123456789012345678\"}".to_string());
-    lines.push("2. Write reply_message.txt (NOT reply_email_draft.html) with Discord markdown".to_string());
-    lines.push(String::new());
+}}
+```
 
-    lines.join("\n")
+Identifier format per channel:
+- email: email address (e.g., "user@example.com")
+- slack: Slack user ID (e.g., "U1234567890")
+- discord: Discord user ID (e.g., "123456789012345678")
+- telegram: Telegram user ID (e.g., "123456789")
+- sms/whatsapp/bluebubbles: phone number (e.g., "+15551234567")
+
+IMPORTANT: When using cross-channel routing, write the reply in the TARGET channel's format:
+- email target: reply_email_draft.html (HTML), attachments in reply_email_attachments/
+- slack target: reply_message.txt (Slack mrkdwn: *bold*, _italic_, `code`)
+- discord target: reply_message.txt (Discord markdown: **bold**, *italic*, `code`)
+- telegram target: reply_message.txt (MarkdownV2)
+- sms/whatsapp/bluebubbles target: reply_message.txt (plain text)
+- Attachments for non-email channels go in reply_attachments/
+
+Example: Inbound is email, user says "reply to my Discord instead"
+1. Write reply_routing.json: {{"channel": "discord", "identifier": "123456789012345678"}}
+2. Write reply_message.txt (NOT reply_email_draft.html) with Discord markdown
+"#,
+        channels = channels.join("\n")
+    )
 }
 
 fn build_github_coauthor_section(workspace_dir: &Path, input_email_dir: &Path) -> String {
@@ -711,10 +714,11 @@ mod tests {
     }
 
     #[test]
-    fn build_user_identities_section_empty_for_default() {
+    fn build_user_identities_section_shows_not_available_for_default() {
         let identities = UserIdentities::default();
         let section = build_user_identities_section(&identities);
-        assert!(section.is_empty());
+        assert!(section.contains("Not available"));
+        assert!(section.contains("no linked DoWhiz account"));
     }
 
     #[test]
