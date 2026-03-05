@@ -71,9 +71,9 @@ Key scripts:
 | Script | Purpose |
 |---|---|
 | `scripts/run_gateway_local.sh` | Start `inbound_gateway` |
-| `scripts/run_employee.sh` | Start `rust_service` for one employee (optional ngrok/hook) |
-| `scripts/start_all.sh` | Convenience local stack bootstrap (gateway + worker + ngrok + hook) |
-| `scripts/run_e2e.sh` | Live email E2E harness |
+| `scripts/run_employee.sh` | Start `rust_service` for one employee (uses configured public hook URL; ngrok optional for local only) |
+| `scripts/start_all.sh` | Local-only stack bootstrap (gateway + worker + ngrok + hook) |
+| `scripts/run_e2e.sh` | Live email E2E harness (uses `POSTMARK_TEST_HOOK_URL`/`POSTMARK_INBOUND_HOOK_URL` when available) |
 | `scripts/ensure_aci_share_mount.sh` | Validate/mount Azure Files for ACI backend |
 
 ## 3) Config Files
@@ -255,6 +255,9 @@ Runtime env policy:
 Expected config selections:
 - staging: `GATEWAY_CONFIG_PATH=gateway.staging.toml`, `EMPLOYEE_CONFIG_PATH=employee.staging.toml`
 - production: `GATEWAY_CONFIG_PATH=gateway.toml`, `EMPLOYEE_CONFIG_PATH=employee.toml`
+- staging expected worker identity: `boiled_egg`
+- production expected worker identity: `little_bear`
+- on staging/production VMs, use existing public webhook endpoint (`POSTMARK_INBOUND_HOOK_URL`) and do not run ngrok
 
 Use these runbooks:
 - `DoWhiz_service/OPERATIONS.md`
@@ -286,6 +289,8 @@ Full email E2E helper script:
 ```bash
 ./DoWhiz_service/scripts/run_e2e.sh
 ```
+
+On staging/production, prefer configured public hook URL via `POSTMARK_TEST_HOOK_URL` or `POSTMARK_INBOUND_HOOK_URL` (or pass `--public-url`) and keep ngrok disabled.
 
 Manual live run example:
 
