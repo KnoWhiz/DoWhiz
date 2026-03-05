@@ -165,203 +165,109 @@ jobs:
             echo "mongo_healthy=skipped" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check Legacy DB Remnants (${{ matrix.env }})
+      - name: Check Azure ACI Containers (${{ matrix.env }})
         if: steps.should_run.outputs.run == 'true'
-        id: legacy_db_remnants
+        id: aci_containers
         run: |
-          echo "## [${{ matrix.env }}] Legacy DB Remnants Check" >> $GITHUB_STEP_SUMMARY
+          echo "## [${{ matrix.env }}] Azure ACI Container Status" >> $GITHUB_STEP_SUMMARY
 
-          LEGACY_DB_CHECK=$(ssh -o ConnectTimeout=10 ${{ secrets[matrix.vm_user_secret] }}@${{ secrets[matrix.vm_ip_secret] }} << 'EOF'
-            STATE_DIR="/home/azureuser/server/.dowhiz/DoWhiz/run_task/little_bear/state"
-            USERS_DIR="/home/azureuser/server/.dowhiz/DoWhiz/run_task/little_bear/users"
-            ENV_FILE="/home/azureuser/server/DoWhiz/DoWhiz_service/.env"
-
-            STORAGE_BACKEND=$(grep -E "^STORAGE_BACKEND=" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "not_set")
-            echo "### Configuration"
-            echo "STORAGE_BACKEND=$STORAGE_BACKEND"
-
-            if [[ "$STORAGE_BACKEND" != "mongo" && "$STORAGE_BACKEND" != "mongodb" ]]; then
-              echo "WARNING: STORAGE_BACKEND is not set to 'mongo' - Legacy DB fallback may be active"
-              echo "LEGACY_DB_FALLBACK_RISK"
-            fi
-
-            echo ""
-            echo "### Legacy DB Files in State Directory"
-            EXPECTED_DBS="users.db task_index.db slack.db ingestion.db"
-
-            if [[ -d "$STATE_DIR" ]]; then
-              echo "| File | Size | Status |"
-              echo "|------|------|--------|"
-
-              for db in "$STATE_DIR"/*.db; do
-                [[ -e "$db" ]] || continue
-                BASENAME=$(basename "$db")
-                SIZE=$(stat -c%s "$db" 2>/dev/null || echo "0")
-
-                if echo "$EXPECTED_DBS" | grep -qw "$BASENAME"; then
-                  if [[ "$SIZE" -eq 0 ]]; then
-                    echo "| $BASENAME | ${SIZE}B | EXPECTED but CORRUPTED (zero-byte) |"
-                  else
-                    echo "| $BASENAME | ${SIZE}B | EXPECTED (legacy) |"
-                  fi
-                else
-                  echo "| $BASENAME | ${SIZE}B | UNEXPECTED - should not be Legacy DB |"
-                  echo "UNEXPECTED_LEGACY_DB_FILE"
-                fi
-              done
-
-              if ls "$STATE_DIR"/*.db 1>/dev/null 2>&1; then
-                echo "LEGACY_DB_FILES_EXIST"
-              else
-                echo "No Legacy DB files found"
-              fi
-            else
-              echo "State directory not found"
-            fi
-
-            echo ""
-            echo "### Stale Journal/WAL Files"
-            JOURNALS=$(find "$STATE_DIR" -maxdepth 1 \( -name "*.db-journal" -o -name "*.db-wal" -o -name "*.db-shm" \) 2>/dev/null)
-            if [[ -n "$JOURNALS" ]]; then
-              echo "STALE_JOURNALS_FOUND"
-              ls -la $JOURNALS 2>/dev/null
-            else
-              echo "No stale journal files"
-            fi
-
-            echo ""
-            echo "### CIFS Lock Status"
-            if mount | grep -q "dowhiz-run-task"; then
-              echo "CIFS mount: active"
-
-              LOCK_PROCS=$(lsof +D "$STATE_DIR" 2>/dev/null | grep -E "\.db" | head -10 || echo "")
-              if [[ -n "$LOCK_PROCS" ]]; then
-                echo "Processes holding DB file locks:"
-                echo "$LOCK_PROCS"
-                echo "CIFS_LOCKS_HELD"
-              else
-                echo "No processes holding DB locks"
-              fi
-
-              CIFS_LOCKS=$(grep -i "cifs" /proc/locks 2>/dev/null | head -5 || echo "")
-              if [[ -n "$CIFS_LOCKS" ]]; then
-                echo "Kernel CIFS locks detected:"
-                echo "$CIFS_LOCKS"
-                echo "CIFS_KERNEL_LOCKS"
-              else
-                echo "No kernel CIFS locks"
-              fi
-            else
-              echo "CIFS mount: not active (good - using MongoDB)"
-            fi
-
-            echo ""
-            echo "### Recent Legacy DB Errors in Logs"
-            if [[ -f ~/.nvm/nvm.sh ]]; then
-              source ~/.nvm/nvm.sh 2>/dev/null
-              LEGACY_DB_ERRORS=$(pm2 logs --nostream --lines 50 2>&1 | grep -i "legacy_db\|database is locked" | tail -5)
-              if [[ -n "$LEGACY_DB_ERRORS" ]]; then
-                echo "Recent Legacy DB-related errors:"
-                echo "$LEGACY_DB_ERRORS"
-                echo "LEGACY_DB_ERRORS_IN_LOGS"
-              else
-                echo "No recent Legacy DB errors"
-              fi
-            fi
-          EOF
-          )
-
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "$LEGACY_DB_CHECK" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-
-          if [[ "$LEGACY_DB_CHECK" == *"LEGACY_DB_ERRORS_IN_LOGS"* ]]; then
-            echo "::error::[${{ matrix.env }}] Legacy DB errors found in recent logs"
-            echo "legacy_db_status=errors" >> $GITHUB_OUTPUT
-          elif [[ "$LEGACY_DB_CHECK" == *"CIFS_LOCKS_HELD"* ]]; then
-            echo "::warning::[${{ matrix.env }}] CIFS locks held on Legacy DB files"
-            echo "legacy_db_status=cifs_locks" >> $GITHUB_OUTPUT
-          elif [[ "$LEGACY_DB_CHECK" == *"STALE_JOURNALS_FOUND"* ]]; then
-            echo "::warning::[${{ matrix.env }}] Stale Legacy DB journal files found"
-            echo "legacy_db_status=stale_journals" >> $GITHUB_OUTPUT
-          elif [[ "$LEGACY_DB_CHECK" == *"UNEXPECTED_LEGACY_DB_FILE"* ]]; then
-            echo "::warning::[${{ matrix.env }}] Unexpected Legacy DB file found"
-            echo "legacy_db_status=unexpected_file" >> $GITHUB_OUTPUT
-          elif [[ "$LEGACY_DB_CHECK" == *"LEGACY_DB_FALLBACK_RISK"* ]]; then
-            echo "::warning::[${{ matrix.env }}] STORAGE_BACKEND not set to mongo"
-            echo "legacy_db_status=fallback_risk" >> $GITHUB_OUTPUT
-          else
-            echo "legacy_db_status=ok" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Check User Tasks DB Corruption (${{ matrix.env }})
-        if: steps.should_run.outputs.run == 'true'
-        id: tasks_corruption
-        run: |
-          echo "## [${{ matrix.env }}] Per-User Tasks DB Corruption Check" >> $GITHUB_STEP_SUMMARY
-
-          CORRUPTION_CHECK=$(ssh -o ConnectTimeout=30 ${{ secrets[matrix.vm_user_secret] }}@${{ secrets[matrix.vm_ip_secret] }} << 'EOF'
-            USERS_DIR="/home/azureuser/server/.dowhiz/DoWhiz/run_task/little_bear/users"
-
-            if [[ ! -d "$USERS_DIR" ]]; then
-              echo "Users directory not found"
-              echo "USERS_DIR_MISSING"
+          ACI_CHECK=$(ssh -o ConnectTimeout=30 ${{ secrets[matrix.vm_user_secret] }}@${{ secrets[matrix.vm_ip_secret] }} << 'EOF'
+            # Check if az CLI is available
+            if ! command -v az &>/dev/null; then
+              echo "Azure CLI not installed"
+              echo "AZ_CLI_MISSING"
               exit 0
             fi
 
-            TOTAL=0
-            CORRUPTED=0
-            HEALTHY=0
-            MISSING=0
+            # Get resource group from env
+            ENV_FILE="/home/azureuser/server/DoWhiz/DoWhiz_service/.env"
+            RESOURCE_GROUP=$(grep -E "^AZURE_ACI_RESOURCE_GROUP=" "$ENV_FILE" 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "")
 
-            for user_dir in "$USERS_DIR"/*/; do
-              [[ -d "$user_dir" ]] || continue
-              TOTAL=$((TOTAL + 1))
-              tasks_db="$user_dir/state/tasks.db"
+            if [[ -z "$RESOURCE_GROUP" ]]; then
+              echo "AZURE_ACI_RESOURCE_GROUP not configured"
+              echo "ACI_NOT_CONFIGURED"
+              exit 0
+            fi
 
-              if [[ -f "$tasks_db" ]]; then
-                size=$(stat -c%s "$tasks_db" 2>/dev/null || echo "0")
-                if [[ "$size" -eq 0 ]]; then
-                  CORRUPTED=$((CORRUPTED + 1))
-                else
-                  HEALTHY=$((HEALTHY + 1))
-                fi
-              else
-                MISSING=$((MISSING + 1))
-              fi
-            done
+            echo "Resource Group: $RESOURCE_GROUP"
+            echo ""
+
+            # List all container groups
+            CONTAINERS=$(az container list --resource-group "$RESOURCE_GROUP" --output json 2>/dev/null || echo "[]")
+
+            TOTAL=$(echo "$CONTAINERS" | jq 'length')
+            RUNNING=$(echo "$CONTAINERS" | jq '[.[] | select(.instanceView.state == "Running")] | length')
+            FAILED=$(echo "$CONTAINERS" | jq '[.[] | select(.instanceView.state == "Failed")] | length')
+            SUCCEEDED=$(echo "$CONTAINERS" | jq '[.[] | select(.instanceView.state == "Succeeded")] | length')
+            OTHER=$(echo "$CONTAINERS" | jq "[.[] | select(.instanceView.state != \"Running\" and .instanceView.state != \"Failed\" and .instanceView.state != \"Succeeded\")] | length")
 
             echo "| Status | Count |"
             echo "|--------|-------|"
-            echo "| Total users | $TOTAL |"
-            echo "| Healthy tasks.db | $HEALTHY |"
-            echo "| Corrupted (0 bytes) | $CORRUPTED |"
-            echo "| Missing tasks.db | $MISSING |"
+            echo "| Total containers | $TOTAL |"
+            echo "| Running | $RUNNING |"
+            echo "| Succeeded (completed) | $SUCCEEDED |"
+            echo "| Failed | $FAILED |"
+            echo "| Other | $OTHER |"
 
-            if [[ "$CORRUPTED" -gt 0 ]]; then
-              PERCENT=$((CORRUPTED * 100 / TOTAL))
-              echo ""
-              echo "Corruption rate: ${PERCENT}%"
-              echo "TASKS_DB_CORRUPTED:$CORRUPTED"
+            # Check for orphaned containers (older than 1 hour)
+            echo ""
+            echo "### Containers older than 1 hour"
+            ONE_HOUR_AGO=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1H +%Y-%m-%dT%H:%M:%SZ)
+            OLD_CONTAINERS=$(echo "$CONTAINERS" | jq --arg cutoff "$ONE_HOUR_AGO" '[.[] | select(.instanceView.state == "Running") | select(.containers[0].instanceView.currentState.startTime < $cutoff) | {name: .name, state: .instanceView.state, started: .containers[0].instanceView.currentState.startTime}]')
+            OLD_COUNT=$(echo "$OLD_CONTAINERS" | jq 'length')
+
+            if [[ "$OLD_COUNT" -gt 0 ]]; then
+              echo "$OLD_CONTAINERS" | jq -r '.[] | "- \(.name) (started: \(.started))"'
+              echo "ORPHANED_CONTAINERS:$OLD_COUNT"
             else
-              echo "TASKS_DB_HEALTHY"
+              echo "No orphaned containers found"
             fi
+
+            # List failed containers
+            if [[ "$FAILED" -gt 0 ]]; then
+              echo ""
+              echo "### Failed Containers"
+              echo "$CONTAINERS" | jq -r '.[] | select(.instanceView.state == "Failed") | "- \(.name): \(.containers[0].instanceView.currentState.detailStatus // "unknown error")"' | head -10
+              echo "FAILED_CONTAINERS:$FAILED"
+            fi
+
+            # Alert thresholds
+            if [[ "$FAILED" -gt 5 ]]; then
+              echo "ACI_CRITICAL_FAILURES"
+            elif [[ "$FAILED" -gt 0 ]]; then
+              echo "ACI_HAS_FAILURES"
+            fi
+
+            if [[ "$TOTAL" -gt 50 ]]; then
+              echo "ACI_HIGH_COUNT"
+            fi
+
+            echo "ACI_CHECK_COMPLETE"
           EOF
           )
 
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "$CORRUPTION_CHECK" >> $GITHUB_STEP_SUMMARY
+          echo "$ACI_CHECK" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
-          if [[ "$CORRUPTION_CHECK" == *"TASKS_DB_CORRUPTED"* ]]; then
-            CORRUPTED_COUNT=$(echo "$CORRUPTION_CHECK" | grep "TASKS_DB_CORRUPTED" | cut -d: -f2)
-            echo "::error::[${{ matrix.env }}] $CORRUPTED_COUNT users have corrupted tasks.db files"
-            echo "tasks_corruption=corrupted" >> $GITHUB_OUTPUT
-            echo "corrupted_count=$CORRUPTED_COUNT" >> $GITHUB_OUTPUT
-          elif [[ "$CORRUPTION_CHECK" == *"USERS_DIR_MISSING"* ]]; then
-            echo "tasks_corruption=missing_dir" >> $GITHUB_OUTPUT
+          if [[ "$ACI_CHECK" == *"ACI_CRITICAL_FAILURES"* ]]; then
+            FAILED_COUNT=$(echo "$ACI_CHECK" | grep "FAILED_CONTAINERS:" | cut -d: -f2)
+            echo "::error::[${{ matrix.env }}] $FAILED_COUNT ACI containers in Failed state"
+            echo "aci_status=critical" >> $GITHUB_OUTPUT
+          elif [[ "$ACI_CHECK" == *"ORPHANED_CONTAINERS"* ]]; then
+            ORPHAN_COUNT=$(echo "$ACI_CHECK" | grep "ORPHANED_CONTAINERS:" | cut -d: -f2)
+            echo "::warning::[${{ matrix.env }}] $ORPHAN_COUNT orphaned ACI containers (running > 1 hour)"
+            echo "aci_status=orphaned" >> $GITHUB_OUTPUT
+          elif [[ "$ACI_CHECK" == *"ACI_HAS_FAILURES"* ]]; then
+            echo "::warning::[${{ matrix.env }}] Some ACI containers in Failed state"
+            echo "aci_status=warning" >> $GITHUB_OUTPUT
+          elif [[ "$ACI_CHECK" == *"ACI_HIGH_COUNT"* ]]; then
+            echo "::warning::[${{ matrix.env }}] High number of ACI containers"
+            echo "aci_status=high_count" >> $GITHUB_OUTPUT
+          elif [[ "$ACI_CHECK" == *"AZ_CLI_MISSING"* ]] || [[ "$ACI_CHECK" == *"ACI_NOT_CONFIGURED"* ]]; then
+            echo "aci_status=skipped" >> $GITHUB_OUTPUT
           else
-            echo "tasks_corruption=healthy" >> $GITHUB_OUTPUT
+            echo "aci_status=healthy" >> $GITHUB_OUTPUT
           fi
 
       - name: Check Disk Space (${{ matrix.env }})
@@ -396,8 +302,7 @@ jobs:
           echo "| Worker HTTP | ${{ steps.endpoints.outputs.worker_health }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Gateway HTTP | ${{ steps.endpoints.outputs.gateway_health }} |" >> $GITHUB_STEP_SUMMARY
           echo "| MongoDB | ${{ steps.mongodb.outputs.mongo_healthy }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Legacy DB Remnants | ${{ steps.legacy_db_remnants.outputs.legacy_db_status }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Tasks DB Corruption | ${{ steps.tasks_corruption.outputs.tasks_corruption }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Azure ACI | ${{ steps.aci_containers.outputs.aci_status }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Disk Space | ${{ steps.disk.outputs.disk_ok }} |" >> $GITHUB_STEP_SUMMARY
 
       - name: Fail if Critical Issues (${{ matrix.env }})
@@ -407,15 +312,13 @@ jobs:
             steps.endpoints.outputs.worker_health != '200' ||
             steps.endpoints.outputs.gateway_health != '200' ||
             steps.mongodb.outputs.mongo_healthy == 'false' ||
-            steps.legacy_db_remnants.outputs.legacy_db_status == 'errors' ||
-            steps.tasks_corruption.outputs.tasks_corruption == 'corrupted'
+            steps.aci_containers.outputs.aci_status == 'critical'
           )
         run: |
           echo "Critical health check failures detected on ${{ matrix.env }}!"
           echo "Worker Health: ${{ steps.endpoints.outputs.worker_health }}"
           echo "Gateway Health: ${{ steps.endpoints.outputs.gateway_health }}"
           echo "MongoDB: ${{ steps.mongodb.outputs.mongo_healthy }}"
-          echo "Legacy DB Status: ${{ steps.legacy_db_remnants.outputs.legacy_db_status }}"
-          echo "Tasks DB Corruption: ${{ steps.tasks_corruption.outputs.tasks_corruption }} (count: ${{ steps.tasks_corruption.outputs.corrupted_count }})"
+          echo "Azure ACI: ${{ steps.aci_containers.outputs.aci_status }}"
           exit 1
 
