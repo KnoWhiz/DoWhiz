@@ -181,10 +181,10 @@ jobs:
 
             # Get resource group from env
             ENV_FILE="/home/azureuser/server/DoWhiz/DoWhiz_service/.env"
-            RESOURCE_GROUP=$(grep -E "^AZURE_ACI_RESOURCE_GROUP=" "$ENV_FILE" 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "")
+            RESOURCE_GROUP=$(grep -E "^RUN_TASK_AZURE_ACI_RESOURCE_GROUP=" "$ENV_FILE" 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "")
 
             if [[ -z "$RESOURCE_GROUP" ]]; then
-              echo "AZURE_ACI_RESOURCE_GROUP not configured"
+              echo "RUN_TASK_AZURE_ACI_RESOURCE_GROUP not configured"
               echo "ACI_NOT_CONFIGURED"
               exit 0
             fi
