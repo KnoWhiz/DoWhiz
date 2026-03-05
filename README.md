@@ -1,4 +1,4 @@
-# DoWhiz - A lightweight Rust replica of OpenClaw🦞
+# DoWhiz - OpenClaw🦞, but scalable, accessible, and safe.
 
 <p align="center">
   <img src="website/public/assets/DoWhiz.jpeg" alt="Do icon" width="96" />
