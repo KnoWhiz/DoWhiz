@@ -28,7 +28,7 @@ use scheduler_module::raw_payload_store::{self, RawPayloadStoreError};
 use scheduler_module::user_store::extract_emails;
 
 use super::routes::{build_dedupe_key, normalize_email, normalize_phone_number, resolve_route};
-use super::state::{find_service_address, GatewayState, RouteDecision};
+use super::state::{find_service_address, GatewayState, RouteDecision, RouteKey, RouteTarget};
 use super::verify::{
     verify_bluebubbles, verify_postmark, verify_slack, verify_twilio, verify_whatsapp_subscription,
 };
@@ -135,7 +135,7 @@ pub(super) async fn ingest_slack(
 
     let event_id = wrapper.event_id.clone();
 
-    let Some(route) = resolve_route(Channel::Slack, api_app_id, &state) else {
+    let Some(route) = resolve_slack_route(api_app_id, &state) else {
         info!("gateway no route for slack api_app_id={}", api_app_id);
         return (StatusCode::OK, Json(json!({"status": "no_route"})));
     };
@@ -194,6 +194,85 @@ fn resolve_slack_bot_user_id_for_employee(employee_id: &str) -> Option<String> {
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
         })
+}
+
+fn route_decision_from_target(target: RouteTarget, state: &GatewayState) -> RouteDecision {
+    let tenant_id = target
+        .tenant_id
+        .clone()
+        .or_else(|| state.config.defaults.tenant_id.clone())
+        .unwrap_or_else(|| "default".to_string());
+    RouteDecision {
+        tenant_id,
+        employee_id: target.employee_id,
+    }
+}
+
+fn resolve_employee_id_by_slack_app_id(api_app_id: &str, state: &GatewayState) -> Option<String> {
+    let app_id = api_app_id.trim();
+    if app_id.is_empty() {
+        return None;
+    }
+
+    for employee in &state.employee_directory.employees {
+        let env_key = format!(
+            "{}_SLACK_APP_ID",
+            employee.id.to_uppercase().replace('-', "_")
+        );
+        let matched = std::env::var(&env_key)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .map(|value| value == app_id)
+            .unwrap_or(false);
+        if matched {
+            return Some(employee.id.clone());
+        }
+    }
+
+    let default_matched = std::env::var("SLACK_APP_ID")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(|value| value == app_id)
+        .unwrap_or(false);
+    if default_matched {
+        return state
+            .config
+            .defaults
+            .employee_id
+            .clone()
+            .or_else(|| state.employee_directory.default_employee_id.clone());
+    }
+
+    None
+}
+
+fn resolve_slack_route(api_app_id: &str, state: &GatewayState) -> Option<RouteDecision> {
+    // 1) Exact route in gateway config (api_app_id specific) has highest precedence.
+    let explicit_key = RouteKey {
+        channel: Channel::Slack,
+        key: api_app_id.to_string(),
+    };
+    if let Some(target) = state.config.routes.get(&explicit_key).cloned() {
+        return Some(route_decision_from_target(target, state));
+    }
+
+    // 2) Env-based app-id mapping (e.g. BOILED_EGG_SLACK_APP_ID) to avoid wildcard misrouting.
+    if let Some(employee_id) = resolve_employee_id_by_slack_app_id(api_app_id, state) {
+        return Some(RouteDecision {
+            tenant_id: state
+                .config
+                .defaults
+                .tenant_id
+                .clone()
+                .unwrap_or_else(|| "default".to_string()),
+            employee_id,
+        });
+    }
+
+    // 3) Fallback to existing wildcard/default route behavior.
+    resolve_route(Channel::Slack, api_app_id, state)
 }
 
 fn should_enqueue_slack_message(wrapper: &SlackEventWrapper, bot_user_id: Option<&str>) -> bool {
