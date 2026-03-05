@@ -42,13 +42,14 @@ impl SchedulerStore {
 
     pub(crate) fn record_execution_finish(
         &self,
+        task_id: Uuid,
         execution_id: i64,
         finished_at: DateTime<Utc>,
         status: &str,
         error_message: Option<&str>,
     ) -> Result<(), SchedulerError> {
         self.mongo
-            .record_execution_finish(execution_id, finished_at, status, error_message)
+            .record_execution_finish(task_id, execution_id, finished_at, status, error_message)
     }
 
     pub(crate) fn get_retry_count(&self, task_id: &str) -> Result<u32, SchedulerError> {
