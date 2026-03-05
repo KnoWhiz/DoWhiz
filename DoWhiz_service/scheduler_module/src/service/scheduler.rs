@@ -22,6 +22,8 @@ use super::BoxError;
 const DEFAULT_TASK_TIMEOUT_SECS: u64 = 600;
 /// Maximum number of retries before giving up
 const MAX_TASK_RETRIES: u32 = 3;
+/// Exponential backoff delays in seconds: 10s, 100s, 1000s
+const RETRY_BACKOFF_SECS: [u64; 3] = [10, 100, 1000];
 /// Watchdog check interval in seconds
 const WATCHDOG_INTERVAL_SECS: u64 = 30;
 /// Minimum interval between busy logs for the same task
@@ -483,48 +485,103 @@ fn execute_due_task(
     let executed = scheduler.execute_task_by_id(task_id);
 
     drop(thread_guard);
-    let executed = executed?;
-    if executed {
-        info!(
-            "scheduler task completed task_id={} user_id={} status=success",
-            task_ref.task_id, task_ref.user_id
-        );
 
-        // Reset retry count on successful execution
-        if let Err(err) = scheduler.reset_retry_count(&task_ref.task_id) {
-            warn!(
-                "Failed to reset retry count for task {}: {}",
-                task_ref.task_id, err
+    match executed {
+        Ok(true) => {
+            info!(
+                "scheduler task completed task_id={} user_id={} status=success",
+                task_ref.task_id, task_ref.user_id
             );
-        }
 
-        let refreshed_scheduler = Scheduler::load(&tasks_db_path, ModuleExecutor::default());
-        match refreshed_scheduler {
-            Ok(refreshed_scheduler) => {
-                index_store.sync_user_tasks(&task_ref.user_id, refreshed_scheduler.tasks())?;
-                let summary = summarize_tasks(refreshed_scheduler.tasks(), Utc::now());
-                log_task_snapshot(&task_ref.user_id, "after_execute", &summary);
-                Ok(())
+            // Reset retry count on successful execution
+            if let Err(err) = scheduler.reset_retry_count(&task_ref.task_id) {
+                warn!(
+                    "Failed to reset retry count for task {}: {}",
+                    task_ref.task_id, err
+                );
             }
-            Err(err) => {
-                if let Err(sync_err) =
-                    index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks())
-                {
-                    warn!(
-                        "scheduler sync failed after error task_id={} user_id={} error={}",
-                        task_ref.task_id, task_ref.user_id, sync_err
-                    );
-                } else {
-                    let summary = summarize_tasks(scheduler.tasks(), Utc::now());
-                    log_task_snapshot(&task_ref.user_id, "after_execute_error", &summary);
+
+            let refreshed_scheduler = Scheduler::load(&tasks_db_path, ModuleExecutor::default());
+            match refreshed_scheduler {
+                Ok(refreshed_scheduler) => {
+                    index_store.sync_user_tasks(&task_ref.user_id, refreshed_scheduler.tasks())?;
+                    let summary = summarize_tasks(refreshed_scheduler.tasks(), Utc::now());
+                    log_task_snapshot(&task_ref.user_id, "after_execute", &summary);
+                    Ok(())
                 }
-                Err(Box::new(err))
+                Err(err) => {
+                    if let Err(sync_err) =
+                        index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks())
+                    {
+                        warn!(
+                            "scheduler sync failed after error task_id={} user_id={} error={}",
+                            task_ref.task_id, task_ref.user_id, sync_err
+                        );
+                    } else {
+                        let summary = summarize_tasks(scheduler.tasks(), Utc::now());
+                        log_task_snapshot(&task_ref.user_id, "after_execute_error", &summary);
+                    }
+                    Err(Box::new(err))
+                }
             }
         }
-    } else {
-        // Task was not executed (disabled or not due), sync index to remove stale entries
-        index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks())?;
-        Ok(())
+        Ok(false) => {
+            // Task was not executed (disabled or not due), sync index to remove stale entries
+            index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks())?;
+            Ok(())
+        }
+        Err(err) => {
+            // Task execution failed - increment retry count
+            error!(
+                "scheduler task failed task_id={} user_id={} error={}",
+                task_ref.task_id, task_ref.user_id, err
+            );
+
+            match scheduler.increment_retry_count(&task_ref.task_id) {
+                Ok(new_count) => {
+                    if new_count >= MAX_TASK_RETRIES {
+                        warn!(
+                            "Task {} exceeded max retries ({}), disabling task",
+                            task_ref.task_id, MAX_TASK_RETRIES
+                        );
+                        if let Err(disable_err) = scheduler.disable_task_by_id(&task_ref.task_id) {
+                            error!(
+                                "Failed to disable task {} after max retries: {}",
+                                task_ref.task_id, disable_err
+                            );
+                        }
+                    } else {
+                        // Apply exponential backoff before next retry
+                        let backoff_idx = (new_count as usize).saturating_sub(1);
+                        let backoff_secs = RETRY_BACKOFF_SECS
+                            .get(backoff_idx)
+                            .copied()
+                            .unwrap_or(RETRY_BACKOFF_SECS[RETRY_BACKOFF_SECS.len() - 1]);
+                        info!(
+                            "Task {} failed, retry {}/{}, backing off for {}s",
+                            task_ref.task_id, new_count, MAX_TASK_RETRIES, backoff_secs
+                        );
+                        thread::sleep(Duration::from_secs(backoff_secs));
+                    }
+                }
+                Err(retry_err) => {
+                    warn!(
+                        "Failed to increment retry count for task {}: {}",
+                        task_ref.task_id, retry_err
+                    );
+                }
+            }
+
+            // Sync index to reflect any state changes
+            if let Err(sync_err) = index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks()) {
+                warn!(
+                    "scheduler sync failed after task failure task_id={} user_id={} error={}",
+                    task_ref.task_id, task_ref.user_id, sync_err
+                );
+            }
+
+            Err(Box::new(err))
+        }
     }
 }
 
@@ -813,6 +870,60 @@ mod tests {
             elapsed < Duration::from_secs(1),
             "stop_and_join took too long: {:?}",
             elapsed
+        );
+    }
+
+    #[test]
+    fn retry_backoff_constants_are_correct() {
+        // Verify backoff delays: 10s, 100s, 1000s
+        assert_eq!(RETRY_BACKOFF_SECS.len(), 3);
+        assert_eq!(RETRY_BACKOFF_SECS[0], 10);
+        assert_eq!(RETRY_BACKOFF_SECS[1], 100);
+        assert_eq!(RETRY_BACKOFF_SECS[2], 1000);
+    }
+
+    #[test]
+    fn retry_backoff_index_calculation() {
+        // Test that retry count maps to correct backoff index
+        // retry 1 -> index 0 -> 10s
+        // retry 2 -> index 1 -> 100s
+        // retry 3 -> index 2 -> 1000s
+        for retry_count in 1..=3u32 {
+            let backoff_idx = (retry_count as usize).saturating_sub(1);
+            let backoff_secs = RETRY_BACKOFF_SECS
+                .get(backoff_idx)
+                .copied()
+                .unwrap_or(RETRY_BACKOFF_SECS[RETRY_BACKOFF_SECS.len() - 1]);
+
+            match retry_count {
+                1 => assert_eq!(backoff_secs, 10, "retry 1 should backoff 10s"),
+                2 => assert_eq!(backoff_secs, 100, "retry 2 should backoff 100s"),
+                3 => assert_eq!(backoff_secs, 1000, "retry 3 should backoff 1000s"),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn retry_backoff_clamps_to_max_for_high_retry_counts() {
+        // If retry_count somehow exceeds array length, use last value
+        let retry_count = 10u32;
+        let backoff_idx = (retry_count as usize).saturating_sub(1);
+        let backoff_secs = RETRY_BACKOFF_SECS
+            .get(backoff_idx)
+            .copied()
+            .unwrap_or(RETRY_BACKOFF_SECS[RETRY_BACKOFF_SECS.len() - 1]);
+
+        assert_eq!(backoff_secs, 1000, "high retry counts should clamp to max backoff");
+    }
+
+    #[test]
+    fn max_task_retries_matches_backoff_array_length() {
+        // Ensure MAX_TASK_RETRIES aligns with RETRY_BACKOFF_SECS
+        assert_eq!(
+            MAX_TASK_RETRIES as usize,
+            RETRY_BACKOFF_SECS.len(),
+            "MAX_TASK_RETRIES should match number of backoff delays"
         );
     }
 }
