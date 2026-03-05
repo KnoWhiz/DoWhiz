@@ -213,8 +213,16 @@ pub async fn run_server(
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
         .await;
+    info!("shutdown signal received, stopping services...");
     ingestion_control.stop_and_join();
     scheduler_control.stop_and_join();
+
+    // Clean up any active ACI containers to prevent orphans
+    let cleaned = run_task_module::cleanup_all_aci_containers();
+    if cleaned > 0 {
+        info!("cleaned up {} orphaned ACI container(s) on shutdown", cleaned);
+    }
+
     serve_result?;
     Ok(())
 }

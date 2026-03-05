@@ -12,6 +12,7 @@ mod types;
 mod utils;
 mod workspace;
 
+pub use codex::cleanup_all_aci_containers;
 pub use core::run_task;
 pub use errors::RunTaskError;
 pub use types::{
