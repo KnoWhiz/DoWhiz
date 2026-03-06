@@ -5,7 +5,7 @@ use std::time::Duration;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::account_store::lookup_account_by_channel;
+use crate::account_store::{lookup_account_by_channel, lookup_account_by_identifier};
 use crate::channel::Channel;
 
 use super::actions::{apply_scheduler_actions, ingest_follow_up_tasks, schedule_auto_reply};
@@ -375,7 +375,6 @@ impl<E: TaskExecutor> Scheduler<E> {
 
 /// Sync task execution status to user's account-level tasks.db for Discord/Google Workspace channels.
 /// This allows users to see task status in their dashboard for linked accounts.
-/// Note: Slack is excluded because reply_to contains channel_id, not user_id - Slack uses legacy user storage.
 fn sync_task_status_to_user_storage(
     task_id: Uuid,
     task: &RunTaskTask,
@@ -383,32 +382,50 @@ fn sync_task_status_to_user_storage(
     status: &str,
     error_message: Option<&str>,
 ) {
-    // Only sync for channels that support unified accounts (Slack excluded - uses legacy user storage)
+    // Only sync for channels that support unified accounts
     if !matches!(
         task.channel,
-        Channel::Discord | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides
+        Channel::Discord
+            | Channel::Slack
+            | Channel::Email
+            | Channel::GoogleDocs
+            | Channel::GoogleSheets
+            | Channel::GoogleSlides
     ) {
         return;
     }
 
-    // Get the identifier from reply_to (Discord: user_id, Google*: email)
-    let identifier = match task.reply_to.first() {
-        Some(id) => id,
-        None => {
-            warn!(
-                "no reply_to identifier for task {} to sync to user storage",
-                task_id
-            );
-            return;
+    // Look up the account using requester info if available, otherwise fall back to channel/reply_to
+    let account_id = if let (Some(id_type), Some(id_value)) = (
+        task.requester_identifier_type.as_ref(),
+        task.requester_identifier.as_ref(),
+    ) {
+        // Use explicit requester info (handles GitHub notifications via email correctly)
+        match lookup_account_by_identifier(id_type, id_value) {
+            Some(id) => id,
+            None => {
+                // No linked account, nothing to sync
+                return;
+            }
         }
-    };
-
-    // Look up the account by channel identifier
-    let account_id = match lookup_account_by_channel(&task.channel, identifier) {
-        Some(id) => id,
-        None => {
-            // No linked account, nothing to sync
-            return;
+    } else {
+        // Fall back to channel-based lookup for backwards compatibility
+        let identifier = match task.reply_to.first() {
+            Some(id) => id,
+            None => {
+                warn!(
+                    "no reply_to identifier for task {} to sync to user storage",
+                    task_id
+                );
+                return;
+            }
+        };
+        match lookup_account_by_channel(&task.channel, identifier) {
+            Some(id) => id,
+            None => {
+                // No linked account, nothing to sync
+                return;
+            }
         }
     };
 

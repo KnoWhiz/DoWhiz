@@ -466,6 +466,8 @@ impl GoogleDocsPoller {
                     channel: Channel::GoogleDocs,
                     slack_team_id: None,
                     employee_id: Some(self.config.employee_id.clone()),
+                    requester_identifier_type: None,
+                    requester_identifier: None,
                 };
 
                 // Schedule the task

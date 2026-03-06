@@ -91,6 +91,8 @@ pub(crate) fn process_sms_message(
         channel: Channel::Sms,
         slack_team_id: None,
         employee_id: Some(config.employee_profile.id.clone()),
+        requester_identifier_type: None,
+        requester_identifier: None,
     };
 
     let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
