@@ -8,6 +8,7 @@ use base64::Engine;
 use chrono::Utc;
 use tracing::{error, info, warn};
 
+use crate::account_store::AccountStore;
 use crate::artifact_extractor::extract_artifacts_from_email;
 use crate::channel::Channel;
 use crate::github_inbound::{
@@ -36,6 +37,7 @@ pub fn process_inbound_payload(
     config: &ServiceConfig,
     user_store: &UserStore,
     index_store: &IndexStore,
+    account_store: &AccountStore,
     payload: &PostmarkInbound,
     raw_payload: &[u8],
 ) -> Result<(), BoxError> {
@@ -246,6 +248,9 @@ pub fn process_inbound_payload(
         employee_id: Some(config.employee_profile.id.clone()),
     };
 
+    // Clone run_task before consuming it, in case we need to write to account-level storage
+    let run_task_for_account = run_task.clone();
+
     let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())
         .map_err(|err| {
             io::Error::other(format!(
@@ -286,6 +291,54 @@ pub fn process_inbound_payload(
         workspace.display(),
         thread_state.epoch
     );
+
+    // If the sender has linked their email to an account, also write to account-level tasks
+    // to_list[0] contains the sender (may be "Name <email>" format), extract just the email
+    if let Some(sender_raw) = to_list.first() {
+        let sender_email = extract_emails(sender_raw).into_iter().next();
+        if let Some(email) = sender_email {
+            if let Ok(Some(account)) = account_store.get_account_by_identifier("email", &email) {
+            let account_tasks_dir = config.users_root.join(account.id.to_string()).join("state");
+            if let Err(err) = std::fs::create_dir_all(&account_tasks_dir) {
+                warn!(
+                    "failed to create account tasks dir for account {}: {}",
+                    account.id, err
+                );
+            } else {
+                let account_tasks_db_path = account_tasks_dir.join("tasks.db");
+                match Scheduler::load(&account_tasks_db_path, ModuleExecutor::default()) {
+                    Ok(mut account_scheduler) => {
+                        // Use the same task_id so we can update status at completion
+                        match account_scheduler.add_one_shot_in_with_id(
+                            task_id,
+                            Duration::from_secs(0),
+                            TaskKind::RunTask(run_task_for_account),
+                        ) {
+                            Ok(()) => {
+                                info!(
+                                    "also enqueued task to account-level storage account={} task_id={}",
+                                    account.id, task_id
+                                );
+                            }
+                            Err(err) => {
+                                warn!(
+                                    "failed to add task to account scheduler for account {}: {}",
+                                    account.id, err
+                                );
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        warn!(
+                            "failed to load account scheduler for account {}: {}",
+                            account.id, err
+                        );
+                    }
+                }
+            }
+        }
+        }
+    }
 
     Ok(())
 }
@@ -737,5 +790,32 @@ mod tests {
         })
         .expect("bytes");
         assert_eq!(bytes, b"blob-data");
+    }
+
+    #[test]
+    fn account_lookup_extracts_email_from_display_name_format() {
+        // Simulates what happens when to_list contains "Name <email>" format
+        let to_list = vec!["Alice Smith <alice@example.com>".to_string()];
+        let sender_raw = to_list.first().unwrap();
+        let sender_email = extract_emails(sender_raw).into_iter().next();
+        assert_eq!(sender_email, Some("alice@example.com".to_string()));
+    }
+
+    #[test]
+    fn account_lookup_extracts_email_from_bare_email() {
+        // When to_list contains just an email address
+        let to_list = vec!["alice@example.com".to_string()];
+        let sender_raw = to_list.first().unwrap();
+        let sender_email = extract_emails(sender_raw).into_iter().next();
+        assert_eq!(sender_email, Some("alice@example.com".to_string()));
+    }
+
+    #[test]
+    fn account_lookup_handles_quoted_display_name() {
+        // When to_list contains quoted display name with special chars
+        let to_list = vec!["\"Smith, Alice\" <alice@example.com>".to_string()];
+        let sender_raw = to_list.first().unwrap();
+        let sender_email = extract_emails(sender_raw).into_iter().next();
+        assert_eq!(sender_email, Some("alice@example.com".to_string()));
     }
 }

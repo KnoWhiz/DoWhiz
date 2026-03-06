@@ -387,6 +387,7 @@ fn sync_task_status_to_user_storage(
         task.channel,
         Channel::Discord
             | Channel::Slack
+            | Channel::Email
             | Channel::GoogleDocs
             | Channel::GoogleSheets
             | Channel::GoogleSlides
