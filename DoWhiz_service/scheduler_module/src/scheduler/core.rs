@@ -375,7 +375,6 @@ impl<E: TaskExecutor> Scheduler<E> {
 
 /// Sync task execution status to user's account-level tasks.db for Discord/Google Workspace channels.
 /// This allows users to see task status in their dashboard for linked accounts.
-/// Note: Slack is excluded because reply_to contains channel_id, not user_id - Slack uses legacy user storage.
 fn sync_task_status_to_user_storage(
     task_id: Uuid,
     task: &RunTaskTask,
@@ -383,10 +382,14 @@ fn sync_task_status_to_user_storage(
     status: &str,
     error_message: Option<&str>,
 ) {
-    // Only sync for channels that support unified accounts (Slack excluded - uses legacy user storage)
+    // Only sync for channels that support unified accounts
     if !matches!(
         task.channel,
-        Channel::Discord | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides
+        Channel::Discord
+            | Channel::Slack
+            | Channel::GoogleDocs
+            | Channel::GoogleSheets
+            | Channel::GoogleSlides
     ) {
         return;
     }
