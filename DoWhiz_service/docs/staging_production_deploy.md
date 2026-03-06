@@ -44,6 +44,12 @@ Raw payload download auth for Azure Blob can use any one of:
 - `AZURE_STORAGE_CONTAINER_INGEST` + `AZURE_STORAGE_SAS_TOKEN` + `AZURE_STORAGE_ACCOUNT`
 - `AZURE_STORAGE_CONNECTION_STRING_INGEST` (or `AZURE_STORAGE_CONNECTION_STRING`)
 
+Staging ingest isolation policy:
+- Use a staging-dedicated storage account for raw payload ingress.
+- Current staging account: `dwhzoliverstg26261234`
+- Current staging container: `ingestion-raw`
+- In `ENV_STAGING`, explicitly set `AZURE_STORAGE_ACCOUNT` and `AZURE_STORAGE_CONTAINER_SAS_URL` so staging does not fall back to shared/common storage credentials.
+
 ## 3) VM Deployment
 
 ### Staging (`dev`)
