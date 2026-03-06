@@ -623,6 +623,7 @@ fn run_task_rejects_absolute_input_dir() {
         channel: "email".to_string(),
         google_access_token: std::env::var("GOOGLE_ACCESS_TOKEN").ok(),
         has_unified_account: true,
+        user_identities: Default::default(),
     };
 
     let err = run_task(&request).unwrap_err();
