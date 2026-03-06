@@ -141,23 +141,23 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
     }
 
     // Check for cross-channel routing override
-    let (target_channel, target_recipients) = if let Some(routing) = load_reply_routing(&task.workspace_dir) {
+    let (target_channel, target_recipients, is_cross_channel) = if let Some(routing) = load_reply_routing(&task.workspace_dir) {
         if routing.identifier.trim().is_empty() {
             warn!("Empty identifier in reply_routing.json, falling back to inbound channel");
-            (task.channel.clone(), task.reply_to.clone())
+            (task.channel.clone(), task.reply_to.clone(), false)
         } else if let Some(channel) = parse_channel(&routing.channel) {
             info!(
                 "Cross-channel routing: {} -> {:?} (identifier: {})",
                 task.channel, channel, routing.identifier
             );
-            (channel, vec![routing.identifier])
+            (channel, vec![routing.identifier], true)
         } else {
             // Invalid channel in routing file, fall back to inbound
-            (task.channel.clone(), task.reply_to.clone())
+            (task.channel.clone(), task.reply_to.clone(), false)
         }
     } else {
         // No routing file, use inbound channel
-        (task.channel.clone(), task.reply_to.clone())
+        (task.channel.clone(), task.reply_to.clone(), false)
     };
 
     // Non-email channels use plain text reply_message.txt
@@ -198,6 +198,13 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
     let reply_context = load_reply_context(&task.workspace_dir);
     let reply_from = task.reply_from.clone().or(reply_context.from.clone());
 
+    // For cross-channel routing, don't pass inbound thread context to outbound channel
+    let (in_reply_to, references) = if is_cross_channel {
+        (None, None)
+    } else {
+        (reply_context.in_reply_to, reply_context.references)
+    };
+
     let send_task = SendReplyTask {
         channel: target_channel,
         subject: reply_context.subject,
@@ -207,8 +214,8 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         to: target_recipients,
         cc: Vec::new(),
         bcc: Vec::new(),
-        in_reply_to: reply_context.in_reply_to,
-        references: reply_context.references,
+        in_reply_to,
+        references,
         archive_root: task.archive_root.clone(),
         thread_epoch: task.thread_epoch,
         thread_state_path: task.thread_state_path.clone(),
