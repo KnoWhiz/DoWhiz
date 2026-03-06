@@ -7,7 +7,7 @@ default_employee_id = "little_bear"
 id = "little_bear"
 display_name = "Oliver"
 runner = "codex"
-model = "gpt-5.3-codex"
+model = "gpt-5.4"
 addresses = [
   "oliver@dowhiz.com",
   "little-bear@dowhiz.com",
@@ -36,7 +36,7 @@ skills_dir = "skills"
 id = "sticky_octopus"
 display_name = "Sticky-Octopus"
 runner = "codex"
-model = "gpt-5.3-codex"
+model = "gpt-5.4"
 addresses = ["devin@dowhiz.com", "sticky-octopus@dowhiz.com", "coder@dowhiz.com"]
 runtime_root = ".workspace/sticky_octopus"
 agents_path = "employees/sticky_octopus/AGENTS.md"
@@ -48,7 +48,7 @@ skills_dir = "skills"
 id = "boiled_egg"
 display_name = "Boiled-Egg"
 runner = "codex"
-model = "gpt-5.3-codex"
+model = "gpt-5.4"
 # First address is used as FROM for replies (must be verified in Postmark)
 # Inbound address is kept for routing but code uses first address for reply_from
 addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com", "c9051c2176b203ca4b6da98e0a790e15@inbound.postmarkapp.com"]
