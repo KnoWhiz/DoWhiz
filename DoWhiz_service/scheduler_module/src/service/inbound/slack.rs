@@ -142,6 +142,8 @@ pub(crate) fn process_slack_event(
         channel: Channel::Slack,
         slack_team_id: message.metadata.slack_team_id.clone(),
         employee_id: Some(config.employee_profile.id.clone()),
+        requester_identifier_type: None,
+        requester_identifier: None,
     };
 
     // Clone run_task before consuming it, in case we need to write to account-level storage

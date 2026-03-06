@@ -133,7 +133,7 @@ fn process_ingestion_envelope(
                 return Ok(());
             }
             let (payload, raw_payload) = resolve_email_payload(envelope)?;
-            process_inbound_payload(config, user_store, index_store, &payload, &raw_payload)
+            process_inbound_payload(config, user_store, index_store, account_store, &payload, &raw_payload)
         }
         Channel::Slack => {
             info!("processing slack envelope, trying quick response first");

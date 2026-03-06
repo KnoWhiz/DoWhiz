@@ -407,6 +407,8 @@ fn process_discord_message(
         channel: Channel::Discord,
         slack_team_id: None,
         employee_id: Some(config.employee_id.clone()),
+        requester_identifier_type: None,
+        requester_identifier: None,
     };
 
     // Schedule the task using user-based scheduler
