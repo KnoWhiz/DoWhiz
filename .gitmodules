@@ -7,3 +7,6 @@
 [submodule "external/zeroclaw"]
 	path = external/zeroclaw
 	url = https://github.com/KnoWhiz/zeroclaw
+[submodule "external/gepa"]
+	path = external/gepa
+	url = https://github.com/KnoWhiz/gepa
