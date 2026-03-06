@@ -129,17 +129,65 @@ impl DiscordOutboundAdapter {
     pub fn new(bot_token: String) -> Self {
         Self { bot_token }
     }
+
+    /// Create a DM channel with a user, returning the channel ID.
+    /// Discord API: POST /users/@me/channels
+    fn create_dm_channel(&self, user_id: &str) -> Result<u64, AdapterError> {
+        let api_base = env::var("DISCORD_API_BASE_URL")
+            .unwrap_or_else(|_| "https://discord.com/api/v10".to_string());
+        let url = format!("{}/users/@me/channels", api_base.trim_end_matches('/'));
+
+        let request = DiscordCreateDmRequest {
+            recipient_id: user_id.to_string(),
+        };
+
+        let client = reqwest::blocking::Client::new();
+        let response = client
+            .post(&url)
+            .header("Authorization", format!("Bot {}", self.bot_token))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .map_err(|e| AdapterError::SendError(format!("DM channel creation failed: {}", e)))?;
+
+        if response.status().is_success() {
+            let dm_response: DiscordDmChannelResponse = response
+                .json()
+                .map_err(|e| AdapterError::SendError(format!("Failed to parse DM response: {}", e)))?;
+            dm_response
+                .id
+                .parse()
+                .map_err(|_| AdapterError::SendError("Invalid DM channel ID".to_string()))
+        } else {
+            let error_text = response
+                .text()
+                .unwrap_or_else(|_| "unknown error".to_string());
+            Err(AdapterError::SendError(format!(
+                "DM channel creation failed: {}",
+                error_text
+            )))
+        }
+    }
 }
 
 impl OutboundAdapter for DiscordOutboundAdapter {
     fn send(&self, message: &OutboundMessage) -> Result<SendResult, AdapterError> {
-        let channel_id = message
-            .metadata
-            .discord_channel_id
-            .or_else(|| message.to.first().and_then(|s| s.parse().ok()))
-            .ok_or(AdapterError::ConfigError(
-                "no channel specified for Discord message".to_string(),
-            ))?;
+        // Resolve channel ID:
+        // 1. Use discord_channel_id from metadata if present
+        // 2. Try to[1] as channel_id (normal reply structure)
+        // 3. Try to[0] as user_id and create DM channel (cross-channel routing)
+        let channel_id = if let Some(id) = message.metadata.discord_channel_id {
+            id
+        } else if let Some(ch) = message.to.get(1).and_then(|s| s.parse().ok()) {
+            ch
+        } else if let Some(user_id) = message.to.first() {
+            // Cross-channel routing: to[0] is user_id, create DM channel
+            self.create_dm_channel(user_id)?
+        } else {
+            return Err(AdapterError::ConfigError(
+                "no channel or user specified for Discord message".to_string(),
+            ));
+        };
 
         let request = DiscordCreateMessageRequest {
             content: if message.text_body.is_empty() {
@@ -247,9 +295,22 @@ pub struct DiscordMessageResponse {
     pub channel_id: String,
 }
 
+/// Request body for creating a DM channel.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiscordCreateDmRequest {
+    pub recipient_id: String,
+}
+
+/// Response from Discord when creating a DM channel.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct DiscordDmChannelResponse {
+    pub id: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn bot_user_id_filtered() {
@@ -306,5 +367,120 @@ mod tests {
         let response: DiscordMessageResponse = serde_json::from_str(json).unwrap();
         assert_eq!(response.id, "123456789012345678");
         assert_eq!(response.channel_id, "987654321098765432");
+    }
+
+    #[test]
+    fn dm_channel_response_deserializes() {
+        let json = r#"{"id": "1234567890123456"}"#;
+        let response: DiscordDmChannelResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.id, "1234567890123456");
+    }
+
+    #[test]
+    fn create_dm_request_serializes() {
+        let request = DiscordCreateDmRequest {
+            recipient_id: "123456789".to_string(),
+        };
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("recipient_id"));
+        assert!(json.contains("123456789"));
+    }
+
+    #[test]
+    #[serial]
+    fn create_dm_channel_success() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/users/@me/channels")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"id": "9876543210987654"}"#)
+            .create();
+
+        env::set_var("DISCORD_API_BASE_URL", server.url());
+        let adapter = DiscordOutboundAdapter::new("test_token".to_string());
+        let result = adapter.create_dm_channel("123456789");
+
+        mock.assert();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 9876543210987654u64);
+
+        env::remove_var("DISCORD_API_BASE_URL");
+    }
+
+    #[test]
+    #[serial]
+    fn create_dm_channel_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/users/@me/channels")
+            .with_status(403)
+            .with_body(r#"{"message": "Missing Access"}"#)
+            .create();
+
+        env::set_var("DISCORD_API_BASE_URL", server.url());
+        let adapter = DiscordOutboundAdapter::new("test_token".to_string());
+        let result = adapter.create_dm_channel("123456789");
+
+        mock.assert();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("DM channel creation failed"));
+
+        env::remove_var("DISCORD_API_BASE_URL");
+    }
+
+    #[test]
+    #[serial]
+    fn send_with_cross_channel_creates_dm() {
+        use crate::channel::{Channel, ChannelMetadata, OutboundAdapter, OutboundMessage};
+
+        let mut server = mockito::Server::new();
+
+        // First: DM channel creation
+        let dm_mock = server
+            .mock("POST", "/users/@me/channels")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"id": "9876543210987654"}"#)
+            .create();
+
+        // Second: Message send to that channel
+        let msg_mock = server
+            .mock("POST", "/channels/9876543210987654/messages")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"id": "111222333", "timestamp": "2024-01-01T00:00:00Z", "channel_id": "9876543210987654"}"#)
+            .create();
+
+        env::set_var("DISCORD_API_BASE_URL", server.url());
+        let adapter = DiscordOutboundAdapter::new("test_token".to_string());
+
+        // Cross-channel: only user_id in to[0], no channel_id
+        let message = OutboundMessage {
+            channel: Channel::Discord,
+            from: None,
+            to: vec!["123456789".to_string()], // user_id only
+            cc: vec![],
+            bcc: vec![],
+            subject: String::new(),
+            text_body: "Hello from cross-channel!".to_string(),
+            html_body: String::new(),
+            html_path: None,
+            attachments_dir: None,
+            thread_id: None,
+            metadata: ChannelMetadata::default(), // no discord_channel_id
+        };
+
+        let result = adapter.send(&message);
+
+        dm_mock.assert();
+        msg_mock.assert();
+        assert!(result.is_ok());
+        let send_result = result.unwrap();
+        assert!(send_result.success);
+        assert_eq!(send_result.message_id, "111222333");
+
+        env::remove_var("DISCORD_API_BASE_URL");
     }
 }
