@@ -202,11 +202,69 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
     let (in_reply_to, references) = if is_cross_channel {
         (None, None)
     } else {
-        (reply_context.in_reply_to, reply_context.references)
+        (reply_context.in_reply_to.clone(), reply_context.references.clone())
     };
 
+    // If cross-channel routing, first send an acknowledgement on the inbound channel
+    if is_cross_channel {
+        // Determine ack file format based on INBOUND channel
+        let (ack_filename, ack_attachments_dirname) = match task.channel {
+            Channel::Slack
+            | Channel::Discord
+            | Channel::BlueBubbles
+            | Channel::Telegram
+            | Channel::WhatsApp
+            | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
+            Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
+                ("cross_channel_ack.html", "reply_email_attachments")
+            }
+        };
+
+        let ack_path = task.workspace_dir.join(ack_filename);
+        let ack_message = format!(
+            "The request was successfully completed! I've sent my response to you on {}.",
+            format_channel_name(&target_channel)
+        );
+
+        // For email, wrap in basic HTML
+        let ack_content = if ack_filename.ends_with(".html") {
+            format!("<html><body><p>{}</p></body></html>", ack_message)
+        } else {
+            ack_message
+        };
+
+        if let Err(e) = std::fs::write(&ack_path, &ack_content) {
+            warn!("Failed to write cross-channel acknowledgement file: {}", e);
+        } else {
+            // Schedule acknowledgement on inbound channel
+            let ack_task = SendReplyTask {
+                channel: task.channel.clone(),
+                subject: reply_context.subject.clone(),
+                html_path: ack_path,
+                attachments_dir: task.workspace_dir.join(ack_attachments_dirname),
+                from: reply_from.clone(),
+                to: task.reply_to.clone(),
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                in_reply_to: reply_context.in_reply_to.clone(),
+                references: reply_context.references.clone(),
+                archive_root: task.archive_root.clone(),
+                thread_epoch: task.thread_epoch,
+                thread_state_path: task.thread_state_path.clone(),
+                employee_id: task.employee_id.clone(),
+            };
+
+            let ack_task_id =
+                scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::SendReply(ack_task))?;
+            info!(
+                "scheduled cross-channel acknowledgement task {} on {:?}",
+                ack_task_id, task.channel
+            );
+        }
+    }
+
     let send_task = SendReplyTask {
-        channel: target_channel,
+        channel: target_channel.clone(),
         subject: reply_context.subject,
         html_path,
         attachments_dir,
@@ -228,9 +286,25 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         "scheduled auto reply task {} from {} via {:?}",
         task_id,
         task.workspace_dir.display(),
-        task.channel
+        target_channel
     );
     Ok(true)
+}
+
+/// Format channel name for user-friendly display in acknowledgement messages.
+fn format_channel_name(channel: &Channel) -> &'static str {
+    match channel {
+        Channel::Email => "Email",
+        Channel::Slack => "Slack",
+        Channel::Discord => "Discord",
+        Channel::Telegram => "Telegram",
+        Channel::Sms => "SMS",
+        Channel::WhatsApp => "WhatsApp",
+        Channel::BlueBubbles => "iMessage",
+        Channel::GoogleDocs => "Google Docs",
+        Channel::GoogleSheets => "Google Sheets",
+        Channel::GoogleSlides => "Google Slides",
+    }
 }
 
 pub(crate) fn schedule_send_email<E: TaskExecutor>(
@@ -620,5 +694,114 @@ mod tests {
 
         let routing = load_reply_routing(workspace);
         assert!(routing.is_none());
+    }
+
+    #[test]
+    fn format_channel_name_returns_friendly_names() {
+        assert_eq!(format_channel_name(&Channel::Email), "Email");
+        assert_eq!(format_channel_name(&Channel::Slack), "Slack");
+        assert_eq!(format_channel_name(&Channel::Discord), "Discord");
+        assert_eq!(format_channel_name(&Channel::Telegram), "Telegram");
+        assert_eq!(format_channel_name(&Channel::Sms), "SMS");
+        assert_eq!(format_channel_name(&Channel::WhatsApp), "WhatsApp");
+        assert_eq!(format_channel_name(&Channel::BlueBubbles), "iMessage");
+        assert_eq!(format_channel_name(&Channel::GoogleDocs), "Google Docs");
+        assert_eq!(format_channel_name(&Channel::GoogleSheets), "Google Sheets");
+        assert_eq!(format_channel_name(&Channel::GoogleSlides), "Google Slides");
+    }
+
+    #[test]
+    fn cross_channel_ack_file_format_for_slack_inbound() {
+        // For Slack/Discord inbound, ack should be plain text
+        let channel = Channel::Slack;
+        let (ack_filename, _) = match channel {
+            Channel::Slack
+            | Channel::Discord
+            | Channel::BlueBubbles
+            | Channel::Telegram
+            | Channel::WhatsApp
+            | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
+            Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
+                ("cross_channel_ack.html", "reply_email_attachments")
+            }
+        };
+        assert_eq!(ack_filename, "cross_channel_ack.txt");
+    }
+
+    #[test]
+    fn cross_channel_ack_file_format_for_email_inbound() {
+        // For Email inbound, ack should be HTML
+        let channel = Channel::Email;
+        let (ack_filename, _) = match channel {
+            Channel::Slack
+            | Channel::Discord
+            | Channel::BlueBubbles
+            | Channel::Telegram
+            | Channel::WhatsApp
+            | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
+            Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
+                ("cross_channel_ack.html", "reply_email_attachments")
+            }
+        };
+        assert_eq!(ack_filename, "cross_channel_ack.html");
+    }
+
+    #[test]
+    fn cross_channel_ack_content_plain_text() {
+        let target_channel = Channel::Discord;
+        let ack_filename = "cross_channel_ack.txt";
+        let ack_message = format!(
+            "The request has been successfully completed! I've sent my response to you on {}.",
+            format_channel_name(&target_channel)
+        );
+
+        let ack_content = if ack_filename.ends_with(".html") {
+            format!("<html><body><p>{}</p></body></html>", ack_message)
+        } else {
+            ack_message.clone()
+        };
+
+        assert_eq!(ack_content, "The request has been successfully completed! I've sent my response to you on Discord.");
+        assert!(!ack_content.contains("<html>"));
+    }
+
+    #[test]
+    fn cross_channel_ack_content_html() {
+        let target_channel = Channel::Slack;
+        let ack_filename = "cross_channel_ack.html";
+        let ack_message = format!(
+            "The request has been successfully completed! I've sent my response to you on {}.",
+            format_channel_name(&target_channel)
+        );
+
+        let ack_content = if ack_filename.ends_with(".html") {
+            format!("<html><body><p>{}</p></body></html>", ack_message)
+        } else {
+            ack_message
+        };
+
+        assert!(ack_content.contains("<html>"));
+        assert!(ack_content.contains("Slack"));
+    }
+
+    #[test]
+    fn cross_channel_ack_file_written_correctly() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        let target_channel = Channel::Discord;
+        let ack_filename = "cross_channel_ack.txt";
+        let ack_path = workspace.join(ack_filename);
+        let ack_message = format!(
+            "The request has been successfully completed! I've sent my response to you on {}.",
+            format_channel_name(&target_channel)
+        );
+
+        fs::write(&ack_path, &ack_message).expect("write ack file");
+
+        assert!(ack_path.exists());
+        let content = fs::read_to_string(&ack_path).expect("read ack file");
+        assert!(content.contains("Discord"));
+        assert!(content.contains("I've sent my response"));
     }
 }
