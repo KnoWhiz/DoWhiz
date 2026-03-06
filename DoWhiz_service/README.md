@@ -26,6 +26,7 @@ This service layer currently runs as:
 - Worker does **not** host inbound webhook routes; it consumes ingestion queue messages.
 - Both gateway and worker expose account/auth routes (`/auth/*`) and agent market routes.
 - Billing routes (`/billing/*`) are mounted on worker only when Stripe config exists.
+- Worker also exposes an internal metrics API route (`/api/internal/metrics`) for operational dashboarding.
 
 ### 1.2 End-to-end flow
 
@@ -188,6 +189,14 @@ Azure ACI execution path (required vars):
 - Twilio SMS: `TWILIO_*`
 - Google Workspace: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, refresh tokens, `GOOGLE_*_ENABLED`
 - Google Drive push: `GOOGLE_DRIVE_PUSH_ENABLED`, `GOOGLE_DRIVE_WEBHOOK_URL`
+
+### 4.6 Internal dashboard metrics API
+
+- Set `INTERNAL_DASHBOARD_API_KEY` to enable `/api/internal/metrics`.
+- Requests must send one of:
+  - header `x-internal-dashboard-key: <INTERNAL_DASHBOARD_API_KEY>`, or
+  - header `Authorization: Bearer <INTERNAL_DASHBOARD_API_KEY>`
+- If `INTERNAL_DASHBOARD_API_KEY` is not set, the route returns `503` (disabled).
 
 ## 5) Local Run Workflows
 

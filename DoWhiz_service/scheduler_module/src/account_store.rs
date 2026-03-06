@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use postgres_native_tls::MakeTlsConnector;
 use r2d2::{Pool, PooledConnection};
 use r2d2_postgres::PostgresConnectionManager;
+use serde::Serialize;
+use std::collections::BTreeMap;
 use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -12,6 +14,20 @@ use crate::env_alias::var_with_scale_oliver;
 
 type PgPool = Pool<PostgresConnectionManager<MakeTlsConnector>>;
 type PgConn = PooledConnection<PostgresConnectionManager<MakeTlsConnector>>;
+
+fn query_count_or_zero_on_missing_table(
+    conn: &mut PgConn,
+    query: &str,
+) -> Result<i64, AccountStoreError> {
+    match conn.query_one(query, &[]) {
+        Ok(row) => Ok(row.get(0)),
+        Err(err) if err.code() == Some(&postgres::error::SqlState::UNDEFINED_TABLE) => {
+            warn!("account_store metrics query skipped missing table: {}", query);
+            Ok(0)
+        }
+        Err(err) => Err(err.into()),
+    }
+}
 
 fn parse_bool_env(value: &str) -> bool {
     matches!(
@@ -66,6 +82,18 @@ pub struct AccountIdentifier {
     pub identifier: String,
     pub verified: bool,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AccountMetricsSnapshot {
+    pub accounts_total: i64,
+    pub identifiers_total: i64,
+    pub verified_identifiers_total: i64,
+    pub identifiers_by_type: BTreeMap<String, i64>,
+    pub purchased_hours_total: f64,
+    pub used_hours_total: f64,
+    pub payments_total: i64,
+    pub payments_last_24h: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -466,6 +494,80 @@ impl AccountStore {
             &[&tokens, &account_id],
         )?;
         Ok(())
+    }
+
+    /// Return global account metrics for internal dashboarding.
+    pub fn metrics_snapshot(&self) -> Result<AccountMetricsSnapshot, AccountStoreError> {
+        let mut conn = self.conn()?;
+
+        let accounts_total = query_count_or_zero_on_missing_table(
+            &mut conn,
+            "SELECT COUNT(*)::bigint FROM accounts",
+        )?;
+        let identifiers_total = query_count_or_zero_on_missing_table(
+            &mut conn,
+            "SELECT COUNT(*)::bigint FROM account_identifiers",
+        )?;
+        let verified_identifiers_total = query_count_or_zero_on_missing_table(
+            &mut conn,
+            "SELECT COUNT(*)::bigint FROM account_identifiers WHERE verified = true",
+        )?;
+        let payments_total = query_count_or_zero_on_missing_table(
+            &mut conn,
+            "SELECT COUNT(*)::bigint FROM payments",
+        )?;
+        let payments_last_24h = query_count_or_zero_on_missing_table(
+            &mut conn,
+            "SELECT COUNT(*)::bigint FROM payments WHERE created_at >= NOW() - interval '24 hours'",
+        )?;
+
+        let mut identifiers_by_type = BTreeMap::new();
+        match conn.query(
+            "SELECT identifier_type, COUNT(*)::bigint
+             FROM account_identifiers
+             WHERE verified = true
+             GROUP BY identifier_type
+             ORDER BY identifier_type",
+            &[],
+        ) {
+            Ok(rows) => {
+                for row in rows {
+                    let identifier_type: String = row.get(0);
+                    let count: i64 = row.get(1);
+                    identifiers_by_type.insert(identifier_type, count);
+                }
+            }
+            Err(err) if err.code() == Some(&postgres::error::SqlState::UNDEFINED_TABLE) => {
+                warn!("account_store metrics identifier breakdown skipped: missing table");
+            }
+            Err(err) => return Err(err.into()),
+        }
+
+        let (purchased_hours_total, used_hours_total) = match conn.query_one(
+            "SELECT
+                COALESCE(SUM(purchased_hours::float8), 0),
+                COALESCE(SUM(tokens_to_hours::float8), 0)
+             FROM accounts",
+            &[],
+        ) {
+            Ok(row) => (row.get(0), row.get(1)),
+            Err(err) if err.code() == Some(&postgres::error::SqlState::UNDEFINED_TABLE) => {
+                warn!("account_store metrics usage totals skipped: missing accounts table");
+                (0.0, 0.0)
+            }
+            Err(err) => return Err(err.into()),
+        };
+
+        Ok(AccountMetricsSnapshot {
+            accounts_total,
+            identifiers_total,
+            verified_identifiers_total,
+            identifiers_by_type,
+            purchased_hours_total,
+            used_hours_total,
+            payments_total,
+            payments_last_24h,
+        })
     }
 
     // =========================================================================
