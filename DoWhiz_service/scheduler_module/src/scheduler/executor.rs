@@ -1026,7 +1026,7 @@ mod tests {
             input_attachments_dir: PathBuf::from("incoming_attachments"),
             memory_dir: PathBuf::from("memory"),
             reference_dir: PathBuf::from("references"),
-            model_name: "gpt-5.3-codex".to_string(),
+            model_name: "gpt-5.4".to_string(),
             runner: "codex".to_string(),
             codex_disabled: true,
             reply_to: vec!["reply@example.com".to_string()],
