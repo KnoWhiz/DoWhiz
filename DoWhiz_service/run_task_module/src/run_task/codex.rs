@@ -932,8 +932,18 @@ fn run_azure_aci_execution(
     timeout: Duration,
 ) -> Result<(String, String), RunTaskError> {
     let workspace_sh = shell_quote(&container_workspace_dir.to_string_lossy());
-    let output_file = shell_quote(REMOTE_OUTPUT_FILENAME);
-    let exit_file = shell_quote(REMOTE_EXIT_CODE_FILENAME);
+    let output_file = shell_quote(
+        &container_workspace_dir
+            .join(REMOTE_OUTPUT_FILENAME)
+            .to_string_lossy(),
+    );
+    let exit_file = shell_quote(
+        &container_workspace_dir
+            .join(REMOTE_EXIT_CODE_FILENAME)
+            .to_string_lossy(),
+    );
+    let output_tmp = shell_quote(&format!("/tmp/{container_name}{REMOTE_OUTPUT_FILENAME}"));
+    let exit_tmp = shell_quote(&format!("/tmp/{container_name}{REMOTE_EXIT_CODE_FILENAME}"));
     let model_name_sh = shell_quote(model_name);
     let sandbox_mode_sh = shell_quote(sandbox_mode);
     let web_search_cfg = shell_quote("web_search=\"live\"");
@@ -951,9 +961,15 @@ fn run_azure_aci_execution(
     let script = format!(
         "set -euo pipefail\n\
 export PATH=/app/bin:$PATH\n\
-cd {workspace}\n\
+rm -f {output} {exit} {output_tmp} {exit_tmp}\n\
+if ! cd {workspace}; then\n\
+  printf 'workspace path unavailable: %s\\n' {workspace} > {output_tmp}\n\
+  printf '%s' '1' > {exit_tmp}\n\
+  cp {output_tmp} {output} 2>/dev/null || true\n\
+  cp {exit_tmp} {exit} 2>/dev/null || true\n\
+  exit 1\n\
+fi\n\
 mkdir -p .config/gh .codex\n\
-rm -f {output} {exit}\n\
 codex_help=\"$(codex exec --help 2>/dev/null || true)\"\n\
 codex_cmd=(codex exec --json)\n\
 if printf '%s' \"$codex_help\" | grep -q -- '--search'; then\n\
@@ -981,13 +997,23 @@ fi\n\
 {add_dirs}\n\
 codex_cmd+=(--skip-git-repo-check -m {model_name} -c {azure_env_cfg} --cd {workspace} \"$(cat .codex_remote_prompt.txt)\")\n\
 set +e\n\
-\"${{codex_cmd[@]}}\" > {output} 2>&1\n\
+\"${{codex_cmd[@]}}\" > {output_tmp} 2>&1\n\
 status=$?\n\
-printf '%s' \"$status\" > {exit}\n\
+printf '%s' \"$status\" > {exit_tmp}\n\
+cp {output_tmp} {output} 2>/dev/null || true\n\
+cp {exit_tmp} {exit} 2>/dev/null || true\n\
+if [ ! -f {output} ]; then\n\
+  echo '[run_task] warning: failed to persist codex output to workspace' >&2\n\
+fi\n\
+if [ ! -f {exit} ]; then\n\
+  echo '[run_task] warning: failed to persist codex exit code to workspace' >&2\n\
+fi\n\
 exit \"$status\"\n",
         workspace = workspace_sh,
         output = output_file,
         exit = exit_file,
+        output_tmp = output_tmp,
+        exit_tmp = exit_tmp,
         web_search_cfg = web_search_cfg,
         ask_for_approval_cfg = ask_for_approval_cfg,
         sandbox_mode = sandbox_mode_sh,
