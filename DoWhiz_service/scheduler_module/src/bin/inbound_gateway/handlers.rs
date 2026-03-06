@@ -820,14 +820,20 @@ pub(super) async fn build_envelope(
     let raw_payload_ref = if raw_payload.is_empty() {
         None
     } else {
-        Some(
-            raw_payload_store::upload_raw_payload_azure(
-                envelope_id,
-                received_at,
-                &stored_payload_bytes,
-            )
-            .await?,
+        match raw_payload_store::upload_raw_payload_azure(
+            envelope_id,
+            received_at,
+            &stored_payload_bytes,
         )
+        .await
+        {
+            Ok(payload_ref) => Some(payload_ref),
+            Err(err) => {
+                // Non-blocking: log error but continue without raw payload archival
+                tracing::error!("failed to upload raw payload: {}", err);
+                None
+            }
+        }
     };
     Ok(IngestionEnvelope {
         envelope_id,
