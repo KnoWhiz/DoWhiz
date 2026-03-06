@@ -5,7 +5,7 @@ use mongodb::bson::{doc, Document};
 use mongodb::options::{IndexOptions, UpdateOptions};
 use mongodb::sync::Collection;
 use mongodb::IndexModel;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::NotionError;
 
@@ -14,13 +14,27 @@ use super::NotionError;
 /// This prevents duplicate processing of notifications across restarts
 /// and ensures each @mention is only handled once.
 pub struct MongoNotionProcessedStore {
-    collection: Collection<Document>,
+    collection: Option<Collection<Document>>,
+    noop_mode: bool,
 }
 
 impl MongoNotionProcessedStore {
     /// Create a new processed store using the given MongoDB collection.
     pub fn new(collection: Collection<Document>) -> Self {
-        Self { collection }
+        Self {
+            collection: Some(collection),
+            noop_mode: false,
+        }
+    }
+
+    /// Create a no-op store that doesn't persist anything.
+    /// Useful for testing without MongoDB.
+    pub fn noop() -> Self {
+        warn!("Running in noop mode - notifications will not be deduplicated");
+        Self {
+            collection: None,
+            noop_mode: true,
+        }
     }
 
     /// Create a store from environment configuration.
@@ -49,6 +63,11 @@ impl MongoNotionProcessedStore {
 
     /// Ensure required indexes exist on the collection.
     fn ensure_indexes(&self) -> Result<(), NotionError> {
+        let collection = match &self.collection {
+            Some(c) => c,
+            None => return Ok(()), // noop mode
+        };
+
         use crate::mongo_store::ensure_index_compatible;
 
         // Unique index on notification_id
@@ -67,13 +86,13 @@ impl MongoNotionProcessedStore {
             .keys(doc! { "workspace_id": 1, "processed_at": -1 })
             .build();
 
-        ensure_index_compatible(&self.collection, notification_index)
+        ensure_index_compatible(collection, notification_index)
             .map_err(|e| NotionError::StorageError(e.to_string()))?;
 
-        ensure_index_compatible(&self.collection, timestamp_index)
+        ensure_index_compatible(collection, timestamp_index)
             .map_err(|e| NotionError::StorageError(e.to_string()))?;
 
-        ensure_index_compatible(&self.collection, workspace_index)
+        ensure_index_compatible(collection, workspace_index)
             .map_err(|e| NotionError::StorageError(e.to_string()))?;
 
         Ok(())
@@ -81,10 +100,14 @@ impl MongoNotionProcessedStore {
 
     /// Check if a notification has already been processed.
     pub fn is_processed(&self, notification_id: &str) -> Result<bool, NotionError> {
+        let collection = match &self.collection {
+            Some(c) => c,
+            None => return Ok(false), // noop mode - never processed
+        };
+
         let filter = doc! { "notification_id": notification_id };
 
-        let count = self
-            .collection
+        let count = collection
             .count_documents(filter, None)
             .map_err(|e| NotionError::StorageError(format!("Failed to check processed: {}", e)))?;
 
@@ -98,6 +121,11 @@ impl MongoNotionProcessedStore {
         workspace_id: Option<&str>,
         page_id: Option<&str>,
     ) -> Result<(), NotionError> {
+        let collection = match &self.collection {
+            Some(c) => c,
+            None => return Ok(()), // noop mode - do nothing
+        };
+
         let now = Utc::now();
 
         let document = doc! {
@@ -112,7 +140,7 @@ impl MongoNotionProcessedStore {
         let update = doc! { "$setOnInsert": document };
         let options = UpdateOptions::builder().upsert(true).build();
 
-        self.collection
+        collection
             .update_one(filter, update, options)
             .map_err(|e| NotionError::StorageError(format!("Failed to mark processed: {}", e)))?;
 
@@ -122,12 +150,16 @@ impl MongoNotionProcessedStore {
 
     /// Get all notification IDs processed since a given time.
     pub fn get_processed_since(&self, since: DateTime<Utc>) -> Result<Vec<String>, NotionError> {
+        let collection = match &self.collection {
+            Some(c) => c,
+            None => return Ok(vec![]), // noop mode
+        };
+
         let filter = doc! {
             "processed_at": { "$gte": mongodb::bson::DateTime::from_chrono(since) }
         };
 
-        let cursor = self
-            .collection
+        let cursor = collection
             .find(filter, None)
             .map_err(|e| NotionError::StorageError(format!("Failed to query processed: {}", e)))?;
 
@@ -145,10 +177,14 @@ impl MongoNotionProcessedStore {
 
     /// Get all processed notification IDs for a specific workspace.
     pub fn get_processed_for_workspace(&self, workspace_id: &str) -> Result<Vec<String>, NotionError> {
+        let collection = match &self.collection {
+            Some(c) => c,
+            None => return Ok(vec![]), // noop mode
+        };
+
         let filter = doc! { "workspace_id": workspace_id };
 
-        let cursor = self
-            .collection
+        let cursor = collection
             .find(filter, None)
             .map_err(|e| NotionError::StorageError(format!("Failed to query processed: {}", e)))?;
 
@@ -166,13 +202,17 @@ impl MongoNotionProcessedStore {
 
     /// Clean up old processed records (older than retention days).
     pub fn cleanup_old_records(&self, retention_days: i64) -> Result<u64, NotionError> {
+        let collection = match &self.collection {
+            Some(c) => c,
+            None => return Ok(0), // noop mode
+        };
+
         let cutoff = Utc::now() - chrono::Duration::days(retention_days);
         let filter = doc! {
             "processed_at": { "$lt": mongodb::bson::DateTime::from_chrono(cutoff) }
         };
 
-        let result = self
-            .collection
+        let result = collection
             .delete_many(filter, None)
             .map_err(|e| NotionError::StorageError(format!("Failed to cleanup: {}", e)))?;
 
@@ -188,8 +228,17 @@ impl MongoNotionProcessedStore {
 
     /// Get statistics about processed notifications.
     pub fn get_stats(&self) -> Result<ProcessedStats, NotionError> {
-        let total = self
-            .collection
+        let collection = match &self.collection {
+            Some(c) => c,
+            None => {
+                return Ok(ProcessedStats {
+                    total_processed: 0,
+                    processed_today: 0,
+                })
+            } // noop mode
+        };
+
+        let total = collection
             .count_documents(doc! {}, None)
             .map_err(|e| NotionError::StorageError(format!("Failed to count: {}", e)))?;
 
@@ -199,8 +248,7 @@ impl MongoNotionProcessedStore {
             .unwrap()
             .and_utc();
 
-        let today = self
-            .collection
+        let today = collection
             .count_documents(
                 doc! {
                     "processed_at": { "$gte": mongodb::bson::DateTime::from_chrono(today_start) }

@@ -681,10 +681,19 @@ pub(crate) fn execute_google_docs_send(task: &SendReplyTask) -> Result<(), Sched
     Ok(())
 }
 
+/// Get the central Notion reply queue directory for an employee.
+pub fn notion_reply_queue_dir(employee_id: &str) -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(".dowhiz")
+        .join("notion_reply_queue")
+        .join(employee_id)
+}
+
 /// Execute a SendReplyTask via Notion browser automation.
 ///
 /// This function queues a reply request for the Notion browser poller to process.
-/// The reply is written to a `.notion_reply_request.json` file in the workspace.
+/// The reply is written to a central queue directory that the poller monitors.
 pub(crate) fn execute_notion_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
     dotenvy::dotenv().ok();
 
@@ -733,8 +742,22 @@ pub(crate) fn execute_notion_send(task: &SendReplyTask) -> Result<(), SchedulerE
         }
     };
 
+    // Get employee ID from task or environment
+    let employee_id = task
+        .employee_id
+        .clone()
+        .or_else(|| std::env::var("EMPLOYEE_ID").ok())
+        .unwrap_or_else(|| "default".to_string());
+
+    // Create central queue directory
+    let queue_dir = notion_reply_queue_dir(&employee_id);
+    fs::create_dir_all(&queue_dir)
+        .map_err(|e| SchedulerError::TaskFailed(format!("Failed to create queue dir: {}", e)))?;
+
     // Create a reply request for the poller to process
+    let request_id = uuid::Uuid::new_v4().to_string();
     let reply_request = serde_json::json!({
+        "id": request_id,
         "reply_text": text_body.trim(),
         "workspace_id": context.get("workspace_id"),
         "page_id": context.get("page_id"),
@@ -742,29 +765,32 @@ pub(crate) fn execute_notion_send(task: &SendReplyTask) -> Result<(), SchedulerE
         "block_id": context.get("block_id"),
         "notification_id": context.get("notification_id"),
         "url": context.get("url"),
+        "workspace_dir": workspace_dir.to_string_lossy(),
         "requested_at": chrono::Utc::now().to_rfc3339(),
         "status": "pending"
     });
 
-    // Write the reply request to the workspace
-    let reply_request_path = workspace_dir.join(".notion_reply_request.json");
+    // Write to central queue with unique filename
+    let request_filename = format!("{}.json", request_id);
+    let request_path = queue_dir.join(&request_filename);
     fs::write(
-        &reply_request_path,
+        &request_path,
         serde_json::to_string_pretty(&reply_request)
             .map_err(|e| SchedulerError::TaskFailed(format!("Failed to serialize reply: {}", e)))?,
     )
     .map_err(|e| SchedulerError::TaskFailed(format!("Failed to write reply request: {}", e)))?;
 
+    // Also write to workspace for reference
+    let workspace_request_path = workspace_dir.join(".notion_reply_request.json");
+    let _ = fs::write(&workspace_request_path, serde_json::to_string_pretty(&reply_request).unwrap_or_default());
+
     info!(
-        "queued Notion reply request to {:?}, page_id={:?}, workspace={}",
+        "queued Notion reply request id={} to {:?}, page_id={:?}, queue={}",
+        request_id,
         task.to,
         context.get("page_id"),
-        workspace_dir.display()
+        queue_dir.display()
     );
-
-    // TODO: In the future, we could trigger the Notion browser directly here
-    // using a tokio runtime or a shared browser session. For now, the poller
-    // will pick up the reply request file and process it.
 
     Ok(())
 }

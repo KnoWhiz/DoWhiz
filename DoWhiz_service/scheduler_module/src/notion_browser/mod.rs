@@ -6,7 +6,7 @@
 //! - Read page content and comment threads
 //! - Reply to comments as a real user
 //!
-//! Uses WebDriver (fantoccini) for browser automation with anti-detection measures.
+//! Uses browser-use CLI for browser automation with anti-detection measures.
 
 pub mod browser;
 pub mod models;
@@ -14,7 +14,7 @@ pub mod parser;
 pub mod poller;
 pub mod store;
 
-pub use browser::{NotionBrowser, NotionBrowserConfig};
+pub use browser::{BrowserState, NotionBrowser, NotionBrowserConfig};
 pub use models::{NotionMention, NotionNotification, NotionPageContext};
 pub use parser::{parse_notifications, parse_page_content};
 pub use poller::{spawn_notion_browser_poller, NotionBrowserPoller, NotionPollerConfig};
@@ -47,17 +47,3 @@ pub enum NotionError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 }
-
-impl From<fantoccini::error::CmdError> for NotionError {
-    fn from(err: fantoccini::error::CmdError) -> Self {
-        NotionError::BrowserError(err.to_string())
-    }
-}
-
-impl From<fantoccini::error::NewSessionError> for NotionError {
-    fn from(err: fantoccini::error::NewSessionError) -> Self {
-        NotionError::BrowserError(format!("Failed to create browser session: {}", err))
-    }
-}
-
-// URL parsing errors are handled via fantoccini's CmdError

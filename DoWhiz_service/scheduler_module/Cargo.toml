@@ -45,9 +45,9 @@ urlencoding = "2"
 uuid = { version = "1", features = ["serde", "v4"] }
 serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "rustls_backend"] }
 
-# Browser automation for Notion integration
-fantoccini = "0.21"
+# Browser automation for Notion integration (via browser-use CLI)
 scraper = "0.20"
+shellexpand = "3"
 rand = "0.8"
 
 send_emails_module = { path = "../send_emails_module" }
@@ -64,6 +64,10 @@ path = "src/bin/google_sheets_cli.rs"
 [[bin]]
 name = "google-slides"
 path = "src/bin/google_slides_cli.rs"
+
+[[bin]]
+name = "notion_poller"
+path = "src/bin/notion_poller.rs"
 
 [dev-dependencies]
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder"] }
