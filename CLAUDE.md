@@ -352,6 +352,36 @@ If the same bug persists after 2-3 attempts with different approaches:
 4. **Consider alternative approaches** - Sometimes a different architecture avoids the problem entirely
 5. **Ask the user** - If still blocked, clearly explain what was tried and ask for guidance
 
+### Post-Debugging Reflection (IMPORTANT)
+
+**After resolving any significant debugging session, you MUST:**
+
+1. **Identify root cause** - What was the actual issue? (e.g., missing env var, wrong API assumption, format mismatch)
+
+2. **Document the lesson** - Update relevant documentation:
+   - **Skill files** (`.claude/skills/*/SKILL.md`) - Add troubleshooting tips, required env vars, format notes
+   - **Memory files** (`~/.claude/projects/.../memory/`) - Add project-specific learnings
+   - **This file (CLAUDE.md)** - Add gotchas that apply to multiple features
+
+3. **Prevent recurrence** - Ask yourself:
+   - Would another agent hit the same issue following current docs?
+   - What one line of documentation would have saved hours of debugging?
+   - Are there similar patterns elsewhere that need the same fix?
+
+**Examples of lessons worth documenting:**
+- `IN_DOCKER=true` required for browser-use in WSL/root (cost: 2+ hours debugging)
+- `browser-use state` output uses tabs not spaces (cost: regex debugging)
+- Notion `/notifications` URL doesn't work, must click Inbox button (cost: navigation failures)
+- Cookie-first auth for OAuth sites to avoid rate limiting (cost: account lockouts)
+
+**Where to document:**
+| Type of Lesson | Location |
+|----------------|----------|
+| Tool-specific (browser-use, etc.) | `.claude/skills/<tool>/SKILL.md` |
+| Project-specific patterns | `~/.claude/projects/.../memory/*.md` |
+| Cross-cutting concerns | This file (CLAUDE.md) |
+| Feature-specific | Inline code comments or feature skill file |
+
 ---
 
 ## Coding Guidelines
@@ -363,6 +393,43 @@ Use standard Rust formatting (rustfmt) with `snake_case` for functions/modules, 
 Tests live in `*/tests/*.rs` for integration and in-module `#[test]` for unit coverage. Live Postmark tests are opt-in via environment variables.
 
 When opening PRs, include a short summary, tests run, and any required env/config changes.
+
+---
+
+## Known Gotchas (Lessons Learned)
+
+This section collects hard-won debugging lessons. **Read before starting work on related features.**
+
+### browser-use CLI
+
+| Issue | Solution | Cost if Ignored |
+|-------|----------|-----------------|
+| Browser times out after 30s in WSL/root | Set `IN_DOCKER=true` env var | Hours of debugging |
+| `browser-use state` output format | Uses tabs for indentation, `[index]<element>` format | Regex parsing failures |
+| OAuth sites (Notion, Slack) rate limit | Use cookie import/export, not automated login | Account lockouts |
+| Login detection fails | Check for UI text ("New page", "Inbox") not CSS classes | False "not logged in" errors |
+
+### Notion Integration
+
+| Issue | Solution | Cost if Ignored |
+|-------|----------|-----------------|
+| `/notifications` URL returns 404 | Click Inbox button in sidebar instead | Navigation failures |
+| Notification parsing misses items | Regex must handle tabs, various date formats ("Mar 2", "Yesterday") | Missed @mentions |
+| Same notification matched twice | Add content-based deduplication (actor + page + mentioned) | Duplicate processing |
+
+### Rust/Cargo
+
+| Issue | Solution | Cost if Ignored |
+|-------|----------|-----------------|
+| Debug builds bloat storage | Always use `--release` flag | Disk full errors |
+| MongoDB not available locally | Code handles gracefully with noop mode | Test failures |
+
+### General Patterns
+
+| Issue | Solution | Cost if Ignored |
+|-------|----------|-----------------|
+| API format assumptions | Save actual response to file, test parsing offline | Hours of trial-and-error |
+| Environment differences | Document required env vars in skill files | Works locally, fails in CI/prod |
 
 ---
 
