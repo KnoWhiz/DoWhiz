@@ -278,6 +278,44 @@ fn append_discord_attachment_links(base_text: &str, attachments_dir: &Path) -> S
     }
 }
 
+const DISCORD_MAX_CONTENT_CHARS: usize = 2000;
+
+fn byte_index_after_char_count(text: &str, char_count: usize) -> usize {
+    if char_count == 0 {
+        return 0;
+    }
+    text.char_indices()
+        .nth(char_count)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len())
+}
+
+fn split_discord_message_chunks(text: &str) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+
+    let mut chunks = Vec::new();
+    let mut remaining = text;
+
+    while !remaining.is_empty() {
+        if remaining.chars().count() <= DISCORD_MAX_CONTENT_CHARS {
+            chunks.push(remaining.to_string());
+            break;
+        }
+
+        let split_at = byte_index_after_char_count(remaining, DISCORD_MAX_CONTENT_CHARS);
+        chunks.push(remaining[..split_at].to_string());
+        remaining = &remaining[split_at..];
+    }
+
+    chunks
+}
+
+fn is_discord_unknown_message_reference(error_text: &str) -> bool {
+    error_text.contains("MESSAGE_REFERENCE_UNKNOWN_MESSAGE")
+}
+
 /// Execute a SendReplyTask via Discord.
 pub(crate) fn execute_discord_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
     use crate::adapters::discord::DiscordOutboundAdapter;
@@ -294,42 +332,64 @@ pub(crate) fn execute_discord_send(task: &SendReplyTask) -> Result<(), Scheduler
         String::new()
     };
     let text_body = append_discord_attachment_links(&base_text_body, &task.attachments_dir);
+    let text_chunks = split_discord_message_chunks(&text_body);
 
     // For Discord, reply_to[0] = user_id, reply_to[1] = channel_id
     let channel_id = task.to.get(1).and_then(|value| value.parse::<u64>().ok());
 
-    let message = OutboundMessage {
-        channel: Channel::Discord,
-        from: task.from.clone(),
-        to: task.to.clone(),
-        cc: vec![],
-        bcc: vec![],
-        subject: task.subject.clone(),
-        text_body,
-        html_body: String::new(),
-        html_path: Some(task.html_path.clone()),
-        attachments_dir: Some(task.attachments_dir.clone()),
-        thread_id: task.in_reply_to.clone(),
-        metadata: ChannelMetadata {
-            discord_channel_id: channel_id,
-            ..Default::default()
-        },
-    };
+    let mut next_thread_id = task.in_reply_to.clone();
+    let mut sent_message_ids = Vec::new();
 
-    let result = adapter
-        .send(&message)
-        .map_err(|err| SchedulerError::TaskFailed(format!("Discord send failed: {}", err)))?;
+    for chunk in text_chunks {
+        let mut message = OutboundMessage {
+            channel: Channel::Discord,
+            from: task.from.clone(),
+            to: task.to.clone(),
+            cc: vec![],
+            bcc: vec![],
+            subject: task.subject.clone(),
+            text_body: chunk,
+            html_body: String::new(),
+            html_path: Some(task.html_path.clone()),
+            attachments_dir: Some(task.attachments_dir.clone()),
+            thread_id: next_thread_id.clone(),
+            metadata: ChannelMetadata {
+                discord_channel_id: channel_id,
+                ..Default::default()
+            },
+        };
 
-    if !result.success {
-        return Err(SchedulerError::TaskFailed(format!(
-            "Discord API error: {}",
-            result.error.unwrap_or_default()
-        )));
+        let mut result = adapter
+            .send(&message)
+            .map_err(|err| SchedulerError::TaskFailed(format!("Discord send failed: {}", err)))?;
+
+        if !result.success {
+            let error_text = result.error.clone().unwrap_or_default();
+            if message.thread_id.is_some() && is_discord_unknown_message_reference(&error_text) {
+                warn!("discord reply reference not found; retrying without message_reference");
+                message.thread_id = None;
+                result = adapter.send(&message).map_err(|err| {
+                    SchedulerError::TaskFailed(format!("Discord send failed: {}", err))
+                })?;
+            }
+        }
+
+        if !result.success {
+            return Err(SchedulerError::TaskFailed(format!(
+                "Discord API error: {}",
+                result.error.unwrap_or_default()
+            )));
+        }
+
+        next_thread_id = Some(result.message_id.clone());
+        sent_message_ids.push(result.message_id);
     }
 
     info!(
-        "sent Discord message to {:?}, message_id={}",
-        task.to, result.message_id
+        "sent Discord message to {:?}, chunks={}, message_ids={:?}",
+        task.to,
+        sent_message_ids.len(),
+        sent_message_ids
     );
     Ok(())
 }
@@ -681,4 +741,49 @@ pub(crate) fn execute_google_docs_send(task: &SendReplyTask) -> Result<(), Sched
         task.to, result.message_id
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        is_discord_unknown_message_reference, split_discord_message_chunks,
+        DISCORD_MAX_CONTENT_CHARS,
+    };
+
+    #[test]
+    fn split_discord_message_keeps_short_text() {
+        let text = "short reply";
+        let chunks = split_discord_message_chunks(text);
+        assert_eq!(chunks, vec!["short reply".to_string()]);
+    }
+
+    #[test]
+    fn split_discord_message_splits_over_limit() {
+        let text = "a".repeat(DISCORD_MAX_CONTENT_CHARS * 2 + 7);
+        let chunks = split_discord_message_chunks(&text);
+        assert_eq!(chunks.len(), 3);
+        assert!(chunks
+            .iter()
+            .all(|chunk| chunk.chars().count() <= DISCORD_MAX_CONTENT_CHARS));
+        assert_eq!(chunks.concat(), text);
+    }
+
+    #[test]
+    fn split_discord_message_handles_unicode_boundaries() {
+        let text = "😀".repeat(DISCORD_MAX_CONTENT_CHARS + 3);
+        let chunks = split_discord_message_chunks(&text);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].chars().count(), DISCORD_MAX_CONTENT_CHARS);
+        assert_eq!(chunks[1].chars().count(), 3);
+        assert_eq!(chunks.concat(), text);
+    }
+
+    #[test]
+    fn discord_unknown_message_reference_detection() {
+        let error = r#"{"errors":{"message_reference":{"_errors":[{"code":"MESSAGE_REFERENCE_UNKNOWN_MESSAGE"}]}}}"#;
+        assert!(is_discord_unknown_message_reference(error));
+        assert!(!is_discord_unknown_message_reference(
+            r#"{"message":"Unknown Channel","code":10003}"#
+        ));
+    }
 }
