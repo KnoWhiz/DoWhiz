@@ -344,6 +344,8 @@ impl NotionBrowserPoller {
     fn parse_notifications_from_state(&self, raw: &str) -> Vec<NotionNotification> {
         let mut notifications = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
+        // Content-based deduplication to prevent multiple patterns matching the same notification
+        let mut seen_content = std::collections::HashSet::new();
 
         // Pattern 0: Inbox panel format from browser-use state
         // Format in state output (with tabs):
@@ -385,6 +387,17 @@ impl NotionBrowserPoller {
                         continue;
                     }
                     seen_ids.insert(id.clone());
+
+                    // Content-based deduplication (different patterns may capture same notification with different element indices)
+                    let content_key = format!("{}_{}_{}",
+                        actor_name.to_lowercase(),
+                        page_title.to_lowercase().replace(' ', "_"),
+                        mentioned_name.to_lowercase());
+                    if seen_content.contains(&content_key) {
+                        debug!("Skipping duplicate notification (content match): {}", content_key);
+                        continue;
+                    }
+                    seen_content.insert(content_key);
 
                     info!("Found inbox notification: {} commented in {} mentioning @{}: {}",
                         actor_name, page_title, mentioned_name, preview_text);
@@ -444,6 +457,17 @@ impl NotionBrowserPoller {
                         continue;
                     }
                     seen_ids.insert(id.clone());
+
+                    // Content-based deduplication (same notification may match different patterns)
+                    let content_key = format!("{}_{}_{}",
+                        actor_name.to_lowercase(),
+                        page_title.to_lowercase().replace(' ', "_"),
+                        mentioned_name.to_lowercase());
+                    if seen_content.contains(&content_key) {
+                        debug!("Skipping duplicate notification (content match): {}", content_key);
+                        continue;
+                    }
+                    seen_content.insert(content_key);
 
                     info!("Found inbox notification (simple): {} commented in {} mentioning @{}: {}",
                         actor_name, page_title, mentioned_name, preview_text);
