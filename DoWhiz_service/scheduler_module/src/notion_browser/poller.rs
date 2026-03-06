@@ -407,9 +407,9 @@ impl NotionBrowserPoller {
             }
         }
 
-        // Pattern 0b: Inbox panel format with tabs
+        // Pattern 0b: Inbox panel format with tabs - captures link element index
         // Format:
-        //   *[index]<a role=link />
+        //   *[index]<a role=link />   <- this index for clicking
         //   \t*[index]<div role=img ...>
         //   \tDowhiz
         //   \tcommented in
@@ -420,12 +420,13 @@ impl NotionBrowserPoller {
         //   这个任务的描述...
         // Time format can be: "2d", "5h", "Mar 2", "Yesterday", etc.
         if let Ok(simple_re) = Regex::new(
-            r#"([A-Z][a-z]+)\s*\n\t*commented in\s*\n\t*([^\n]+)\s*\n\t*(?:\d+[dhm]?|[A-Z][a-z]{2}\s+\d+|Yesterday|Today)\s*\n(?:[^\n]*\n)*?\t*([A-Za-z]+):\s*\n([^\n\[*]+)"#
+            r#"\*?\[(\d+)\]<a[^>]*role=link[^>]*/?>\s*\n(?:[^\n]*\n)*?\t*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*\n\t*commented in\s*\n\t*([^\n]+)\s*\n\t*(?:\d+[dhm]?|[A-Z][a-z]{2}\s+\d+|Yesterday|Today)\s*\n(?:[^\n]*\n)*?\t*([A-Za-z]+):\s*\n([^\n\[*]+)"#
         ) {
             for caps in simple_re.captures_iter(raw) {
-                if let (Some(actor), Some(page), Some(mentioned), Some(preview)) =
-                    (caps.get(1), caps.get(2), caps.get(3), caps.get(4))
+                if let (Some(idx), Some(actor), Some(page), Some(mentioned), Some(preview)) =
+                    (caps.get(1), caps.get(2), caps.get(3), caps.get(4), caps.get(5))
                 {
+                    let idx_str = idx.as_str();
                     let actor_name = actor.as_str().trim().to_string();
                     let page_title = page.as_str().trim().to_string();
                     let mentioned_name = mentioned.as_str().trim().to_string();
@@ -436,7 +437,8 @@ impl NotionBrowserPoller {
                         continue;
                     }
 
-                    let id = format!("inbox_simple_{}_{}", actor_name.replace(' ', "_"), page_title.replace(' ', "_"));
+                    // Use inbox_{idx}_{page} format so process_notification can extract the index
+                    let id = format!("inbox_{}_{}", idx_str, page_title.replace(' ', "_").replace("'", ""));
 
                     if seen_ids.contains(&id) {
                         continue;
