@@ -426,6 +426,14 @@ fn resolve_telegram_bot_token_from_env() -> Option<String> {
         .or_else(|| env_var_non_empty("TELEGRAM_BOT_TOKEN"))
 }
 
+fn resolve_wechat_webhook_url_from_env() -> Option<String> {
+    if let Some(url) = env_var_non_empty("WECHAT_WEBHOOK_URL") {
+        return Some(url);
+    }
+    env_var_non_empty("WECHAT_WEBHOOK_KEY")
+        .map(|key| format!("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={key}"))
+}
+
 /// Execute a SendReplyTask via Telegram Bot API.
 pub(crate) fn execute_telegram_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
     use crate::adapters::telegram::TelegramOutboundAdapter;
@@ -481,6 +489,97 @@ pub(crate) fn execute_telegram_send(task: &SendReplyTask) -> Result<(), Schedule
         "sent Telegram message to {:?}, message_id={}",
         task.to, result.message_id
     );
+    Ok(())
+}
+
+/// Execute a SendReplyTask via WeChat Work webhook.
+pub(crate) fn execute_wechat_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
+    dotenvy::dotenv().ok();
+
+    let webhook_url = resolve_wechat_webhook_url_from_env().ok_or_else(|| {
+        SchedulerError::TaskFailed("WECHAT_WEBHOOK_URL or WECHAT_WEBHOOK_KEY not set".to_string())
+    })?;
+
+    let text_body = if task.html_path.exists() {
+        fs::read_to_string(&task.html_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let content = text_body.trim();
+    if content.is_empty() {
+        return Err(SchedulerError::TaskFailed(
+            "WeChat message body is empty".to_string(),
+        ));
+    }
+
+    let recipient = task
+        .to
+        .first()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    if task.attachments_dir.is_dir() {
+        let has_files = fs::read_dir(&task.attachments_dir)
+            .ok()
+            .and_then(|mut entries| entries.next())
+            .is_some();
+        if has_files {
+            warn!(
+                "WeChat webhook adapter currently sends text only; attachments in {} were not sent",
+                task.attachments_dir.display()
+            );
+        }
+    }
+
+    let mut text_payload = serde_json::Map::new();
+    text_payload.insert(
+        "content".to_string(),
+        serde_json::Value::String(content.to_string()),
+    );
+    if let Some(to_user) = recipient.as_ref() {
+        text_payload.insert("mentioned_list".to_string(), serde_json::json!([to_user]));
+    }
+
+    let payload = serde_json::json!({
+        "msgtype": "text",
+        "text": text_payload,
+    });
+
+    let response = reqwest::blocking::Client::new()
+        .post(&webhook_url)
+        .json(&payload)
+        .send()
+        .map_err(|err| SchedulerError::TaskFailed(format!("WeChat send failed: {}", err)))?;
+
+    let status = response.status();
+    let body = response.text().unwrap_or_default();
+    if !status.is_success() {
+        return Err(SchedulerError::TaskFailed(format!(
+            "WeChat API error {}: {}",
+            status, body
+        )));
+    }
+
+    let response_json: serde_json::Value = serde_json::from_str(&body).map_err(|err| {
+        SchedulerError::TaskFailed(format!("WeChat response parse failed: {}", err))
+    })?;
+    let errcode = response_json
+        .get("errcode")
+        .and_then(|value| value.as_i64())
+        .unwrap_or(-1);
+    if errcode != 0 {
+        let errmsg = response_json
+            .get("errmsg")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown error");
+        return Err(SchedulerError::TaskFailed(format!(
+            "WeChat API returned errcode {}: {}",
+            errcode, errmsg
+        )));
+    }
+
+    info!("sent WeChat webhook message to {:?}", task.to);
     Ok(())
 }
 

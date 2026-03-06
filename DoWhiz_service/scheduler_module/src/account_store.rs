@@ -686,6 +686,7 @@ pub fn channel_to_identifier_type(channel: &crate::channel::Channel) -> &'static
         Channel::Sms => "phone",
         Channel::WhatsApp => "phone",
         Channel::Telegram => "telegram",
+        Channel::WeChat => "wechat",
         Channel::Slack => "slack",
         Channel::Discord => "discord",
         Channel::BlueBubbles => "phone",

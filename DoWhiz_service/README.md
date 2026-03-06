@@ -30,7 +30,7 @@ This service layer currently runs as:
 ### 1.2 End-to-end flow
 
 ```text
-Inbound (email/slack/discord/sms/telegram/whatsapp/google workspace/bluebubbles)
+Inbound (email/slack/discord/sms/telegram/wechat/whatsapp/google workspace/bluebubbles)
   -> inbound_gateway
   -> build route + dedupe key + raw payload ref
   -> ingestion queue
@@ -184,6 +184,7 @@ Azure ACI execution path (required vars):
 - Slack: `SLACK_*`, `SLACK_SIGNING_SECRET`
 - Discord: `DISCORD_*` and/or employee-specific Discord token envs
 - Telegram: `TELEGRAM_BOT_TOKEN` or employee-derived env keys
+- WeChat: `WECHAT_WEBHOOK_URL` or `WECHAT_WEBHOOK_KEY`
 - WhatsApp: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`
 - Twilio SMS: `TWILIO_*`
 - Google Workspace: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, refresh tokens, `GOOGLE_*_ENABLED`

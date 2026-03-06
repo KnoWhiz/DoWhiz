@@ -23,7 +23,7 @@ Schedules:
 ## Channels
 
 Supported channel enum values:
-- `email`, `slack`, `discord`, `sms`, `telegram`, `whatsapp`
+- `email`, `slack`, `discord`, `sms`, `telegram`, `wechat`, `whatsapp`
 - `google_docs`, `google_sheets`, `google_slides`
 - `bluebubbles`
 

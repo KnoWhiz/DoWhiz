@@ -660,6 +660,7 @@ mod tests {
         let non_syncable_channels = vec![
             Channel::Email,
             Channel::Sms,
+            Channel::WeChat,
             Channel::WhatsApp,
             Channel::Telegram,
             Channel::BlueBubbles,
@@ -697,6 +698,7 @@ mod tests {
 
         assert_eq!(channel_to_identifier_type(&Channel::Discord), "discord");
         assert_eq!(channel_to_identifier_type(&Channel::Slack), "slack");
+        assert_eq!(channel_to_identifier_type(&Channel::WeChat), "wechat");
     }
 
     #[test]

@@ -62,6 +62,9 @@ pub(super) fn build_prompt(
             "bluebubbles" => {
                 "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Keep the reply concise and conversational. Do not use HTML or markdown. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."
             }
+            "wechat" => {
+                "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Keep the reply concise and conversational. Do not use HTML. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."
+            }
             "whatsapp" => {
                 "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Keep the reply concise and conversational. Do not use HTML. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."
             }
@@ -163,7 +166,8 @@ fn build_user_identities_section(identities: &UserIdentities) -> String {
         || !identities.slack_user_ids.is_empty()
         || !identities.discord_user_ids.is_empty()
         || !identities.phone_numbers.is_empty()
-        || !identities.telegram_user_ids.is_empty();
+        || !identities.telegram_user_ids.is_empty()
+        || !identities.wechat_user_ids.is_empty();
 
     if !has_any {
         return "Cross-channel routing: Not available (user has no linked DoWhiz account). \
@@ -190,6 +194,9 @@ their accounts at dowhiz.com first.\n".to_string();
     if !identities.telegram_user_ids.is_empty() {
         channels.push(format!("- Telegram User IDs: {}", identities.telegram_user_ids.join(", ")));
     }
+    if !identities.wechat_user_ids.is_empty() {
+        channels.push(format!("- WeChat User IDs: {}", identities.wechat_user_ids.join(", ")));
+    }
 
     format!(
         r#"Cross-channel routing (user's linked channels):
@@ -203,7 +210,7 @@ If no routing file is written, the reply goes to the original inbound channel.
 reply_routing.json schema:
 ```json
 {{
-  "channel": "email" | "slack" | "discord" | "telegram" | "sms" | "whatsapp" | "bluebubbles",
+  "channel": "email" | "slack" | "discord" | "telegram" | "wechat" | "sms" | "whatsapp" | "bluebubbles",
   "identifier": "<target identifier for the channel>"
 }}
 ```
@@ -213,6 +220,7 @@ Identifier format per channel:
 - slack: Slack user ID (e.g., "U1234567890")
 - discord: Discord user ID (e.g., "123456789012345678")
 - telegram: Telegram user ID (e.g., "123456789")
+- wechat: WeChat user ID (e.g., "wxid_abc123")
 - sms/whatsapp/bluebubbles: phone number (e.g., "+15551234567")
 
 IMPORTANT: When using cross-channel routing, write the reply in the TARGET channel's format:
@@ -220,6 +228,7 @@ IMPORTANT: When using cross-channel routing, write the reply in the TARGET chann
 - slack target: reply_message.txt (Slack mrkdwn: *bold*, _italic_, `code`)
 - discord target: reply_message.txt (Discord markdown: **bold**, *italic*, `code`)
 - telegram target: reply_message.txt (MarkdownV2)
+- wechat target: reply_message.txt (plain text)
 - sms/whatsapp/bluebubbles target: reply_message.txt (plain text)
 - Attachments for non-email channels go in reply_attachments/
 
@@ -741,6 +750,7 @@ mod tests {
             discord_user_ids: vec!["987654321".to_string()],
             phone_numbers: vec!["+15551234567".to_string()],
             telegram_user_ids: vec!["12345678".to_string()],
+            wechat_user_ids: vec!["wxid_abc123".to_string()],
         };
         let section = build_user_identities_section(&identities);
 
@@ -749,6 +759,7 @@ mod tests {
         assert!(section.contains("Discord User IDs: 987654321"));
         assert!(section.contains("Phone Numbers: +15551234567"));
         assert!(section.contains("Telegram User IDs: 12345678"));
+        assert!(section.contains("WeChat User IDs: wxid_abc123"));
     }
 
     #[test]
@@ -763,6 +774,7 @@ mod tests {
         assert!(section.contains("IMPORTANT: When using cross-channel routing"));
         assert!(section.contains("email target: reply_email_draft.html"));
         assert!(section.contains("discord target: reply_message.txt"));
+        assert!(section.contains("wechat target: reply_message.txt"));
     }
 
     #[test]

@@ -22,6 +22,9 @@ pub enum Channel {
     Telegram,
     /// WhatsApp via Meta Cloud API
     WhatsApp,
+    /// WeChat via inbound/outbound integrations
+    #[serde(rename = "wechat")]
+    WeChat,
     /// Google Docs collaboration via comments
     GoogleDocs,
     /// Google Sheets collaboration via comments
@@ -47,6 +50,7 @@ impl std::fmt::Display for Channel {
             Channel::Sms => write!(f, "sms"),
             Channel::Telegram => write!(f, "telegram"),
             Channel::WhatsApp => write!(f, "whatsapp"),
+            Channel::WeChat => write!(f, "wechat"),
             Channel::GoogleDocs => write!(f, "google_docs"),
             Channel::GoogleSheets => write!(f, "google_sheets"),
             Channel::GoogleSlides => write!(f, "google_slides"),
@@ -66,6 +70,7 @@ impl std::str::FromStr for Channel {
             "sms" => Ok(Channel::Sms),
             "telegram" => Ok(Channel::Telegram),
             "whatsapp" => Ok(Channel::WhatsApp),
+            "wechat" | "weixin" => Ok(Channel::WeChat),
             "google_docs" | "googledocs" => Ok(Channel::GoogleDocs),
             "google_sheets" | "googlesheets" => Ok(Channel::GoogleSheets),
             "google_slides" | "googleslides" => Ok(Channel::GoogleSlides),
@@ -145,6 +150,8 @@ pub struct ChannelMetadata {
     pub telegram_chat_id: Option<i64>,
     /// WhatsApp-specific: Phone number (sender's phone)
     pub whatsapp_phone_number: Option<String>,
+    /// WeChat-specific: recipient/user identifier
+    pub wechat_user_id: Option<String>,
     /// SMS-specific: From phone number
     pub sms_from: Option<String>,
     /// SMS-specific: To phone number

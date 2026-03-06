@@ -40,7 +40,7 @@ Queue/storage behavior:
 - Account/auth/billing data is stored in Supabase Postgres (`AccountStore`).
 
 Channels in code:
-- email, slack, discord, sms, telegram, whatsapp, google_docs/google_sheets/google_slides, bluebubbles.
+- email, slack, discord, sms, telegram, wechat, whatsapp, google_docs/google_sheets/google_slides, bluebubbles.
 
 ## Runtime Configuration Policy (Source of Truth)
 
