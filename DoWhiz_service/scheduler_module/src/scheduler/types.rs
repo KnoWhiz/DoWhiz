@@ -83,6 +83,14 @@ pub struct RunTaskTask {
     /// Employee ID for per-employee credentials (optional)
     #[serde(default)]
     pub employee_id: Option<String>,
+    /// The type of identifier for the requester (e.g., "github", "email", "slack")
+    /// Used for account lookup during status sync
+    #[serde(default)]
+    pub requester_identifier_type: Option<String>,
+    /// The identifier value for the requester (e.g., GitHub username, email address)
+    /// Used for account lookup during status sync
+    #[serde(default)]
+    pub requester_identifier: Option<String>,
 }
 
 fn default_runner() -> String {

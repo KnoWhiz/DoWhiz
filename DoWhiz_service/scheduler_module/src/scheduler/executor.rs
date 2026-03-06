@@ -705,6 +705,8 @@ mod tests {
             channel: Channel::Email,
             slack_team_id: None,
             employee_id: Some("little_bear".to_string()),
+            requester_identifier_type: None,
+            requester_identifier: None,
         }
     }
 
@@ -727,6 +729,8 @@ mod tests {
             channel,
             slack_team_id: None,
             employee_id: None,
+            requester_identifier_type: None,
+            requester_identifier: None,
         }
     }
 

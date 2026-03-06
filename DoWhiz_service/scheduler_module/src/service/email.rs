@@ -246,6 +246,8 @@ pub fn process_inbound_payload(
         channel: Channel::Email,
         slack_team_id: None,
         employee_id: Some(config.employee_profile.id.clone()),
+        requester_identifier_type: Some(requester.identifier_type.to_string()),
+        requester_identifier: Some(requester.identifier.clone()),
     };
 
     // Clone run_task before consuming it, in case we need to write to account-level storage
@@ -292,51 +294,48 @@ pub fn process_inbound_payload(
         thread_state.epoch
     );
 
-    // If the sender has linked their email to an account, also write to account-level tasks
-    // to_list[0] contains the sender (may be "Name <email>" format), extract just the email
-    if let Some(sender_raw) = to_list.first() {
-        let sender_email = extract_emails(sender_raw).into_iter().next();
-        if let Some(email) = sender_email {
-            if let Ok(Some(account)) = account_store.get_account_by_identifier("email", &email) {
-            let account_tasks_dir = config.users_root.join(account.id.to_string()).join("state");
-            if let Err(err) = std::fs::create_dir_all(&account_tasks_dir) {
-                warn!(
-                    "failed to create account tasks dir for account {}: {}",
-                    account.id, err
-                );
-            } else {
-                let account_tasks_db_path = account_tasks_dir.join("tasks.db");
-                match Scheduler::load(&account_tasks_db_path, ModuleExecutor::default()) {
-                    Ok(mut account_scheduler) => {
-                        // Use the same task_id so we can update status at completion
-                        match account_scheduler.add_one_shot_in_with_id(
-                            task_id,
-                            Duration::from_secs(0),
-                            TaskKind::RunTask(run_task_for_account),
-                        ) {
-                            Ok(()) => {
-                                info!(
-                                    "also enqueued task to account-level storage account={} task_id={}",
-                                    account.id, task_id
-                                );
-                            }
-                            Err(err) => {
-                                warn!(
-                                    "failed to add task to account scheduler for account {}: {}",
-                                    account.id, err
-                                );
-                            }
+    // If the sender has linked their identifier to an account, also write to account-level tasks
+    // Use the resolved requester (which handles GitHub vs email identifiers correctly)
+    if let Ok(Some(account)) =
+        account_store.get_account_by_identifier(requester.identifier_type, &requester.identifier)
+    {
+        let account_tasks_dir = config.users_root.join(account.id.to_string()).join("state");
+        if let Err(err) = std::fs::create_dir_all(&account_tasks_dir) {
+            warn!(
+                "failed to create account tasks dir for account {}: {}",
+                account.id, err
+            );
+        } else {
+            let account_tasks_db_path = account_tasks_dir.join("tasks.db");
+            match Scheduler::load(&account_tasks_db_path, ModuleExecutor::default()) {
+                Ok(mut account_scheduler) => {
+                    // Use the same task_id so we can update status at completion
+                    match account_scheduler.add_one_shot_in_with_id(
+                        task_id,
+                        Duration::from_secs(0),
+                        TaskKind::RunTask(run_task_for_account),
+                    ) {
+                        Ok(()) => {
+                            info!(
+                                "also enqueued task to account-level storage account={} task_id={}",
+                                account.id, task_id
+                            );
+                        }
+                        Err(err) => {
+                            warn!(
+                                "failed to add task to account scheduler for account {}: {}",
+                                account.id, err
+                            );
                         }
                     }
-                    Err(err) => {
-                        warn!(
-                            "failed to load account scheduler for account {}: {}",
-                            account.id, err
-                        );
-                    }
+                }
+                Err(err) => {
+                    warn!(
+                        "failed to load account scheduler for account {}: {}",
+                        account.id, err
+                    );
                 }
             }
-        }
         }
     }
 
@@ -793,29 +792,31 @@ mod tests {
     }
 
     #[test]
-    fn account_lookup_extracts_email_from_display_name_format() {
-        // Simulates what happens when to_list contains "Name <email>" format
-        let to_list = vec!["Alice Smith <alice@example.com>".to_string()];
-        let sender_raw = to_list.first().unwrap();
-        let sender_email = extract_emails(sender_raw).into_iter().next();
-        assert_eq!(sender_email, Some("alice@example.com".to_string()));
+    fn account_lookup_uses_github_identifier_for_github_notifications() {
+        // Verify resolve_inbound_requester returns github identifier for GitHub notifications
+        let raw = br#"{
+  "From": "Bingran You <notifications@github.com>",
+  "Headers": [{"Name": "X-GitHub-Sender", "Value": "bingran-you"}],
+  "TextBody": "bingran-you left a comment"
+}"#;
+        let payload: PostmarkInbound = serde_json::from_slice(raw).expect("payload");
+        let requester = resolve_inbound_requester(&payload, raw).expect("requester");
+        // Account lookup should use "github" identifier type, not "email"
+        assert_eq!(requester.identifier_type, "github");
+        assert_eq!(requester.identifier, "bingran-you");
     }
 
     #[test]
-    fn account_lookup_extracts_email_from_bare_email() {
-        // When to_list contains just an email address
-        let to_list = vec!["alice@example.com".to_string()];
-        let sender_raw = to_list.first().unwrap();
-        let sender_email = extract_emails(sender_raw).into_iter().next();
-        assert_eq!(sender_email, Some("alice@example.com".to_string()));
-    }
-
-    #[test]
-    fn account_lookup_handles_quoted_display_name() {
-        // When to_list contains quoted display name with special chars
-        let to_list = vec!["\"Smith, Alice\" <alice@example.com>".to_string()];
-        let sender_raw = to_list.first().unwrap();
-        let sender_email = extract_emails(sender_raw).into_iter().next();
-        assert_eq!(sender_email, Some("alice@example.com".to_string()));
+    fn account_lookup_uses_email_identifier_for_regular_emails() {
+        // Verify resolve_inbound_requester returns email identifier for non-GitHub emails
+        let raw = br#"{
+  "From": "Alice Smith <alice@example.com>",
+  "TextBody": "hello"
+}"#;
+        let payload: PostmarkInbound = serde_json::from_slice(raw).expect("payload");
+        let requester = resolve_inbound_requester(&payload, raw).expect("requester");
+        // Account lookup should use "email" identifier type
+        assert_eq!(requester.identifier_type, "email");
+        assert_eq!(requester.identifier, "alice@example.com");
     }
 }

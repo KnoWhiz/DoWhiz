@@ -108,6 +108,8 @@ pub(crate) fn process_whatsapp_event(
         channel: Channel::WhatsApp,
         slack_team_id: None,
         employee_id: Some(config.employee_profile.id.clone()),
+        requester_identifier_type: None,
+        requester_identifier: None,
     };
 
     // Schedule the task
