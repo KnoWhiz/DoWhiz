@@ -7,6 +7,7 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::memory_store::DEFAULT_MEMO_CONTENT;
+use crate::workspace_bootstrap::WorkspaceBootstrapProfile;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BlobStoreError {
@@ -86,6 +87,23 @@ impl BlobStore {
         format!("{}/memo.md", account_id)
     }
 
+    /// Get the blob path for an account's workspace bootstrap profile.
+    fn workspace_bootstrap_profile_blob_path(account_id: Uuid) -> String {
+        format!("{}/workspace_bootstrap/profile.json", account_id)
+    }
+
+    /// Get the blob path for an account's workspace bootstrap file.
+    fn workspace_bootstrap_file_blob_path(
+        account_id: Uuid,
+        file_id: &str,
+    ) -> Result<String, BlobStoreError> {
+        validate_workspace_bootstrap_file_id(file_id)?;
+        Ok(format!(
+            "{}/workspace_bootstrap/files/{}",
+            account_id, file_id
+        ))
+    }
+
     /// Read memo.md for an account, returns default content if not found
     pub async fn read_memo(&self, account_id: Uuid) -> Result<String, BlobStoreError> {
         let blob_path = Self::memo_blob_path(account_id);
@@ -139,6 +157,105 @@ impl BlobStore {
             content.len()
         );
         Ok(())
+    }
+
+    /// Read workspace bootstrap profile.json for an account.
+    /// Returns an empty profile if not found.
+    pub async fn read_workspace_bootstrap_profile(
+        &self,
+        account_id: Uuid,
+    ) -> Result<WorkspaceBootstrapProfile, BlobStoreError> {
+        let blob_path = Self::workspace_bootstrap_profile_blob_path(account_id);
+        let blob_client = self.container_client.blob_client(&blob_path);
+
+        match blob_client.get_content().await {
+            Ok(data) => serde_json::from_slice::<WorkspaceBootstrapProfile>(&data)
+                .map_err(|e| BlobStoreError::Azure(format!("invalid profile json: {}", e))),
+            Err(e) => {
+                let error_str = e.to_string();
+                if error_str.contains("BlobNotFound") || error_str.contains("404") {
+                    Ok(WorkspaceBootstrapProfile::default())
+                } else {
+                    Err(BlobStoreError::Azure(e.to_string()))
+                }
+            }
+        }
+    }
+
+    /// Write workspace bootstrap profile.json for an account.
+    pub async fn write_workspace_bootstrap_profile(
+        &self,
+        account_id: Uuid,
+        profile: &WorkspaceBootstrapProfile,
+    ) -> Result<(), BlobStoreError> {
+        let blob_path = Self::workspace_bootstrap_profile_blob_path(account_id);
+        let blob_client = self.container_client.blob_client(&blob_path);
+        let payload =
+            serde_json::to_vec_pretty(profile).map_err(|e| BlobStoreError::Azure(e.to_string()))?;
+
+        blob_client
+            .put_block_blob(payload)
+            .content_type("application/json")
+            .await
+            .map_err(|e| BlobStoreError::Azure(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Read workspace bootstrap file bytes for an account.
+    pub async fn read_workspace_bootstrap_file(
+        &self,
+        account_id: Uuid,
+        file_id: &str,
+    ) -> Result<Vec<u8>, BlobStoreError> {
+        let blob_path = Self::workspace_bootstrap_file_blob_path(account_id, file_id)?;
+        let blob_client = self.container_client.blob_client(&blob_path);
+        blob_client
+            .get_content()
+            .await
+            .map_err(|e| BlobStoreError::Azure(e.to_string()))
+    }
+
+    /// Write workspace bootstrap file bytes for an account.
+    pub async fn write_workspace_bootstrap_file(
+        &self,
+        account_id: Uuid,
+        file_id: &str,
+        content: &[u8],
+        content_type: Option<&str>,
+    ) -> Result<(), BlobStoreError> {
+        let blob_path = Self::workspace_bootstrap_file_blob_path(account_id, file_id)?;
+        let blob_client = self.container_client.blob_client(&blob_path);
+
+        blob_client
+            .put_block_blob(content.to_vec())
+            .content_type(content_type.unwrap_or("application/octet-stream"))
+            .await
+            .map_err(|e| BlobStoreError::Azure(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Delete workspace bootstrap file for an account.
+    pub async fn delete_workspace_bootstrap_file(
+        &self,
+        account_id: Uuid,
+        file_id: &str,
+    ) -> Result<(), BlobStoreError> {
+        let blob_path = Self::workspace_bootstrap_file_blob_path(account_id, file_id)?;
+        let blob_client = self.container_client.blob_client(&blob_path);
+
+        match blob_client.delete().await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let error_str = e.to_string();
+                if error_str.contains("BlobNotFound") || error_str.contains("404") {
+                    Ok(())
+                } else {
+                    Err(BlobStoreError::Azure(e.to_string()))
+                }
+            }
+        }
     }
 
     /// Delete memo.md for an account (used when account is deleted)
@@ -202,6 +319,27 @@ impl BlobStore {
 
         Ok(account_ids)
     }
+}
+
+fn validate_workspace_bootstrap_file_id(file_id: &str) -> Result<(), BlobStoreError> {
+    let trimmed = file_id.trim();
+    if trimmed.is_empty() {
+        return Err(BlobStoreError::Azure(
+            "workspace bootstrap file_id cannot be empty".to_string(),
+        ));
+    }
+
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+    {
+        return Err(BlobStoreError::Azure(format!(
+            "workspace bootstrap file_id contains unsupported characters: {}",
+            file_id
+        )));
+    }
+
+    Ok(())
 }
 
 /// Lazy-initialized global BlobStore for unified accounts

@@ -844,12 +844,13 @@
               <aside class="dashboard-sidebar">
                 <p class="sidebar-eyebrow">Dashboard</p>
                 <h2 class="sidebar-title">Workspace Settings</h2>
-                <p class="sidebar-description">Navigate quickly to channels, tasks, memo, and account controls.</p>
+                <p class="sidebar-description">Navigate quickly to channels, tasks, memo, bootstrap assets, and account controls.</p>
                 <nav class="sidebar-nav" aria-label="Dashboard Sections">
                   <a class="sidebar-link is-active" href="#section-overview">Overview</a>
                   <a class="sidebar-link" href="#section-channels">Channels</a>
                   <a class="sidebar-link" href="#section-tasks">Tasks</a>
                   <a class="sidebar-link" href="#section-memo">Memo</a>
+                  <a class="sidebar-link" href="#section-bootstrap">Workspace Bootstrap</a>
                   <a class="sidebar-link" href="#section-settings">Settings</a>
                 </nav>
                 <div class="sidebar-note">
@@ -935,6 +936,47 @@
                         Refresh
                       </button>
                       <span id="memo-status" class="memo-status"></span>
+                    </div>
+                  </div>
+                </section>
+
+                <section id="section-bootstrap" class="legal-card dashboard-section">
+                  <h2>Workspace Bootstrap</h2>
+                  <p>Configure files and commands that are applied when a workspace starts.</p>
+                  <div id="workspace-bootstrap-container" style="margin-top: 1rem;">
+                    <textarea id="workspace-bootstrap-profile" style="
+                      background: var(--surface, #1a1a1a);
+                      border: 1px solid var(--border, #333);
+                      border-radius: 8px;
+                      padding: 1rem;
+                      width: 100%;
+                      min-height: 260px;
+                      resize: vertical;
+                      font-family: monospace;
+                      font-size: 0.9rem;
+                      color: var(--text, #fff);
+                      box-sizing: border-box;
+                    ">Loading bootstrap profile...</textarea>
+                    <div class="memo-actions">
+                      <button id="save-workspace-bootstrap-btn" class="auth-btn auth-btn-primary">
+                        Save Profile
+                      </button>
+                      <button id="refresh-workspace-bootstrap-btn" class="auth-btn auth-btn-oauth">
+                        Refresh
+                      </button>
+                      <span id="workspace-bootstrap-status" class="memo-status"></span>
+                    </div>
+
+                    <div style="margin-top: 1rem;">
+                      <h3 style="margin-bottom: 0.5rem;">Upload Bootstrap File</h3>
+                      <div style="display: grid; gap: 0.5rem;">
+                        <input id="workspace-bootstrap-target-path" class="auth-input" type="text" placeholder="Target workspace path, e.g. .vscode/settings.json" />
+                        <input id="workspace-bootstrap-file-input" class="auth-input" type="file" />
+                        <button id="upload-workspace-bootstrap-file-btn" class="auth-btn auth-btn-oauth">
+                          Upload File And Add To Profile Draft
+                        </button>
+                        <span id="workspace-bootstrap-upload-status" class="memo-status"></span>
+                      </div>
                     </div>
                   </div>
                 </section>
@@ -1559,15 +1601,16 @@
         hideExistingAccountOptions();
         dashboardContainer.classList.remove('hidden');
         pageTitle.textContent = 'Your Dashboard';
-        pageSubtitle.textContent = 'Manage channels, tasks, memo, and settings from one unified dashboard.';
+        pageSubtitle.textContent = 'Manage channels, tasks, memo, workspace bootstrap, and settings from one unified dashboard.';
 
         document.getElementById('account-id').textContent = accountData.account_id;
         document.getElementById('user-email').textContent = session.user.email;
 
-        // Load identifiers, memo, and tasks in parallel
+        // Load identifiers, memo, workspace bootstrap, and tasks in parallel
         await Promise.all([
           loadIdentifiers(session.access_token),
           loadMemo(session.access_token),
+          loadWorkspaceBootstrap(session.access_token),
           loadTasks(session.access_token)
         ]);
 
@@ -1715,6 +1758,221 @@
         if (session) {
           document.getElementById('memo-content').value = 'Loading...';
           await loadMemo(session.access_token);
+        }
+      });
+
+      function defaultWorkspaceBootstrapProfile() {
+        return {
+          version: '',
+          commands: [],
+          files: [],
+          updated_at: null
+        };
+      }
+
+      function setWorkspaceBootstrapStatus(message, color = 'var(--text-muted, #888)') {
+        const status = document.getElementById('workspace-bootstrap-status');
+        status.textContent = message;
+        status.style.color = color;
+      }
+
+      function setWorkspaceBootstrapUploadStatus(message, color = 'var(--text-muted, #888)') {
+        const status = document.getElementById('workspace-bootstrap-upload-status');
+        status.textContent = message;
+        status.style.color = color;
+      }
+
+      function readFileAsBase64(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result || '';
+            const commaIndex = String(result).indexOf(',');
+            if (commaIndex === -1) {
+              reject(new Error('Failed to encode file.'));
+              return;
+            }
+            resolve(String(result).slice(commaIndex + 1));
+          };
+          reader.onerror = () => reject(new Error('Failed to read file.'));
+          reader.readAsDataURL(file);
+        });
+      }
+
+      function generateWorkspaceBootstrapFileId(fileName) {
+        const normalized = (fileName || 'file')
+          .toLowerCase()
+          .replace(/[^a-z0-9._-]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '');
+        const safeBase = normalized || 'file';
+        return `${safeBase}-${Date.now()}`;
+      }
+
+      function parseWorkspaceBootstrapProfileFromEditor() {
+        const editor = document.getElementById('workspace-bootstrap-profile');
+        const parsed = JSON.parse(editor.value);
+        if (!parsed || typeof parsed !== 'object') {
+          throw new Error('Profile must be a JSON object.');
+        }
+        if (!Array.isArray(parsed.commands)) {
+          parsed.commands = [];
+        }
+        if (!Array.isArray(parsed.files)) {
+          parsed.files = [];
+        }
+        if (typeof parsed.version !== 'string') {
+          parsed.version = '';
+        }
+        if (!Object.prototype.hasOwnProperty.call(parsed, 'updated_at')) {
+          parsed.updated_at = null;
+        }
+        return parsed;
+      }
+
+      // Load workspace bootstrap profile
+      async function loadWorkspaceBootstrap(accessToken) {
+        const editor = document.getElementById('workspace-bootstrap-profile');
+        setWorkspaceBootstrapStatus('Loading...');
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/auth/workspace-bootstrap`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to load workspace bootstrap profile');
+          }
+
+          const data = await res.json();
+          const profile = data.profile || defaultWorkspaceBootstrapProfile();
+          editor.value = JSON.stringify(profile, null, 2);
+          setWorkspaceBootstrapStatus('Loaded.', '#22c55e');
+          setTimeout(() => setWorkspaceBootstrapStatus(''), 2000);
+        } catch (err) {
+          console.error('Failed to load workspace bootstrap profile:', err);
+          editor.value = JSON.stringify(defaultWorkspaceBootstrapProfile(), null, 2);
+          setWorkspaceBootstrapStatus(`Error: ${err.message}`, '#ef4444');
+        }
+      }
+
+      // Save workspace bootstrap profile
+      async function saveWorkspaceBootstrap(accessToken) {
+        setWorkspaceBootstrapStatus('Saving...');
+
+        let profile;
+        try {
+          profile = parseWorkspaceBootstrapProfileFromEditor();
+        } catch (err) {
+          setWorkspaceBootstrapStatus(`Error: ${err.message}`, '#ef4444');
+          return;
+        }
+
+        profile.updated_at = new Date().toISOString();
+
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/auth/workspace-bootstrap`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(profile)
+          });
+
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to save workspace bootstrap profile');
+          }
+
+          document.getElementById('workspace-bootstrap-profile').value = JSON.stringify(profile, null, 2);
+          setWorkspaceBootstrapStatus('Saved!', '#22c55e');
+          setTimeout(() => setWorkspaceBootstrapStatus(''), 3000);
+        } catch (err) {
+          console.error('Failed to save workspace bootstrap profile:', err);
+          setWorkspaceBootstrapStatus(`Error: ${err.message}`, '#ef4444');
+        }
+      }
+
+      // Upload one bootstrap file and append it to profile draft
+      async function uploadWorkspaceBootstrapFile(accessToken) {
+        const fileInput = document.getElementById('workspace-bootstrap-file-input');
+        const pathInput = document.getElementById('workspace-bootstrap-target-path');
+        const targetPath = (pathInput.value || '').trim();
+        const selectedFile = fileInput.files && fileInput.files[0];
+
+        if (!targetPath) {
+          setWorkspaceBootstrapUploadStatus('Please provide a target workspace path.', '#ef4444');
+          return;
+        }
+        if (!selectedFile) {
+          setWorkspaceBootstrapUploadStatus('Please choose a file to upload.', '#ef4444');
+          return;
+        }
+
+        setWorkspaceBootstrapUploadStatus('Uploading...');
+        const fileId = generateWorkspaceBootstrapFileId(selectedFile.name);
+
+        try {
+          const contentBase64 = await readFileAsBase64(selectedFile);
+          const res = await fetch(`${DOWHIZ_API_URL}/auth/workspace-bootstrap/files`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              file_id: fileId,
+              content_base64: contentBase64,
+              content_type: selectedFile.type || 'application/octet-stream'
+            })
+          });
+
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to upload bootstrap file');
+          }
+
+          const profile = parseWorkspaceBootstrapProfileFromEditor();
+          profile.files = profile.files.filter((item) => item.path !== targetPath);
+          profile.files.push({
+            file_id: fileId,
+            path: targetPath,
+            required: true
+          });
+          profile.updated_at = new Date().toISOString();
+          document.getElementById('workspace-bootstrap-profile').value = JSON.stringify(profile, null, 2);
+
+          setWorkspaceBootstrapUploadStatus('Uploaded. Profile draft updated; click "Save Profile" to persist.', '#22c55e');
+          fileInput.value = '';
+        } catch (err) {
+          console.error('Failed to upload workspace bootstrap file:', err);
+          setWorkspaceBootstrapUploadStatus(`Error: ${err.message}`, '#ef4444');
+        }
+      }
+
+      // Save workspace bootstrap button
+      document.getElementById('save-workspace-bootstrap-btn').addEventListener('click', async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          await saveWorkspaceBootstrap(session.access_token);
+        }
+      });
+
+      // Refresh workspace bootstrap button
+      document.getElementById('refresh-workspace-bootstrap-btn').addEventListener('click', async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          document.getElementById('workspace-bootstrap-profile').value = 'Loading bootstrap profile...';
+          await loadWorkspaceBootstrap(session.access_token);
+        }
+      });
+
+      // Upload workspace bootstrap file button
+      document.getElementById('upload-workspace-bootstrap-file-btn').addEventListener('click', async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          await uploadWorkspaceBootstrapFile(session.access_token);
         }
       });
 

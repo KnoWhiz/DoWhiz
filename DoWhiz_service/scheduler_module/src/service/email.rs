@@ -613,6 +613,8 @@ mod tests {
             state_dir: user_root.join("state"),
             tasks_db_path: user_root.join("state/tasks.db"),
             memory_dir: user_root.join("memory"),
+            bootstrap_dir: user_root.join("bootstrap"),
+            bootstrap_files_dir: user_root.join("bootstrap/files"),
             secrets_dir: user_root.join("secrets"),
             mail_root: user_root.join("mail"),
             workspaces_root: user_root.join("workspaces"),
