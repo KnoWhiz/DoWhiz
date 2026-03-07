@@ -1572,7 +1572,7 @@
         ]);
 
         // Start polling for task updates
-        startTaskPolling(session.access_token);
+        startTaskPolling();
         updateSidebarNavigation();
       }
 
@@ -2107,15 +2107,21 @@
       }
 
       // Start polling for task updates
-      function startTaskPolling(accessToken) {
+      function startTaskPolling() {
         // Clear any existing interval
         if (taskPollingInterval) {
           clearInterval(taskPollingInterval);
         }
 
-        // Poll every 30 seconds
-        taskPollingInterval = setInterval(() => {
-          loadTasks(accessToken);
+        // Poll every 30 seconds, fetching fresh session each time
+        taskPollingInterval = setInterval(async () => {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            loadTasks(session.access_token);
+          } else {
+            // Session expired completely, stop polling
+            stopTaskPolling();
+          }
         }, 30000);
       }
 
