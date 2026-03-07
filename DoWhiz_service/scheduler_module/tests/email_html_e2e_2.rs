@@ -1,5 +1,6 @@
 mod test_support;
 
+use scheduler_module::account_store::AccountStore;
 use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
 use scheduler_module::service::{
@@ -131,7 +132,7 @@ fn test_employee_directory() -> (EmployeeProfile, EmployeeDirectory) {
 fn setup_service_for_test(
     test_name: &str,
 ) -> Result<
-    Option<(TempDir, ServiceConfig, UserStore, IndexStore)>,
+    Option<(TempDir, ServiceConfig, UserStore, IndexStore, AccountStore)>,
     Box<dyn std::error::Error + Send + Sync>,
 > {
     let Some(ingestion_db_url) = test_support::require_supabase_db_url(test_name) else {
@@ -186,13 +187,15 @@ fn setup_service_for_test(
 
     let user_store = UserStore::new(&config.users_db_path)?;
     let index_store = IndexStore::new(&config.task_index_path)?;
-    Ok(Some((temp, config, user_store, index_store)))
+    let account_store = AccountStore::new(&config.ingestion_db_url)?;
+    Ok(Some((temp, config, user_store, index_store, account_store)))
 }
 
 fn process_payload_and_load_html(
     config: &ServiceConfig,
     user_store: &UserStore,
     index_store: &IndexStore,
+    account_store: &AccountStore,
     payload: serde_json::Value,
     requester_email: &str,
 ) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
@@ -202,6 +205,7 @@ fn process_payload_and_load_html(
         config,
         user_store,
         index_store,
+        account_store,
         &payload,
         inbound_raw.as_bytes(),
     )?;
@@ -219,7 +223,7 @@ fn process_payload_and_load_html(
 #[test]
 fn inbound_email_complex_html_is_sanitized() -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 {
-    let Some((_temp, config, user_store, index_store)) =
+    let Some((_temp, config, user_store, index_store, account_store)) =
         setup_service_for_test("inbound_email_complex_html_is_sanitized")?
     else {
         return Ok(());
@@ -273,6 +277,7 @@ fn inbound_email_complex_html_is_sanitized() -> Result<(), Box<dyn std::error::E
         &config,
         &user_store,
         &index_store,
+        &account_store,
         payload_value,
         "alice@example.com",
     )?;
@@ -285,7 +290,7 @@ fn inbound_email_complex_html_is_sanitized() -> Result<(), Box<dyn std::error::E
 #[test]
 fn inbound_email_falls_back_to_text_when_html_is_removed(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let Some((_temp, config, user_store, index_store)) =
+    let Some((_temp, config, user_store, index_store, account_store)) =
         setup_service_for_test("inbound_email_falls_back_to_text_when_html_is_removed")?
     else {
         return Ok(());
@@ -314,6 +319,7 @@ fn inbound_email_falls_back_to_text_when_html_is_removed(
         &config,
         &user_store,
         &index_store,
+        &account_store,
         payload_value,
         "bob@example.com",
     )?;

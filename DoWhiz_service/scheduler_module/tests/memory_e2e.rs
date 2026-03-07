@@ -142,6 +142,8 @@ fn memory_sync_roundtrip_via_run_task() -> Result<(), Box<dyn std::error::Error>
         channel: scheduler_module::channel::Channel::default(),
         slack_team_id: None,
         employee_id: None,
+        requester_identifier_type: None,
+        requester_identifier: None,
     };
 
     let executor = ModuleExecutor::default();
