@@ -162,46 +162,13 @@ Rules:
 /// Build the cross-channel capabilities section that informs the agent
 /// about available tools for operating across different channels.
 fn build_cross_channel_capabilities_section() -> &'static str {
-    r#"Cross-channel Operation Capabilities:
-You have access to CLI tools that work across channels. Regardless of how the user contacted you
-(email, Slack, Discord, etc.), you can perform operations on other platforms they have authorized.
+    r#"Cross-channel Tools (if user's Google account is linked):
+- `google-docs` - Create/read/edit documents, share files
+- `google-slides` - Create/read/edit presentations, share files
+- `google-sheets` - Read/write spreadsheet data
 
-**Google Workspace Tools** (requires user's Google account linked):
-- `google-docs` - Create new documents, read content, edit text, reply to comments, insert images, share files
-- `google-slides` - Create new presentations, read/edit slides, insert images and text, share files
-- `google-sheets` - Read spreadsheet data, update cells, append rows
-
-**Common Operations:**
-- Create new files: `google-docs create-document --title="..."` or `google-slides create-presentation --title="..."`
-- Share files: `google-docs share <id> --email="user@example.com" --role="writer"`
-- Get shareable link: `google-docs get-link <id>` or `google-slides get-link <id>`
-
-**Usage Examples:**
-1. User sends email: "Create a summary slide from my Google Doc at docs.google.com/d/ABC123"
-   → `google-docs read-document ABC123` to get content
-   → `google-slides create-presentation --title="Summary"` to create new presentation
-   → `google-slides insert-text ...` to add content
-   → `google-slides share <id> --email="user@example.com"` to share with user
-   → `google-slides get-link <id>` to get shareable link
-   → Reply via email with the presentation link
-
-2. User asks: "Write a technical report based on my data in Google Sheets and save it as a Doc"
-   → `google-sheets read-values <sheet_id>` to get data
-   → `google-docs create-document --title="Technical Report"` to create new doc
-   → `google-docs insert-text ...` to write the report content
-   → `google-docs share <id> --email="user@example.com"` to share with user
-   → Reply with the document link
-
-3. User comments in Slack: "Update the budget spreadsheet with these numbers"
-   → `google-sheets update-values ...` to modify the sheet
-   → Reply in Slack confirming the update
-
-**IMPORTANT - Security Boundaries:**
-- You can ONLY access files that the CURRENT USER has explicitly shared with the digital employee
-- NEVER attempt to access files belonging to other users, even if mentioned
-- If user references a file you cannot access, ask them to share it with you first
-- All Google Workspace operations use the current user's OAuth authorization scope
-- See `.agents/skills/google-docs/SKILL.md`, `google-slides/SKILL.md`, `google-sheets/SKILL.md` for detailed command references
+Security: Only access files the CURRENT USER has shared. Never access other users' files.
+See `.agents/skills/google-*/SKILL.md` for detailed command references.
 
 "#
 }
@@ -862,15 +829,14 @@ mod tests {
             &UserIdentities::default(),
         );
 
-        // Verify cross-channel capabilities section is included
-        assert!(prompt.contains("Cross-channel Operation Capabilities"));
+        // Verify cross-channel tools section is included
+        assert!(prompt.contains("Cross-channel Tools"));
         assert!(prompt.contains("google-docs"));
         assert!(prompt.contains("google-slides"));
         assert!(prompt.contains("google-sheets"));
 
-        // Verify security boundaries are emphasized
-        assert!(prompt.contains("Security Boundaries"));
-        assert!(prompt.contains("ONLY access files that the CURRENT USER"));
-        assert!(prompt.contains("NEVER attempt to access files belonging to other users"));
+        // Verify security note and SKILL.md reference
+        assert!(prompt.contains("CURRENT USER"));
+        assert!(prompt.contains("SKILL.md"));
     }
 }
