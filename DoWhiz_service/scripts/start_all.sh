@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# DoWhiz 服务一键启动脚本
+# DoWhiz 本地一键启动脚本（仅本地调试）
 # 启动顺序：Gateway → Worker → Ngrok → 更新 Postmark Webhook
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,6 +11,16 @@ SERVICE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=./load_env_target.sh
 source "${SCRIPT_DIR}/load_env_target.sh"
 echo "✓ 已加载环境变量: ${ENV_FILE:-<shell environment only>}"
+
+DEPLOY_TARGET_NORMALIZED="$(echo "${DEPLOY_TARGET:-}" | tr '[:upper:]' '[:lower:]')"
+if [[ "$DEPLOY_TARGET_NORMALIZED" == "staging" || "$DEPLOY_TARGET_NORMALIZED" == "production" ]]; then
+    echo "✗ start_all.sh 仅用于本地调试：它会启动 ngrok 并改写 Postmark inbound hook。"
+    echo "  staging/production 请改用："
+    echo "  ./DoWhiz_service/scripts/run_gateway_local.sh"
+    echo "  ./DoWhiz_service/scripts/run_employee.sh <employee_id> 9001 --skip-hook --skip-ngrok"
+    echo "  (staging: boiled_egg, production: little_bear)"
+    exit 1
+fi
 
 # Azure ACI backend requires VM-side shared mount before worker starts.
 "${SCRIPT_DIR}/ensure_aci_share_mount.sh"

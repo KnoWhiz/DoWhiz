@@ -4,6 +4,9 @@
 [submodule "external/harbor"]
 	path = external/harbor
 	url = https://github.com/KnoWhiz/harbor
-[submodule "external/zeroclaw"]
-	path = external/zeroclaw
-	url = https://github.com/KnoWhiz/zeroclaw
+[submodule "external/gepa"]
+	path = external/gepa
+	url = https://github.com/KnoWhiz/gepa
+[submodule "external/ironclaw"]
+	path = external/ironclaw
+	url = https://github.com/KnoWhiz/ironclaw

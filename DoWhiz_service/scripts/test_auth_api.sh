@@ -1,165 +1,228 @@
-#!/bin/bash
-# Test script for the auth API endpoints
+#!/usr/bin/env bash
+# Test script for auth API endpoints with explicit status validation.
 
-set -e
+set -euo pipefail
 
-# Load specific environment variables from .env
-if [ -f .env ]; then
-    SUPABASE_ANON_KEY=$(grep '^SUPABASE_ANON_KEY=' .env | cut -d'=' -f2- | tr -d '"')
-    SUPABASE_PROJECT_URL=$(grep '^SUPABASE_PROJECT_URL=' .env | cut -d'=' -f2- | tr -d '"')
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="${ENV_FILE:-$PROJECT_DIR/.env}"
+
+load_env_value() {
+    local key="$1"
+    local file="$2"
+    awk -F'=' -v key="$key" '
+        $0 ~ "^[[:space:]]*"key"=" {
+            sub(/^[^=]*=/, "", $0);
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0);
+            gsub(/^"|"$/, "", $0);
+            print $0;
+            exit;
+        }
+    ' "$file"
+}
+
+json_get() {
+    local path="$1"
+    python3 -c '
+import json, sys
+path = sys.argv[1]
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+cur = data
+for part in path.split("."):
+    if isinstance(cur, dict) and part in cur:
+        cur = cur[part]
+    else:
+        sys.exit(1)
+if cur is None:
+    sys.exit(1)
+if isinstance(cur, (dict, list)):
+    print(json.dumps(cur))
+else:
+    print(cur)
+' "$path"
+}
+
+curl_json() {
+    local method="$1"
+    local url="$2"
+    local data="${3:-}"
+    shift 3
+    local extra_headers=("$@")
+    local response
+    if [[ -n "$data" ]]; then
+        response="$(curl -sS -X "$method" "$url" \
+            -H "Content-Type: application/json" \
+            "${extra_headers[@]}" \
+            -d "$data" \
+            -w $'\n%{http_code}')"
+    else
+        response="$(curl -sS -X "$method" "$url" \
+            "${extra_headers[@]}" \
+            -w $'\n%{http_code}')"
+    fi
+    HTTP_STATUS="${response##*$'\n'}"
+    HTTP_BODY="${response%$'\n'*}"
+}
+
+ensure_2xx() {
+    local step="$1"
+    if [[ "${HTTP_STATUS:0:1}" != "2" ]]; then
+        echo "ERROR: ${step} failed (status=${HTTP_STATUS})"
+        echo "Body: ${HTTP_BODY}"
+        exit 1
+    fi
+}
+
+if [[ -f "$ENV_FILE" ]]; then
+    SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-$(load_env_value SUPABASE_ANON_KEY "$ENV_FILE")}"
+    SUPABASE_PROJECT_URL="${SUPABASE_PROJECT_URL:-$(load_env_value SUPABASE_PROJECT_URL "$ENV_FILE")}"
 fi
 
-# Configuration
 SERVICE_URL="${SERVICE_URL:-http://localhost:9001}"
-SUPABASE_URL="${SUPABASE_PROJECT_URL:-https://resmseutzmwumflevfqw.supabase.co}"
-ANON_KEY="${SUPABASE_ANON_KEY}"
+SUPABASE_URL="${SUPABASE_PROJECT_URL:-}"
+ANON_KEY="${SUPABASE_ANON_KEY:-}"
+TEST_EMAIL="${1:-${TEST_EMAIL:-}}"
+TEST_PASSWORD="${2:-${TEST_PASSWORD:-}}"
+TEST_PHONE="${3:-${TEST_PHONE:-+14155550100}}"
+AUTH_VERIFY_CODE="${AUTH_VERIFY_CODE:-123456}"
 
-# Use email from argument or default
-TEST_EMAIL="${1:-dylantang12@gmail.com}"
-TEST_PASSWORD="${2:-testpassword123}"
+if [[ -z "$TEST_EMAIL" || -z "$TEST_PASSWORD" ]]; then
+    echo "Usage: $0 <test_email> <test_password> [test_phone]"
+    echo "Or set TEST_EMAIL/TEST_PASSWORD env vars."
+    exit 2
+fi
+
+if [[ -z "$SUPABASE_URL" || -z "$ANON_KEY" ]]; then
+    echo "ERROR: SUPABASE_PROJECT_URL and SUPABASE_ANON_KEY are required."
+    echo "Set env vars directly or provide them in $ENV_FILE."
+    exit 1
+fi
 
 echo "=== Auth API Test Script ==="
 echo "Service URL: $SERVICE_URL"
 echo "Supabase URL: $SUPABASE_URL"
 echo "Test email: $TEST_EMAIL"
+echo "Test phone: $TEST_PHONE"
 echo ""
 
-# Check if anon key is set
-if [ -z "$ANON_KEY" ]; then
-    echo "ERROR: SUPABASE_ANON_KEY not set. Please check your .env file."
-    exit 1
-fi
+echo "1. Login with Supabase (fallback to signup)..."
+curl_json "POST" "${SUPABASE_URL}/auth/v1/token?grant_type=password" \
+    "{\"email\":\"${TEST_EMAIL}\",\"password\":\"${TEST_PASSWORD}\"}" \
+    -H "apikey: ${ANON_KEY}"
 
-# Step 1: Try to login first, if fails then signup
-echo "1. Logging in with Supabase Auth..."
-LOGIN_RESPONSE=$(curl -s -X POST "${SUPABASE_URL}/auth/v1/token?grant_type=password" \
-    -H "apikey: ${ANON_KEY}" \
-    -H "Content-Type: application/json" \
-    -d "{\"email\": \"${TEST_EMAIL}\", \"password\": \"${TEST_PASSWORD}\"}")
+ACCESS_TOKEN="$(printf '%s' "$HTTP_BODY" | json_get "access_token" 2>/dev/null || true)"
 
-# Extract access token from login
-ACCESS_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
-
-if [ -z "$ACCESS_TOKEN" ]; then
-    echo "Login failed, trying signup..."
-    SIGNUP_RESPONSE=$(curl -s -X POST "${SUPABASE_URL}/auth/v1/signup" \
-        -H "apikey: ${ANON_KEY}" \
-        -H "Content-Type: application/json" \
-        -d "{\"email\": \"${TEST_EMAIL}\", \"password\": \"${TEST_PASSWORD}\"}")
-
-    echo "Signup response: $SIGNUP_RESPONSE"
-
-    # Check if email confirmation is required
-    if echo "$SIGNUP_RESPONSE" | grep -q "confirmation_sent_at"; then
-        echo ""
-        echo "=========================================="
-        echo "EMAIL CONFIRMATION REQUIRED"
-        echo "=========================================="
-        echo "1. Check your email ($TEST_EMAIL) for confirmation link"
-        echo "2. Click the link to confirm your account"
-        echo "3. Run this script again to login"
-        echo ""
-        echo "Or disable email confirmation in Supabase Dashboard:"
-        echo "  Auth → Settings → Email Auth → Disable 'Confirm email'"
+if [[ -z "$ACCESS_TOKEN" ]]; then
+    echo "Login failed (status=${HTTP_STATUS}), trying signup..."
+    curl_json "POST" "${SUPABASE_URL}/auth/v1/signup" \
+        "{\"email\":\"${TEST_EMAIL}\",\"password\":\"${TEST_PASSWORD}\"}" \
+        -H "apikey: ${ANON_KEY}"
+    ensure_2xx "Supabase signup"
+    ACCESS_TOKEN="$(printf '%s' "$HTTP_BODY" | json_get "access_token" 2>/dev/null || true)"
+    CONFIRMATION_SENT_AT="$(printf '%s' "$HTTP_BODY" | json_get "user.confirmation_sent_at" 2>/dev/null || true)"
+    if [[ -n "$CONFIRMATION_SENT_AT" && -z "$ACCESS_TOKEN" ]]; then
+        echo "Signup requires email confirmation for $TEST_EMAIL."
+        echo "Confirm email first, then rerun this script."
         exit 0
     fi
-
-    ACCESS_TOKEN=$(echo "$SIGNUP_RESPONSE" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
 fi
 
-if [ -z "$ACCESS_TOKEN" ]; then
-    echo "ERROR: Failed to get access token"
-    echo "Login response: $LOGIN_RESPONSE"
+if [[ -z "$ACCESS_TOKEN" ]]; then
+    echo "ERROR: Failed to acquire Supabase access token."
     exit 1
 fi
 
 echo "Access token obtained: ${ACCESS_TOKEN:0:20}..."
 echo ""
 
-# Step 2: Create DoWhiz account
-echo "2. Creating DoWhiz account (POST /auth/signup)..."
-ACCOUNT_RESPONSE=$(curl -s -X POST "${SERVICE_URL}/auth/signup" \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}")
-
-echo "Response: $ACCOUNT_RESPONSE"
+echo "2. POST /auth/signup"
+curl_json "POST" "${SERVICE_URL}/auth/signup" "" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}"
+ensure_2xx "/auth/signup"
+echo "status=${HTTP_STATUS}"
+echo "body=${HTTP_BODY}"
 echo ""
 
-# Step 3: Get account info
-echo "3. Getting account info (GET /auth/account)..."
-ACCOUNT_INFO=$(curl -s "${SERVICE_URL}/auth/account" \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}")
-
-echo "Response: $ACCOUNT_INFO"
+echo "3. GET /auth/account"
+curl_json "GET" "${SERVICE_URL}/auth/account" "" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}"
+ensure_2xx "/auth/account (initial)"
+echo "status=${HTTP_STATUS}"
+echo "body=${HTTP_BODY}"
 echo ""
 
-# Step 4: Link a phone identifier
-echo "4. Linking phone identifier (POST /auth/link)..."
-LINK_RESPONSE=$(curl -s -X POST "${SERVICE_URL}/auth/link" \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d '{"identifier_type": "phone", "identifier": "+14155550100"}')
-
-echo "Response: $LINK_RESPONSE"
+echo "4. POST /auth/link"
+curl_json "POST" "${SERVICE_URL}/auth/link" \
+    "{\"identifier_type\":\"phone\",\"identifier\":\"${TEST_PHONE}\"}" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}"
+ensure_2xx "/auth/link"
+echo "status=${HTTP_STATUS}"
+echo "body=${HTTP_BODY}"
 echo ""
 
-# Step 5: Get account info again (should show the linked identifier)
-echo "5. Getting account info again (should show linked identifier)..."
-ACCOUNT_INFO2=$(curl -s "${SERVICE_URL}/auth/account" \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}")
-
-echo "Response: $ACCOUNT_INFO2"
+echo "5. GET /auth/account (after link)"
+curl_json "GET" "${SERVICE_URL}/auth/account" "" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}"
+ensure_2xx "/auth/account (after link)"
+echo "status=${HTTP_STATUS}"
+echo "body=${HTTP_BODY}"
 echo ""
 
-# Step 6: Verify the identifier
-echo "6. Verifying identifier (POST /auth/verify)..."
-VERIFY_RESPONSE=$(curl -s -X POST "${SERVICE_URL}/auth/verify" \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d '{"identifier_type": "phone", "identifier": "+14155550100", "code": "123456"}')
-
-echo "Response: $VERIFY_RESPONSE"
+echo "6. POST /auth/verify"
+curl_json "POST" "${SERVICE_URL}/auth/verify" \
+    "{\"identifier_type\":\"phone\",\"identifier\":\"${TEST_PHONE}\",\"code\":\"${AUTH_VERIFY_CODE}\"}" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}"
+ensure_2xx "/auth/verify"
+echo "status=${HTTP_STATUS}"
+echo "body=${HTTP_BODY}"
 echo ""
 
-# Step 7: Get account info again (should show verified)
-echo "7. Getting account info (should show verified=true)..."
-ACCOUNT_INFO3=$(curl -s "${SERVICE_URL}/auth/account" \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}")
-
-echo "Response: $ACCOUNT_INFO3"
+echo "7. GET /auth/account (after verify)"
+curl_json "GET" "${SERVICE_URL}/auth/account" "" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}"
+ensure_2xx "/auth/account (after verify)"
+echo "status=${HTTP_STATUS}"
+echo "body=${HTTP_BODY}"
 echo ""
 
-# Step 8: Unlink the identifier
-echo "8. Unlinking identifier (DELETE /auth/unlink)..."
-UNLINK_RESPONSE=$(curl -s -X DELETE "${SERVICE_URL}/auth/unlink" \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d '{"identifier_type": "phone", "identifier": "+14155550100"}')
-
-echo "Response: $UNLINK_RESPONSE"
+echo "8. DELETE /auth/unlink"
+curl_json "DELETE" "${SERVICE_URL}/auth/unlink" \
+    "{\"identifier_type\":\"phone\",\"identifier\":\"${TEST_PHONE}\"}" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}"
+ensure_2xx "/auth/unlink"
+echo "status=${HTTP_STATUS}"
+echo "body=${HTTP_BODY}"
 echo ""
 
-# Step 9: Final account info (should have no identifiers)
-echo "9. Final account info (should have no identifiers)..."
-ACCOUNT_INFO_FINAL=$(curl -s "${SERVICE_URL}/auth/account" \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}")
-
-echo "Response: $ACCOUNT_INFO_FINAL"
+echo "9. GET /auth/account (after unlink)"
+curl_json "GET" "${SERVICE_URL}/auth/account" "" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}"
+ensure_2xx "/auth/account (after unlink)"
+echo "status=${HTTP_STATUS}"
+echo "body=${HTTP_BODY}"
 echo ""
 
-# Step 10: Delete the account
-echo "10. Deleting account (DELETE /auth/account)..."
-DELETE_RESPONSE=$(curl -s -X DELETE "${SERVICE_URL}/auth/account" \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}")
-
-echo "Response: $DELETE_RESPONSE"
+echo "10. DELETE /auth/account"
+curl_json "DELETE" "${SERVICE_URL}/auth/account" "" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}"
+ensure_2xx "/auth/account delete"
+echo "status=${HTTP_STATUS}"
+echo "body=${HTTP_BODY}"
 echo ""
 
-# Step 11: Verify account is deleted
-echo "11. Verifying account is deleted (should return 404)..."
-VERIFY_DELETE=$(curl -s "${SERVICE_URL}/auth/account" \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}")
-
-echo "Response: $VERIFY_DELETE"
+echo "11. GET /auth/account (should fail after delete)"
+curl_json "GET" "${SERVICE_URL}/auth/account" "" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}"
+if [[ "${HTTP_STATUS:0:1}" == "2" ]]; then
+    echo "ERROR: account still exists after delete."
+    echo "body=${HTTP_BODY}"
+    exit 1
+fi
+echo "status=${HTTP_STATUS}"
+echo "body=${HTTP_BODY}"
 echo ""
 
-echo "=== Test Complete ==="
+echo "=== Test Complete: PASS ==="

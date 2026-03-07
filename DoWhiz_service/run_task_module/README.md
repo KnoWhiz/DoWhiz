@@ -1,30 +1,51 @@
 # run_task_module
 
-Run Codex or Claude CLI for workspace-based task execution. Output files are channel-aware:
-- Email / Google Workspace: `reply_email_draft.html` + `reply_email_attachments/`
-- Slack / Discord / Telegram / SMS / WhatsApp / BlueBubbles: `reply_message.txt` + `reply_attachments/`
+Workspace-based task executor used by scheduler `RunTask` jobs.
 
-## Usage
+Runners:
+- `codex`
+- `claude`
 
-Requirements:
-- Codex CLI installed and available on PATH (for `runner = "codex"`).
-- Claude CLI installed and available on PATH (for `runner = "claude"`).
-- Node.js 20 + npm.
-- `playwright-cli` + Chromium (required when Codex calls browser automation skills).
-- Environment variables:
-  - `AZURE_OPENAI_API_KEY_BACKUP`
+## Inputs / Outputs
 
-Install (Linux, Dockerfile parity):
-```
-sudo apt-get update
-sudo apt-get install -y ca-certificates libssl-dev pkg-config curl
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-sudo npm install -g @openai/codex@latest @playwright/cli@latest
-sudo npx playwright install --with-deps chromium
-```
+Required input directories (relative to `workspace_dir`):
+- `incoming_email`
+- `incoming_attachments`
+- `memory`
+- `references`
 
-Example:
+Output files are channel-aware:
+- email/google workspace channels -> `reply_email_draft.html` + `reply_email_attachments/`
+- chat channels (slack/discord/telegram/sms/whatsapp/bluebubbles) -> `reply_message.txt` + `reply_attachments/`
+
+## Execution Backend
+
+Control via `RUN_TASK_EXECUTION_BACKEND=local|azure_aci|auto`.
+
+`auto` behavior:
+- `DEPLOY_TARGET=staging|production` -> Azure ACI
+- otherwise -> local
+
+Safety rule in code:
+- local codex execution is blocked when `DEPLOY_TARGET` is `staging` or `production`.
+
+Optional dockerized local path:
+- `RUN_TASK_USE_DOCKER=1`
+- `RUN_TASK_DOCKER_IMAGE=<image>`
+- optional `RUN_TASK_DOCKER_REQUIRED=1`
+
+## Required Env
+
+Minimum practical requirement:
+- `AZURE_OPENAI_API_KEY_BACKUP`
+
+Common optional controls:
+- `CODEX_MODEL`, `CLAUDE_MODEL`
+- `RUN_TASK_TIMEOUT_SECS`
+- `CODEX_SANDBOX_MODE`, `CODEX_BYPASS_SANDBOX`
+
+## Example Usage
+
 ```rust
 use run_task_module::{run_task, RunTaskParams};
 use std::path::PathBuf;
@@ -36,7 +57,7 @@ let params = RunTaskParams {
     memory_dir: PathBuf::from("memory"),
     reference_dir: PathBuf::from("references"),
     reply_to: vec!["user@example.com".to_string()],
-    model_name: "gpt-5.3-codex".to_string(),
+    model_name: "gpt-5.4".to_string(),
     runner: "codex".to_string(),
     codex_disabled: false,
     channel: "email".to_string(),
@@ -44,37 +65,16 @@ let params = RunTaskParams {
     has_unified_account: true,
 };
 
-// runner: "codex" (default) or "claude"
-// For Claude runs, install @anthropic-ai/claude-code and ensure
-// AZURE_OPENAI_API_KEY_BACKUP is set so the Foundry settings are written.
-// For Codex runs, model is taken from `params.model_name` (or `CODEX_MODEL` when empty),
-// while base_url and sandbox mode are fixed in code.
-
-let result = run_task(&params)?;
-println!("Reply saved at: {}", result.reply_html_path.display());
+let out = run_task(&params)?;
+println!("reply file: {}", out.reply_html_path.display());
 ```
 
-## Folder structure
+## Tests
 
-- `DoWhiz_service/run_task_module/src/lib.rs` : Codex CLI runner and prompt builder.
-- `DoWhiz_service/run_task_module/tests/` : Integration tests covering config generation, sandbox flags, env mapping, timeout/error handling, and optional live Codex E2E.
+```bash
+cd DoWhiz_service
+cargo test -p run_task_module
+```
 
-## Notes
-
-- Input paths must be relative to `workspace_dir`.
-- The module creates output files based on `channel`:
-  - `email` / `google_docs` / `google_sheets` / `google_slides`: `reply_email_draft.html` + `reply_email_attachments/`
-  - other channels: `reply_message.txt` + `reply_attachments/`
-- When `codex_disabled` is true, it writes a placeholder reply instead of calling Codex (unless `reply_to` is empty).
-- When `reply_to` is empty, the prompt skips drafting output content and the reply file is optional.
-- Skills are copied from `DoWhiz_service/skills` automatically when preparing workspaces.
-- Codex runs use `params.model_name` (fallback `CODEX_MODEL`, then `gpt-5.3-codex`), with fixed `workspace-write` sandbox and fixed endpoint `https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1`.
-- Codex exec adds `--add-dir $HOME/.config/gh` to allow GitHub CLI state writes under sandbox.
-- Execution backend is controlled by `RUN_TASK_EXECUTION_BACKEND` (`local` / `azure_aci` / `auto`).
-  - In `auto`, staging/production targets default to `azure_aci`; local/dev targets default to `local`.
-  - In `DEPLOY_TARGET=staging|production`, local Codex execution is blocked.
-- ACI/image/backend settings use unprefixed keys only (for example `RUN_TASK_AZURE_ACI_RESOURCE_GROUP`).
-
-## Production Deployment
-
-For Azure deployment (Rust Gateway + Service Bus + Blob + workers) or VM-based setups, follow the workflows in `DoWhiz_service/README.md` under “Azure Deployment (Rust Gateway + Service Bus + Blob + Workers)” and “VM Deployment (Gateway + ngrok)”.
+See also:
+- `DoWhiz_service/run_task_module/tests/README.md`

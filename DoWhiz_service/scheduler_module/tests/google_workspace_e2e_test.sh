@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Google Workspace End-to-End Test Script
 #
 # This script tests the full workflow:
@@ -15,10 +15,17 @@
 #   export GOOGLE_ACCESS_TOKEN="your_token"
 #   ./google_workspace_e2e_test.sh
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+BUILD_MODE="${BUILD_MODE:-release}"
+BUILD_FLAG="--release"
+TARGET_SUBDIR="release"
+if [ "$BUILD_MODE" = "debug" ] || [ "$BUILD_MODE" = "dev" ]; then
+    BUILD_FLAG=""
+    TARGET_SUBDIR="debug"
+fi
 
 # Colors
 RED='\033[0;31m'
@@ -33,7 +40,7 @@ echo "=========================================="
 echo ""
 
 # Check credentials
-if [ -z "$GOOGLE_ACCESS_TOKEN" ] && [ -z "$GOOGLE_REFRESH_TOKEN" ]; then
+if [ -z "${GOOGLE_ACCESS_TOKEN:-}" ] && [ -z "${GOOGLE_REFRESH_TOKEN:-}" ]; then
     echo -e "${RED}Error: No Google credentials found.${NC}"
     exit 1
 fi
@@ -41,11 +48,22 @@ fi
 # Build binaries
 echo "Building CLI binaries..."
 cd "$PROJECT_DIR"
-cargo build --release --bin google-docs --bin google-sheets --bin google-slides 2>/dev/null
+cargo build ${BUILD_FLAG} --bin google-docs --bin google-sheets --bin google-slides 2>/dev/null
 
-GOOGLE_DOCS="$PROJECT_DIR/target/release/google-docs"
-GOOGLE_SHEETS="$PROJECT_DIR/target/release/google-sheets"
-GOOGLE_SLIDES="$PROJECT_DIR/target/release/google-slides"
+GOOGLE_DOCS="$PROJECT_DIR/target/${TARGET_SUBDIR}/google-docs"
+GOOGLE_SHEETS="$PROJECT_DIR/target/${TARGET_SUBDIR}/google-sheets"
+GOOGLE_SLIDES="$PROJECT_DIR/target/${TARGET_SUBDIR}/google-slides"
+
+for bin in "$GOOGLE_DOCS" "$GOOGLE_SHEETS" "$GOOGLE_SLIDES"; do
+    if [ ! -x "$bin" ]; then
+        echo -e "${RED}Error: Binary not found: $bin${NC}"
+        exit 1
+    fi
+done
+
+extract_first_id() {
+    sed -n 's/.*(\([A-Za-z0-9_-][A-Za-z0-9_-]*\)).*/\1/p' | head -1
+}
 
 echo -e "${GREEN}Build complete.${NC}"
 echo ""
@@ -62,7 +80,7 @@ echo "Step 1.1: List all spreadsheets..."
 SHEETS_OUTPUT=$("$GOOGLE_SHEETS" list-spreadsheets 2>&1)
 echo "$SHEETS_OUTPUT"
 
-SHEET_ID=$(echo "$SHEETS_OUTPUT" | grep -oP '\(\K[a-zA-Z0-9_-]+(?=\))' | head -1)
+SHEET_ID="$(echo "$SHEETS_OUTPUT" | extract_first_id)"
 
 if [ -z "$SHEET_ID" ]; then
     echo -e "${YELLOW}No spreadsheets found. Please share a spreadsheet with the service account.${NC}"
@@ -105,7 +123,7 @@ echo "Step 2.1: List all presentations..."
 SLIDES_OUTPUT=$("$GOOGLE_SLIDES" list-presentations 2>&1)
 echo "$SLIDES_OUTPUT"
 
-SLIDES_ID=$(echo "$SLIDES_OUTPUT" | grep -oP '\(\K[a-zA-Z0-9_-]+(?=\))' | head -1)
+SLIDES_ID="$(echo "$SLIDES_OUTPUT" | extract_first_id)"
 
 if [ -z "$SLIDES_ID" ]; then
     echo -e "${YELLOW}No presentations found. Please share a presentation with the service account.${NC}"
@@ -144,7 +162,7 @@ echo "Step 3.1: List all documents..."
 DOCS_OUTPUT=$("$GOOGLE_DOCS" list-documents 2>&1)
 echo "$DOCS_OUTPUT"
 
-DOC_ID=$(echo "$DOCS_OUTPUT" | grep -oP '\(\K[a-zA-Z0-9_-]+(?=\))' | head -1)
+DOC_ID="$(echo "$DOCS_OUTPUT" | extract_first_id)"
 
 if [ -z "$DOC_ID" ]; then
     echo -e "${YELLOW}No documents found. Please share a document with the service account.${NC}"

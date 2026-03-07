@@ -37,7 +37,7 @@ SCHEDULER_ACTIONS_JSON_BEGIN
   { "action": "cancel", "task_ids": ["..."] },
   { "action": "reschedule", "task_id": "...", "schedule": { "type": "one_shot", "run_at": "2026-02-07T12:00:00Z" } },
   { "action": "reschedule", "task_id": "...", "schedule": { "type": "cron", "expression": "0 0 9 * * *" } },
-  { "action": "create_run_task", "schedule": { "type": "one_shot", "run_at": "2026-02-07T12:00:00Z" }, "model_name": "gpt-5.3-codex", "codex_disabled": false, "reply_to": ["user@example.com"] }
+  { "action": "create_run_task", "schedule": { "type": "one_shot", "run_at": "2026-02-07T12:00:00Z" }, "model_name": "gpt-5.4", "codex_disabled": false, "reply_to": ["user@example.com"] }
 ]
 SCHEDULER_ACTIONS_JSON_END
 ```

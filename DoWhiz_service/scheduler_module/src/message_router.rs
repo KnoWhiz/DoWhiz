@@ -6,7 +6,7 @@
 //!
 //! Configuration:
 //! - `OPENAI_API_KEY`: OpenAI API key (required)
-//! - `ROUTER_MODEL`: Model to use (default: `gpt-5.2`)
+//! - `ROUTER_MODEL`: Model to use (default: `gpt-5.4`)
 //! - `AZURE_OPENAI_API_KEY_BACKUP` + `AZURE_OPENAI_ENDPOINT_BACKUP`: use Azure OpenAI
 //! - `ROUTER_ENABLED`: Set to "false" to disable routing (default: enabled)
 
@@ -21,7 +21,7 @@ use tracing::{debug, info, warn};
 const DEFAULT_OPENAI_URL: &str = "https://api.openai.com/v1";
 
 /// Default model for OpenAI
-const DEFAULT_MODEL: &str = "gpt-5.2";
+const DEFAULT_MODEL: &str = "gpt-5.4";
 
 /// Timeout for LLM requests
 const LLM_TIMEOUT: Duration = Duration::from_secs(15);

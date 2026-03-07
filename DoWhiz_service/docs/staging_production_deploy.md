@@ -26,7 +26,7 @@ Typical keys that differ by environment (still unprefixed):
 - `POSTMARK_INBOUND_HOOK_URL`
 - `POSTMARK_TEST_SERVICE_ADDRESS`
 - `INGESTION_QUEUE_BACKEND`
-- `SERVICE_BUS_CONNECTION_STRING`
+- `SERVICE_BUS_CONNECTION_STRING` (or `SERVICE_BUS_NAMESPACE` + `SERVICE_BUS_POLICY_NAME` + `SERVICE_BUS_POLICY_KEY`)
 - `SERVICE_BUS_QUEUE_NAME`
 - `SERVICE_BUS_TEST_QUEUE_NAME`
 - `GATEWAY_CONFIG_PATH`
@@ -44,6 +44,12 @@ Raw payload download auth for Azure Blob can use any one of:
 - `AZURE_STORAGE_CONTAINER_INGEST` + `AZURE_STORAGE_SAS_TOKEN` + `AZURE_STORAGE_ACCOUNT`
 - `AZURE_STORAGE_CONNECTION_STRING_INGEST` (or `AZURE_STORAGE_CONNECTION_STRING`)
 
+Staging ingest isolation policy:
+- Use a staging-dedicated storage account for raw payload ingress.
+- Current staging account: `dwhzoliverstg26261234`
+- Current staging container: `ingestion-raw`
+- In `ENV_STAGING`, explicitly set `AZURE_STORAGE_ACCOUNT` and `AZURE_STORAGE_CONTAINER_SAS_URL` so staging does not fall back to shared/common storage credentials.
+
 ## 3) VM Deployment
 
 ### Staging (`dev`)
@@ -53,7 +59,8 @@ cd /home/azureuser/server/.dowhiz/DoWhiz
 git fetch origin
 git checkout dev
 git pull --ff-only origin dev
-./DoWhiz_service/scripts/start_all.sh
+./DoWhiz_service/scripts/run_gateway_local.sh
+./DoWhiz_service/scripts/run_employee.sh boiled_egg 9001 --skip-hook --skip-ngrok
 ```
 
 ### Production (`main`)
@@ -66,6 +73,8 @@ git pull --ff-only origin main
 ./DoWhiz_service/scripts/run_gateway_local.sh
 ./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
 ```
+
+Do not use `scripts/start_all.sh` on staging/production VMs; it is local-only and will start ngrok plus rewrite Postmark inbound hook.
 
 ## 4) CI/CD Expectations
 
