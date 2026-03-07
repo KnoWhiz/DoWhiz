@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::account_store::{AccountStore, AccountStoreError};
 use crate::blob_store::BlobStore;
 use crate::user_store::UserStore;
+use crate::workspace_bootstrap::WorkspaceBootstrapProfile;
 use crate::{load_tasks_with_status, TaskStatusSummary};
 
 /// State for auth routes
@@ -142,6 +143,64 @@ pub fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(|s| s.to_string())
+}
+
+async fn resolve_account_from_headers(
+    state: &AuthState,
+    headers: &HeaderMap,
+) -> Result<crate::account_store::Account, axum::response::Response> {
+    let token = match extract_bearer_token(headers) {
+        Some(t) => t,
+        None => {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response());
+        }
+    };
+
+    let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(user) => user.id,
+        Err((status, msg)) => {
+            return Err((status, Json(serde_json::json!({ "error": msg }))).into_response());
+        }
+    };
+
+    let store = state.account_store.clone();
+    let account_result = task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id))
+        .await
+        .map_err(|e| {
+            error!("spawn_blocking panicked: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
+                .into_response()
+        })?;
+
+    match account_result {
+        Ok(Some(account)) => Ok(account),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error": "Account not found. Please sign up first."
+            })),
+        )
+            .into_response()),
+        Err(e) => {
+            error!("Failed to get account: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Database error"
+                })),
+            )
+                .into_response())
+        }
+    }
 }
 
 // ============================================================================
@@ -1208,6 +1267,260 @@ pub async fn update_memo(
 }
 
 // ============================================================================
+// Workspace Bootstrap
+// ============================================================================
+
+#[derive(Debug, Serialize)]
+pub struct WorkspaceBootstrapResponse {
+    pub account_id: Uuid,
+    pub profile: WorkspaceBootstrapProfile,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WorkspaceBootstrapFileUploadRequest {
+    pub file_id: String,
+    pub content_base64: String,
+    #[serde(default)]
+    pub content_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WorkspaceBootstrapFileDeleteRequest {
+    pub file_id: String,
+}
+
+/// GET /auth/workspace-bootstrap
+/// Returns the workspace bootstrap profile for the current user's account.
+pub async fn get_workspace_bootstrap(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let account = match resolve_account_from_headers(&state, &headers).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
+
+    let blob_store = match &state.blob_store {
+        Some(store) => store.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Workspace bootstrap storage not configured"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    match blob_store.read_workspace_bootstrap_profile(account.id).await {
+        Ok(profile) => (
+            StatusCode::OK,
+            Json(WorkspaceBootstrapResponse {
+                account_id: account.id,
+                profile,
+            }),
+        )
+            .into_response(),
+        Err(e) => {
+            error!(
+                "Failed to read workspace bootstrap profile for account {}: {}",
+                account.id, e
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to read workspace bootstrap profile"
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// POST /auth/workspace-bootstrap
+/// Updates the workspace bootstrap profile for the current user's account.
+pub async fn update_workspace_bootstrap(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    Json(profile): Json<WorkspaceBootstrapProfile>,
+) -> impl IntoResponse {
+    let account = match resolve_account_from_headers(&state, &headers).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
+
+    let blob_store = match &state.blob_store {
+        Some(store) => store.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Workspace bootstrap storage not configured"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    match blob_store
+        .write_workspace_bootstrap_profile(account.id, &profile)
+        .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": true,
+                "account_id": account.id
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            error!(
+                "Failed to write workspace bootstrap profile for account {}: {}",
+                account.id, e
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to save workspace bootstrap profile"
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// POST /auth/workspace-bootstrap/files
+/// Uploads/overwrites one bootstrap file for the current user's account.
+pub async fn upload_workspace_bootstrap_file(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    Json(payload): Json<WorkspaceBootstrapFileUploadRequest>,
+) -> impl IntoResponse {
+    let account = match resolve_account_from_headers(&state, &headers).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
+
+    let blob_store = match &state.blob_store {
+        Some(store) => store.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Workspace bootstrap storage not configured"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let content = match base64::engine::general_purpose::STANDARD
+        .decode(payload.content_base64.as_bytes())
+    {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": format!("Invalid base64 content: {}", e)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    match blob_store
+        .write_workspace_bootstrap_file(
+            account.id,
+            &payload.file_id,
+            &content,
+            payload.content_type.as_deref(),
+        )
+        .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": true,
+                "account_id": account.id,
+                "file_id": payload.file_id,
+                "size_bytes": content.len()
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            error!(
+                "Failed to write workspace bootstrap file for account {}: {}",
+                account.id, e
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to upload workspace bootstrap file"
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// DELETE /auth/workspace-bootstrap/files
+/// Deletes one bootstrap file for the current user's account.
+pub async fn delete_workspace_bootstrap_file(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    Json(payload): Json<WorkspaceBootstrapFileDeleteRequest>,
+) -> impl IntoResponse {
+    let account = match resolve_account_from_headers(&state, &headers).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
+
+    let blob_store = match &state.blob_store {
+        Some(store) => store.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Workspace bootstrap storage not configured"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    match blob_store
+        .delete_workspace_bootstrap_file(account.id, &payload.file_id)
+        .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": true,
+                "account_id": account.id,
+                "file_id": payload.file_id
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            error!(
+                "Failed to delete workspace bootstrap file for account {}: {}",
+                account.id, e
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to delete workspace bootstrap file"
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ============================================================================
 // Discord OAuth
 // ============================================================================
 
@@ -2066,6 +2379,14 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/auth/verify-email", get(verify_email))
         .route("/auth/unlink", delete(unlink_identifier))
         .route("/auth/memo", get(get_memo).post(update_memo))
+        .route(
+            "/auth/workspace-bootstrap",
+            get(get_workspace_bootstrap).post(update_workspace_bootstrap),
+        )
+        .route(
+            "/auth/workspace-bootstrap/files",
+            post(upload_workspace_bootstrap_file).delete(delete_workspace_bootstrap_file),
+        )
         .route("/auth/discord", get(discord_oauth_start))
         .route("/auth/discord/callback", get(discord_oauth_callback))
         .route("/auth/slack", get(slack_oauth_start))

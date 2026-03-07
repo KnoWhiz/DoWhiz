@@ -36,6 +36,8 @@ pub struct UserPaths {
     pub state_dir: PathBuf,
     pub tasks_db_path: PathBuf,
     pub memory_dir: PathBuf,
+    pub bootstrap_dir: PathBuf,
+    pub bootstrap_files_dir: PathBuf,
     pub secrets_dir: PathBuf,
     pub mail_root: PathBuf,
     pub workspaces_root: PathBuf,
@@ -90,6 +92,8 @@ impl UserStore {
         let state_dir = root.join("state");
         let tasks_db_path = state_dir.join("tasks.db");
         let memory_dir = root.join("memory");
+        let bootstrap_dir = root.join("bootstrap");
+        let bootstrap_files_dir = bootstrap_dir.join("files");
         let secrets_dir = root.join("secrets");
         let mail_root = root.join("mail");
         let workspaces_root = root.join("workspaces");
@@ -98,6 +102,8 @@ impl UserStore {
             state_dir,
             tasks_db_path,
             memory_dir,
+            bootstrap_dir,
+            bootstrap_files_dir,
             secrets_dir,
             mail_root,
             workspaces_root,
@@ -107,6 +113,8 @@ impl UserStore {
     pub fn ensure_user_dirs(&self, paths: &UserPaths) -> Result<(), UserStoreError> {
         fs::create_dir_all(&paths.state_dir)?;
         fs::create_dir_all(&paths.memory_dir)?;
+        fs::create_dir_all(&paths.bootstrap_dir)?;
+        fs::create_dir_all(&paths.bootstrap_files_dir)?;
         fs::create_dir_all(&paths.secrets_dir)?;
         fs::create_dir_all(&paths.mail_root)?;
         fs::create_dir_all(&paths.workspaces_root)?;

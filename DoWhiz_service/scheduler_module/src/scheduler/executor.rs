@@ -24,6 +24,7 @@ use crate::secrets_store::{
     resolve_user_secrets_path, sync_user_secrets_to_workspace, sync_workspace_secrets_to_user,
 };
 use crate::thread_state::{current_thread_epoch, find_thread_state_path};
+use crate::workspace_bootstrap::{apply_workspace_bootstrap, load_workspace_bootstrap_profile};
 use run_task_module::UserIdentities;
 use uuid::Uuid;
 
@@ -853,6 +854,34 @@ impl TaskExecutor for ModuleExecutor {
                         task.workspace_dir.display()
                     );
                 }
+
+                if let Some((bootstrap_profile, bootstrap_source)) =
+                    load_workspace_bootstrap_profile(account_id, user_memory_dir.as_deref())
+                {
+                    match apply_workspace_bootstrap(
+                        &task.workspace_dir,
+                        &bootstrap_profile,
+                        &bootstrap_source,
+                    ) {
+                        Ok(result) => {
+                            if result.applied {
+                                info!(
+                                    "workspace bootstrap applied workspace={} files={} commands={}",
+                                    task.workspace_dir.display(),
+                                    result.files_applied,
+                                    result.commands_applied
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            return Err(SchedulerError::TaskFailed(format!(
+                                "workspace bootstrap failed: {}",
+                                err
+                            )));
+                        }
+                    }
+                }
+
                 // Check balance before running task (only for unified accounts)
                 if let Some(account_id) = account_id {
                     if let Some(store) = get_global_account_store() {
