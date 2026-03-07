@@ -23,6 +23,7 @@ Primary coverage includes:
 cd DoWhiz_service
 RUN_CODEX_E2E=1 \
 AZURE_OPENAI_API_KEY_BACKUP=... \
+AZURE_OPENAI_ENDPOINT_BACKUP=https://<resource>.openai.azure.com/ \
 cargo test -p run_task_module --test run_task_tests -- --nocapture
 ```
 

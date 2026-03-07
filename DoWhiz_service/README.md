@@ -136,6 +136,7 @@ cp .env.example DoWhiz_service/.env
 | `MONGODB_URI` | Scheduler/user/index persistence |
 | `SUPABASE_DB_URL` (or `SUPABASE_POOLER_URL` fallback in some paths) | Account/auth/billing store |
 | `AZURE_OPENAI_API_KEY_BACKUP` | Required by Codex/Claude task execution |
+| `AZURE_OPENAI_ENDPOINT_BACKUP` | Required by Codex task execution (Azure OpenAI endpoint) |
 | `POSTMARK_SERVER_TOKEN` | Email outbound and webhook utility |
 | `INGESTION_QUEUE_BACKEND=servicebus` | Required by gateway |
 | `SERVICE_BUS_CONNECTION_STRING` **or** `SERVICE_BUS_NAMESPACE` + `SERVICE_BUS_POLICY_NAME` + `SERVICE_BUS_POLICY_KEY` | Service Bus queue auth |
@@ -188,6 +189,9 @@ Azure ACI execution path (required vars):
 - Twilio SMS: `TWILIO_*`
 - Google Workspace: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, refresh tokens, `GOOGLE_*_ENABLED`
 - Google Drive push: `GOOGLE_DRIVE_PUSH_ENABLED`, `GOOGLE_DRIVE_WEBHOOK_URL`
+- Web app auth bootstrap (optional, for private Notion/Google web links in tasks):
+  `WEB_AUTH_BOOTSTRAP_ENABLED`, `WEB_AUTH_BOOTSTRAP_TIMEOUT_SECS`,
+  `NOTION_ACCOUNT_EMAIL`, `NOTION_PASSWORD`, `GOOGLE_ACCOUNT_EMAIL`, `GOOGLE_PASSWORD`
 
 ## 5) Local Run Workflows
 
