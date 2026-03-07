@@ -275,6 +275,9 @@ jobs:
           # so ACI tasks share workspace/memory paths correctly.
           bash "$APP_DIR/scripts/ensure_aci_share_mount.sh"
 
+          # Ensure web auth bootstrap can use Playwright for Notion/Google sign-in.
+          bash "$APP_DIR/scripts/install_web_auth_bootstrap_deps.sh"
+
           worker_running=0
           for service in dw_worker dowhiz_rust_service dowhiz-rust-service; do
             if pm2 describe "$service" >/dev/null 2>&1; then
