@@ -19,7 +19,7 @@ use super::errors::RunTaskError;
 use super::github_auth::{ensure_github_cli_auth, resolve_github_auth};
 use super::prompt::{build_prompt, load_memory_context};
 use super::scheduled::{extract_scheduled_tasks, extract_scheduler_actions};
-use super::types::{RunTaskOutput, RunTaskRequest, TokenUsage, UserIdentities};
+use super::types::{RunTaskOutput, RunTaskRequest, TokenUsage};
 use super::utils::{run_command_with_timeout, run_task_timeout, tail_string};
 use super::workspace::{canonicalize_dir, workspace_path_in_container};
 
@@ -251,9 +251,6 @@ pub(super) fn run_codex_task(
         request.has_unified_account,
         request.user_identities,
     );
-
-    // Write user identities to workspace for cross-channel routing
-    write_user_identities_file(request.workspace_dir, request.user_identities)?;
 
     let timeout = run_task_timeout();
     let output = if use_docker {
@@ -614,9 +611,6 @@ fn run_codex_task_azure_aci(
         request.has_unified_account,
         request.user_identities,
     );
-
-    // Write user identities to workspace for cross-channel routing
-    write_user_identities_file(&host_workspace_dir, request.user_identities)?;
 
     // Remote executor reads prompt from workspace file to avoid oversized command lines.
     let prompt_path = host_workspace_dir.join(".codex_remote_prompt.txt");
@@ -1539,15 +1533,6 @@ fn update_config_block(existing: &str, block: &str) -> String {
     updated.push_str(block.trim_end());
     updated.push('\n');
     updated
-}
-
-/// Write user identities to a JSON file in the workspace for cross-channel routing
-fn write_user_identities_file(workspace_dir: &Path, identities: &UserIdentities) -> Result<(), RunTaskError> {
-    let path = workspace_dir.join(".user_identities.json");
-    let json = serde_json::to_string_pretty(identities)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    fs::write(&path, json)?;
-    Ok(())
 }
 
 /// Parse token usage from Codex JSON output (JSONL format)
