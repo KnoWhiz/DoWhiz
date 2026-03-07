@@ -388,5 +388,47 @@ fn should_refresh_last_seen(last_seen_at: DateTime<Utc>, now: DateTime<Utc>) -> 
 
 const LAST_SEEN_UPDATE_INTERVAL_SECS: i64 = 5 * 60;
 
+use std::sync::Arc;
+
+/// Lazy-initialized global UserStore
+static USER_STORE: std::sync::OnceLock<Option<Arc<UserStore>>> = std::sync::OnceLock::new();
+
+/// Get or initialize the global UserStore (returns None if not configured)
+pub fn get_global_user_store() -> Option<Arc<UserStore>> {
+    USER_STORE
+        .get_or_init(|| {
+            match UserStore::new("") {
+                Ok(store) => {
+                    tracing::info!("UserStore initialized for user lookups");
+                    Some(Arc::new(store))
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to initialize UserStore: {}", e);
+                    None
+                }
+            }
+        })
+        .clone()
+}
+
+/// Look up filesystem user_id by identifier type and identifier.
+/// Returns the user_id (UUID string) if found, None otherwise.
+pub fn lookup_user_id_by_identifier(identifier_type: &str, identifier: &str) -> Option<String> {
+    let store = get_global_user_store()?;
+    match store.get_user_by_identifier(identifier_type, identifier) {
+        Ok(Some(record)) => Some(record.user_id),
+        Ok(None) => None,
+        Err(e) => {
+            tracing::warn!(
+                "Failed to lookup user by identifier {}:{}: {}",
+                identifier_type,
+                identifier,
+                e
+            );
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;
