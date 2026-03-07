@@ -113,6 +113,8 @@ fn run_task_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Err
         channel: Channel::Email,
         slack_team_id: None,
         employee_id: None,
+        requester_identifier_type: None,
+        requester_identifier: None,
     };
 
     let db_path = temp.path().join("tasks.db");

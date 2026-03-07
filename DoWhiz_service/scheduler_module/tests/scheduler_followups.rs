@@ -64,6 +64,8 @@ fn run_task_followups_persist_across_restarts() {
         channel: scheduler_module::channel::Channel::default(),
         slack_team_id: None,
         employee_id: None,
+        requester_identifier_type: None,
+        requester_identifier: None,
     };
 
     let mut scheduler =

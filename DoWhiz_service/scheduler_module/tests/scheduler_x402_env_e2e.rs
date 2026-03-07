@@ -238,6 +238,8 @@ fn run_scheduler_x402_env_test(
         channel: scheduler_module::channel::Channel::default(),
         slack_team_id: None,
         employee_id: None,
+        requester_identifier_type: None,
+        requester_identifier: None,
     };
 
     scheduler
