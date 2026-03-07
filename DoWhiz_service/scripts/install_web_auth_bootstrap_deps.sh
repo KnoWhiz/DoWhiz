@@ -62,6 +62,29 @@ case "$check_status" in
     ;;
 esac
 
+run_with_pep668_retry() {
+  local log_file
+  log_file="$(mktemp)"
+  if "$@" >"$log_file" 2>&1; then
+    cat "$log_file"
+    rm -f "$log_file"
+    return 0
+  fi
+
+  local status=$?
+  if grep -qi "externally-managed-environment" "$log_file"; then
+    echo "Detected externally-managed-environment; retrying with --break-system-packages."
+    cat "$log_file" >&2
+    rm -f "$log_file"
+    "$@" --break-system-packages
+    return $?
+  fi
+
+  cat "$log_file" >&2
+  rm -f "$log_file"
+  return $status
+}
+
 ensure_pip() {
   if python3 -m pip --version >/dev/null 2>&1; then
     return 0
@@ -75,7 +98,7 @@ ensure_pip() {
   echo "pip is missing; bootstrapping with get-pip.py."
   tmp_dir="$(mktemp -d)"
   curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$tmp_dir/get-pip.py"
-  python3 "$tmp_dir/get-pip.py" --user
+  run_with_pep668_retry python3 "$tmp_dir/get-pip.py" --user
   rm -rf "$tmp_dir"
 
   python3 -m pip --version >/dev/null 2>&1
@@ -83,7 +106,7 @@ ensure_pip() {
 
 if [[ "$install_pkg" -eq 1 ]]; then
   ensure_pip
-  python3 -m pip install --user --upgrade playwright
+  run_with_pep668_retry python3 -m pip install --user --upgrade playwright
 fi
 
 if [[ "$install_browser" -eq 1 ]]; then
