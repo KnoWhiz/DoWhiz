@@ -410,7 +410,7 @@ def bootstrap_provider(
         "attempted": False,
         "success": False,
         "cached": False,
-        "state_file": str(auth_dir.join(f"{provider}_state.json")),
+        "state_file": str(auth_dir.joinpath(f"{provider}_state.json")),
         "message": "",
         "updated_at": now_iso(),
     }
@@ -418,8 +418,8 @@ def bootstrap_provider(
         result["message"] = "missing credentials"
         return result
 
-    state_path = auth_dir.join(f"{provider}_state.json")
-    meta_path = auth_dir.join(f"{provider}_state.meta.json")
+    state_path = auth_dir.joinpath(f"{provider}_state.json")
+    meta_path = auth_dir.joinpath(f"{provider}_state.meta.json")
     current_fp = fingerprint(email, password)
     previous_meta = load_json(meta_path)
     previous_fp = previous_meta.get("fingerprint")
