@@ -62,10 +62,27 @@ case "$check_status" in
     ;;
 esac
 
-if [[ "$install_pkg" -eq 1 ]]; then
-  if ! python3 -m pip --version >/dev/null 2>&1; then
-    python3 -m ensurepip --upgrade
+ensure_pip() {
+  if python3 -m pip --version >/dev/null 2>&1; then
+    return 0
   fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl is required to bootstrap pip for Playwright installation." >&2
+    return 1
+  fi
+
+  echo "pip is missing; bootstrapping with get-pip.py."
+  tmp_dir="$(mktemp -d)"
+  curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$tmp_dir/get-pip.py"
+  python3 "$tmp_dir/get-pip.py" --user
+  rm -rf "$tmp_dir"
+
+  python3 -m pip --version >/dev/null 2>&1
+}
+
+if [[ "$install_pkg" -eq 1 ]]; then
+  ensure_pip
   python3 -m pip install --user --upgrade playwright
 fi
 
