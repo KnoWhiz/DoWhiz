@@ -9,7 +9,6 @@ use crate::account_store::{
     get_global_account_store, lookup_account_by_channel, lookup_account_by_identifier,
     AccountIdentifier,
 };
-use crate::user_store::lookup_user_id_by_identifier;
 use crate::blob_store::get_blob_store;
 use crate::channel::Channel;
 use crate::github_inbound::{
@@ -25,6 +24,7 @@ use crate::secrets_store::{
     resolve_user_secrets_path, sync_user_secrets_to_workspace, sync_workspace_secrets_to_user,
 };
 use crate::thread_state::{current_thread_epoch, find_thread_state_path};
+use crate::user_store::lookup_user_id_by_identifier;
 use run_task_module::UserIdentities;
 use uuid::Uuid;
 
@@ -865,6 +865,7 @@ impl TaskExecutor for ModuleExecutor {
                         task.workspace_dir.display()
                     );
                 }
+                crate::web_auth_bootstrap::bootstrap_workspace_web_auth(&task.workspace_dir);
                 // Check balance before running task (only for unified accounts)
                 if let Some(account_id) = account_id {
                     if let Some(store) = get_global_account_store() {
@@ -1372,7 +1373,12 @@ mod tests {
         // requires MongoDB. In unit tests without MongoDB, this will be empty.
         // Full integration tests would verify the lookup behavior.
         let account_id = Uuid::new_v4();
-        let identifiers = vec![make_identifier(account_id, "email", "test@example.com", true)];
+        let identifiers = vec![make_identifier(
+            account_id,
+            "email",
+            "test@example.com",
+            true,
+        )];
 
         let result = identifiers_to_user_identities(account_id, &identifiers);
 
