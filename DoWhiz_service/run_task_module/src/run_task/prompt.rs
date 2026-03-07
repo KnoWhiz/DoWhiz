@@ -186,6 +186,10 @@ fn build_web_auth_capabilities_section() -> &'static str {
 - Before opening a private page, load the state file if it exists:
   - `playwright-cli state-load .auth/notion_state.json`
   - `playwright-cli state-load .auth/google_state.json`
+- If state files are missing or stale, try signing in with credentials from environment variables:
+  - Notion: `NOTION_ACCOUNT_EMAIL`, `NOTION_PASSWORD`
+  - Google: `GOOGLE_ACCOUNT_EMAIL`, `GOOGLE_PASSWORD`
+- Never include raw credentials in any user-facing reply.
 - Do not conclude "cannot access due to sign-in" until you tried loading available state files.
 
 "#

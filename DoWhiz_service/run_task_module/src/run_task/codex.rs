@@ -47,6 +47,12 @@ const PAYMENT_ENV_KEYS: &[&str] = &[
     "X402_API_KEY",
     "X402_API_SECRET",
 ];
+const WEB_AUTH_ENV_KEYS: &[&str] = &[
+    "NOTION_ACCOUNT_EMAIL",
+    "NOTION_PASSWORD",
+    "GOOGLE_ACCOUNT_EMAIL",
+    "GOOGLE_PASSWORD",
+];
 
 const REMOTE_OUTPUT_FILENAME: &str = ".codex_remote_output.log";
 const REMOTE_EXIT_CODE_FILENAME: &str = ".codex_remote_exit_code";
@@ -273,6 +279,7 @@ pub(super) fn run_codex_task(
     }
     ensure_github_cli_auth(&github_auth)?;
     let payment_env_overrides = collect_payment_env_overrides();
+    let web_auth_env_overrides = collect_web_auth_env_overrides();
 
     let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
     let prompt = build_prompt(
@@ -349,6 +356,9 @@ pub(super) fn run_codex_task(
             }
         }
         for (key, value) in &payment_env_overrides {
+            cmd.arg("-e").arg(format!("{}={}", key, value));
+        }
+        for (key, value) in &web_auth_env_overrides {
             cmd.arg("-e").arg(format!("{}={}", key, value));
         }
         for (key, value) in &github_auth.env_overrides {
@@ -454,6 +464,9 @@ pub(super) fn run_codex_task(
             }
         }
         for (key, value) in &payment_env_overrides {
+            cmd.env(key, value);
+        }
+        for (key, value) in &web_auth_env_overrides {
             cmd.env(key, value);
         }
         for (key, value) in github_auth.env_overrides {
@@ -635,6 +648,7 @@ fn run_codex_task_azure_aci(
     let codex_home = host_workspace_dir.join(DOCKER_CODEX_HOME_DIR);
     ensure_codex_config_at(&codex_home, &container_workspace_dir)?;
     let payment_env_overrides = collect_payment_env_overrides();
+    let web_auth_env_overrides = collect_web_auth_env_overrides();
 
     let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
     let prompt = build_prompt(
@@ -703,6 +717,9 @@ fn run_codex_task_azure_aci(
         ("DEPLOY_TARGET".to_string(), "azure_aci_runner".to_string()),
     ];
     for (key, value) in payment_env_overrides {
+        env_overrides.push((key, value));
+    }
+    for (key, value) in web_auth_env_overrides {
         env_overrides.push((key, value));
     }
     for (key, value) in github_auth.env_overrides {
@@ -1533,9 +1550,31 @@ fn resolve_payment_env_prefix() -> Option<String> {
         })
 }
 
+fn resolve_web_auth_env_prefix() -> Option<String> {
+    read_env_trimmed("EMPLOYEE_WEB_AUTH_ENV_PREFIX")
+        .or_else(|| read_env_trimmed("WEB_AUTH_ENV_PREFIX"))
+        .or_else(resolve_payment_env_prefix)
+}
+
 fn collect_payment_env_overrides() -> Vec<(String, String)> {
     let prefix = resolve_payment_env_prefix();
     PAYMENT_ENV_KEYS
+        .iter()
+        .filter_map(|key| {
+            read_env_trimmed(key)
+                .or_else(|| {
+                    prefix
+                        .as_ref()
+                        .and_then(|prefix| read_env_trimmed(&format!("{}_{}", prefix, key)))
+                })
+                .map(|value| ((*key).to_string(), value))
+        })
+        .collect()
+}
+
+fn collect_web_auth_env_overrides() -> Vec<(String, String)> {
+    let prefix = resolve_web_auth_env_prefix();
+    WEB_AUTH_ENV_KEYS
         .iter()
         .filter_map(|key| {
             read_env_trimmed(key)
@@ -2200,6 +2239,47 @@ mod tests {
         assert!(overrides
             .iter()
             .any(|(k, v)| k == "GOATX402_API_KEY" && v == "api-key-global"));
+    }
+
+    #[test]
+    fn test_collect_web_auth_env_overrides_uses_employee_prefix_fallback() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset("NOTION_ACCOUNT_EMAIL"),
+            EnvVarGuard::unset("NOTION_PASSWORD"),
+            EnvVarGuard::unset("EMPLOYEE_WEB_AUTH_ENV_PREFIX"),
+            EnvVarGuard::unset("WEB_AUTH_ENV_PREFIX"),
+            EnvVarGuard::unset("EMPLOYEE_PAYMENT_ENV_PREFIX"),
+            EnvVarGuard::unset("PAYMENT_ENV_PREFIX"),
+            EnvVarGuard::unset("EMPLOYEE_GITHUB_ENV_PREFIX"),
+            EnvVarGuard::unset("GITHUB_ENV_PREFIX"),
+            EnvVarGuard::set("EMPLOYEE_ID", "boiled_egg"),
+            EnvVarGuard::set("PROTO_NOTION_ACCOUNT_EMAIL", "proto-notion@example.com"),
+            EnvVarGuard::set("PROTO_NOTION_PASSWORD", "proto-password"),
+        ];
+
+        let overrides = collect_web_auth_env_overrides();
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "NOTION_ACCOUNT_EMAIL" && v == "proto-notion@example.com"));
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "NOTION_PASSWORD" && v == "proto-password"));
+    }
+
+    #[test]
+    fn test_collect_web_auth_env_overrides_prefers_unprefixed_values() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set("EMPLOYEE_WEB_AUTH_ENV_PREFIX", "PROTO"),
+            EnvVarGuard::set("NOTION_ACCOUNT_EMAIL", "global-notion@example.com"),
+            EnvVarGuard::set("PROTO_NOTION_ACCOUNT_EMAIL", "prefixed-notion@example.com"),
+        ];
+
+        let overrides = collect_web_auth_env_overrides();
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "NOTION_ACCOUNT_EMAIL" && v == "global-notion@example.com"));
     }
 
     #[test]
