@@ -164,6 +164,8 @@ If using Azure raw payload storage (`RAW_PAYLOAD_STORAGE_BACKEND=azure`):
 - `auto` behavior:
   - `DEPLOY_TARGET in {staging,production}` -> Azure ACI
   - otherwise local
+- `TASK_TIMEOUT_SECS` controls scheduler watchdog stale-task detection (default: `600`).
+- `RUN_TASK_TIMEOUT_SECS` (optional) controls command timeout for run_task; runtime caps it below `TASK_TIMEOUT_SECS` to avoid stale-task retry loops (default effective value: `TASK_TIMEOUT_SECS - 30s`).
 
 In staging/production targets, local codex execution is blocked unless you explicitly avoid that policy.
 
