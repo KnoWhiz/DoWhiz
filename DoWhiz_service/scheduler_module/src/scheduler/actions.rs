@@ -7,6 +7,8 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::channel::Channel;
+use crate::employee_config;
+use crate::service;
 use crate::thread_state::{current_thread_epoch, default_thread_state_path};
 
 use super::core::Scheduler;
@@ -37,6 +39,28 @@ fn load_reply_routing(workspace_dir: &Path) -> Option<ReplyRouting> {
             None
         }
     }
+}
+
+/// Resolve the employee's primary email address from config by employee ID.
+fn resolve_employee_primary_email(employee_id: &str) -> Option<String> {
+    let config_path = std::env::var("EMPLOYEE_CONFIG_PATH")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                std::env::current_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .join(path)
+            }
+        })
+        .unwrap_or_else(service::default_employee_config_path);
+    let directory = employee_config::load_employee_directory(&config_path).ok()?;
+    let profile = directory.employee(employee_id)?;
+    profile.addresses.first().cloned()
 }
 
 /// Parse channel string to Channel enum.
@@ -196,7 +220,16 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
     }
     let attachments_dir = task.workspace_dir.join(attachments_dirname);
     let reply_context = load_reply_context(&task.workspace_dir);
-    let reply_from = task.reply_from.clone().or(reply_context.from.clone());
+    let reply_from = if is_cross_channel && matches!(target_channel, Channel::Email) {
+        // For cross-channel routing to email, derive sender from employee config
+        task.employee_id
+            .as_ref()
+            .and_then(|id| resolve_employee_primary_email(id))
+            .or_else(|| task.reply_from.clone())
+            .or(reply_context.from.clone())
+    } else {
+        task.reply_from.clone().or(reply_context.from.clone())
+    };
 
     // For cross-channel routing, don't pass inbound thread context to outbound channel
     let (in_reply_to, references) = if is_cross_channel {
@@ -803,5 +836,77 @@ mod tests {
         let content = fs::read_to_string(&ack_path).expect("read ack file");
         assert!(content.contains("Discord"));
         assert!(content.contains("I've sent my response"));
+    }
+
+    #[test]
+    fn resolve_employee_primary_email_returns_first_address() {
+        let temp = TempDir::new().expect("tempdir");
+        let config_path = temp.path().join("employee.toml");
+
+        let config_content = r#"
+[[employees]]
+id = "test_employee"
+addresses = ["primary@example.com", "secondary@example.com"]
+"#;
+        fs::write(&config_path, config_content).expect("write config");
+
+        // Set env var to point to our test config
+        std::env::set_var("EMPLOYEE_CONFIG_PATH", config_path.to_str().unwrap());
+
+        let email = resolve_employee_primary_email("test_employee");
+        assert_eq!(email, Some("primary@example.com".to_string()));
+
+        // Clean up env var
+        std::env::remove_var("EMPLOYEE_CONFIG_PATH");
+    }
+
+    #[test]
+    fn resolve_employee_primary_email_returns_none_for_unknown_employee() {
+        let temp = TempDir::new().expect("tempdir");
+        let config_path = temp.path().join("employee.toml");
+
+        let config_content = r#"
+[[employees]]
+id = "known_employee"
+addresses = ["known@example.com"]
+"#;
+        fs::write(&config_path, config_content).expect("write config");
+
+        std::env::set_var("EMPLOYEE_CONFIG_PATH", config_path.to_str().unwrap());
+
+        let email = resolve_employee_primary_email("unknown_employee");
+        assert_eq!(email, None);
+
+        std::env::remove_var("EMPLOYEE_CONFIG_PATH");
+    }
+
+    #[test]
+    fn resolve_employee_primary_email_with_multiple_employees() {
+        let temp = TempDir::new().expect("tempdir");
+        let config_path = temp.path().join("employee.toml");
+
+        let config_content = r#"
+[[employees]]
+id = "little_bear"
+addresses = ["oliver@dowhiz.com", "little-bear@dowhiz.com"]
+
+[[employees]]
+id = "boiled_egg"
+addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com"]
+"#;
+        fs::write(&config_path, config_content).expect("write config");
+
+        std::env::set_var("EMPLOYEE_CONFIG_PATH", config_path.to_str().unwrap());
+
+        assert_eq!(
+            resolve_employee_primary_email("little_bear"),
+            Some("oliver@dowhiz.com".to_string())
+        );
+        assert_eq!(
+            resolve_employee_primary_email("boiled_egg"),
+            Some("proto@dowhiz.com".to_string())
+        );
+
+        std::env::remove_var("EMPLOYEE_CONFIG_PATH");
     }
 }

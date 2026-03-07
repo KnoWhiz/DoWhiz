@@ -114,6 +114,8 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
             channel: scheduler_module::channel::Channel::default(),
             slack_team_id: None,
             employee_id: None,
+            requester_identifier_type: None,
+            requester_identifier: None,
         };
 
         let mut scheduler = Scheduler::load(&paths.tasks_db_path, ModuleExecutor::default())?;

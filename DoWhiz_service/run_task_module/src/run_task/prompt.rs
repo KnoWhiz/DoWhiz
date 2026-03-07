@@ -135,6 +135,7 @@ Memory management and maintain policy:
 Scheduling:
 - For any scheduling (email or task), you MUST use the skill "scheduler_maintain".
 
+{cross_channel_capabilities}
 {user_identities_section}
 Rules:
 - Each workspace includes a `.env` file at the workspace root. You may edit it to manage per-user secrets; updates are synced back after the task completes.
@@ -153,10 +154,25 @@ Rules:
         reply_instruction = reply_instruction,
         discord_context_section = discord_context_section,
         github_coauthor_section = github_coauthor_section,
+        cross_channel_capabilities = build_cross_channel_capabilities_section(),
         user_identities_section = user_identities_section,
         filesystem_security_section = filesystem_security_section,
         registration_section = registration_section,
     )
+}
+
+/// Build the cross-channel capabilities section that informs the agent
+/// about available tools for operating across different channels.
+fn build_cross_channel_capabilities_section() -> &'static str {
+    r#"Cross-channel Tools (if user's Google account is linked):
+- `google-docs` - Create/read/edit documents, share files
+- `google-slides` - Create/read/edit presentations, share files
+- `google-sheets` - Read/write spreadsheet data
+
+Security: Only access files the CURRENT USER has shared. Never access other users' files.
+See `.agents/skills/google-*/SKILL.md` for detailed command references.
+
+"#
 }
 
 fn build_user_identities_section(identities: &UserIdentities) -> String {
@@ -823,6 +839,35 @@ mod tests {
         assert!(prompt.contains("test@example.com"));
         assert!(prompt.contains("123456789"));
         assert!(prompt.contains("reply_routing.json"));
+    }
+
+    #[test]
+    fn build_prompt_includes_cross_channel_capabilities() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            true,
+            &UserIdentities::default(),
+        );
+
+        // Verify cross-channel tools section is included
+        assert!(prompt.contains("Cross-channel Tools"));
+        assert!(prompt.contains("google-docs"));
+        assert!(prompt.contains("google-slides"));
+        assert!(prompt.contains("google-sheets"));
+
+        // Verify security note and SKILL.md reference
+        assert!(prompt.contains("CURRENT USER"));
+        assert!(prompt.contains("SKILL.md"));
     }
 
     #[test]

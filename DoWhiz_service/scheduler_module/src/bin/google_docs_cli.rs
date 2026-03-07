@@ -5,7 +5,10 @@
 //! - Apply direct edits
 //! - Apply suggestions (revision marks)
 //! - Apply or discard suggestions
+//! - Create new documents
+//! - Share documents and manage permissions
 
+use scheduler_module::adapters::google_common::{GoogleDriveClient, PermissionRole};
 use scheduler_module::adapters::google_docs::GoogleDocsOutboundAdapter;
 use scheduler_module::google_auth::{GoogleAuth, GoogleAuthConfig};
 use std::env;
@@ -41,6 +44,15 @@ Suggesting Mode Operations:
   suggest-replace <doc_id> --find="old text" --replace="new text"
   apply-suggestions <doc_id>
   discard-suggestions <doc_id>
+
+Document Management:
+  create-document --title="My Document"        Create a new document
+
+Sharing & Permissions:
+  share <file_id> --email="user@example.com" --role="writer" [--notify]
+  get-link <file_id>                           Get shareable link for a file
+  list-permissions <file_id>                   List who has access to a file
+  remove-permission <file_id> <permission_id>  Remove access from a file
 
 Environment Variables:
   GOOGLE_ACCESS_TOKEN    - Pre-generated access token (for sandbox environments)
@@ -357,6 +369,49 @@ fn main() {
             let count = parse_arg(&args, "--count").and_then(|s| s.parse().ok());
             let orientation = parse_arg(&args, "--orientation");
             cmd_search_image(&query, count, orientation.as_deref())
+        }
+        "create-document" => {
+            let title = parse_arg(&args, "--title").unwrap_or_else(|| "Untitled Document".to_string());
+            cmd_create_document(&title)
+        }
+        "share" => {
+            if args.len() < 3 {
+                eprintln!("Error: file ID required");
+                print_usage();
+                exit(1);
+            }
+            let email = parse_arg(&args, "--email").unwrap_or_default();
+            let role = parse_arg(&args, "--role").unwrap_or_else(|| "writer".to_string());
+            let notify = args.iter().any(|a| a == "--notify");
+            if email.is_empty() {
+                eprintln!("Error: --email is required");
+                exit(1);
+            }
+            cmd_share_file(&args[2], &email, &role, notify)
+        }
+        "get-link" => {
+            if args.len() < 3 {
+                eprintln!("Error: file ID required");
+                print_usage();
+                exit(1);
+            }
+            cmd_get_link(&args[2])
+        }
+        "list-permissions" => {
+            if args.len() < 3 {
+                eprintln!("Error: file ID required");
+                print_usage();
+                exit(1);
+            }
+            cmd_list_permissions(&args[2])
+        }
+        "remove-permission" => {
+            if args.len() < 4 {
+                eprintln!("Error: file ID and permission ID required");
+                print_usage();
+                exit(1);
+            }
+            cmd_remove_permission(&args[2], &args[3])
         }
         "--help" | "-h" | "help" => {
             print_usage();
@@ -839,4 +894,141 @@ fn cmd_search_image(
         .push_str("  google-docs insert-image <doc_id> --url=\"<URL>\" --after=\"anchor text\"\n");
 
     Ok(output)
+}
+
+fn cmd_create_document(title: &str) -> Result<String, String> {
+    let auth = get_auth()?;
+    let adapter = GoogleDocsOutboundAdapter::new(auth);
+
+    let document_id = adapter
+        .create_document(title)
+        .map_err(|e| format!("Failed to create document: {}", e))?;
+
+    let mut output = String::new();
+    output.push_str(&format!("Created new document: {}\n", title));
+    output.push_str(&format!("Document ID: {}\n", document_id));
+    output.push_str(&format!(
+        "URL: https://docs.google.com/document/d/{}/edit\n",
+        document_id
+    ));
+    output.push_str("\nNext steps:\n");
+    output.push_str("  - Add content: google-docs insert-text <id> --after=\"\" --text=\"Your content\"\n");
+    output.push_str("  - Share with user: google-docs share <id> --email=\"user@example.com\" --role=\"writer\"\n");
+    output.push_str("  - Get shareable link: google-docs get-link <id>\n");
+
+    Ok(output)
+}
+
+fn cmd_share_file(file_id: &str, email: &str, role: &str, notify: bool) -> Result<String, String> {
+    let auth = get_auth()?;
+    let client = GoogleDriveClient::new(auth);
+
+    let permission_role = match role.to_lowercase().as_str() {
+        "reader" => PermissionRole::Reader,
+        "commenter" => PermissionRole::Commenter,
+        "writer" => PermissionRole::Writer,
+        _ => {
+            return Err(format!(
+                "Invalid role '{}'. Use: reader, commenter, or writer",
+                role
+            ))
+        }
+    };
+
+    let result = client
+        .share_file(file_id, email, permission_role, notify)
+        .map_err(|e| format!("Failed to share file: {}", e))?;
+
+    let mut output = String::new();
+    output.push_str(&format!("Shared file with {}\n", email));
+    output.push_str(&format!("Role: {}\n", result.role));
+    output.push_str(&format!("Permission ID: {}\n", result.permission_id));
+    if notify {
+        output.push_str("Email notification sent.\n");
+    }
+
+    Ok(output)
+}
+
+fn cmd_get_link(file_id: &str) -> Result<String, String> {
+    let auth = get_auth()?;
+    let client = GoogleDriveClient::new(auth);
+
+    let links = client
+        .get_sharing_link(file_id)
+        .map_err(|e| format!("Failed to get link: {}", e))?;
+
+    let mut output = String::new();
+    output.push_str("File Links:\n");
+
+    if let Some(view_link) = &links.web_view_link {
+        output.push_str(&format!("  View/Edit: {}\n", view_link));
+    }
+
+    if let Some(content_link) = &links.web_content_link {
+        output.push_str(&format!("  Download: {}\n", content_link));
+    }
+
+    if links.web_view_link.is_none() && links.web_content_link.is_none() {
+        output.push_str("No links available. The file may not be shared yet.\n");
+        output.push_str("Use 'google-docs share <id> --email=\"...\"' to share the file first.\n");
+    }
+
+    Ok(output)
+}
+
+fn cmd_list_permissions(file_id: &str) -> Result<String, String> {
+    let auth = get_auth()?;
+    let client = GoogleDriveClient::new(auth);
+
+    let permissions = client
+        .list_permissions(file_id)
+        .map_err(|e| format!("Failed to list permissions: {}", e))?;
+
+    let mut output = String::new();
+    output.push_str(&format!("Permissions for file {}:\n\n", file_id));
+
+    if permissions.is_empty() {
+        output.push_str("No permissions found.\n");
+    } else {
+        for perm in &permissions {
+            let perm_type = perm.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
+            let role = perm.get("role").and_then(|r| r.as_str()).unwrap_or("unknown");
+            let id = perm.get("id").and_then(|i| i.as_str()).unwrap_or("unknown");
+            let email = perm
+                .get("emailAddress")
+                .and_then(|e| e.as_str())
+                .unwrap_or("");
+            let name = perm
+                .get("displayName")
+                .and_then(|n| n.as_str())
+                .unwrap_or("");
+
+            output.push_str(&format!("  ID: {}\n", id));
+            output.push_str(&format!("  Type: {} | Role: {}\n", perm_type, role));
+            if !email.is_empty() {
+                output.push_str(&format!("  Email: {}\n", email));
+            }
+            if !name.is_empty() {
+                output.push_str(&format!("  Name: {}\n", name));
+            }
+            output.push_str("\n");
+        }
+    }
+
+    Ok(output)
+}
+
+fn cmd_remove_permission(file_id: &str, permission_id: &str) -> Result<String, String> {
+    let auth = get_auth()?;
+    let client = GoogleDriveClient::new(auth);
+
+    client
+        .remove_permission(file_id, permission_id)
+        .map_err(|e| format!("Failed to remove permission: {}", e))?;
+
+    Ok(format!(
+        "Removed permission {} from file {}\n",
+        permission_id, file_id
+    ))
 }

@@ -195,6 +195,60 @@ google-docs list-comments <document_id>
 google-docs read-comment <document_id> <comment_id>
 ```
 
+### Document Management
+
+```bash
+# Create a new Google Doc
+google-docs create-document --title="My Document"
+```
+
+**Example workflow - Creating a report and sharing it:**
+```bash
+# 1. Create a new document
+google-docs create-document --title="Weekly Report"
+# Output: Document ID: 1abc123xyz
+
+# 2. Add content to the document
+google-docs insert-text 1abc123xyz --after="" --text="# Weekly Report\n\nContent here..."
+
+# 3. Share with the user
+google-docs share 1abc123xyz --email="user@example.com" --role="writer"
+
+# 4. Get the shareable link
+google-docs get-link 1abc123xyz
+```
+
+### Sharing & Permissions
+
+```bash
+# Share a document with a user
+google-docs share <document_id> --email="user@example.com" --role="writer" [--notify]
+
+# Get shareable link for a document
+google-docs get-link <document_id>
+
+# List who has access to a document
+google-docs list-permissions <document_id>
+
+# Remove someone's access
+google-docs remove-permission <document_id> <permission_id>
+```
+
+**Roles:**
+- `reader` - Can view the document
+- `commenter` - Can view and add comments
+- `writer` - Can edit the document
+
+**Example:**
+```bash
+# Share with editing permissions and send notification email
+google-docs share 1abc123xyz --email="colleague@example.com" --role="writer" --notify
+
+# Get the shareable link to include in your reply
+google-docs get-link 1abc123xyz
+# Output: View/Edit: https://docs.google.com/document/d/1abc123xyz/edit
+```
+
 ### Reply to Comments (IMPORTANT!)
 
 **ALWAYS reply to the comment after completing a task!** This is how the user gets notified that you've completed their request.

@@ -1,6 +1,7 @@
 mod test_support;
 
 use run_task_module::RunTaskParams;
+use scheduler_module::account_store::AccountStore;
 use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
 use scheduler_module::service::{
@@ -255,6 +256,7 @@ fn thread_latest_epoch_end_to_end() {
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
+    let account_store = AccountStore::new(&config.ingestion_db_url).expect("account store");
 
     let inbound_raw_1 = r#"{
   "From": "Alice <alice@example.com>",
@@ -268,6 +270,7 @@ fn thread_latest_epoch_end_to_end() {
         &config,
         &user_store,
         &index_store,
+        &account_store,
         &payload_1,
         inbound_raw_1.as_bytes(),
     )
@@ -305,6 +308,7 @@ fn thread_latest_epoch_end_to_end() {
         &config,
         &user_store,
         &index_store,
+        &account_store,
         &payload_2,
         inbound_raw_2.as_bytes(),
     )
