@@ -10,8 +10,8 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::constants::{
-    CODEX_BASE_URL, CODEX_CONFIG_BLOCK_TEMPLATE, CODEX_CONFIG_MARKER, CODEX_MODEL_NAME,
-    CODEX_SANDBOX_MODE, DOCKER_CODEX_HOME_DIR, DOCKER_WORKSPACE_DIR,
+    CODEX_CONFIG_BASE_URL_PLACEHOLDER, CODEX_CONFIG_BLOCK_TEMPLATE, CODEX_CONFIG_MARKER,
+    CODEX_MODEL_NAME, CODEX_SANDBOX_MODE, DOCKER_CODEX_HOME_DIR, DOCKER_WORKSPACE_DIR,
 };
 use super::docker::{docker_cli_available, ensure_docker_image_available};
 use super::env::{env_enabled, normalize_env_prefix, read_env_list, read_env_trimmed};
@@ -252,7 +252,7 @@ pub(super) fn run_codex_task(
             key: "AZURE_OPENAI_API_KEY_BACKUP",
         });
     }
-    let azure_endpoint = normalize_azure_endpoint(CODEX_BASE_URL);
+    let azure_endpoint = azure_endpoint_from_env()?;
     // Use model from request/database, fallback to env var, then constant
     let model_name = if request.model_name.trim().is_empty() {
         env::var("CODEX_MODEL").unwrap_or_else(|_| CODEX_MODEL_NAME.to_string())
@@ -273,9 +273,13 @@ pub(super) fn run_codex_task(
             .as_ref()
             .map(|dir| dir.join(DOCKER_CODEX_HOME_DIR))
             .unwrap_or_else(|| request.workspace_dir.join(DOCKER_CODEX_HOME_DIR));
-        ensure_codex_config_at(&codex_home, Path::new(DOCKER_WORKSPACE_DIR))?;
+        ensure_codex_config_at(
+            &codex_home,
+            Path::new(DOCKER_WORKSPACE_DIR),
+            &azure_endpoint,
+        )?;
     } else {
-        ensure_codex_config(request.workspace_dir)?;
+        ensure_codex_config(request.workspace_dir, &azure_endpoint)?;
     }
     ensure_github_cli_auth(&github_auth)?;
     let payment_env_overrides = collect_payment_env_overrides();
@@ -542,7 +546,8 @@ pub(super) fn run_codex_task(
 
     // Only check for reply file if a reply was expected
     // Use cross-channel routing to determine actual expected path
-    let expected_reply_path = resolve_expected_reply_path(request.workspace_dir, reply_html_path.clone());
+    let expected_reply_path =
+        resolve_expected_reply_path(request.workspace_dir, reply_html_path.clone());
     if !request.reply_to.is_empty() && !expected_reply_path.exists() {
         return Err(RunTaskError::OutputMissing {
             path: expected_reply_path,
@@ -631,7 +636,7 @@ fn run_codex_task_azure_aci(
         });
     }
 
-    let azure_endpoint = normalize_azure_endpoint(CODEX_BASE_URL);
+    let azure_endpoint = azure_endpoint_from_env()?;
     let model_name = if request.model_name.trim().is_empty() {
         env::var("CODEX_MODEL").unwrap_or_else(|_| CODEX_MODEL_NAME.to_string())
     } else {
@@ -646,7 +651,7 @@ fn run_codex_task_azure_aci(
 
     let add_dirs = codex_add_dirs_remote(&host_workspace_dir, &container_workspace_dir)?;
     let codex_home = host_workspace_dir.join(DOCKER_CODEX_HOME_DIR);
-    ensure_codex_config_at(&codex_home, &container_workspace_dir)?;
+    ensure_codex_config_at(&codex_home, &container_workspace_dir, &azure_endpoint)?;
     let payment_env_overrides = collect_payment_env_overrides();
     let web_auth_env_overrides = collect_web_auth_env_overrides();
 
@@ -811,7 +816,8 @@ fn run_codex_task_azure_aci(
     }
 
     // Use cross-channel routing to determine actual expected path
-    let expected_reply_path = resolve_expected_reply_path(request.workspace_dir, reply_html_path.clone());
+    let expected_reply_path =
+        resolve_expected_reply_path(request.workspace_dir, reply_html_path.clone());
     if !request.reply_to.is_empty() && !expected_reply_path.exists() {
         return Err(RunTaskError::OutputMissing {
             path: expected_reply_path,
@@ -1454,15 +1460,16 @@ fn shell_quote(value: &str) -> String {
     out
 }
 
-fn ensure_codex_config(workspace_dir: &Path) -> Result<(), RunTaskError> {
+fn ensure_codex_config(workspace_dir: &Path, azure_endpoint: &str) -> Result<(), RunTaskError> {
     let home = env::var("HOME").map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
     let config_dir = PathBuf::from(home).join(".codex");
-    ensure_codex_config_at(&config_dir, workspace_dir)
+    ensure_codex_config_at(&config_dir, workspace_dir, azure_endpoint)
 }
 
 fn ensure_codex_config_at(
     config_dir: &Path,
     trust_workspace_dir: &Path,
+    azure_endpoint: &str,
 ) -> Result<(), RunTaskError> {
     let config_path = config_dir.join("config.toml");
     let config_dir = config_path.parent().ok_or(RunTaskError::InvalidPath {
@@ -1472,7 +1479,7 @@ fn ensure_codex_config_at(
     })?;
     fs::create_dir_all(config_dir)?;
 
-    let block = CODEX_CONFIG_BLOCK_TEMPLATE;
+    let block = build_codex_config_block(azure_endpoint);
 
     let existing = if config_path.exists() {
         fs::read_to_string(&config_path)?
@@ -1601,6 +1608,18 @@ fn codex_add_dirs(workspace_dir: &Path, use_docker: bool) -> Result<Vec<String>,
         add_dirs.push(gh_config_dir.to_string_lossy().into_owned());
     }
     Ok(add_dirs)
+}
+
+fn azure_endpoint_from_env() -> Result<String, RunTaskError> {
+    let endpoint =
+        read_env_trimmed("AZURE_OPENAI_ENDPOINT_BACKUP").ok_or(RunTaskError::MissingEnv {
+            key: "AZURE_OPENAI_ENDPOINT_BACKUP",
+        })?;
+    Ok(normalize_azure_endpoint(&endpoint))
+}
+
+fn build_codex_config_block(azure_endpoint: &str) -> String {
+    CODEX_CONFIG_BLOCK_TEMPLATE.replace(CODEX_CONFIG_BASE_URL_PLACEHOLDER, azure_endpoint)
 }
 
 fn normalize_azure_endpoint(endpoint: &str) -> String {
@@ -2485,7 +2504,9 @@ mod tests {
             .arg("--output")
             .arg("json");
 
-        let create_output = create_cmd.output().expect("failed to run az container create");
+        let create_output = create_cmd
+            .output()
+            .expect("failed to run az container create");
         if !create_output.status.success() {
             let stderr = String::from_utf8_lossy(&create_output.stderr);
             panic!("Failed to create test container: {}", stderr);
@@ -2496,7 +2517,10 @@ mod tests {
         register_aci_container(&container_name);
         {
             let containers = ACTIVE_ACI_CONTAINERS.lock().unwrap();
-            assert!(containers.contains(&container_name), "Container should be registered");
+            assert!(
+                containers.contains(&container_name),
+                "Container should be registered"
+            );
         }
 
         // Now call cleanup (simulating shutdown without normal deletion)
@@ -2507,7 +2531,10 @@ mod tests {
         // Verify the registry is empty
         {
             let containers = ACTIVE_ACI_CONTAINERS.lock().unwrap();
-            assert!(containers.is_empty(), "Registry should be empty after cleanup");
+            assert!(
+                containers.is_empty(),
+                "Registry should be empty after cleanup"
+            );
         }
 
         // Verify container is actually deleted by trying to show it
