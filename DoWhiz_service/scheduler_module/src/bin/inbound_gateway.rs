@@ -166,6 +166,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let slack_client_secret = env::var("SLACK_CLIENT_SECRET").ok();
     let slack_redirect_uri = env::var("SLACK_AUTH_REDIRECT_URI").ok();
 
+    // GitHub OAuth config (optional)
+    let github_client_id = env::var("GITHUB_CLIENT_ID").ok();
+    let github_client_secret = env::var("GITHUB_CLIENT_SECRET").ok();
+    let github_redirect_uri = env::var("GITHUB_REDIRECT_URI").ok();
+
     // Frontend URL for OAuth redirects
     let frontend_url =
         env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:5173".to_string());
@@ -180,6 +185,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         slack_client_id,
         slack_client_secret,
         slack_redirect_uri,
+        github_client_id,
+        github_client_secret,
+        github_redirect_uri,
         frontend_url,
         user_store: None, // Task lookups not available in inbound gateway
         users_root: None,

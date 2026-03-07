@@ -31,6 +31,9 @@ pub struct UserIdentities {
     /// Telegram user IDs
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub telegram_user_ids: Vec<String>,
+    /// Filesystem user IDs (UUIDs) that this account can access
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_user_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

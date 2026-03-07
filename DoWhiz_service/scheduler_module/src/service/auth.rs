@@ -30,6 +30,10 @@ pub struct AuthState {
     pub slack_client_id: Option<String>,
     pub slack_client_secret: Option<String>,
     pub slack_redirect_uri: Option<String>,
+    // GitHub OAuth config
+    pub github_client_id: Option<String>,
+    pub github_client_secret: Option<String>,
+    pub github_redirect_uri: Option<String>,
     // Frontend URL for redirects after OAuth
     pub frontend_url: String,
     // User store and paths for task lookups
@@ -1683,6 +1687,248 @@ pub async fn slack_oauth_callback(
 }
 
 // ============================================================================
+// GitHub OAuth
+// ============================================================================
+
+/// Query params for GitHub OAuth callback
+#[derive(Debug, Deserialize)]
+pub struct GitHubCallbackQuery {
+    pub code: String,
+    pub state: String,
+}
+
+/// GitHub token response
+#[derive(Debug, Deserialize)]
+struct GitHubTokenResponse {
+    access_token: String,
+    token_type: String,
+}
+
+/// GitHub user response
+#[derive(Debug, Deserialize)]
+struct GitHubUser {
+    login: String,
+    id: u64,
+}
+
+/// GET /auth/github
+/// Initiates GitHub OAuth flow - redirects to GitHub's authorization page.
+pub async fn github_oauth_start(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    // Check if GitHub OAuth is configured
+    let (client_id, redirect_uri) = match (&state.github_client_id, &state.github_redirect_uri) {
+        (Some(id), Some(uri)) => (id.clone(), uri.clone()),
+        _ => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "GitHub OAuth not configured"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Extract and validate Supabase token
+    let token = match extract_bearer_token(&headers) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Validate the token to ensure user is authenticated
+    if let Err((status, msg)) = validate_supabase_token(&state.supabase_url, &token).await {
+        return (status, Json(serde_json::json!({ "error": msg }))).into_response();
+    }
+
+    // Encode the Supabase token in state so we can identify the user on callback
+    let encoded_state = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(token.as_bytes());
+
+    // Build GitHub OAuth URL (no scope needed - public profile gives us username)
+    let github_auth_url = format!(
+        "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&state={}",
+        client_id,
+        urlencoding::encode(&redirect_uri),
+        encoded_state
+    );
+
+    // Return the URL for the frontend to redirect to
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "redirect_url": github_auth_url
+        })),
+    )
+        .into_response()
+}
+
+/// GET /auth/github/callback
+/// Handles GitHub OAuth callback - exchanges code for token, gets user info, links account.
+pub async fn github_oauth_callback(
+    State(state): State<AuthState>,
+    Query(params): Query<GitHubCallbackQuery>,
+) -> impl IntoResponse {
+    // Helper to build redirect URLs to the frontend
+    let frontend_url = state.frontend_url.clone();
+    let redirect_to = |path: &str| -> axum::response::Response {
+        Redirect::to(&format!("{}{}", frontend_url, path)).into_response()
+    };
+
+    // Check if GitHub OAuth is configured
+    let (client_id, client_secret, redirect_uri) = match (
+        &state.github_client_id,
+        &state.github_client_secret,
+        &state.github_redirect_uri,
+    ) {
+        (Some(id), Some(secret), Some(uri)) => (id.clone(), secret.clone(), uri.clone()),
+        _ => {
+            return redirect_to("/auth/index.html?github=error&reason=not_configured");
+        }
+    };
+
+    // Decode state to get the Supabase token
+    let token = match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&params.state) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(t) => t,
+            Err(_) => {
+                return redirect_to("/auth/index.html?github=error&reason=invalid_state");
+            }
+        },
+        Err(_) => {
+            return redirect_to("/auth/index.html?github=error&reason=invalid_state");
+        }
+    };
+
+    // Validate Supabase token and get user
+    let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(user) => user.id,
+        Err(_) => {
+            return redirect_to("/auth/index.html?github=error&reason=invalid_token");
+        }
+    };
+
+    // Exchange code for GitHub access token
+    let client = reqwest::Client::new();
+    let token_res = client
+        .post("https://github.com/login/oauth/access_token")
+        .header("Accept", "application/json")
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("code", params.code.as_str()),
+            ("redirect_uri", redirect_uri.as_str()),
+        ])
+        .send()
+        .await;
+
+    let github_token = match token_res {
+        Ok(res) if res.status().is_success() => match res.json::<GitHubTokenResponse>().await {
+            Ok(t) => t,
+            Err(e) => {
+                error!("Failed to parse GitHub token response: {}", e);
+                return redirect_to("/auth/index.html?github=error&reason=token_parse_error");
+            }
+        },
+        Ok(res) => {
+            error!("GitHub token exchange failed: {}", res.status());
+            return redirect_to("/auth/index.html?github=error&reason=token_exchange_failed");
+        }
+        Err(e) => {
+            error!("GitHub token request failed: {}", e);
+            return redirect_to("/auth/index.html?github=error&reason=token_request_failed");
+        }
+    };
+
+    // Get GitHub user info
+    let user_res = client
+        .get("https://api.github.com/user")
+        .header("Authorization", format!("Bearer {}", github_token.access_token))
+        .header("User-Agent", "DoWhiz")
+        .send()
+        .await;
+
+    let github_user = match user_res {
+        Ok(res) if res.status().is_success() => match res.json::<GitHubUser>().await {
+            Ok(u) => u,
+            Err(e) => {
+                error!("Failed to parse GitHub user response: {}", e);
+                return redirect_to("/auth/index.html?github=error&reason=user_parse_error");
+            }
+        },
+        Ok(res) => {
+            error!("GitHub user request failed: {}", res.status());
+            return redirect_to("/auth/index.html?github=error&reason=user_request_failed");
+        }
+        Err(e) => {
+            error!("GitHub user request failed: {}", e);
+            return redirect_to("/auth/index.html?github=error&reason=user_request_failed");
+        }
+    };
+
+    info!(
+        "GitHub OAuth successful for user {} (GitHub: {} / {})",
+        auth_user_id, github_user.login, github_user.id
+    );
+
+    // Get user's account
+    let store = state.account_store.clone();
+    let account_result =
+        task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id)).await;
+
+    let account = match account_result {
+        Ok(Ok(Some(acc))) => acc,
+        Ok(Ok(None)) => {
+            return redirect_to("/auth/index.html?github=error&reason=account_not_found");
+        }
+        Ok(Err(e)) => {
+            error!("Failed to get account: {}", e);
+            return redirect_to("/auth/index.html?github=error&reason=db_error");
+        }
+        Err(e) => {
+            error!("spawn_blocking panicked: {}", e);
+            return redirect_to("/auth/index.html?github=error&reason=internal_error");
+        }
+    };
+
+    // Link GitHub username to account
+    let store = state.account_store.clone();
+    let github_username = github_user.login.clone();
+    let link_result =
+        task::spawn_blocking(move || store.create_identifier(account.id, "github", &github_username))
+            .await;
+
+    match link_result {
+        Ok(Ok(_identifier)) => {
+            info!(
+                "Linked GitHub {} to account {}",
+                github_user.login, account.id
+            );
+            redirect_to("/auth/index.html?github=success")
+        }
+        Ok(Err(AccountStoreError::IdentifierTaken)) => {
+            redirect_to("/auth/index.html?github=error&reason=already_linked")
+        }
+        Ok(Err(e)) => {
+            error!("Failed to link GitHub: {}", e);
+            redirect_to("/auth/index.html?github=error&reason=link_failed")
+        }
+        Err(e) => {
+            error!("spawn_blocking panicked: {}", e);
+            redirect_to("/auth/index.html?github=error&reason=internal_error")
+        }
+    }
+}
+
+// ============================================================================
 // Email Verification
 // ============================================================================
 
@@ -2070,7 +2316,173 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/auth/discord/callback", get(discord_oauth_callback))
         .route("/auth/slack", get(slack_oauth_start))
         .route("/auth/slack/callback", get(slack_oauth_callback))
+        .route("/auth/github", get(github_oauth_start))
+        .route("/auth/github/callback", get(github_oauth_callback))
         .route("/api/tasks", get(get_tasks))
         .route("/api/account/tasks", get(get_account_tasks))
         .with_state(state)
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Unit tests for GitHub OAuth structs and encoding logic
+    // These don't require a database connection
+
+    #[test]
+    fn github_callback_query_deserializes_correctly() {
+        let query = "code=abc123&state=encoded_token";
+        let parsed: GitHubCallbackQuery = serde_urlencoded::from_str(query).unwrap();
+        assert_eq!(parsed.code, "abc123");
+        assert_eq!(parsed.state, "encoded_token");
+    }
+
+    #[test]
+    fn github_callback_query_handles_special_chars() {
+        let query = "code=abc%2B123%3D&state=token%2Fwith%2Fslashes";
+        let parsed: GitHubCallbackQuery = serde_urlencoded::from_str(query).unwrap();
+        assert_eq!(parsed.code, "abc+123=");
+        assert_eq!(parsed.state, "token/with/slashes");
+    }
+
+    #[test]
+    fn github_token_response_deserializes_correctly() {
+        let json = r#"{"access_token":"gho_xxxxx","token_type":"bearer"}"#;
+        let parsed: GitHubTokenResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.access_token, "gho_xxxxx");
+        assert_eq!(parsed.token_type, "bearer");
+    }
+
+    #[test]
+    fn github_token_response_handles_extra_fields() {
+        // GitHub may return additional fields we don't care about
+        let json = r#"{"access_token":"gho_test","token_type":"bearer","scope":"","extra_field":123}"#;
+        let parsed: GitHubTokenResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.access_token, "gho_test");
+        assert_eq!(parsed.token_type, "bearer");
+    }
+
+    #[test]
+    fn github_user_response_deserializes_correctly() {
+        let json = r#"{"login":"octocat","id":12345}"#;
+        let parsed: GitHubUser = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.login, "octocat");
+        assert_eq!(parsed.id, 12345);
+    }
+
+    #[test]
+    fn github_user_response_handles_full_api_response() {
+        // GitHub API returns many more fields - ensure we parse correctly
+        let json = r#"{
+            "login": "testuser",
+            "id": 98765,
+            "node_id": "MDQ6VXNlcjk4NzY1",
+            "avatar_url": "https://avatars.githubusercontent.com/u/98765",
+            "type": "User",
+            "name": "Test User",
+            "company": "TestCorp",
+            "blog": "https://test.com",
+            "location": "San Francisco",
+            "email": null,
+            "bio": "Testing",
+            "public_repos": 10
+        }"#;
+        let parsed: GitHubUser = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.login, "testuser");
+        assert_eq!(parsed.id, 98765);
+    }
+
+    #[test]
+    fn base64_state_encoding_roundtrip() {
+        let original_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test";
+
+        // Encode (as done in github_oauth_start)
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(original_token.as_bytes());
+
+        // Decode (as done in github_oauth_callback)
+        let decoded_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(&encoded)
+            .unwrap();
+        let decoded = String::from_utf8(decoded_bytes).unwrap();
+
+        assert_eq!(original_token, decoded);
+    }
+
+    #[test]
+    fn base64_state_encoding_is_url_safe() {
+        // JWT tokens may contain characters that need URL encoding
+        let token = "eyJhbG+ciOi/JIUZ+I1NiIsInR5cCI6IkpXVCJ9";
+
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(token.as_bytes());
+
+        // URL_SAFE encoding should not contain +, /, or =
+        assert!(!encoded.contains('+'));
+        assert!(!encoded.contains('/'));
+        assert!(!encoded.contains('='));
+
+        // Should still roundtrip correctly
+        let decoded_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(&encoded)
+            .unwrap();
+        let decoded = String::from_utf8(decoded_bytes).unwrap();
+        assert_eq!(token, decoded);
+    }
+
+    #[test]
+    fn github_oauth_url_format() {
+        let client_id = "test_client_id";
+        let redirect_uri = "https://api.dowhiz.com/auth/github/callback";
+        let state = "encoded_state";
+
+        let url = format!(
+            "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&state={}",
+            client_id,
+            urlencoding::encode(redirect_uri),
+            state
+        );
+
+        assert!(url.starts_with("https://github.com/login/oauth/authorize"));
+        assert!(url.contains("client_id=test_client_id"));
+        assert!(url.contains("redirect_uri=https%3A%2F%2Fapi.dowhiz.com%2Fauth%2Fgithub%2Fcallback"));
+        assert!(url.contains("state=encoded_state"));
+    }
+
+    #[test]
+    fn invalid_base64_state_fails_decode() {
+        let invalid_state = "!!!not_valid_base64!!!";
+        let result = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(invalid_state);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_bearer_token_works() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Authorization", "Bearer my_test_token".parse().unwrap());
+
+        let token = extract_bearer_token(&headers);
+        assert_eq!(token, Some("my_test_token".to_string()));
+    }
+
+    #[test]
+    fn extract_bearer_token_returns_none_without_header() {
+        let headers = HeaderMap::new();
+        let token = extract_bearer_token(&headers);
+        assert_eq!(token, None);
+    }
+
+    #[test]
+    fn extract_bearer_token_returns_none_for_non_bearer() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Authorization", "Basic abc123".parse().unwrap());
+
+        let token = extract_bearer_token(&headers);
+        assert_eq!(token, None);
+    }
 }
