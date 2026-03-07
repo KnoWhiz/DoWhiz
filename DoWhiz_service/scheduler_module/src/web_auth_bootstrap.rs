@@ -5,7 +5,10 @@ use std::process::Command;
 use tracing::{info, warn};
 
 const DEFAULT_TIMEOUT_SECS: u64 = 90;
-const DEFAULT_SCRIPT_REL_PATH: &str = "DoWhiz_service/scripts/bootstrap_web_auth.py";
+const DEFAULT_SCRIPT_REL_PATHS: &[&str] = &[
+    "DoWhiz_service/scripts/bootstrap_web_auth.py",
+    "scripts/bootstrap_web_auth.py",
+];
 
 pub(crate) fn bootstrap_workspace_web_auth(workspace_dir: &Path) {
     if !env_flag_enabled("WEB_AUTH_BOOTSTRAP_ENABLED", true) {
@@ -95,30 +98,40 @@ fn resolve_bootstrap_script_path() -> Option<PathBuf> {
     }
 
     if let Ok(cwd) = env::current_dir() {
-        let candidate = cwd.join(DEFAULT_SCRIPT_REL_PATH);
-        if candidate.exists() {
-            return Some(candidate);
+        if let Some(path) = find_script_in_ancestors(&cwd) {
+            return Some(path);
         }
     }
 
     if let Ok(exe_path) = env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            let candidate = exe_dir.join(DEFAULT_SCRIPT_REL_PATH);
-            if candidate.exists() {
-                return Some(candidate);
-            }
-            if let Some(parent) = exe_dir.parent() {
-                let candidate = parent.join(DEFAULT_SCRIPT_REL_PATH);
-                if candidate.exists() {
-                    return Some(candidate);
-                }
+            if let Some(path) = find_script_in_ancestors(exe_dir) {
+                return Some(path);
             }
         }
     }
 
-    let fallback = Path::new("/app").join(DEFAULT_SCRIPT_REL_PATH);
-    if fallback.exists() {
-        return Some(fallback);
+    if let Some(path) = find_script_in_ancestors(Path::new("/app")) {
+        return Some(path);
+    }
+    None
+}
+
+fn find_script_in_ancestors(start: &Path) -> Option<PathBuf> {
+    for base in start.ancestors().take(8) {
+        if let Some(path) = find_script_under(base) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn find_script_under(base: &Path) -> Option<PathBuf> {
+    for rel in DEFAULT_SCRIPT_REL_PATHS {
+        let candidate = base.join(rel);
+        if candidate.exists() {
+            return Some(candidate);
+        }
     }
     None
 }
@@ -138,7 +151,26 @@ fn tail_utf8(bytes: &[u8], max_chars: usize) -> String {
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
     use tempfile::TempDir;
+
+    struct CwdGuard {
+        prev: PathBuf,
+    }
+
+    impl CwdGuard {
+        fn set(path: &Path) -> Self {
+            let prev = env::current_dir().expect("current dir");
+            env::set_current_dir(path).expect("set current dir");
+            Self { prev }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = env::set_current_dir(&self.prev);
+        }
+    }
 
     #[test]
     fn parse_env_bool_understands_common_values() {
@@ -175,5 +207,31 @@ mod tests {
         }
 
         assert_eq!(resolved.as_deref(), Some(script.as_path()));
+    }
+
+    #[test]
+    fn resolve_bootstrap_script_path_supports_service_working_dir() {
+        let temp = TempDir::new().expect("tempdir");
+        let service_root = temp.path().join("DoWhiz_service");
+        let scripts_dir = service_root.join("scripts");
+        fs::create_dir_all(&scripts_dir).expect("scripts dir");
+        let script = scripts_dir.join("bootstrap_web_auth.py");
+        fs::write(&script, "print('ok')").expect("write script");
+
+        let _cwd_guard = CwdGuard::set(&service_root);
+        let prev = env::var("WEB_AUTH_BOOTSTRAP_SCRIPT").ok();
+        env::remove_var("WEB_AUTH_BOOTSTRAP_SCRIPT");
+
+        let resolved = resolve_bootstrap_script_path();
+
+        match prev {
+            Some(value) => env::set_var("WEB_AUTH_BOOTSTRAP_SCRIPT", value),
+            None => env::remove_var("WEB_AUTH_BOOTSTRAP_SCRIPT"),
+        }
+
+        let resolved = resolved.expect("resolved path");
+        let resolved_canon = resolved.canonicalize().expect("canonical resolved");
+        let script_canon = script.canonicalize().expect("canonical script");
+        assert_eq!(resolved_canon, script_canon);
     }
 }
