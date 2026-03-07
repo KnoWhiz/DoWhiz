@@ -6,6 +6,7 @@
 //! - Insert/replace text
 //! - Create/delete slides
 
+use scheduler_module::adapters::google_common::{GoogleDriveClient, PermissionRole};
 use scheduler_module::adapters::google_slides::{
     GoogleSlidesInboundAdapter, GoogleSlidesOutboundAdapter,
 };
@@ -41,6 +42,15 @@ Edit Operations:
 Smart Layout:
   find-space <id> <slide_id> [--min-width=100] [--min-height=100]  Find available space on slide
   search-image --query="keyword" [--count=5] [--orientation=landscape|portrait|squarish]
+
+Presentation Management:
+  create-presentation --title="My Presentation"  Create a new presentation
+
+Sharing & Permissions:
+  share <file_id> --email="user@example.com" --role="writer" [--notify]
+  get-link <file_id>                           Get shareable link for a file
+  list-permissions <file_id>                   List who has access to a file
+  remove-permission <file_id> <permission_id>  Remove access from a file
 
 Examples:
   google-slides list-presentations
@@ -281,6 +291,49 @@ fn main() {
             let count = parse_arg(&args, "--count").and_then(|s| s.parse().ok());
             let orientation = parse_arg(&args, "--orientation");
             cmd_search_image(&query, count, orientation.as_deref())
+        }
+        "create-presentation" => {
+            let title = parse_arg(&args, "--title").unwrap_or_else(|| "Untitled Presentation".to_string());
+            cmd_create_presentation(&title)
+        }
+        "share" => {
+            if args.len() < 3 {
+                eprintln!("Error: file ID required");
+                print_usage();
+                exit(1);
+            }
+            let email = parse_arg(&args, "--email").unwrap_or_default();
+            let role = parse_arg(&args, "--role").unwrap_or_else(|| "writer".to_string());
+            if email.is_empty() {
+                eprintln!("Error: --email is required");
+                exit(1);
+            }
+            let notify = has_flag(&args, "--notify");
+            cmd_share_file(&args[2], &email, &role, notify)
+        }
+        "get-link" => {
+            if args.len() < 3 {
+                eprintln!("Error: file ID required");
+                print_usage();
+                exit(1);
+            }
+            cmd_get_link(&args[2])
+        }
+        "list-permissions" => {
+            if args.len() < 3 {
+                eprintln!("Error: file ID required");
+                print_usage();
+                exit(1);
+            }
+            cmd_list_permissions(&args[2])
+        }
+        "remove-permission" => {
+            if args.len() < 4 {
+                eprintln!("Error: file ID and permission ID required");
+                print_usage();
+                exit(1);
+            }
+            cmd_remove_permission(&args[2], &args[3])
         }
         "--help" | "-h" | "help" => {
             print_usage();
@@ -1182,4 +1235,141 @@ fn cmd_search_image(
     output.push_str("  2. Then insert the image: google-slides insert-image <id> --url=\"<URL>\" --page-id=<slide_id> --x=<x> --y=<y>\n");
 
     Ok(output)
+}
+
+fn cmd_create_presentation(title: &str) -> Result<String, String> {
+    let auth = get_auth()?;
+    let adapter = GoogleSlidesOutboundAdapter::new(auth);
+
+    let presentation_id = adapter
+        .create_presentation(title)
+        .map_err(|e| format!("Failed to create presentation: {}", e))?;
+
+    let mut output = String::new();
+    output.push_str(&format!("Created presentation: {}\n", title));
+    output.push_str(&format!("Presentation ID: {}\n", presentation_id));
+    output.push_str(&format!(
+        "Link: https://docs.google.com/presentation/d/{}/edit\n",
+        presentation_id
+    ));
+    output.push_str("\nNext steps:\n");
+    output.push_str("  - Add slides: google-slides create-slide <id> --layout=TITLE_AND_BODY\n");
+    output.push_str("  - Share with user: google-slides share <id> --email=\"user@example.com\" --role=\"writer\"\n");
+    output.push_str("  - Get shareable link: google-slides get-link <id>\n");
+
+    Ok(output)
+}
+
+fn cmd_share_file(file_id: &str, email: &str, role: &str, notify: bool) -> Result<String, String> {
+    let auth = get_auth()?;
+    let client = GoogleDriveClient::new(auth);
+
+    let permission_role = match role.to_lowercase().as_str() {
+        "reader" | "read" | "view" => PermissionRole::Reader,
+        "commenter" | "comment" => PermissionRole::Commenter,
+        "writer" | "write" | "edit" => PermissionRole::Writer,
+        _ => {
+            return Err(format!(
+                "Invalid role '{}'. Valid roles: reader, commenter, writer",
+                role
+            ));
+        }
+    };
+
+    let result = client
+        .share_file(file_id, email, permission_role, notify)
+        .map_err(|e| format!("Failed to share file: {}", e))?;
+
+    let mut output = String::new();
+    output.push_str(&format!("Shared file {} with {}\n", file_id, email));
+    output.push_str(&format!("Role: {}\n", result.role));
+    output.push_str(&format!("Permission ID: {}\n", result.permission_id));
+    if notify {
+        output.push_str("Email notification sent.\n");
+    }
+
+    Ok(output)
+}
+
+fn cmd_get_link(file_id: &str) -> Result<String, String> {
+    let auth = get_auth()?;
+    let client = GoogleDriveClient::new(auth);
+
+    let links = client
+        .get_sharing_link(file_id)
+        .map_err(|e| format!("Failed to get link: {}", e))?;
+
+    let mut output = String::new();
+    output.push_str(&format!("File ID: {}\n", file_id));
+
+    if let Some(view_link) = &links.web_view_link {
+        output.push_str(&format!("View/Edit Link: {}\n", view_link));
+    }
+
+    if let Some(download_link) = &links.web_content_link {
+        output.push_str(&format!("Download Link: {}\n", download_link));
+    }
+
+    if links.web_view_link.is_none() && links.web_content_link.is_none() {
+        output.push_str("No links available. The file may not be shared yet.\n");
+        output.push_str("Use 'google-slides share <id> --email=\"...\"' to share the file first.\n");
+    }
+
+    Ok(output)
+}
+
+fn cmd_list_permissions(file_id: &str) -> Result<String, String> {
+    let auth = get_auth()?;
+    let client = GoogleDriveClient::new(auth);
+
+    let permissions = client
+        .list_permissions(file_id)
+        .map_err(|e| format!("Failed to list permissions: {}", e))?;
+
+    let mut output = String::new();
+    output.push_str(&format!(
+        "Permissions for file {} ({} total):\n\n",
+        file_id,
+        permissions.len()
+    ));
+
+    for perm in permissions {
+        let id = perm.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let perm_type = perm.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let role = perm.get("role").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let email = perm
+            .get("emailAddress")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        let name = perm
+            .get("displayName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+
+        output.push_str(&format!("- ID: {}\n", id));
+        output.push_str(&format!("  Type: {}, Role: {}\n", perm_type, role));
+        if email != "-" {
+            output.push_str(&format!("  Email: {}\n", email));
+        }
+        if name != "-" {
+            output.push_str(&format!("  Name: {}\n", name));
+        }
+        output.push_str("\n");
+    }
+
+    Ok(output)
+}
+
+fn cmd_remove_permission(file_id: &str, permission_id: &str) -> Result<String, String> {
+    let auth = get_auth()?;
+    let client = GoogleDriveClient::new(auth);
+
+    client
+        .remove_permission(file_id, permission_id)
+        .map_err(|e| format!("Failed to remove permission: {}", e))?;
+
+    Ok(format!(
+        "Removed permission {} from file {}",
+        permission_id, file_id
+    ))
 }
