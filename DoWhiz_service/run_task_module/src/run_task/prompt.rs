@@ -79,7 +79,9 @@ pub(super) fn build_prompt(
     };
     let github_coauthor_section = build_github_coauthor_section(workspace_dir, input_email_dir);
     let user_identities_section = build_user_identities_section(user_identities);
-    let filesystem_security_section = build_allowed_paths_section(&user_identities.allowed_user_ids);
+    let filesystem_security_section =
+        build_allowed_paths_section(&user_identities.allowed_user_ids);
+    let web_auth_capabilities_section = build_web_auth_capabilities_section();
 
     // Build registration prompt section if user doesn't have a unified account
     // and we haven't prompted them yet in this thread
@@ -136,6 +138,7 @@ Scheduling:
 - For any scheduling (email or task), you MUST use the skill "scheduler_maintain".
 
 {cross_channel_capabilities}
+{web_auth_capabilities_section}
 {user_identities_section}
 Rules:
 - Each workspace includes a `.env` file at the workspace root. You may edit it to manage per-user secrets; updates are synced back after the task completes.
@@ -155,6 +158,7 @@ Rules:
         discord_context_section = discord_context_section,
         github_coauthor_section = github_coauthor_section,
         cross_channel_capabilities = build_cross_channel_capabilities_section(),
+        web_auth_capabilities_section = web_auth_capabilities_section,
         user_identities_section = user_identities_section,
         filesystem_security_section = filesystem_security_section,
         registration_section = registration_section,
@@ -175,6 +179,18 @@ See `.agents/skills/google-*/SKILL.md` for detailed command references.
 "#
 }
 
+fn build_web_auth_capabilities_section() -> &'static str {
+    r#"Web Workspace Auth (Notion / Google web pages):
+- Workspace may include pre-bootstrapped browser states in `.auth/notion_state.json` and `.auth/google_state.json`.
+- For private Notion/Google pages, use browser automation (for example `playwright-cli`) instead of plain HTTP fetches.
+- Before opening a private page, load the state file if it exists:
+  - `playwright-cli state-load .auth/notion_state.json`
+  - `playwright-cli state-load .auth/google_state.json`
+- Do not conclude "cannot access due to sign-in" until you tried loading available state files.
+
+"#
+}
+
 fn build_user_identities_section(identities: &UserIdentities) -> String {
     let has_any = identities.account_id.is_some()
         || !identities.emails.is_empty()
@@ -186,7 +202,8 @@ fn build_user_identities_section(identities: &UserIdentities) -> String {
     if !has_any {
         return "Cross-channel routing: Not available (user has no linked DoWhiz account). \
 If the user requests a reply on a different channel, politely explain they need to link \
-their accounts at dowhiz.com first.\n".to_string();
+their accounts at dowhiz.com first.\n"
+            .to_string();
     }
 
     let mut channels = Vec::new();
@@ -197,16 +214,28 @@ their accounts at dowhiz.com first.\n".to_string();
         channels.push(format!("- Email: {}", identities.emails.join(", ")));
     }
     if !identities.slack_user_ids.is_empty() {
-        channels.push(format!("- Slack User IDs: {}", identities.slack_user_ids.join(", ")));
+        channels.push(format!(
+            "- Slack User IDs: {}",
+            identities.slack_user_ids.join(", ")
+        ));
     }
     if !identities.discord_user_ids.is_empty() {
-        channels.push(format!("- Discord User IDs: {}", identities.discord_user_ids.join(", ")));
+        channels.push(format!(
+            "- Discord User IDs: {}",
+            identities.discord_user_ids.join(", ")
+        ));
     }
     if !identities.phone_numbers.is_empty() {
-        channels.push(format!("- Phone Numbers: {}", identities.phone_numbers.join(", ")));
+        channels.push(format!(
+            "- Phone Numbers: {}",
+            identities.phone_numbers.join(", ")
+        ));
     }
     if !identities.telegram_user_ids.is_empty() {
-        channels.push(format!("- Telegram User IDs: {}", identities.telegram_user_ids.join(", ")));
+        channels.push(format!(
+            "- Telegram User IDs: {}",
+            identities.telegram_user_ids.join(", ")
+        ));
     }
 
     format!(
@@ -1116,8 +1145,12 @@ mod tests {
         );
 
         // Security section should appear after the rules
-        let rules_pos = prompt.find("Avoid interactive commands").expect("rules section");
-        let security_pos = prompt.find("Filesystem Security").expect("security section");
+        let rules_pos = prompt
+            .find("Avoid interactive commands")
+            .expect("rules section");
+        let security_pos = prompt
+            .find("Filesystem Security")
+            .expect("security section");
         assert!(
             security_pos > rules_pos,
             "Security section should appear after rules"
@@ -1314,7 +1347,10 @@ mod tests {
 
         // Should only list the path once (deduplicated)
         let user_path_count = prompt.matches("/users/uuid-charlie-shared/").count();
-        assert_eq!(user_path_count, 1, "Deduplicated user_id should appear once");
+        assert_eq!(
+            user_path_count, 1,
+            "Deduplicated user_id should appear once"
+        );
     }
 
     #[test]
@@ -1329,10 +1365,7 @@ mod tests {
             discord_user_ids: vec![],
             phone_numbers: vec![],
             telegram_user_ids: vec![],
-            allowed_user_ids: vec![
-                "uuid-email-dave".to_string(),
-                "uuid-slack-dave".to_string(),
-            ],
+            allowed_user_ids: vec!["uuid-email-dave".to_string(), "uuid-slack-dave".to_string()],
         };
 
         let prompt = build_prompt(
@@ -1365,10 +1398,7 @@ mod tests {
 
         let identities = UserIdentities {
             account_id: Some("test-acct".to_string()),
-            allowed_user_ids: vec![
-                "first-uuid".to_string(),
-                "second-uuid".to_string(),
-            ],
+            allowed_user_ids: vec!["first-uuid".to_string(), "second-uuid".to_string()],
             ..Default::default()
         };
 
@@ -1417,7 +1447,11 @@ mod tests {
 
         // Check exact phrases
         assert!(prompt.contains("Filesystem Security:"));
-        assert!(prompt.contains("You may ONLY access files within your current workspace directory."));
-        assert!(prompt.contains("Do NOT traverse to parent directories or access paths outside this workspace."));
+        assert!(
+            prompt.contains("You may ONLY access files within your current workspace directory.")
+        );
+        assert!(prompt.contains(
+            "Do NOT traverse to parent directories or access paths outside this workspace."
+        ));
     }
 }

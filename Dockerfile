@@ -124,6 +124,7 @@ COPY DoWhiz_service/employees/ /app/DoWhiz_service/employees/
 
 # Copy skills directory for Codex
 COPY DoWhiz_service/skills/ /app/DoWhiz_service/skills/
+COPY DoWhiz_service/scripts/bootstrap_web_auth.py /app/DoWhiz_service/scripts/bootstrap_web_auth.py
 
 RUN chown -R app:nogroup /app/DoWhiz_service /app/bin
 
