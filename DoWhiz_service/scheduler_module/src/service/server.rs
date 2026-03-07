@@ -29,6 +29,7 @@ use tokio::task;
 use super::agent_market::{agent_market_router, AgentMarketState};
 use super::auth::{auth_router, AuthState};
 use super::billing::{billing_router, BillingState};
+use super::internal_dashboard::{internal_dashboard_router, InternalDashboardState};
 
 use super::config::ServiceConfig;
 use super::ingestion::spawn_ingestion_consumer;
@@ -194,6 +195,8 @@ pub async fn run_server(
         users_root: Some(config.users_root.clone()),
     };
     let agent_market_state = AgentMarketState::from_env();
+    let internal_dashboard_state =
+        InternalDashboardState::from_env(auth_state.account_store.clone(), index_store.clone());
 
     let mut app = Router::new()
         .route("/", get(health))
@@ -202,7 +205,8 @@ pub async fn run_server(
         .route("/slack/oauth/callback", get(slack_oauth_callback))
         .with_state(state)
         .merge(auth_router(auth_state))
-        .merge(agent_market_router(agent_market_state));
+        .merge(agent_market_router(agent_market_state))
+        .merge(internal_dashboard_router(internal_dashboard_state));
 
     // Add billing routes if Stripe is configured
     if let Some(billing) = billing_state {

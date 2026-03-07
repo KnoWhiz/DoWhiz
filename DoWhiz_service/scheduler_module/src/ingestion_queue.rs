@@ -2,6 +2,8 @@ use postgres::types::Type;
 use postgres_native_tls::MakeTlsConnector;
 use r2d2::{Pool, PooledConnection};
 use r2d2_postgres::PostgresConnectionManager;
+use serde::Serialize;
+use std::collections::BTreeMap;
 use std::env;
 use tracing::{error, warn};
 use uuid::Uuid;
@@ -51,6 +53,19 @@ pub struct QueuedEnvelope {
     pub envelope: IngestionEnvelope,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct IngestionQueueMetricsSnapshot {
+    pub total: i64,
+    pub pending: i64,
+    pub processing: i64,
+    pub done: i64,
+    pub failed: i64,
+    pub created_last_24h: i64,
+    pub failed_last_24h: i64,
+    pub status_counts: BTreeMap<String, i64>,
+    pub channel_counts: BTreeMap<String, i64>,
+}
+
 pub trait IngestionQueue: Send + Sync {
     fn enqueue(&self, envelope: &IngestionEnvelope) -> Result<EnqueueResult, IngestionQueueError>;
     fn claim_next(&self, employee_id: &str) -> Result<Option<QueuedEnvelope>, IngestionQueueError>;
@@ -97,6 +112,67 @@ pub fn build_servicebus_queue_from_env(
 ) -> Result<std::sync::Arc<dyn IngestionQueue>, IngestionQueueError> {
     let queue = ServiceBusIngestionQueue::from_env()?;
     Ok(std::sync::Arc::new(queue))
+}
+
+pub fn ingestion_queue_metrics_from_env() -> Result<IngestionQueueMetricsSnapshot, IngestionQueueError> {
+    let db_url = resolve_db_url()?;
+    let table = resolve_table_name()?;
+    let config: postgres::Config = db_url.parse().map_err(IngestionQueueError::Postgres)?;
+
+    let mut tls_builder = native_tls::TlsConnector::builder();
+    if resolve_bool_env("INGESTION_QUEUE_TLS_ALLOW_INVALID_CERTS") {
+        tls_builder.danger_accept_invalid_certs(true);
+        tls_builder.danger_accept_invalid_hostnames(true);
+    }
+    let tls_connector = tls_builder
+        .build()
+        .map_err(|err| IngestionQueueError::Config(err.to_string()))?;
+    let tls = MakeTlsConnector::new(tls_connector);
+    let mut conn = config.connect(tls).map_err(IngestionQueueError::Postgres)?;
+
+    let total = query_table_count(&mut conn, &table, None)?;
+    let pending = query_table_count(&mut conn, &table, Some("status = 'pending'"))?;
+    let processing = query_table_count(&mut conn, &table, Some("status = 'processing'"))?;
+    let done = query_table_count(&mut conn, &table, Some("status = 'done'"))?;
+    let failed = query_table_count(&mut conn, &table, Some("status = 'failed'"))?;
+    let created_last_24h = query_table_count(
+        &mut conn,
+        &table,
+        Some("created_at >= now() - interval '24 hours'"),
+    )?;
+    let failed_last_24h = query_table_count(
+        &mut conn,
+        &table,
+        Some("status = 'failed' AND created_at >= now() - interval '24 hours'"),
+    )?;
+
+    let mut status_counts = BTreeMap::new();
+    let status_query = format!("SELECT status, COUNT(*)::bigint FROM {table} GROUP BY status");
+    for row in conn.query(&status_query, &[])? {
+        let status: String = row.get(0);
+        let count: i64 = row.get(1);
+        status_counts.insert(status, count);
+    }
+
+    let mut channel_counts = BTreeMap::new();
+    let channel_query = format!("SELECT channel, COUNT(*)::bigint FROM {table} GROUP BY channel");
+    for row in conn.query(&channel_query, &[])? {
+        let channel: String = row.get(0);
+        let count: i64 = row.get(1);
+        channel_counts.insert(channel, count);
+    }
+
+    Ok(IngestionQueueMetricsSnapshot {
+        total,
+        pending,
+        processing,
+        done,
+        failed,
+        created_last_24h,
+        failed_last_24h,
+        status_counts,
+        channel_counts,
+    })
 }
 
 impl PostgresIngestionQueue {
@@ -494,6 +570,18 @@ fn resolve_db_url() -> Result<String, IngestionQueueError> {
                 .filter(|value| !value.trim().is_empty())
         })
         .ok_or(IngestionQueueError::MissingDbUrl)
+}
+
+fn query_table_count(
+    conn: &mut postgres::Client,
+    table: &str,
+    predicate: Option<&str>,
+) -> Result<i64, IngestionQueueError> {
+    let statement = match predicate {
+        Some(predicate) => format!("SELECT COUNT(*)::bigint FROM {table} WHERE {predicate}"),
+        None => format!("SELECT COUNT(*)::bigint FROM {table}"),
+    };
+    Ok(conn.query_one(&statement, &[])?.get(0))
 }
 
 fn resolve_table_name() -> Result<String, IngestionQueueError> {
