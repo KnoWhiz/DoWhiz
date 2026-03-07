@@ -292,6 +292,53 @@ impl GoogleSlidesOutboundAdapter {
         Ok(created_id)
     }
 
+    /// Create a new presentation.
+    ///
+    /// Returns the presentation ID of the newly created presentation.
+    pub fn create_presentation(&self, title: &str) -> Result<String, AdapterError> {
+        let access_token = self
+            .auth
+            .get_access_token()
+            .map_err(|e| AdapterError::ConfigError(e.to_string()))?;
+
+        let client = reqwest::blocking::Client::new();
+
+        let url = "https://slides.googleapis.com/v1/presentations";
+
+        let payload = serde_json::json!({
+            "title": title
+        });
+
+        let response = client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .map_err(|e| AdapterError::SendError(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().unwrap_or_default();
+            error!("Failed to create presentation '{}': {} - {}", title, status, body);
+            return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+        }
+
+        let json: serde_json::Value = response
+            .json()
+            .map_err(|e| AdapterError::ParseError(e.to_string()))?;
+
+        let presentation_id = json
+            .get("presentationId")
+            .and_then(|id| id.as_str())
+            .ok_or_else(|| AdapterError::ParseError("Missing presentationId in response".to_string()))?
+            .to_string();
+
+        info!("Created new presentation '{}' with ID {}", title, presentation_id);
+
+        Ok(presentation_id)
+    }
+
     /// Get presentation metadata.
     pub fn get_presentation(
         &self,

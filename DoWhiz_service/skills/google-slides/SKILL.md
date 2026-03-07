@@ -322,6 +322,84 @@ If you need to insert a private/local image:
    - Feature images: 300-400 pt
    - Full-width: 600+ pt
 
+## Creating New Presentations
+
+You can create a brand new presentation from scratch:
+
+```bash
+# Create a new presentation with a title
+google-slides create-presentation --title="Quarterly Report Q1 2026"
+```
+
+This returns:
+- The presentation ID
+- A direct link to the presentation
+
+**Example workflow for creating a presentation from a Google Doc:**
+
+```bash
+# 1. Read the source document
+google-docs read-document <doc_id>
+
+# 2. Create a new presentation
+google-slides create-presentation --title="Summary: Project Alpha"
+
+# 3. Add slides with the content
+google-slides create-slide <presentation_id> --layout=TITLE
+google-slides create-slide <presentation_id> --layout=TITLE_AND_BODY
+
+# 4. Share with the user
+google-slides share <presentation_id> --email="user@example.com" --role="writer" --notify
+
+# 5. Get the shareable link to include in your reply
+google-slides get-link <presentation_id>
+```
+
+## Sharing & Permissions
+
+### Share a File
+
+```bash
+# Share with edit access and send notification
+google-slides share <file_id> --email="user@example.com" --role="writer" --notify
+
+# Share with view-only access (no notification)
+google-slides share <file_id> --email="user@example.com" --role="reader"
+
+# Share with comment access
+google-slides share <file_id> --email="user@example.com" --role="commenter"
+```
+
+**Roles:**
+- `reader` / `read` / `view` - Can view only
+- `commenter` / `comment` - Can view and comment
+- `writer` / `write` / `edit` - Can edit
+
+### Get Shareable Link
+
+```bash
+# Get the link to share with the user
+google-slides get-link <file_id>
+```
+
+Returns:
+- **View/Edit Link**: Direct link to open in browser
+- **Download Link**: Link to download (if available)
+
+### List Permissions
+
+```bash
+# See who has access to a file
+google-slides list-permissions <file_id>
+```
+
+### Remove Permission
+
+```bash
+# Remove someone's access (use permission ID from list-permissions)
+google-slides remove-permission <file_id> <permission_id>
+```
+
 ## Notes
 
 - Use `--json` flag with `get-presentation` to find exact element IDs
@@ -330,3 +408,4 @@ If you need to insert a private/local image:
 - Always verify the presentation structure before making edits
 - Always check text capacity before inserting long content
 - The `replace-all-text` command is useful for templated content
+- **Security**: You can only share files that the current user owns or has sharing permissions for

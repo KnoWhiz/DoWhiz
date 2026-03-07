@@ -1,126 +1,97 @@
-# DoWhiz - Long-term Vision for the Digital Employee Platform
+# DoWhiz Vision (Code-Aligned)
 
-Current implementation baseline (as of 2026-02):
-- Ingress is already multi-channel: Email, Slack, Discord, SMS/Twilio, Telegram, WhatsApp, Google Docs/Sheets/Slides comments, and BlueBubbles/iMessage.
-- Inbound gateway + worker architecture is in production use: gateway handles ingress, workers consume queue by employee.
-- Scheduler/user/index state is persisted in MongoDB with per-path owner scopes; ingestion queue backend supports Service Bus (recommended for gateway) and Postgres (legacy/optional).
+## 1) Current Baseline (What Exists Today)
 
-## 1. North Star Vision
-Let every user have a "digital employee team" that collaborates like real colleagues via email/collab docs/team tools, can execute tasks independently, keep following up, proactively sync progress, and escalate to humans when needed (clarify / approval / escalation).
+As of current `dev` codebase, DoWhiz already operates as a multi-channel digital employee system with:
 
-Core experience:
-- The user only needs to send a task to a digital employee's email; it can execute, produce results, and return them via the appropriate channel.
-- Digital employees autonomously choose the best toolchain in the background (LLM, code, docs, editing, data retrieval); the user does not need to care about details.
-- Each user has a **fully isolated** memory and data management system that is auditable, revocable, and portable.
+- ingress gateway (`inbound_gateway`) for webhook/event intake
+- worker service (`rust_service`) for queue consumption, scheduling, and task execution
+- channel coverage: email, slack, discord, sms/twilio, telegram, whatsapp, google docs/sheets/slides comments, bluebubbles/imessage
+- task execution via Codex/Claude runner abstraction (`run_task_module`)
+- Mongo-backed scheduler/user/index state
+- Supabase Postgres-backed account/auth/billing data
+- ingestion queue support for Postgres (legacy/optional) and Service Bus (required by gateway flow)
 
-## 2. Product Form and Role Model
-Digital employees are not a single bot, but **role-based positions**:
-- Oliver: all-round assistant for daily work.
-- Mini-Mouse: all-round assistant for daily work.
-- Alice (Researcher): deep research, routine paper monitoring, survey/brief production.
-- Bob (TPM): task scheduling, progress tracking, cross-team reminders, meeting coordination.
-- Eve (Docs/Notion/Overleaf collaborator): document organizing, comment responses, version updates (after being added to a document's access, modify based on Overleaf comments and leave comments).
+## 2) Product North Star
 
-"Role as a strategy package":
-- Each role corresponds to a set of goals, tool strategies, default models, risk levels, and approval thresholds.
-- Roles can use permissions granted by the user (such as access/edit permissions for different Notion or Google workspaces), but act only within the authorized scope (least privilege).
+Give each user a dependable digital employee team that can:
+- accept work from normal communication channels
+- execute tasks with the right toolchain autonomously
+- keep context over time (memory + references)
+- follow up proactively and safely
+- escalate to humans when ambiguity/approval/risk requires it
 
-## 3. Design Principles
-1) **Isolation first**: user data, memory, credentials, and execution environments are isolated from each other.
-2) **Minimal interruption**: complete when possible; ask precise questions when unclear.
-3) **Tool neutral**: tools are replaceable and upgradable; users do not need to know the details.
-4) **Controllable long-term memory**: memory is files/structured storage (in the future, users can view, edit, delete).
+## 3) Platform Principles
 
-## 4. Core Abstractions Referencing OpenClaw (Reusable Design Ideas)
-OpenClaw's architecture has mature abstractions for "multi-channel messaging + agent execution + task queues." Key borrowable points:
+1. Isolation first
+- user-scoped workspace, memory, and task ownership must remain hard boundaries.
 
-- **Gateway (long-running daemon)**: maintains all message channel connections and exposes a unified control interface.
-- **Agent Loop (task execution loop)**: standardizes the execution path of "context assembly -> reasoning -> tool calls -> output -> record."
-- **Command Queue (Queue)**: serial per session, global rate limiting, ensures concurrency safety.
-- **Multi-agent Routing**: multiple agentIds in the same process with independent workspaces/sessions/credentials.
-- **Workspace + Memory as files**: memory sources are readable/writable files for audit and rollback.
-- **Hooks / Plugins**: insert security/audit/automation logic before and after execution.
+2. Operational reliability
+- queue-driven ingestion + idempotent dedupe + observable retries.
 
-> These abstractions align highly with the core requirements of the "digital employee platform" and can serve as base design references.
+3. Channel-native UX
+- users interact from their existing channel; system handles tool complexity internally.
 
-## 5. Target System Architecture (Multi-tenant SaaS)
+4. Auditable behavior
+- task scheduling, outbound actions, and long-term memory updates should be inspectable.
 
-### 5.1 Logical Layers
-1) **Ingress Layer (Channel Ingress)**
-   - Email/Postmark
-   - Slack / Discord / SMS (Twilio) / Telegram / WhatsApp / BlueBubbles
-   - Google Docs / Sheets / Slides comment events
-   - Future expansion: Zoom / Calendar / Notion / Overleaf deeper workflows
-   - Unified event format (Inbound Event)
+## 4) Role Model
 
-2) **Control Plane**
-   - User/org/subscription management
-   - Role catalog and permission policies
-   - Connector configuration and credential vaulting (Vault)
+Digital employees are role packages, not a single generic bot.
 
-3) **Task Orchestrator**
-   - Task categories: sign-up / unpaid / irrelevant / direct reply / needs execution
-   - Task state machine: queued -> in-progress -> done / archived
-   - Scheduled and recurring tasks (daily / weekly / monthly / yearly: cron-like)
+Each role combines:
+- behavioral style/persona guidance
+- model/runner defaults
+- skill/tool policy
+- risk/approval posture
 
-4) **Execution Layer (Agent Runtime)**
-   - Task context assembly
-   - Role strategy and tool selection
-   - Tool execution, output, and return
+Current employee config model already supports this via `employee.toml` fields (`runner`, `model`, `addresses`, role-specific guide files, skills dirs).
 
-5) **Storage Layer (Data & Memory)**
-   - Azure Blob/Supabase Storage: raw payloads, artifacts, and memo/object storage
-   - MongoDB/Cosmos DB API (current runtime): scheduler state, users, task index, Slack installs
-   - Postgres (legacy/optional path): ingestion queue backend and future shared metadata expansion
+## 5) Target Architecture Evolution
 
-6) **Observability Layer (Observability)**
-   - Task logs, cost, failure reasons
-   - Audit and replay for external write operations
+### 5.1 Ingress and routing
 
-### 5.2 Execution Flow (Email Ingress Example)
-```
-Email -> Ingress -> Triage -> Task Queue -> Agent Runtime -> Output
-Scheduler ^                                           v Scheduler
-```
+Continue to strengthen gateway-first ingress:
+- deterministic route resolution
+- richer dedupe and replay controls
+- stronger channel-level validation and anti-loop protection
 
-- Triage categories:
-  a) need to create account and reply
-  b) account balance insufficient -> reply to prompt recharge
-  c) irrelevant email -> ignore
-  d) execute task locally and reply directly (e.g., need more info, from user's direct task request)
-  e) execute task directly in third-party services (e.g., modify documents based on Google Doc/Slides/Overleaf comments) + reply to comments + email report (not direct email reply, because the received email is a machine notification from a third-party app)
+### 5.2 Orchestration
 
-- After entering the execution layer:
-  1) load user history + current thread + attachments
-  2) role strategy decision: clarify or execute directly
-  3) execute toolchain, generate results/attachments/external document updates
-  4) return via email or specified channel
-  5) if recurring task, write into Scheduler
+Continue evolving scheduler from task runner into policy engine:
+- better follow-up planning primitives
+- clearer cancellation/reschedule semantics
+- stronger concurrency and fairness controls
 
-## 6. Multi-tenant Isolation Strategy (Key Issue)
-Question: **How to ensure Alice only accesses current user data?**
+### 5.3 Execution backends
 
-Hard boundaries:
-- **Data isolation**: each user has an independent Azure Blob Storage folder.
-- **Execution isolation**:
-  - single container, multiple users, but each run mounts only that user's workspace (temporary directory).
-- **Runtime constraints**:
-  - when accessing storage/search/index, only allow the workspace (temporary directory) for that user_id; scope enforced.
-  - any cross-user resource access is rejected and audited.
+Maintain dual-mode execution:
+- local/docker for development and constrained environments
+- Azure ACI backend for staging/production isolation and scalability
 
-Reference from OpenClaw:
-- enable sandbox (containerized tool execution) when stronger isolation is needed.
+### 5.4 Unified memory/account layer
 
-## 7. "Next Step" Design After Alice Gets Shared Permissions
-Question: **After the user shares Notion/Docs with Alice, how does Alice move on?**
+Expand unified account-linked memory so cross-channel continuity improves while preserving per-user isolation and revocation controls.
 
-For each access permission type, maintain an abstract workflow layer with security protections to ensure only the information the user has granted is loaded when preparing the workspace.
+## 6) Near-Term Priorities
 
-## 8. Recurring Tasks and Task Management
-- Each user has an independent Scheduler (supports cron-like).
-- Task entities have a lifecycle:
-  - create, pause, cancel, retry on failure
-- New tasks generated by recurring tasks still go through the unified queue and permission checks.
-- Support "automatic de-noising": identical tasks in a short time window are merged or summarized (if the agent is still executing and has not sent a reply, new information can be delivered as new instructions to the agent, then reply once after completion).
+1. Harden queue and retry observability
+- explicit metrics around enqueue/claim/ack/fail and channel-level error classes.
 
----
+2. Improve test ergonomics and confidence
+- keep canonical suite mapping in `reference_documentation/test_plans/DoWhiz_service_tests.md`
+- close known gaps (queue race, ACI lifecycle, outbound failure injection).
+
+3. Tighten deployment coherence
+- keep docs/scripts/workflows aligned to single runtime `.env` policy and explicit config-path selection.
+
+4. Reduce operator ambiguity
+- make gateway vs worker responsibilities unambiguous across docs and runbooks.
+
+## 7) Long-Term Direction
+
+DoWhiz should evolve into a trustworthy, multi-tenant digital employee platform where:
+- onboarding a new role is configuration-first
+- adding a new channel is adapter-first
+- scaling execution is backend-policy-first
+- governance and audit remain first-class, not afterthoughts

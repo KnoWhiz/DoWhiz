@@ -9,7 +9,7 @@ use crate::account_store::{
     get_global_account_store, lookup_account_by_channel, lookup_account_by_identifier,
     AccountIdentifier,
 };
-use run_task_module::UserIdentities;
+use crate::user_store::lookup_user_id_by_identifier;
 use crate::blob_store::get_blob_store;
 use crate::channel::Channel;
 use crate::github_inbound::{
@@ -25,6 +25,7 @@ use crate::secrets_store::{
     resolve_user_secrets_path, sync_user_secrets_to_workspace, sync_workspace_secrets_to_user,
 };
 use crate::thread_state::{current_thread_epoch, find_thread_state_path};
+use run_task_module::UserIdentities;
 use uuid::Uuid;
 
 /// Sync memo from Azure Blob to workspace directory.
@@ -79,7 +80,7 @@ use super::outbound::{
     execute_bluebubbles_send, execute_discord_send, execute_email_send, execute_google_docs_send,
     execute_slack_send, execute_sms_send, execute_telegram_send, execute_whatsapp_send,
 };
-use super::types::{SchedulerError, TaskExecution, TaskKind};
+use super::types::{SchedulerError, SendReplyTask, TaskExecution, TaskKind};
 use super::utils::load_google_access_token_from_service_env;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,12 +169,21 @@ fn identifiers_to_user_identities(
         ..Default::default()
     };
 
+    let mut seen_user_ids = std::collections::HashSet::new();
+
     for identifier in identifiers.iter().filter(|id| id.verified) {
+        // Look up the filesystem user_id for this identifier
+        if let Some(user_id) =
+            lookup_user_id_by_identifier(&identifier.identifier_type, &identifier.identifier)
+        {
+            if seen_user_ids.insert(user_id.clone()) {
+                result.allowed_user_ids.push(user_id);
+            }
+        }
+
         match identifier.identifier_type.as_str() {
             "email" => result.emails.push(identifier.identifier.clone()),
-            "slack" | "slack_user_id" => {
-                result.slack_user_ids.push(identifier.identifier.clone())
-            }
+            "slack" | "slack_user_id" => result.slack_user_ids.push(identifier.identifier.clone()),
             "discord" | "discord_user_id" => {
                 result.discord_user_ids.push(identifier.identifier.clone())
             }
@@ -241,6 +251,8 @@ fn write_github_sender_parse_failed_reply(
 }
 
 const DISCORD_TYPING_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(8);
+const SLACK_WORKING_PLACEHOLDER_FILE: &str = ".slack_working_placeholder.json";
+const SLACK_WORKING_PLACEHOLDER_TEXT: &str = "⏳ Working on it...";
 
 fn resolve_discord_bot_token_for_employee(employee_id: Option<&str>) -> Option<String> {
     if let Some(emp_id) = employee_id {
@@ -257,6 +269,337 @@ fn resolve_discord_bot_token_for_employee(employee_id: Option<&str>) -> Option<S
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn resolve_slack_bot_token_for_employee(employee_id: Option<&str>) -> Option<String> {
+    if let Some(emp_id) = employee_id {
+        let emp_upper = emp_id.to_uppercase().replace('-', "_");
+        let emp_token_key = format!("{}_SLACK_BOT_TOKEN", emp_upper);
+        if let Ok(token) = std::env::var(&emp_token_key) {
+            if !token.trim().is_empty() {
+                return Some(token);
+            }
+        }
+    }
+
+    std::env::var("SLACK_BOT_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn slack_channel_and_thread_from_thread_key(thread_key: Option<&str>) -> Option<(String, String)> {
+    let raw = thread_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let mut parts = raw.splitn(3, ':');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some("slack"), Some(channel_id), Some(thread_ts))
+            if !channel_id.trim().is_empty() && !thread_ts.trim().is_empty() =>
+        {
+            Some((channel_id.trim().to_string(), thread_ts.trim().to_string()))
+        }
+        _ => None,
+    }
+}
+
+fn slack_channel_and_thread(task: &super::types::RunTaskTask) -> Option<(String, String)> {
+    if task.channel != Channel::Slack {
+        return None;
+    }
+    if let Some(pair) = slack_channel_and_thread_from_thread_key(task.thread_id.as_deref()) {
+        return Some(pair);
+    }
+
+    let channel_id = task.reply_to.get(1).map(|value| value.trim()).unwrap_or("");
+    let thread_ts = task
+        .thread_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .or_else(|| {
+            super::reply::load_reply_context(&task.workspace_dir)
+                .in_reply_to
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })?;
+
+    if channel_id.is_empty() {
+        return None;
+    }
+
+    Some((channel_id.to_string(), thread_ts))
+}
+
+fn slack_placeholder_path(workspace_dir: &Path) -> std::path::PathBuf {
+    workspace_dir.join(SLACK_WORKING_PLACEHOLDER_FILE)
+}
+
+fn write_slack_placeholder(
+    workspace_dir: &Path,
+    channel_id: &str,
+    thread_ts: &str,
+    message_ts: &str,
+) -> Result<(), SchedulerError> {
+    let path = slack_placeholder_path(workspace_dir);
+    let payload = serde_json::json!({
+        "channel_id": channel_id,
+        "thread_ts": thread_ts,
+        "message_ts": message_ts,
+    });
+    let serialized = serde_json::to_vec_pretty(&payload)
+        .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
+    std::fs::write(path, serialized)?;
+    Ok(())
+}
+
+fn post_slack_working_placeholder(task: &super::types::RunTaskTask) {
+    let Some((channel_id, thread_ts)) = slack_channel_and_thread(task) else {
+        return;
+    };
+    let Some(bot_token) = resolve_slack_bot_token_for_employee(task.employee_id.as_deref()) else {
+        return;
+    };
+
+    let marker_path = slack_placeholder_path(&task.workspace_dir);
+    if marker_path.is_file() {
+        return;
+    }
+
+    let api_base =
+        std::env::var("SLACK_API_BASE_URL").unwrap_or_else(|_| "https://slack.com/api".to_string());
+    let url = format!("{}/chat.postMessage", api_base.trim_end_matches('/'));
+    let request = serde_json::json!({
+        "channel": channel_id,
+        "thread_ts": thread_ts,
+        "text": SLACK_WORKING_PLACEHOLDER_TEXT,
+        "mrkdwn": true
+    });
+
+    let client = reqwest::blocking::Client::new();
+    let response = match client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", bot_token))
+        .header("Content-Type", "application/json")
+        .json(&request)
+        .send()
+    {
+        Ok(response) => response,
+        Err(err) => {
+            warn!(
+                "failed to send slack working placeholder for employee={} channel={}: {}",
+                task.employee_id.as_deref().unwrap_or_default(),
+                channel_id,
+                err
+            );
+            return;
+        }
+    };
+
+    let status = response.status();
+    let body = match response.text() {
+        Ok(value) => value,
+        Err(err) => {
+            warn!(
+                "failed reading slack working placeholder response for employee={} channel={}: {}",
+                task.employee_id.as_deref().unwrap_or_default(),
+                channel_id,
+                err
+            );
+            return;
+        }
+    };
+    if !status.is_success() {
+        warn!(
+            "slack working placeholder failed for employee={} channel={} status={} body={}",
+            task.employee_id.as_deref().unwrap_or_default(),
+            channel_id,
+            status,
+            body
+        );
+        return;
+    }
+
+    let payload: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(value) => value,
+        Err(err) => {
+            warn!(
+                "failed parsing slack working placeholder response for employee={} channel={}: {}",
+                task.employee_id.as_deref().unwrap_or_default(),
+                channel_id,
+                err
+            );
+            return;
+        }
+    };
+
+    let ok = payload.get("ok").and_then(|value| value.as_bool()) == Some(true);
+    let message_ts = payload
+        .get("ts")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+    if !ok || message_ts.is_none() {
+        warn!(
+            "slack working placeholder API error for employee={} channel={} error={}",
+            task.employee_id.as_deref().unwrap_or_default(),
+            channel_id,
+            payload
+                .get("error")
+                .and_then(|value| value.as_str())
+                .unwrap_or("unknown")
+        );
+        return;
+    }
+
+    if let Some(message_ts) = message_ts {
+        if let Err(err) =
+            write_slack_placeholder(&task.workspace_dir, &channel_id, &thread_ts, &message_ts)
+        {
+            warn!(
+                "failed writing slack placeholder marker for workspace {}: {}",
+                task.workspace_dir.display(),
+                err
+            );
+        }
+    }
+}
+
+fn find_slack_placeholder_marker(task: &SendReplyTask) -> Option<std::path::PathBuf> {
+    if let Some(state_path) = task.thread_state_path.as_ref() {
+        if let Some(workspace_dir) = state_path.parent() {
+            let marker = slack_placeholder_path(workspace_dir);
+            if marker.is_file() {
+                return Some(marker);
+            }
+        }
+    }
+
+    let workspace_dir = task.html_path.parent()?;
+    let marker = slack_placeholder_path(workspace_dir);
+    if marker.is_file() {
+        return Some(marker);
+    }
+    None
+}
+
+fn load_slack_placeholder_marker(marker_path: &Path) -> Option<(String, String)> {
+    let content = std::fs::read_to_string(marker_path).ok()?;
+    let payload: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let channel_id = payload
+        .get("channel_id")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .to_string();
+    let message_ts = payload
+        .get("message_ts")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .to_string();
+    Some((channel_id, message_ts))
+}
+
+fn clear_slack_placeholder_marker(path: &Path) {
+    if let Err(err) = std::fs::remove_file(path) {
+        warn!(
+            "failed to remove slack placeholder marker {}: {}",
+            path.display(),
+            err
+        );
+    }
+}
+
+fn delete_slack_working_placeholder_before_send(task: &SendReplyTask) {
+    if task.channel != Channel::Slack {
+        return;
+    }
+    let Some(marker_path) = find_slack_placeholder_marker(task) else {
+        return;
+    };
+    let Some((channel_id, message_ts)) = load_slack_placeholder_marker(&marker_path) else {
+        clear_slack_placeholder_marker(&marker_path);
+        return;
+    };
+    let Some(bot_token) = resolve_slack_bot_token_for_employee(task.employee_id.as_deref()) else {
+        return;
+    };
+
+    let api_base =
+        std::env::var("SLACK_API_BASE_URL").unwrap_or_else(|_| "https://slack.com/api".to_string());
+    let url = format!("{}/chat.delete", api_base.trim_end_matches('/'));
+    let request = serde_json::json!({
+        "channel": channel_id,
+        "ts": message_ts
+    });
+
+    let client = reqwest::blocking::Client::new();
+    let response = match client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", bot_token))
+        .header("Content-Type", "application/json")
+        .json(&request)
+        .send()
+    {
+        Ok(response) => response,
+        Err(err) => {
+            warn!(
+                "failed to delete slack working placeholder for {}: {}",
+                task.html_path.display(),
+                err
+            );
+            return;
+        }
+    };
+
+    let status = response.status();
+    let body = match response.text() {
+        Ok(value) => value,
+        Err(err) => {
+            warn!(
+                "failed reading slack delete placeholder response for {}: {}",
+                task.html_path.display(),
+                err
+            );
+            return;
+        }
+    };
+    if !status.is_success() {
+        warn!(
+            "slack delete placeholder failed for {} status={} body={}",
+            task.html_path.display(),
+            status,
+            body
+        );
+        return;
+    }
+
+    let payload: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(value) => value,
+        Err(err) => {
+            warn!(
+                "failed parsing slack delete placeholder response for {}: {}",
+                task.html_path.display(),
+                err
+            );
+            return;
+        }
+    };
+
+    let ok = payload.get("ok").and_then(|value| value.as_bool()) == Some(true);
+    let error = payload.get("error").and_then(|value| value.as_str());
+    if ok || matches!(error, Some("message_not_found")) {
+        clear_slack_placeholder_marker(&marker_path);
+    } else {
+        warn!(
+            "slack delete placeholder API error for {}: {}",
+            task.html_path.display(),
+            error.unwrap_or("unknown")
+        );
+    }
 }
 
 fn discord_typing_channel_id(task: &super::types::RunTaskTask) -> Option<u64> {
@@ -401,6 +744,7 @@ impl TaskExecutor for ModuleExecutor {
                 // Dispatch to the appropriate adapter based on channel
                 match task.channel {
                     Channel::Slack => {
+                        delete_slack_working_placeholder_before_send(task);
                         execute_slack_send(task)?;
                     }
                     Channel::Discord => {
@@ -457,6 +801,7 @@ impl TaskExecutor for ModuleExecutor {
                 let user_memory_dir = resolve_user_memory_dir(task);
                 let user_secrets_path = resolve_user_secrets_path(task);
                 let _typing_heartbeat = DiscordTypingHeartbeat::start(task);
+                post_slack_working_placeholder(task);
 
                 // Sync memo to workspace: prefer Azure Blob if account exists, else local storage
                 let original_memo_snapshot = if let Some(account_id) = account_id {
@@ -693,7 +1038,7 @@ mod tests {
             input_attachments_dir: PathBuf::from("incoming_attachments"),
             memory_dir: PathBuf::from("memory"),
             reference_dir: PathBuf::from("references"),
-            model_name: "gpt-5.3-codex".to_string(),
+            model_name: "gpt-5.4".to_string(),
             runner: "codex".to_string(),
             codex_disabled: true,
             reply_to: vec!["reply@example.com".to_string()],
@@ -840,6 +1185,75 @@ mod tests {
         assert_eq!(discord_typing_channel_id(&task), None);
     }
 
+    #[test]
+    fn slack_channel_and_thread_from_thread_key_parses_compound_key() {
+        assert_eq!(
+            slack_channel_and_thread_from_thread_key(Some("slack:C12345:1700000000.123456")),
+            Some(("C12345".to_string(), "1700000000.123456".to_string()))
+        );
+    }
+
+    #[test]
+    fn slack_channel_and_thread_from_thread_key_rejects_non_slack_key() {
+        assert_eq!(
+            slack_channel_and_thread_from_thread_key(Some("discord:123:456")),
+            None
+        );
+        assert_eq!(
+            slack_channel_and_thread_from_thread_key(Some("1700000000.123456")),
+            None
+        );
+    }
+
+    #[test]
+    fn find_slack_placeholder_marker_finds_workspace_marker() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+        let marker = workspace.join(SLACK_WORKING_PLACEHOLDER_FILE);
+        fs::write(
+            &marker,
+            r#"{"channel_id":"C123","thread_ts":"1700.1","message_ts":"1700.2"}"#,
+        )
+        .expect("marker");
+        let reply_path = workspace.join("reply_message.txt");
+        fs::write(&reply_path, "hello").expect("reply");
+
+        let send_task = SendReplyTask {
+            channel: Channel::Slack,
+            subject: "Slack reply".to_string(),
+            html_path: reply_path,
+            attachments_dir: workspace.join("reply_attachments"),
+            from: None,
+            to: vec!["U123".to_string(), "C123".to_string()],
+            cc: vec![],
+            bcc: vec![],
+            in_reply_to: Some("1700.1".to_string()),
+            references: None,
+            archive_root: None,
+            thread_epoch: None,
+            thread_state_path: Some(workspace.join("thread_state.json")),
+            employee_id: Some("little_bear".to_string()),
+        };
+
+        let found = find_slack_placeholder_marker(&send_task).expect("marker found");
+        assert_eq!(found, marker);
+    }
+
+    #[test]
+    fn load_slack_placeholder_marker_reads_channel_and_message_ts() {
+        let temp = TempDir::new().expect("tempdir");
+        let marker = temp.path().join(SLACK_WORKING_PLACEHOLDER_FILE);
+        fs::write(
+            &marker,
+            r#"{"channel_id":"C123","thread_ts":"1700.1","message_ts":"1700.2"}"#,
+        )
+        .expect("marker");
+
+        let marker_data = load_slack_placeholder_marker(&marker).expect("marker data");
+        assert_eq!(marker_data.0, "C123");
+        assert_eq!(marker_data.1, "1700.2");
+    }
+
     fn make_identifier(
         account_id: Uuid,
         identifier_type: &str,
@@ -859,7 +1273,12 @@ mod tests {
     #[test]
     fn identifiers_to_user_identities_maps_email() {
         let account_id = Uuid::new_v4();
-        let identifiers = vec![make_identifier(account_id, "email", "test@example.com", true)];
+        let identifiers = vec![make_identifier(
+            account_id,
+            "email",
+            "test@example.com",
+            true,
+        )];
 
         let result = identifiers_to_user_identities(account_id, &identifiers);
 
@@ -905,10 +1324,7 @@ mod tests {
 
         let result = identifiers_to_user_identities(account_id, &identifiers);
 
-        assert_eq!(
-            result.phone_numbers,
-            vec!["+15551234567", "+15559876543"]
-        );
+        assert_eq!(result.phone_numbers, vec!["+15551234567", "+15559876543"]);
     }
 
     #[test]
@@ -948,5 +1364,21 @@ mod tests {
         assert_eq!(result.emails, vec!["test@example.com"]);
         assert!(result.slack_user_ids.is_empty());
         assert!(result.discord_user_ids.is_empty());
+    }
+
+    #[test]
+    fn identifiers_to_user_identities_has_allowed_user_ids_field() {
+        // Note: allowed_user_ids is populated by lookup_user_id_by_identifier which
+        // requires MongoDB. In unit tests without MongoDB, this will be empty.
+        // Full integration tests would verify the lookup behavior.
+        let account_id = Uuid::new_v4();
+        let identifiers = vec![make_identifier(account_id, "email", "test@example.com", true)];
+
+        let result = identifiers_to_user_identities(account_id, &identifiers);
+
+        // Field exists (will be empty without MongoDB)
+        assert!(result.allowed_user_ids.is_empty());
+        // But account_id is always set
+        assert_eq!(result.account_id, Some(account_id.to_string()));
     }
 }

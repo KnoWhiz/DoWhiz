@@ -22,7 +22,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
-const DEFAULT_NGROK_HOOK_URL: &str =
+const DEFAULT_PUBLIC_HOOK_URL: &str =
     "https://shayne-laminar-lillian.ngrok-free.dev/postmark/inbound";
 const E2E_ATTACHMENT_NAME: &str = "e2e_note.txt";
 const E2E_ATTACHMENT_CONTENT: &[u8] = b"dowhiz-e2e-attachment";
@@ -157,7 +157,7 @@ fn resolve_postmark_hook_url() -> String {
             return trimmed.to_string();
         }
     }
-    DEFAULT_NGROK_HOOK_URL.to_string()
+    DEFAULT_PUBLIC_HOOK_URL.to_string()
 }
 
 fn env_with_scale_oliver(key: &str) -> Option<String> {
@@ -506,7 +506,7 @@ fn check_public_health(base_url: &str, local_host: &str, port: u16) -> Result<()
     match response {
         Ok(response) if response.status().is_success() => Ok(()),
         Ok(response) => Err(format!(
-            "public health check failed: {} {} (ensure ngrok forwards to http://{}:{})",
+            "public health check failed: {} {} (ensure public endpoint forwards to http://{}:{})",
             response.status(),
             health_url,
             local_host,
@@ -514,7 +514,7 @@ fn check_public_health(base_url: &str, local_host: &str, port: u16) -> Result<()
         )
         .into()),
         Err(err) => Err(format!(
-            "public health check error: {} {} (ensure ngrok forwards to http://{}:{})",
+            "public health check error: {} {} (ensure public endpoint forwards to http://{}:{})",
             err, health_url, local_host, port
         )
         .into()),
@@ -757,7 +757,7 @@ fn rust_service_real_email_end_to_end() -> Result<(), BoxError> {
         users_root: users_root.clone(),
         users_db_path: state_dir.join("users.db"),
         task_index_path: state_dir.join("task_index.db"),
-        codex_model: env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.3-codex".to_string()),
+        codex_model: env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.4".to_string()),
         codex_disabled,
         scheduler_poll_interval: Duration::from_secs(1),
         scheduler_max_concurrency: 10,

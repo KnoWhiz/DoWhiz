@@ -1,15 +1,22 @@
 # send_emails_module
 
-Send HTML emails with attachments via the Postmark API. This module reads a reply HTML file and a flat attachments directory, then sends a single email with comma-separated To/Cc/Bcc.
+Postmark outbound email sender used by scheduler `SendReply` tasks.
+
+## Features
+
+- send HTML email from file (`html_path`)
+- send attachments from flat directory (`attachments_dir`)
+- supports To/Cc/Bcc + threading headers (`In-Reply-To`, `References`)
+
+## Required Env
+
+- `POSTMARK_SERVER_TOKEN`
+
+Optional:
+- `POSTMARK_API_BASE_URL` (test/mocking override)
 
 ## Usage
 
-Environment variables (loaded from `.env` if present):
-- `POSTMARK_SERVER_TOKEN` (required)
-- `POSTMARK_API_BASE_URL` (optional, override Postmark base URL for tests)
-- `POSTMARK_LIVE_TEST` (required by tests, must be `1`)
-
-Example:
 ```rust
 use send_emails_module::{send_email, SendEmailParams};
 use std::path::PathBuf;
@@ -19,30 +26,30 @@ let params = SendEmailParams {
     html_path: PathBuf::from("/path/to/reply_email_draft.html"),
     attachments_dir: PathBuf::from("/path/to/reply_email_attachments"),
     from: Some("oliver@dowhiz.com".to_string()),
-    to: vec!["mini-mouse@deep-tutor.com".to_string()],
-    cc: Vec::new(),
-    bcc: Vec::new(),
+    to: vec!["user@example.com".to_string()],
+    cc: vec![],
+    bcc: vec![],
     in_reply_to: None,
     references: None,
     reply_to: None,
 };
 
-let response = send_email(&params)?;
-println!("Sent: {}", response.message_id);
+let resp = send_email(&params)?;
+println!("message id: {}", resp.message_id);
 ```
 
-## Folder structure
+## Tests
 
-- `DoWhiz_service/send_emails_module/src/lib.rs` : Postmark send logic and request payload construction.
-- `DoWhiz_service/send_emails_module/tests/` : Offline integration tests + optional live Postmark tests.
+Offline tests:
 
-## Notes
+```bash
+cd DoWhiz_service
+cargo test -p send_emails_module
+```
 
-- Attachments are all files in `reply_email_attachments/` (no subfolders).
-- Tests run live against Postmark and will fail unless `POSTMARK_LIVE_TEST=1` and credentials are set.
-- Use `POSTMARK_TEST_TO` to control the live-test recipient address.
-- Use `POSTMARK_BATCH_COUNT` to control the batch live-test size (capped at 5).
+Live Postmark tests are opt-in and require env credentials:
 
-## Production Deployment
-
-For Azure deployment (Rust Gateway + Service Bus + Blob + workers) or VM-based setups, follow the workflows in `DoWhiz_service/README.md` under “Azure Deployment (Rust Gateway + Service Bus + Blob + Workers)” and “VM Deployment (Gateway + ngrok)”.
+```bash
+cd DoWhiz_service
+POSTMARK_LIVE_TEST=1 cargo test -p send_emails_module -- --nocapture
+```
