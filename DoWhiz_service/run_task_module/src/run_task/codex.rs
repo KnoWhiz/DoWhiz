@@ -143,6 +143,43 @@ struct AzureAciConfig {
     container_share_root: PathBuf,
 }
 
+/// Check if cross-channel routing was requested and return the correct expected reply path.
+/// If reply_routing.json specifies a different target channel, compute the expected file for that target.
+fn resolve_expected_reply_path(workspace_dir: &Path, default_path: PathBuf) -> PathBuf {
+    let routing_file = workspace_dir.join("reply_routing.json");
+    if !routing_file.exists() {
+        return default_path;
+    }
+
+    // Try to read and parse reply_routing.json
+    let routing_content = match fs::read_to_string(&routing_file) {
+        Ok(content) => content,
+        Err(_) => return default_path,
+    };
+
+    // Parse the JSON to get target channel
+    let routing: serde_json::Value = match serde_json::from_str(&routing_content) {
+        Ok(v) => v,
+        Err(_) => return default_path,
+    };
+
+    let target_channel = match routing.get("channel").and_then(|c| c.as_str()) {
+        Some(ch) => ch.to_lowercase(),
+        None => return default_path,
+    };
+
+    // Determine expected reply path based on TARGET channel
+    match target_channel.as_str() {
+        "email" | "googledocs" | "googlesheets" | "googleslides" => {
+            workspace_dir.join("reply_email_draft.html")
+        }
+        "slack" | "discord" | "telegram" | "sms" | "whatsapp" | "bluebubbles" => {
+            workspace_dir.join("reply_message.txt")
+        }
+        _ => default_path,
+    }
+}
+
 pub(super) fn run_codex_task(
     request: RunTaskRequest<'_>,
     runner: &str,
@@ -491,15 +528,17 @@ pub(super) fn run_codex_task(
     }
 
     // Only check for reply file if a reply was expected
-    if !request.reply_to.is_empty() && !reply_html_path.exists() {
+    // Use cross-channel routing to determine actual expected path
+    let expected_reply_path = resolve_expected_reply_path(request.workspace_dir, reply_html_path.clone());
+    if !request.reply_to.is_empty() && !expected_reply_path.exists() {
         return Err(RunTaskError::OutputMissing {
-            path: reply_html_path,
+            path: expected_reply_path,
             output: output_tail.clone(),
         });
     }
 
     Ok(RunTaskOutput {
-        reply_html_path,
+        reply_html_path: expected_reply_path,
         reply_attachments_dir,
         codex_output: output_tail,
         scheduled_tasks,
@@ -754,15 +793,17 @@ fn run_codex_task_azure_aci(
         });
     }
 
-    if !request.reply_to.is_empty() && !reply_html_path.exists() {
+    // Use cross-channel routing to determine actual expected path
+    let expected_reply_path = resolve_expected_reply_path(request.workspace_dir, reply_html_path.clone());
+    if !request.reply_to.is_empty() && !expected_reply_path.exists() {
         return Err(RunTaskError::OutputMissing {
-            path: reply_html_path,
+            path: expected_reply_path,
             output: output_tail,
         });
     }
 
     Ok(RunTaskOutput {
-        reply_html_path,
+        reply_html_path: expected_reply_path,
         reply_attachments_dir,
         codex_output: output_tail,
         scheduled_tasks,
@@ -2407,5 +2448,35 @@ mod tests {
             "Container should not exist after cleanup"
         );
         eprintln!("[test] SUCCESS: Container was deleted by cleanup!");
+    }
+
+    #[test]
+    fn test_resolve_expected_reply_path_with_cross_channel_routing_to_email() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let workspace = temp_dir.path();
+
+        // Write reply_routing.json specifying email target
+        let routing = r#"{"channel": "email", "identifier": "user@example.com"}"#;
+        fs::write(workspace.join("reply_routing.json"), routing).expect("write routing file");
+
+        let default_path = workspace.join("reply_message.txt");
+        let resolved = resolve_expected_reply_path(workspace, default_path.clone());
+
+        // Should resolve to reply_email_draft.html for email target
+        assert_eq!(resolved, workspace.join("reply_email_draft.html"));
+        assert_ne!(resolved, default_path);
+    }
+
+    #[test]
+    fn test_resolve_expected_reply_path_fallback_when_no_routing_file() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let workspace = temp_dir.path();
+
+        // No reply_routing.json exists
+        let default_path = workspace.join("reply_message.txt");
+        let resolved = resolve_expected_reply_path(workspace, default_path.clone());
+
+        // Should return the default path as fallback
+        assert_eq!(resolved, default_path);
     }
 }
