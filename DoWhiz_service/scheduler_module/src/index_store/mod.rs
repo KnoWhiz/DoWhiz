@@ -6,7 +6,6 @@ use mongodb::options::IndexOptions;
 use mongodb::options::UpdateOptions;
 use mongodb::sync::Collection;
 use mongodb::IndexModel;
-use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use tracing::warn;
@@ -28,14 +27,6 @@ struct MongoIndexStore {
 pub struct TaskRef {
     pub task_id: String,
     pub user_id: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TaskIndexMetricsSnapshot {
-    pub enabled_tasks_total: u64,
-    pub due_now_total: u64,
-    pub due_within_24h_total: u64,
-    pub unique_users_total: u64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -77,13 +68,6 @@ impl IndexStore {
         limit: usize,
     ) -> Result<Vec<TaskRef>, IndexStoreError> {
         self.mongo.due_task_refs(now, limit)
-    }
-
-    pub fn metrics_snapshot(
-        &self,
-        now: DateTime<Utc>,
-    ) -> Result<TaskIndexMetricsSnapshot, IndexStoreError> {
-        self.mongo.metrics_snapshot(now)
     }
 }
 
@@ -235,33 +219,6 @@ impl MongoIndexStore {
             refs.push(TaskRef { task_id, user_id });
         }
         Ok(refs)
-    }
-
-    fn metrics_snapshot(&self, now: DateTime<Utc>) -> Result<TaskIndexMetricsSnapshot, IndexStoreError> {
-        let enabled_filter = doc! { "enabled": true };
-        let due_now_filter = doc! {
-            "enabled": true,
-            "next_run": { "$lte": BsonDateTime::from_chrono(now) },
-        };
-        let due_window_filter = doc! {
-            "enabled": true,
-            "next_run": { "$lte": BsonDateTime::from_chrono(now + chrono::Duration::hours(24)) },
-        };
-
-        let enabled_tasks_total = self.task_index.count_documents(enabled_filter.clone(), None)?;
-        let due_now_total = self.task_index.count_documents(due_now_filter, None)?;
-        let due_within_24h_total = self.task_index.count_documents(due_window_filter, None)?;
-        let unique_users_total = self
-            .task_index
-            .distinct("user_id", enabled_filter, None)?
-            .len() as u64;
-
-        Ok(TaskIndexMetricsSnapshot {
-            enabled_tasks_total,
-            due_now_total,
-            due_within_24h_total,
-            unique_users_total,
-        })
     }
 }
 

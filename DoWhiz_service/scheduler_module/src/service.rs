@@ -6,7 +6,6 @@ mod email;
 mod html;
 mod inbound;
 mod ingestion;
-mod internal_dashboard;
 mod postmark;
 mod recipients;
 mod scheduler;
