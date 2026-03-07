@@ -79,6 +79,7 @@ pub(super) fn build_prompt(
     };
     let github_coauthor_section = build_github_coauthor_section(workspace_dir, input_email_dir);
     let user_identities_section = build_user_identities_section(user_identities);
+    let filesystem_security_section = build_allowed_paths_section(&user_identities.allowed_user_ids);
 
     // Build registration prompt section if user doesn't have a unified account
     // and we haven't prompted them yet in this thread
@@ -142,7 +143,7 @@ Rules:
   Prefer creating a work/ directory for clones, patches, and build artifacts.
 - If attachments include version suffixes like _v1, _v2, the highest version should be the latest version.
 - Avoid interactive commands; use non-interactive flags for git/gh (for example, `gh pr create --title ... --body ...`).
-{registration_section}"#,
+{filesystem_security_section}{registration_section}"#,
         input_email = input_email_dir.display(),
         input_attachments = input_attachments_dir.display(),
         memory = memory_dir.display(),
@@ -153,6 +154,7 @@ Rules:
         discord_context_section = discord_context_section,
         github_coauthor_section = github_coauthor_section,
         user_identities_section = user_identities_section,
+        filesystem_security_section = filesystem_security_section,
         registration_section = registration_section,
     )
 }
@@ -228,6 +230,33 @@ Example: Inbound is email, user says "reply to my Discord instead"
 2. Write reply_message.txt (NOT reply_email_draft.html) with Discord markdown
 "#,
         channels = channels.join("\n")
+    )
+}
+
+fn build_allowed_paths_section(allowed_user_ids: &[String]) -> String {
+    if allowed_user_ids.is_empty() {
+        return r#"
+Filesystem Security:
+- You may ONLY access files within your current workspace directory.
+- Do NOT traverse to parent directories or access paths outside this workspace.
+"#
+        .to_string();
+    }
+
+    let allowed_paths: Vec<String> = allowed_user_ids
+        .iter()
+        .map(|id| format!("  - /users/{}/", id))
+        .collect();
+
+    format!(
+        r#"
+Filesystem Security:
+- You may ONLY access files within the following user directories:
+{allowed_paths}
+- Do NOT access any paths outside these directories.
+- Do NOT attempt to access other users' data.
+"#,
+        allowed_paths = allowed_paths.join("\n")
     )
 }
 
@@ -741,6 +770,7 @@ mod tests {
             discord_user_ids: vec!["987654321".to_string()],
             phone_numbers: vec!["+15551234567".to_string()],
             telegram_user_ids: vec!["12345678".to_string()],
+            allowed_user_ids: vec![],
         };
         let section = build_user_identities_section(&identities);
 
@@ -793,5 +823,77 @@ mod tests {
         assert!(prompt.contains("test@example.com"));
         assert!(prompt.contains("123456789"));
         assert!(prompt.contains("reply_routing.json"));
+    }
+
+    #[test]
+    fn build_allowed_paths_section_empty_returns_workspace_only() {
+        let section = build_allowed_paths_section(&[]);
+        assert!(section.contains("Filesystem Security"));
+        assert!(section.contains("ONLY access files within your current workspace directory"));
+        assert!(section.contains("Do NOT traverse to parent directories"));
+    }
+
+    #[test]
+    fn build_allowed_paths_section_with_user_ids_lists_paths() {
+        let user_ids = vec![
+            "550e8400-e29b-41d4-a716-446655440000".to_string(),
+            "660f9500-f39c-52e5-b827-557766551111".to_string(),
+        ];
+        let section = build_allowed_paths_section(&user_ids);
+
+        assert!(section.contains("Filesystem Security"));
+        assert!(section.contains("/users/550e8400-e29b-41d4-a716-446655440000/"));
+        assert!(section.contains("/users/660f9500-f39c-52e5-b827-557766551111/"));
+        assert!(section.contains("Do NOT access any paths outside these directories"));
+        assert!(section.contains("Do NOT attempt to access other users' data"));
+    }
+
+    #[test]
+    fn build_prompt_includes_filesystem_security_section() {
+        let temp = TempDir::new().expect("tempdir");
+        let identities = UserIdentities {
+            allowed_user_ids: vec!["test-user-uuid".to_string()],
+            ..Default::default()
+        };
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            false,
+            &identities,
+        );
+
+        assert!(prompt.contains("Filesystem Security"));
+        assert!(prompt.contains("/users/test-user-uuid/"));
+    }
+
+    #[test]
+    fn build_prompt_includes_workspace_only_security_when_no_user_ids() {
+        let temp = TempDir::new().expect("tempdir");
+        let identities = UserIdentities::default();
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            false,
+            &identities,
+        );
+
+        assert!(prompt.contains("Filesystem Security"));
+        assert!(prompt.contains("ONLY access files within your current workspace directory"));
     }
 }

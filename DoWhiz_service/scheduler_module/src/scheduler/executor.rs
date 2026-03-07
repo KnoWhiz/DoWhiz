@@ -9,6 +9,7 @@ use crate::account_store::{
     get_global_account_store, lookup_account_by_channel, lookup_account_by_identifier,
     AccountIdentifier,
 };
+use crate::user_store::lookup_user_id_by_identifier;
 use run_task_module::UserIdentities;
 use crate::blob_store::get_blob_store;
 use crate::channel::Channel;
@@ -168,7 +169,18 @@ fn identifiers_to_user_identities(
         ..Default::default()
     };
 
+    let mut seen_user_ids = std::collections::HashSet::new();
+
     for identifier in identifiers.iter().filter(|id| id.verified) {
+        // Look up the filesystem user_id for this identifier
+        if let Some(user_id) =
+            lookup_user_id_by_identifier(&identifier.identifier_type, &identifier.identifier)
+        {
+            if seen_user_ids.insert(user_id.clone()) {
+                result.allowed_user_ids.push(user_id);
+            }
+        }
+
         match identifier.identifier_type.as_str() {
             "email" => result.emails.push(identifier.identifier.clone()),
             "slack" | "slack_user_id" => {
@@ -948,5 +960,21 @@ mod tests {
         assert_eq!(result.emails, vec!["test@example.com"]);
         assert!(result.slack_user_ids.is_empty());
         assert!(result.discord_user_ids.is_empty());
+    }
+
+    #[test]
+    fn identifiers_to_user_identities_has_allowed_user_ids_field() {
+        // Note: allowed_user_ids is populated by lookup_user_id_by_identifier which
+        // requires MongoDB. In unit tests without MongoDB, this will be empty.
+        // Full integration tests would verify the lookup behavior.
+        let account_id = Uuid::new_v4();
+        let identifiers = vec![make_identifier(account_id, "email", "test@example.com", true)];
+
+        let result = identifiers_to_user_identities(account_id, &identifiers);
+
+        // Field exists (will be empty without MongoDB)
+        assert!(result.allowed_user_ids.is_empty());
+        // But account_id is always set
+        assert_eq!(result.account_id, Some(account_id.to_string()));
     }
 }
