@@ -74,6 +74,10 @@ if [[ "${RUN_CODEX_E2E:-0}" == "1" ]]; then
     echo "AZURE_OPENAI_API_KEY_BACKUP is required when RUN_CODEX_E2E=1." >&2
     exit 1
   fi
+  if [[ -z "${AZURE_OPENAI_ENDPOINT_BACKUP:-}" ]]; then
+    echo "AZURE_OPENAI_ENDPOINT_BACKUP is required when RUN_CODEX_E2E=1." >&2
+    exit 1
+  fi
 fi
 
 if [[ -z "${RUN_TASK_DOCKERFILE:-}" ]] && [[ -f "${repo_root}/Dockerfile" ]]; then

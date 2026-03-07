@@ -38,6 +38,7 @@ Optional dockerized local path:
 
 Minimum practical requirement:
 - `AZURE_OPENAI_API_KEY_BACKUP`
+- `AZURE_OPENAI_ENDPOINT_BACKUP` (required for `codex` runner; for example `https://<resource>.openai.azure.com/`)
 
 Common optional controls:
 - `CODEX_MODEL`, `CLAUDE_MODEL`

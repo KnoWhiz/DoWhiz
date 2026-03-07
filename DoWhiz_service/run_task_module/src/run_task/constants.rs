@@ -1,8 +1,7 @@
 pub(super) const CODEX_CONFIG_MARKER: &str = "# IMPORTANT: Use your Azure *deployment name* here";
 pub(super) const CODEX_MODEL_NAME: &str = "gpt-5.4";
 pub(super) const CODEX_SANDBOX_MODE: &str = "workspace-write";
-pub(super) const CODEX_BASE_URL: &str =
-    "https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1";
+pub(super) const CODEX_CONFIG_BASE_URL_PLACEHOLDER: &str = "__AZURE_OPENAI_BASE_URL__";
 pub(super) const CODEX_CONFIG_BLOCK_TEMPLATE: &str = r#"# IMPORTANT: Use your Azure *deployment name* here (e.g., "gpt-5.4")
 model = "gpt-5.4"
 model_provider = "azure"
@@ -16,7 +15,7 @@ network_access=true
 
 [model_providers.azure]
 name = "Azure OpenAI"
-base_url = "https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1"
+base_url = "__AZURE_OPENAI_BASE_URL__"
 env_key = "AZURE_OPENAI_API_KEY_BACKUP"
 wire_api = "responses"
 "#;
