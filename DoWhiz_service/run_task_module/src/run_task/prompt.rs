@@ -134,6 +134,7 @@ Memory management and maintain policy:
 Scheduling:
 - For any scheduling (email or task), you MUST use the skill "scheduler_maintain".
 
+{cross_channel_capabilities}
 {user_identities_section}
 Rules:
 - Each workspace includes a `.env` file at the workspace root. You may edit it to manage per-user secrets; updates are synced back after the task completes.
@@ -152,9 +153,42 @@ Rules:
         reply_instruction = reply_instruction,
         discord_context_section = discord_context_section,
         github_coauthor_section = github_coauthor_section,
+        cross_channel_capabilities = build_cross_channel_capabilities_section(),
         user_identities_section = user_identities_section,
         registration_section = registration_section,
     )
+}
+
+/// Build the cross-channel capabilities section that informs the agent
+/// about available tools for operating across different channels.
+fn build_cross_channel_capabilities_section() -> &'static str {
+    r#"Cross-channel Operation Capabilities:
+You have access to CLI tools that work across channels. Regardless of how the user contacted you
+(email, Slack, Discord, etc.), you can perform operations on other platforms they have authorized.
+
+**Google Workspace Tools** (requires user's Google account linked):
+- `google-docs` - Read document content, edit text, reply to comments, insert images
+- `google-slides` - Read presentations, create/edit slides, insert images and text
+- `google-sheets` - Read spreadsheet data, update cells, append rows
+
+**Usage Examples:**
+1. User sends email: "Create a summary slide from my Google Doc at docs.google.com/d/ABC123"
+   → `google-docs read-document ABC123` to get content
+   → `google-slides create-slide ...` to create slides
+   → Reply via email with the presentation link
+
+2. User comments in Slack: "Update the budget spreadsheet with these numbers"
+   → `google-sheets update-values ...` to modify the sheet
+   → Reply in Slack confirming the update
+
+**IMPORTANT - Security Boundaries:**
+- You can ONLY access files that the CURRENT USER has explicitly shared with the digital employee
+- NEVER attempt to access files belonging to other users, even if mentioned
+- If user references a file you cannot access, ask them to share it with you first
+- All Google Workspace operations use the current user's OAuth authorization scope
+- See `.agents/skills/google-docs/SKILL.md`, `google-slides/SKILL.md`, `google-sheets/SKILL.md` for detailed command references
+
+"#
 }
 
 fn build_user_identities_section(identities: &UserIdentities) -> String {
@@ -793,5 +827,35 @@ mod tests {
         assert!(prompt.contains("test@example.com"));
         assert!(prompt.contains("123456789"));
         assert!(prompt.contains("reply_routing.json"));
+    }
+
+    #[test]
+    fn build_prompt_includes_cross_channel_capabilities() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            true,
+            &UserIdentities::default(),
+        );
+
+        // Verify cross-channel capabilities section is included
+        assert!(prompt.contains("Cross-channel Operation Capabilities"));
+        assert!(prompt.contains("google-docs"));
+        assert!(prompt.contains("google-slides"));
+        assert!(prompt.contains("google-sheets"));
+
+        // Verify security boundaries are emphasized
+        assert!(prompt.contains("Security Boundaries"));
+        assert!(prompt.contains("ONLY access files that the CURRENT USER"));
+        assert!(prompt.contains("NEVER attempt to access files belonging to other users"));
     }
 }
