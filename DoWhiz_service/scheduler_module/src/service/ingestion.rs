@@ -227,6 +227,7 @@ fn process_ingestion_envelope(
             let raw_payload = envelope.raw_payload_bytes();
             process_telegram_event(config, user_store, index_store, &message, &raw_payload)
         }
+        Channel::WeChat => Err("wechat inbound processing is not implemented yet".into()),
         Channel::WhatsApp => {
             let message = envelope.to_inbound_message();
             if try_quick_response_whatsapp(config, user_store, message_router, runtime, &message)? {

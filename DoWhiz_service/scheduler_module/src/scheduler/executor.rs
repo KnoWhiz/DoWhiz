@@ -77,7 +77,8 @@ fn sync_blob_memo_to_workspace(account_id: Uuid, workspace_memory_dir: &Path) ->
 
 use super::outbound::{
     execute_bluebubbles_send, execute_discord_send, execute_email_send, execute_google_docs_send,
-    execute_slack_send, execute_sms_send, execute_telegram_send, execute_whatsapp_send,
+    execute_slack_send, execute_sms_send, execute_telegram_send, execute_wechat_send,
+    execute_whatsapp_send,
 };
 use super::types::{SchedulerError, SendReplyTask, TaskExecution, TaskKind};
 use super::utils::load_google_access_token_from_service_env;
@@ -180,6 +181,9 @@ fn identifiers_to_user_identities(
             }
             "telegram" | "telegram_user_id" => {
                 result.telegram_user_ids.push(identifier.identifier.clone())
+            }
+            "wechat" | "wechat_user_id" => {
+                result.wechat_user_ids.push(identifier.identifier.clone())
             }
             _ => {
                 // Unknown identifier type, skip
@@ -749,6 +753,9 @@ impl TaskExecutor for ModuleExecutor {
                     }
                     Channel::Telegram => {
                         execute_telegram_send(task)?;
+                    }
+                    Channel::WeChat => {
+                        execute_wechat_send(task)?;
                     }
                     Channel::WhatsApp => {
                         execute_whatsapp_send(task)?;
@@ -1323,6 +1330,19 @@ mod tests {
         let result = identifiers_to_user_identities(account_id, &identifiers);
 
         assert_eq!(result.telegram_user_ids, vec!["12345678"]);
+    }
+
+    #[test]
+    fn identifiers_to_user_identities_maps_wechat() {
+        let account_id = Uuid::new_v4();
+        let identifiers = vec![
+            make_identifier(account_id, "wechat", "wxid_abc123", true),
+            make_identifier(account_id, "wechat_user_id", "wxid_xyz789", true),
+        ];
+
+        let result = identifiers_to_user_identities(account_id, &identifiers);
+
+        assert_eq!(result.wechat_user_ids, vec!["wxid_abc123", "wxid_xyz789"]);
     }
 
     #[test]

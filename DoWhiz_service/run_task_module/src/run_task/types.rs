@@ -31,6 +31,9 @@ pub struct UserIdentities {
     /// Telegram user IDs
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub telegram_user_ids: Vec<String>,
+    /// WeChat user IDs
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wechat_user_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

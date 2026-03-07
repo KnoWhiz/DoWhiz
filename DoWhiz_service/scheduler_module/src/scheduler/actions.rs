@@ -46,6 +46,7 @@ fn parse_channel(channel_str: &str) -> Option<Channel> {
         "slack" => Some(Channel::Slack),
         "discord" => Some(Channel::Discord),
         "telegram" => Some(Channel::Telegram),
+        "wechat" | "weixin" => Some(Channel::WeChat),
         "sms" => Some(Channel::Sms),
         "whatsapp" => Some(Channel::WhatsApp),
         "bluebubbles" => Some(Channel::BlueBubbles),
@@ -168,6 +169,7 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         | Channel::Discord
         | Channel::BlueBubbles
         | Channel::Telegram
+        | Channel::WeChat
         | Channel::WhatsApp
         | Channel::Sms => ("reply_message.txt", "reply_attachments"),
         Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
@@ -213,6 +215,7 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
             | Channel::Discord
             | Channel::BlueBubbles
             | Channel::Telegram
+            | Channel::WeChat
             | Channel::WhatsApp
             | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
@@ -298,6 +301,7 @@ fn format_channel_name(channel: &Channel) -> &'static str {
         Channel::Slack => "Slack",
         Channel::Discord => "Discord",
         Channel::Telegram => "Telegram",
+        Channel::WeChat => "WeChat",
         Channel::Sms => "SMS",
         Channel::WhatsApp => "WhatsApp",
         Channel::BlueBubbles => "iMessage",
@@ -633,6 +637,8 @@ mod tests {
         assert_eq!(parse_channel("slack"), Some(Channel::Slack));
         assert_eq!(parse_channel("discord"), Some(Channel::Discord));
         assert_eq!(parse_channel("telegram"), Some(Channel::Telegram));
+        assert_eq!(parse_channel("wechat"), Some(Channel::WeChat));
+        assert_eq!(parse_channel("weixin"), Some(Channel::WeChat));
         assert_eq!(parse_channel("sms"), Some(Channel::Sms));
         assert_eq!(parse_channel("whatsapp"), Some(Channel::WhatsApp));
         assert_eq!(parse_channel("bluebubbles"), Some(Channel::BlueBubbles));
@@ -643,6 +649,7 @@ mod tests {
         assert_eq!(parse_channel("EMAIL"), Some(Channel::Email));
         assert_eq!(parse_channel("Slack"), Some(Channel::Slack));
         assert_eq!(parse_channel("DISCORD"), Some(Channel::Discord));
+        assert_eq!(parse_channel("WeChat"), Some(Channel::WeChat));
     }
 
     #[test]
@@ -702,6 +709,7 @@ mod tests {
         assert_eq!(format_channel_name(&Channel::Slack), "Slack");
         assert_eq!(format_channel_name(&Channel::Discord), "Discord");
         assert_eq!(format_channel_name(&Channel::Telegram), "Telegram");
+        assert_eq!(format_channel_name(&Channel::WeChat), "WeChat");
         assert_eq!(format_channel_name(&Channel::Sms), "SMS");
         assert_eq!(format_channel_name(&Channel::WhatsApp), "WhatsApp");
         assert_eq!(format_channel_name(&Channel::BlueBubbles), "iMessage");
@@ -719,6 +727,7 @@ mod tests {
             | Channel::Discord
             | Channel::BlueBubbles
             | Channel::Telegram
+            | Channel::WeChat
             | Channel::WhatsApp
             | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
@@ -737,6 +746,7 @@ mod tests {
             | Channel::Discord
             | Channel::BlueBubbles
             | Channel::Telegram
+            | Channel::WeChat
             | Channel::WhatsApp
             | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {

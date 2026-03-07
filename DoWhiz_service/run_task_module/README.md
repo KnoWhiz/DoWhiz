@@ -16,7 +16,7 @@ Required input directories (relative to `workspace_dir`):
 
 Output files are channel-aware:
 - email/google workspace channels -> `reply_email_draft.html` + `reply_email_attachments/`
-- chat channels (slack/discord/telegram/sms/whatsapp/bluebubbles) -> `reply_message.txt` + `reply_attachments/`
+- chat channels (slack/discord/telegram/wechat/sms/whatsapp/bluebubbles) -> `reply_message.txt` + `reply_attachments/`
 
 ## Execution Backend
 
