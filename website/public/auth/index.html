@@ -982,7 +982,6 @@
                           <option value="phone">Phone (SMS)</option>
                           <option value="discord">Discord</option>
                           <option value="slack">Slack</option>
-                          <option value="github">GitHub</option>
                           <option value="telegram">Telegram</option>
                         </select>
                         <input type="text" id="link-identifier" class="auth-input" placeholder="e.g., you@example.com" required />
@@ -1840,7 +1839,7 @@
         window.history.replaceState({}, document.title, window.location.pathname);
       }
 
-      // GitHub manual connect shortcut button
+      // GitHub OAuth button
       document.getElementById('github-connect-btn').addEventListener('click', async () => {
         const githubStatus = document.getElementById('github-connect-status');
         const { data: { session } } = await supabase.auth.getSession();
@@ -1851,13 +1850,44 @@
           return;
         }
 
-        updateLinkFormForChannel('github');
-        const identifierInput = document.getElementById('link-identifier');
-        identifierInput.value = '';
-        identifierInput.focus();
-        githubStatus.textContent = 'Enter your GitHub username below, then click "Link Channel".';
+        githubStatus.textContent = 'Redirecting to GitHub...';
         githubStatus.style.color = 'var(--text-muted, #888)';
+
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/auth/github`, {
+            headers: { 'Authorization': `Bearer ${session.access_token}` }
+          });
+
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to start GitHub OAuth');
+          }
+
+          const data = await res.json();
+          // Redirect to GitHub OAuth page
+          window.location.href = data.redirect_url;
+        } catch (err) {
+          console.error('GitHub OAuth error:', err);
+          githubStatus.textContent = `Error: ${err.message}`;
+          githubStatus.style.color = '#ef4444';
+        }
       });
+
+      // Check for GitHub OAuth callback result
+      const githubResult = urlParams.get('github');
+      if (githubResult) {
+        const githubStatus = document.getElementById('github-connect-status');
+        if (githubResult === 'success') {
+          githubStatus.textContent = 'GitHub connected successfully!';
+          githubStatus.style.color = '#22c55e';
+        } else if (githubResult === 'error') {
+          const reason = urlParams.get('reason') || 'unknown error';
+          githubStatus.textContent = `Failed to connect GitHub: ${reason}`;
+          githubStatus.style.color = '#ef4444';
+        }
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
 
       // Check for email verification token (from magic link in email)
       const verifyEmailToken = urlParams.get('verify_email');
@@ -1903,10 +1933,6 @@
           placeholder: 'e.g., U08ABC1D2EF',
           help: 'Enter your Slack Member ID. To find it: Click your profile picture → Profile → click the ⋮ menu → Copy member ID'
         },
-        github: {
-          placeholder: 'e.g., octocat',
-          help: 'Enter your GitHub username (without @). We recommend using lowercase to match GitHub notification routing.'
-        },
         telegram: {
           placeholder: 'e.g., 123456789',
           help: 'Enter your Telegram numeric user ID. To find it: Message @userinfobot on Telegram and it will reply with your ID'
@@ -1942,13 +1968,6 @@
           return showLinkMessage('Please enter an identifier');
         }
 
-        if (identifierType === 'github') {
-          identifier = identifier.replace(/^@+/, '').toLowerCase();
-          if (!identifier) {
-            return showLinkMessage('Please enter a valid GitHub username');
-          }
-        }
-
         try {
           const res = await fetch(`${DOWHIZ_API_URL}/auth/link`, {
             method: 'POST',
@@ -1974,23 +1993,12 @@
             showLinkMessage('Channel linked successfully!', 'success');
           }
 
-          if (identifierType === 'github') {
-            const githubStatus = document.getElementById('github-connect-status');
-            githubStatus.textContent = 'GitHub connected successfully!';
-            githubStatus.style.color = '#22c55e';
-          }
-
           document.getElementById('link-identifier').value = '';
           await loadIdentifiers(session.access_token);
           // Refresh tasks to include the new channel
           await loadTasks(session.access_token);
         } catch (err) {
           showLinkMessage(err.message);
-          if (identifierType === 'github') {
-            const githubStatus = document.getElementById('github-connect-status');
-            githubStatus.textContent = `Failed to connect GitHub: ${err.message}`;
-            githubStatus.style.color = '#ef4444';
-          }
         }
       });
 
