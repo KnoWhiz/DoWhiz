@@ -140,16 +140,24 @@ ensure_pip() {
 }
 
 run_playwright_install_deps() {
-  local deps_cmd=(python3 -m playwright install-deps chromium)
-  if [[ "$(id -u)" -eq 0 ]]; then
-    "${deps_cmd[@]}"
-    return $?
+  if python3 -m playwright install-deps chromium; then
+    return 0
   fi
+
   if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
-    sudo "${deps_cmd[@]}"
+    local user_site
+    user_site="$(
+      python3 - <<'PY'
+import site
+print(site.getusersitepackages())
+PY
+    )"
+    sudo -n env "PYTHONPATH=${user_site}${PYTHONPATH:+:$PYTHONPATH}" \
+      python3 -m playwright install-deps chromium
     return $?
   fi
-  echo "Unable to install Playwright system dependencies automatically (requires passwordless sudo)." >&2
+
+  echo "Unable to install Playwright system dependencies automatically (requires sudo access)." >&2
   return 1
 }
 
