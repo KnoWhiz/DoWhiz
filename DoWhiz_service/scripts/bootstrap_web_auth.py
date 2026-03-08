@@ -203,6 +203,17 @@ def first_text_snippet(text: str, max_len: int = 200) -> str:
     return cleaned[:max_len]
 
 
+def save_debug_screenshot(page, auth_dir: Path, provider: str, step: str) -> Optional[str]:
+    """Save a debug screenshot and return the path if successful."""
+    try:
+        filename = f"{provider}_debug_{step}_{int(time.time())}.png"
+        screenshot_path = auth_dir / filename
+        page.screenshot(path=str(screenshot_path))
+        return str(screenshot_path)
+    except Exception:
+        return None
+
+
 def safe_page_wait(page, timeout_ms: int) -> bool:
     try:
         page.wait_for_timeout(timeout_ms)
@@ -266,7 +277,7 @@ def notion_session_ready(page, context) -> bool:
 
 
 def notion_password_login(
-    page, context, email: str, password: str, timeout_ms: int
+    page, context, email: str, password: str, timeout_ms: int, auth_dir: Optional[Path] = None
 ) -> Tuple[bool, str]:
     page.goto(
         "https://www.notion.so/login",
@@ -297,6 +308,8 @@ def notion_password_login(
             4000,
         )
         if not fill_first(page, email_selectors, email, 8000):
+            if auth_dir:
+                save_debug_screenshot(page, auth_dir, "notion", "email_not_found")
             return False, "email input not found"
 
     click_first(
@@ -322,9 +335,13 @@ def notion_password_login(
         if not wait_for_any_selector(page, ("input[type='password']",), 6000):
             if notion_session_ready(page, context):
                 return True, "authenticated without password step"
+            if auth_dir:
+                save_debug_screenshot(page, auth_dir, "notion", "password_step_missing")
             return False, "password step not available"
 
     if not fill_first(page, ("input[type='password']",), password, 3000):
+        if auth_dir:
+            save_debug_screenshot(page, auth_dir, "notion", "password_input_not_found")
         return False, "password input not found"
 
     click_first(
@@ -354,7 +371,7 @@ def notion_password_login(
 
 
 def notion_google_login(
-    page, context, google_email: str, google_password: str, timeout_ms: int
+    page, context, google_email: str, google_password: str, timeout_ms: int, auth_dir: Optional[Path] = None
 ) -> Tuple[bool, str]:
     started = time.time()
     preauth_timeout_ms = max(10000, int(timeout_ms * 0.55))
@@ -364,6 +381,7 @@ def notion_google_login(
         google_email,
         google_password,
         preauth_timeout_ms,
+        auth_dir=auth_dir,
     )
     if not preauth_ok:
         return False, f"google pre-auth failed ({preauth_message})"
@@ -465,10 +483,11 @@ def notion_login(
     timeout_ms: int,
     google_email: Optional[str] = None,
     google_password: Optional[str] = None,
+    auth_dir: Optional[Path] = None,
 ) -> Tuple[bool, str]:
     started = time.time()
     password_timeout_ms = max(10000, int(timeout_ms * 0.6))
-    ok, message = notion_password_login(page, context, email, password, password_timeout_ms)
+    ok, message = notion_password_login(page, context, email, password, password_timeout_ms, auth_dir=auth_dir)
     if ok:
         return ok, message
 
@@ -483,13 +502,14 @@ def notion_login(
         google_email,
         google_password,
         fallback_timeout_ms,
+        auth_dir=auth_dir,
     )
     if fallback_ok:
         return True, f"password login failed ({message}); google fallback succeeded ({fallback_message})"
     return False, f"password login failed ({message}); google fallback failed ({fallback_message})"
 
 
-def google_login(page, context, email: str, password: str, timeout_ms: int) -> Tuple[bool, str]:
+def google_login(page, context, email: str, password: str, timeout_ms: int, auth_dir: Optional[Path] = None) -> Tuple[bool, str]:
     page.goto(
         "https://accounts.google.com/signin/v2/identifier",
         wait_until="domcontentloaded",
@@ -504,16 +524,22 @@ def google_login(page, context, email: str, password: str, timeout_ms: int) -> T
         return True, "already authenticated"
 
     if not fill_first(page, ("input[type='email']", "#identifierId"), email, 3000):
+        if auth_dir:
+            save_debug_screenshot(page, auth_dir, "google", "email_not_found")
         return False, "email input not found"
     click_first(page, ("#identifierNext button", "button:has-text('Next')"), 3000)
 
     if not wait_for_any_selector(page, ("input[type='password']",), 8000):
+        if auth_dir:
+            save_debug_screenshot(page, auth_dir, "google", "password_step_missing")
         body = first_text_snippet(page.inner_text("body"))
         if body:
             return False, f"password step not available ({body})"
         return False, "password step not available"
 
     if not fill_first(page, ("input[type='password']",), password, 3000):
+        if auth_dir:
+            save_debug_screenshot(page, auth_dir, "google", "password_input_not_found")
         return False, "password input not found"
     click_first(page, ("#passwordNext button", "button:has-text('Next')"), 3000)
 
@@ -527,11 +553,15 @@ def google_login(page, context, email: str, password: str, timeout_ms: int) -> T
         ):
             return True, "signed in"
         if "challenge" in url or "interstitial" in url:
+            if auth_dir:
+                save_debug_screenshot(page, auth_dir, "google", "challenge_required")
             return False, "additional verification required"
         if "myaccount.google.com" in url:
             return True, "signed in (myaccount)"
         page.wait_for_timeout(350)
 
+    if auth_dir:
+        save_debug_screenshot(page, auth_dir, "google", "timeout")
     body = first_text_snippet(page.inner_text("body"))
     if body:
         return False, f"timeout waiting for authenticated session ({body})"
@@ -546,6 +576,7 @@ def attempt_login(
     timeout_secs: int,
     fallback_email: Optional[str] = None,
     fallback_password: Optional[str] = None,
+    auth_dir: Optional[Path] = None,
 ) -> Tuple[bool, str]:
     if sync_playwright is None:
         message = PLAYWRIGHT_IMPORT_ERROR or "playwright is unavailable"
@@ -569,9 +600,10 @@ def attempt_login(
                     timeout_ms,
                     google_email=fallback_email,
                     google_password=fallback_password,
+                    auth_dir=auth_dir,
                 )
             elif provider == "google":
-                ok, message = google_login(page, context, email, password, timeout_ms)
+                ok, message = google_login(page, context, email, password, timeout_ms, auth_dir=auth_dir)
             else:
                 browser.close()
                 return False, f"unsupported provider: {provider}"
@@ -643,6 +675,7 @@ def bootstrap_provider(
         timeout_secs,
         fallback_email=fallback_email,
         fallback_password=fallback_password,
+        auth_dir=auth_dir,
     )
     result["success"] = ok
     result["message"] = message
