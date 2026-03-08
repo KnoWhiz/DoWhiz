@@ -83,6 +83,72 @@ fn force_one_shot_due<E: TaskExecutor>(scheduler: &mut Scheduler<E>, task_id: Uu
 }
 
 #[test]
+fn defer_one_shot_task_by_id_pushes_run_at_forward_and_persists() {
+    let temp = TempDir::new().expect("tempdir");
+    let tasks_db = temp.path().join("tasks.db");
+    let mut scheduler = Scheduler::load(&tasks_db, NoopExecutor::default()).expect("load");
+
+    let task_id = scheduler
+        .add_one_shot_in(Duration::from_secs(0), TaskKind::Noop)
+        .expect("add task");
+    force_one_shot_due(&mut scheduler, task_id);
+
+    let changed = scheduler
+        .defer_one_shot_task_by_id(task_id, chrono::Duration::seconds(15))
+        .expect("defer");
+    assert!(changed, "expected defer to update one-shot run_at");
+
+    let deferred_run_at = match &scheduler
+        .tasks()
+        .iter()
+        .find(|task| task.id == task_id)
+        .expect("task exists")
+        .schedule
+    {
+        Schedule::OneShot { run_at } => *run_at,
+        _ => panic!("expected one-shot schedule"),
+    };
+    assert!(
+        deferred_run_at >= Utc::now() + chrono::Duration::seconds(10),
+        "deferred run_at should be pushed into the future"
+    );
+
+    let reloaded = Scheduler::load(&tasks_db, NoopExecutor::default()).expect("reload");
+    let persisted_run_at = match &reloaded
+        .tasks()
+        .iter()
+        .find(|task| task.id == task_id)
+        .expect("task exists after reload")
+        .schedule
+    {
+        Schedule::OneShot { run_at } => *run_at,
+        _ => panic!("expected one-shot schedule"),
+    };
+    assert_eq!(
+        persisted_run_at, deferred_run_at,
+        "deferred run_at should persist to storage"
+    );
+}
+
+#[test]
+fn defer_one_shot_task_by_id_is_noop_for_cron_tasks() {
+    let temp = TempDir::new().expect("tempdir");
+    let tasks_db = temp.path().join("tasks.db");
+    let mut scheduler = Scheduler::load(&tasks_db, NoopExecutor::default()).expect("load");
+
+    let task_id = scheduler
+        .add_cron_task("0 * * * * *", TaskKind::Noop)
+        .expect("add cron task");
+    let changed = scheduler
+        .defer_one_shot_task_by_id(task_id, chrono::Duration::seconds(15))
+        .expect("defer should not fail");
+    assert!(
+        !changed,
+        "cron tasks should not be deferred via one-shot API"
+    );
+}
+
+#[test]
 fn build_scheduler_snapshot_limits_to_window() {
     let now = Utc::now();
     let in_window = ScheduledTask {
@@ -676,7 +742,13 @@ fn full_slack_flow_task_sync_and_status_update() {
             .record_execution_start(task_id, executed_at)
             .expect("record start");
         workspace_store
-            .record_execution_finish(task_id, execution_id, executed_at, "failed", Some(error_message))
+            .record_execution_finish(
+                task_id,
+                execution_id,
+                executed_at,
+                "failed",
+                Some(error_message),
+            )
             .expect("record finish");
     }
 
@@ -688,7 +760,13 @@ fn full_slack_flow_task_sync_and_status_update() {
             .record_execution_start(task_id, executed_at)
             .expect("record start");
         account_store
-            .record_execution_finish(task_id, execution_id, executed_at, "failed", Some(error_message))
+            .record_execution_finish(
+                task_id,
+                execution_id,
+                executed_at,
+                "failed",
+                Some(error_message),
+            )
             .expect("record finish");
     }
 

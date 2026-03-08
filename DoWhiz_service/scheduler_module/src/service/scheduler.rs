@@ -28,6 +28,8 @@ const RETRY_BACKOFF_SECS: [u64; 3] = [10, 100, 1000];
 const WATCHDOG_INTERVAL_SECS: u64 = 30;
 /// Minimum interval between busy logs for the same task
 const BUSY_LOG_THROTTLE_SECS: u64 = 10;
+/// Delay before retrying a run_task when the workspace thread is still busy
+const THREAD_BUSY_DEFER_SECS: i64 = 15;
 
 struct RunningThreadGuard {
     running_threads: Arc<Mutex<HashSet<String>>>,
@@ -459,27 +461,53 @@ fn execute_due_task(
         task_ref.task_id, task_ref.user_id, kind_label, status_label
     );
     let mut thread_guard: Option<RunningThreadGuard> = None;
-    if let Some(task) = scheduler.tasks().iter().find(|task| task.id == task_id) {
-        if let TaskKind::RunTask(run) = &task.kind {
-            let key = run.workspace_dir.to_string_lossy().into_owned();
-            let mut running = running_threads
-                .lock()
-                .expect("running thread lock poisoned");
-            if running.contains(&key) {
-                let log_key = format!("thread_busy:{}@{}", task_ref.task_id, task_ref.user_id);
-                if should_log_busy(&log_key) {
-                    info!(
-                        "scheduler deferred run_task task_id={} user_id={} workspace_dir={} (thread busy)",
-                        task_ref.task_id,
-                        task_ref.user_id,
-                        run.workspace_dir.display()
-                    );
-                }
-                return Ok(());
+    if let Some((key, workspace_dir_display)) = scheduler
+        .tasks()
+        .iter()
+        .find(|task| task.id == task_id)
+        .and_then(|task| match &task.kind {
+            TaskKind::RunTask(run) => Some((
+                run.workspace_dir.to_string_lossy().into_owned(),
+                run.workspace_dir.display().to_string(),
+            )),
+            _ => None,
+        })
+    {
+        let mut running = running_threads
+            .lock()
+            .expect("running thread lock poisoned");
+        if running.contains(&key) {
+            drop(running);
+            let defer_result = scheduler.defer_one_shot_task_by_id(
+                task_id,
+                chrono::Duration::seconds(THREAD_BUSY_DEFER_SECS),
+            );
+            let log_key = format!("thread_busy:{}@{}", task_ref.task_id, task_ref.user_id);
+            if should_log_busy(&log_key) {
+                info!(
+                    "scheduler deferred run_task task_id={} user_id={} workspace_dir={} (thread busy, next_attempt_in={}s)",
+                    task_ref.task_id,
+                    task_ref.user_id,
+                    workspace_dir_display,
+                    THREAD_BUSY_DEFER_SECS
+                );
             }
-            running.insert(key.clone());
-            thread_guard = Some(RunningThreadGuard::new(running_threads.clone(), key));
+            if let Err(err) = defer_result {
+                warn!(
+                    "failed to defer busy run_task task_id={} user_id={}: {}",
+                    task_ref.task_id, task_ref.user_id, err
+                );
+            }
+            if let Err(err) = index_store.sync_user_tasks(&task_ref.user_id, scheduler.tasks()) {
+                warn!(
+                    "scheduler sync failed after thread-busy defer task_id={} user_id={} error={}",
+                    task_ref.task_id, task_ref.user_id, err
+                );
+            }
+            return Ok(());
         }
+        running.insert(key.clone());
+        thread_guard = Some(RunningThreadGuard::new(running_threads.clone(), key));
     }
 
     let executed = scheduler.execute_task_by_id(task_id);
