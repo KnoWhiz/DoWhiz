@@ -312,21 +312,29 @@ def notion_password_login(
                 save_debug_screenshot(page, auth_dir, "notion", "email_not_found")
             return False, "email input not found"
 
-    click_first(
+    continue_clicked = click_first(
         page,
         (
+            "[role='button']:has-text('Continue')",
+            "div[role='button']:has-text('Continue')", #Notion uses buttons with <div role="button">
             "button:has-text('Continue with email')",
             "button:has-text('Continue')",
             "button[type='submit']",
         ),
         3000,
     )
+    if not continue_clicked:
+        if auth_dir:
+            save_debug_screenshot(page, auth_dir, "notion", "continue_button_not_clicked")
     page.wait_for_timeout(800)
 
     if not wait_for_any_selector(page, ("input[type='password']",), 6000):
         click_first(
             page,
             (
+                "[role='button']:has-text('Continue with password')",
+                "div[role='button']:has-text('Continue with password')",
+                "[role='button']:has-text('Use password')",
                 "button:has-text('Continue with password')",
                 "button:has-text('Use password')",
             ),
