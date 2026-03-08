@@ -361,9 +361,13 @@ def notion_password_login(
         if notion_session_ready(page, context):
             return True, "signed in"
         if any(token in url for token in ("verify", "challenge", "mfa", "otp")):
+            if auth_dir:
+                save_debug_screenshot(page, auth_dir, "notion", "verification_required")
             return False, "additional verification required"
         page.wait_for_timeout(350)
 
+    if auth_dir:
+        save_debug_screenshot(page, auth_dir, "notion", "timeout_waiting_session")
     body = first_text_snippet(page.inner_text("body"))
     if body:
         return False, f"timeout waiting for authenticated session ({body})"
@@ -399,6 +403,8 @@ def notion_google_login(
         return True, "already authenticated"
 
     if not click_google_button(page, 10000):
+        if auth_dir:
+            save_debug_screenshot(page, auth_dir, "notion", "google_button_not_found")
         return False, "google sign-in button not found"
 
     deadline = time.time() + (handshake_timeout_ms / 1000.0)
@@ -436,6 +442,8 @@ def notion_google_login(
     if notion_session_ready(page, context):
         return True, "signed in via google"
 
+    if auth_dir:
+        save_debug_screenshot(page, auth_dir, "notion", "timeout_after_google_login")
     body = ""
     try:
         body = first_text_snippet(page.inner_text("body"))

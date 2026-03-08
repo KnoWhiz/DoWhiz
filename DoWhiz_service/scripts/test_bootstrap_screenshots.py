@@ -5,12 +5,31 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, PropertyMock
 
 # Add the scripts directory to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from bootstrap_web_auth import save_debug_screenshot
+
+# All expected screenshot step names for each provider
+NOTION_SCREENSHOT_STEPS = [
+    "email_not_found",
+    "password_step_missing",
+    "password_input_not_found",
+    "verification_required",
+    "timeout_waiting_session",
+    "google_button_not_found",
+    "timeout_after_google_login",
+]
+
+GOOGLE_SCREENSHOT_STEPS = [
+    "email_not_found",
+    "password_step_missing",
+    "password_input_not_found",
+    "challenge_required",
+    "timeout",
+]
 
 
 class TestSaveDebugScreenshot:
@@ -76,6 +95,83 @@ class TestSaveDebugScreenshot:
             assert "notion_debug_" in notion_result
 
 
+class TestNotionScreenshotCoverage:
+    """Tests to verify all Notion error paths have screenshot coverage."""
+
+    def test_all_notion_steps_produce_valid_filenames(self):
+        """Test that all expected Notion screenshot steps produce valid filenames."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            auth_dir = Path(tmpdir)
+            mock_page = MagicMock()
+
+            for step in NOTION_SCREENSHOT_STEPS:
+                result = save_debug_screenshot(mock_page, auth_dir, "notion", step)
+                assert result is not None, f"Step '{step}' returned None"
+                assert f"notion_debug_{step}_" in result, f"Step '{step}' not in filename"
+                assert result.endswith(".png"), f"Step '{step}' doesn't end with .png"
+
+    def test_timeout_waiting_session_screenshot(self):
+        """Test the timeout_waiting_session screenshot is captured correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            auth_dir = Path(tmpdir)
+            mock_page = MagicMock()
+
+            result = save_debug_screenshot(mock_page, auth_dir, "notion", "timeout_waiting_session")
+
+            assert result is not None
+            assert "notion_debug_timeout_waiting_session_" in result
+            mock_page.screenshot.assert_called_once()
+
+    def test_verification_required_screenshot(self):
+        """Test the verification_required screenshot is captured correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            auth_dir = Path(tmpdir)
+            mock_page = MagicMock()
+
+            result = save_debug_screenshot(mock_page, auth_dir, "notion", "verification_required")
+
+            assert result is not None
+            assert "notion_debug_verification_required_" in result
+
+    def test_google_button_not_found_screenshot(self):
+        """Test the google_button_not_found screenshot is captured correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            auth_dir = Path(tmpdir)
+            mock_page = MagicMock()
+
+            result = save_debug_screenshot(mock_page, auth_dir, "notion", "google_button_not_found")
+
+            assert result is not None
+            assert "notion_debug_google_button_not_found_" in result
+
+    def test_timeout_after_google_login_screenshot(self):
+        """Test the timeout_after_google_login screenshot is captured correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            auth_dir = Path(tmpdir)
+            mock_page = MagicMock()
+
+            result = save_debug_screenshot(mock_page, auth_dir, "notion", "timeout_after_google_login")
+
+            assert result is not None
+            assert "notion_debug_timeout_after_google_login_" in result
+
+
+class TestGoogleScreenshotCoverage:
+    """Tests to verify all Google error paths have screenshot coverage."""
+
+    def test_all_google_steps_produce_valid_filenames(self):
+        """Test that all expected Google screenshot steps produce valid filenames."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            auth_dir = Path(tmpdir)
+            mock_page = MagicMock()
+
+            for step in GOOGLE_SCREENSHOT_STEPS:
+                result = save_debug_screenshot(mock_page, auth_dir, "google", step)
+                assert result is not None, f"Step '{step}' returned None"
+                assert f"google_debug_{step}_" in result, f"Step '{step}' not in filename"
+                assert result.endswith(".png"), f"Step '{step}' doesn't end with .png"
+
+
 def test_integration_with_playwright():
     """Integration test that actually creates a screenshot with Playwright.
 
@@ -125,12 +221,27 @@ def test_integration_with_playwright():
 
 def run_unit_tests():
     """Run unit tests without pytest."""
-    test_instance = TestSaveDebugScreenshot()
+    # Basic screenshot tests
+    basic_tests = TestSaveDebugScreenshot()
+    # Notion coverage tests
+    notion_tests = TestNotionScreenshotCoverage()
+    # Google coverage tests
+    google_tests = TestGoogleScreenshotCoverage()
+
     tests = [
-        ("test_screenshot_saves_to_correct_path", test_instance.test_screenshot_saves_to_correct_path),
-        ("test_screenshot_returns_none_on_error", test_instance.test_screenshot_returns_none_on_error),
-        ("test_screenshot_filename_includes_timestamp", test_instance.test_screenshot_filename_includes_timestamp),
-        ("test_screenshot_different_providers", test_instance.test_screenshot_different_providers),
+        # Basic tests
+        ("test_screenshot_saves_to_correct_path", basic_tests.test_screenshot_saves_to_correct_path),
+        ("test_screenshot_returns_none_on_error", basic_tests.test_screenshot_returns_none_on_error),
+        ("test_screenshot_filename_includes_timestamp", basic_tests.test_screenshot_filename_includes_timestamp),
+        ("test_screenshot_different_providers", basic_tests.test_screenshot_different_providers),
+        # Notion coverage tests
+        ("test_all_notion_steps_produce_valid_filenames", notion_tests.test_all_notion_steps_produce_valid_filenames),
+        ("test_timeout_waiting_session_screenshot", notion_tests.test_timeout_waiting_session_screenshot),
+        ("test_verification_required_screenshot", notion_tests.test_verification_required_screenshot),
+        ("test_google_button_not_found_screenshot", notion_tests.test_google_button_not_found_screenshot),
+        ("test_timeout_after_google_login_screenshot", notion_tests.test_timeout_after_google_login_screenshot),
+        # Google coverage tests
+        ("test_all_google_steps_produce_valid_filenames", google_tests.test_all_google_steps_produce_valid_filenames),
     ]
 
     passed = 0
