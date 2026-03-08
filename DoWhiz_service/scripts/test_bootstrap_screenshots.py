@@ -15,6 +15,7 @@ from bootstrap_web_auth import save_debug_screenshot
 # All expected screenshot step names for each provider
 NOTION_SCREENSHOT_STEPS = [
     "email_not_found",
+    "continue_button_not_clicked",
     "password_step_missing",
     "password_input_not_found",
     "verification_required",
@@ -120,6 +121,38 @@ class TestNotionScreenshotCoverage:
 
             assert result is not None
             assert "notion_debug_timeout_waiting_session_" in result
+            mock_page.screenshot.assert_called_once()
+
+    def test_continue_button_not_clicked_screenshot(self):
+        """Test the continue_button_not_clicked screenshot is captured correctly.
+
+        This error occurs when the Continue button selector fails to match,
+        typically because Notion uses div[role='button'] instead of <button>.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            auth_dir = Path(tmpdir)
+            mock_page = MagicMock()
+
+            result = save_debug_screenshot(mock_page, auth_dir, "notion", "continue_button_not_clicked")
+
+            assert result is not None
+            assert "notion_debug_continue_button_not_clicked_" in result
+            mock_page.screenshot.assert_called_once()
+
+    def test_password_step_missing_screenshot(self):
+        """Test the password_step_missing screenshot is captured correctly.
+
+        This error occurs when the 'Continue with password' button selector fails,
+        typically because Notion uses div[role='button'] instead of <button>.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            auth_dir = Path(tmpdir)
+            mock_page = MagicMock()
+
+            result = save_debug_screenshot(mock_page, auth_dir, "notion", "password_step_missing")
+
+            assert result is not None
+            assert "notion_debug_password_step_missing_" in result
             mock_page.screenshot.assert_called_once()
 
     def test_verification_required_screenshot(self):
@@ -237,6 +270,8 @@ def run_unit_tests():
         # Notion coverage tests
         ("test_all_notion_steps_produce_valid_filenames", notion_tests.test_all_notion_steps_produce_valid_filenames),
         ("test_timeout_waiting_session_screenshot", notion_tests.test_timeout_waiting_session_screenshot),
+        ("test_continue_button_not_clicked_screenshot", notion_tests.test_continue_button_not_clicked_screenshot),
+        ("test_password_step_missing_screenshot", notion_tests.test_password_step_missing_screenshot),
         ("test_verification_required_screenshot", notion_tests.test_verification_required_screenshot),
         ("test_google_button_not_found_screenshot", notion_tests.test_google_button_not_found_screenshot),
         ("test_timeout_after_google_login_screenshot", notion_tests.test_timeout_after_google_login_screenshot),
