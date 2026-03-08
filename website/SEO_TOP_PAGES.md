@@ -4,7 +4,7 @@ As of 2026-02-26, the website repo exposes 21 indexable pages.
 
 1. https://dowhiz.com/
 H1 count: 1
-H1: Run Work Across Your Tools with Multi-Channel Digital Employees
+H1: OpenClaw🦞, but scalable, accessible, and safe. Message Anywhere, Done Everywhere!
 H2: How it works, Example workflows, Safety & Access, Meet Your Digital Employee Team, The Digital Employee Stack
 
 2. https://dowhiz.com/blog/
