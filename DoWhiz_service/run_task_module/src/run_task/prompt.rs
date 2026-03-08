@@ -183,14 +183,21 @@ fn build_web_auth_capabilities_section() -> &'static str {
     r#"Web Workspace Auth (Notion / Google web pages):
 - Workspace may include pre-bootstrapped browser states in `.auth/notion_state.json` and `.auth/google_state.json`.
 - For private Notion/Google pages, use browser automation (for example `playwright-cli`) instead of plain HTTP fetches.
-- Before opening a private page, load the state file if it exists:
-  - `playwright-cli state-load .auth/notion_state.json`
-  - `playwright-cli state-load .auth/google_state.json`
-- If state files are missing or stale, try signing in with credentials from environment variables:
-  - Notion: `NOTION_ACCOUNT_EMAIL`, `NOTION_PASSWORD`
-  - Google: `GOOGLE_ACCOUNT_EMAIL`, `GOOGLE_PASSWORD`
-- Never include raw credentials in any user-facing reply.
-- Do not conclude "cannot access due to sign-in" until you tried loading available state files.
+- Follow this login sequence:
+  1. If `.auth/bootstrap_status.json` exists, quickly check it for previous bootstrap failures.
+  2. Before opening private URLs, load available state files:
+     - `playwright-cli state-load .auth/notion_state.json`
+     - `playwright-cli state-load .auth/google_state.json`
+  3. Open the target page and verify you are already authenticated.
+  4. If still redirected to sign-in, use env credentials with this order:
+     - Notion email: `NOTION_ACCOUNT_EMAIL`, then `NOTION_EMAIL`
+     - Notion password: `NOTION_PASSWORD`
+     - Google email: `GOOGLE_ACCOUNT_EMAIL`, `GOOGLE_EMAIL`, `GOOGLE_EMPLOYEE_EMAIL`
+     - Google password: `GOOGLE_PASSWORD`, `GOOGLE_ACCOUNT_PASSWORD`, `GOOGLE_EMPLOYEE_PASSWORD`
+     - Also try prefixed keys (`<PREFIX>_<KEY>`) when `EMPLOYEE_WEB_AUTH_ENV_PREFIX` or `WEB_AUTH_ENV_PREFIX` is set.
+  5. After successful sign-in, refresh storage state in `.auth/` so retries are faster.
+- Never include raw credentials in any user-facing reply, logs, or generated files.
+- Do not conclude "cannot access due to sign-in" until the sequence above has been attempted.
 
 "#
 }
