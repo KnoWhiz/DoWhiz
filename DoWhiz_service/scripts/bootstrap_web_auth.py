@@ -254,6 +254,26 @@ def click_first(page, selectors: Sequence[str], timeout_ms: int) -> bool:
     return False
 
 
+def click_first_force(page, selectors: Sequence[str], timeout_ms: int) -> bool:
+    deadline = time.time() + (timeout_ms / 1000.0)
+    while time.time() < deadline:
+        for selector in selectors:
+            try:
+                handle = page.query_selector(selector)
+                if handle:
+                    try:
+                        handle.scroll_into_view_if_needed(timeout=min(2000, timeout_ms))
+                    except Exception:
+                        pass
+                    handle.click(timeout=min(3000, timeout_ms), force=True)
+                    return True
+            except Exception:
+                continue
+        if not safe_page_wait(page, 150):
+            return False
+    return False
+
+
 def wait_for_any_selector(page, selectors: Sequence[str], timeout_ms: int) -> bool:
     end_time = time.time() + (timeout_ms / 1000.0)
     while time.time() < end_time:
@@ -364,6 +384,7 @@ def notion_password_login(
     )
 
     deadline = time.time() + (timeout_ms / 1000.0)
+    next_body_probe = 0.0
     while time.time() < deadline:
         url = (page.url or "").lower()
         if notion_session_ready(page, context):
@@ -372,6 +393,21 @@ def notion_password_login(
             if auth_dir:
                 save_debug_screenshot(page, auth_dir, "notion", "verification_required")
             return False, "additional verification required"
+        now = time.time()
+        if now >= next_body_probe:
+            next_body_probe = now + 1.5
+            try:
+                body_lower = (page.inner_text("body") or "").lower()
+            except Exception:
+                body_lower = ""
+            if body_lower and (
+                "verification code" in body_lower
+                or "we sent a code" in body_lower
+                or "enter the code" in body_lower
+            ):
+                if auth_dir:
+                    save_debug_screenshot(page, auth_dir, "notion", "verification_required")
+                return False, "additional verification required"
         page.wait_for_timeout(350)
 
     if auth_dir:
@@ -410,10 +446,23 @@ def notion_google_login(
     if notion_session_ready(page, context):
         return True, "already authenticated"
 
-    if not click_google_button(page, 10000):
-        if auth_dir:
-            save_debug_screenshot(page, auth_dir, "notion", "google_button_not_found")
-        return False, "google sign-in button not found"
+    button_timeout_ms = min(20000, max(10000, handshake_timeout_ms // 2))
+    if not click_google_button(page, button_timeout_ms):
+        # Some Notion variants briefly render a non-actionable Google button.
+        # Refresh once and retry with force-click fallbacks.
+        try:
+            page.goto(
+                "https://www.notion.so/login",
+                wait_until="domcontentloaded",
+                timeout=max(10000, button_timeout_ms),
+            )
+            page.wait_for_timeout(400)
+        except Exception:
+            pass
+        if not click_google_button(page, button_timeout_ms):
+            if auth_dir:
+                save_debug_screenshot(page, auth_dir, "notion", "google_button_not_found")
+            return False, "google sign-in button not found"
 
     deadline = time.time() + (handshake_timeout_ms / 1000.0)
     account_selectors = (
@@ -463,9 +512,11 @@ def notion_google_login(
 
 
 def click_google_button(page, timeout_ms: int) -> bool:
-    if click_first(
+    if click_first_force(
         page,
         (
+            "div[role='button']:has-text('Google')",
+            "div[role='button']:has-text('Continue with Google')",
             "button:has-text('Continue with Google')",
             "button:has-text('Google')",
             "a:has-text('Continue with Google')",
@@ -473,19 +524,48 @@ def click_google_button(page, timeout_ms: int) -> bool:
             "button[aria-label='Google']",
             "[role='button']:has-text('Google')",
         ),
-        min(timeout_ms, 5000),
+        min(timeout_ms, 12000),
     ):
         return True
 
+    def dom_click_google() -> bool:
+        try:
+            return bool(
+                page.evaluate(
+                    """
+() => {
+  const nodes = Array.from(
+    document.querySelectorAll("div[role='button'],button,a")
+  );
+  const target = nodes.find((el) => {
+    const text = (el.textContent || "").replace(/\\s+/g, " ").trim().toLowerCase();
+    return text === "google" || text === "continue with google";
+  });
+  if (!target) return false;
+  target.scrollIntoView({ block: "center", inline: "center" });
+  target.click();
+  return true;
+}
+                    """
+                )
+            )
+        except Exception:
+            return False
+
     deadline = time.time() + (timeout_ms / 1000.0)
     while time.time() < deadline:
-        for label in ("Continue with Google", "Google"):
-            try:
-                button = page.get_by_role("button", name=re.compile(label, re.IGNORECASE)).first
-                button.click(timeout=min(3000, timeout_ms))
-                return True
-            except Exception:
-                continue
+        try:
+            button = page.get_by_role(
+                "button", name=re.compile(r"^(continue with )?google$", re.IGNORECASE)
+            ).first
+            button.click(timeout=min(3000, timeout_ms), force=True)
+            return True
+        except Exception:
+            pass
+
+        if dom_click_google():
+            return True
+
         if not safe_page_wait(page, 150):
             return False
     return False
@@ -725,10 +805,15 @@ def main() -> int:
         requested.append("notion")
     if google_email and google_password:
         requested.append("google")
-    per_provider_timeout = max(
+
+    notion_timeout_secs = max(
         20,
         args.timeout_secs // max(1, len(requested) if requested else 1),
     )
+    google_timeout_secs = notion_timeout_secs
+    if notion_email and notion_password and google_email and google_password and args.timeout_secs >= 60:
+        notion_timeout_secs = max(30, (args.timeout_secs * 2) // 3)
+        google_timeout_secs = max(20, args.timeout_secs - notion_timeout_secs)
 
     started_at = time.time()
     providers: Dict[str, Dict[str, object]] = {}
@@ -737,7 +822,7 @@ def main() -> int:
         notion_email,
         notion_password,
         auth_dir,
-        per_provider_timeout,
+        notion_timeout_secs,
         fallback_email=google_email,
         fallback_password=google_password,
         extra_fingerprint_parts=(
@@ -749,7 +834,7 @@ def main() -> int:
         google_email,
         google_password,
         auth_dir,
-        per_provider_timeout,
+        google_timeout_secs,
     )
 
     summary = {
