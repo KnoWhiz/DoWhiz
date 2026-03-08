@@ -224,7 +224,7 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
                 routing.identifier
             );
             // Write security message to reply file
-            let security_message = "To maintain user isolation and privacy, I cannot send messages to recipients outside your linked accounts. Please link the target account at dowhiz.com first, or reply to your original channel.";
+            let security_message = "To maintain user isolation and privacy, I cannot send messages to recipients outside your linked accounts.";
             let reply_path = match task.channel {
                 Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
                     let html = format!(
