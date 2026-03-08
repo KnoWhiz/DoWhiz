@@ -654,9 +654,9 @@ ul {
 }
 
 .hero-title {
-  font-size: clamp(2.5rem, 8vw, 4rem);
+  font-size: clamp(2.3rem, 5.2vw, 3rem);
   margin-bottom: 1.5rem;
-  line-height: 1.08;
+  line-height: 1.12;
   letter-spacing: var(--tracking-tighter);
   font-weight: 700;
   animation: fade-in-up 0.6s ease-out forwards;
@@ -664,14 +664,19 @@ ul {
 
 .hero-title-line {
   display: block;
+  white-space: nowrap;
 }
 
 .hero-title-line-primary {
-  color: var(--accent-color);
+  color: var(--text-primary);
 }
 
 .hero-title-line-secondary {
-  color: var(--success-color);
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  color: var(--accent-color);
 }
 
 .hero-subtitle {
@@ -2426,7 +2431,11 @@ ul {
   }
 
   .hero-title {
-    font-size: 4rem;
+    font-size: clamp(2.15rem, 7vw, 2.75rem);
+  }
+
+  .hero-title-line {
+    white-space: normal;
   }
 
   .features-grid {
@@ -2505,7 +2514,7 @@ ul {
   }
 
   .hero-title {
-    font-size: 2.5rem;
+    font-size: clamp(2rem, 8vw, 2.4rem);
     padding: 0 1rem;
     margin-bottom: 1.5rem;
   }
@@ -2642,8 +2651,8 @@ ul {
   }
 
   .hero-title {
-    font-size: clamp(2.1rem, 10.5vw, 2.9rem);
-    line-height: 1.06;
+    font-size: clamp(1.9rem, 9.2vw, 2.3rem);
+    line-height: 1.1;
     margin-bottom: 1rem;
   }
 
