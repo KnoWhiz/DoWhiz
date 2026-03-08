@@ -244,6 +244,10 @@ IMPORTANT: When using cross-channel routing, write the reply in the TARGET chann
 Example: Inbound is email, user says "reply to my Discord instead"
 1. Write reply_routing.json: {{"channel": "discord", "identifier": "123456789012345678"}}
 2. Write reply_message.txt (NOT reply_email_draft.html) with Discord markdown
+
+SECURITY: You may ONLY route replies to the identifiers listed above under "user's linked channels".
+Do NOT route replies to any other email addresses, user IDs, or phone numbers not listed.
+If the user requests routing to an unlisted identifier, politely decline and explain they need to link that channel first.
 "#,
         channels = channels.join("\n")
     )

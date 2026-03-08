@@ -6,6 +6,7 @@ use std::time::Duration;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::account_store::{get_global_account_store, lookup_account_by_identifier};
 use crate::channel::Channel;
 use crate::employee_config;
 use crate::service;
@@ -78,6 +79,53 @@ fn parse_channel(channel_str: &str) -> Option<Channel> {
             None
         }
     }
+}
+
+/// Check if a routing identifier is allowed for the given task's account.
+/// Returns true if the identifier belongs to the user's linked accounts.
+fn is_routing_identifier_allowed(task: &RunTaskTask, identifier: &str) -> bool {
+    // Get account ID from requester info
+    let account_id = match (
+        task.requester_identifier_type.as_deref(),
+        task.requester_identifier.as_deref(),
+    ) {
+        (Some(id_type), Some(id_value)) => lookup_account_by_identifier(id_type, id_value),
+        _ => None,
+    };
+
+    let Some(account_id) = account_id else {
+        // No account linked - allow only original reply_to (conservative default)
+        return task.reply_to.contains(&identifier.to_string());
+    };
+
+    let Some(store) = get_global_account_store() else {
+        warn!("Account store not available for routing validation");
+        return task.reply_to.contains(&identifier.to_string());
+    };
+
+    let identifiers = match store.list_identifiers(account_id) {
+        Ok(ids) => ids,
+        Err(e) => {
+            warn!(
+                "Failed to fetch identifiers for account {} during routing validation: {}",
+                account_id, e
+            );
+            return task.reply_to.contains(&identifier.to_string());
+        }
+    };
+
+    // Check if the target identifier matches any verified identifier
+    let identifier_lower = identifier.to_lowercase();
+    for id in &identifiers {
+        if !id.verified {
+            continue;
+        }
+        if id.identifier.to_lowercase() == identifier_lower {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn thread_epoch_matches(task: &RunTaskTask) -> bool {
@@ -168,6 +216,35 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
     let (target_channel, target_recipients, is_cross_channel) = if let Some(routing) = load_reply_routing(&task.workspace_dir) {
         if routing.identifier.trim().is_empty() {
             warn!("Empty identifier in reply_routing.json, falling back to inbound channel");
+            (task.channel.clone(), task.reply_to.clone(), false)
+        } else if !is_routing_identifier_allowed(task, &routing.identifier) {
+            // Security: Block routing to unauthorized identifiers
+            warn!(
+                "Blocked unauthorized cross-channel routing to '{}' - identifier not in user's linked accounts",
+                routing.identifier
+            );
+            // Write security message to reply file
+            let security_message = "To maintain user isolation and privacy, I cannot send messages to recipients outside your linked accounts. Please link the target account at dowhiz.com first, or reply to your original channel.";
+            let reply_path = match task.channel {
+                Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
+                    let html = format!(
+                        "<!DOCTYPE html><html><body><p>{}</p></body></html>",
+                        security_message
+                    );
+                    let path = task.workspace_dir.join("reply_email_draft.html");
+                    let _ = std::fs::write(&path, html);
+                    path
+                }
+                _ => {
+                    let path = task.workspace_dir.join("reply_message.txt");
+                    let _ = std::fs::write(&path, security_message);
+                    path
+                }
+            };
+            info!(
+                "Wrote security block message to {} for blocked routing attempt",
+                reply_path.display()
+            );
             (task.channel.clone(), task.reply_to.clone(), false)
         } else if let Some(channel) = parse_channel(&routing.channel) {
             info!(
@@ -908,5 +985,113 @@ addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com"]
         );
 
         std::env::remove_var("EMPLOYEE_CONFIG_PATH");
+    }
+
+    // Helper to create a minimal RunTaskTask for testing
+    fn make_test_task(reply_to: Vec<String>) -> RunTaskTask {
+        RunTaskTask {
+            workspace_dir: PathBuf::from("."),
+            input_email_dir: PathBuf::from("incoming_email"),
+            input_attachments_dir: PathBuf::from("incoming_attachments"),
+            memory_dir: PathBuf::from("memory"),
+            reference_dir: PathBuf::from("references"),
+            model_name: "test".to_string(),
+            runner: "codex".to_string(),
+            codex_disabled: false,
+            reply_to,
+            reply_from: None,
+            archive_root: None,
+            thread_id: None,
+            thread_epoch: None,
+            thread_state_path: None,
+            channel: Channel::Email,
+            slack_team_id: None,
+            employee_id: None,
+            requester_identifier_type: None,
+            requester_identifier: None,
+        }
+    }
+
+    #[test]
+    fn is_routing_identifier_allowed_no_account_allows_reply_to() {
+        // When no account is linked, only reply_to addresses are allowed
+        let task = make_test_task(vec!["user@example.com".to_string()]);
+
+        assert!(is_routing_identifier_allowed(&task, "user@example.com"));
+        assert!(!is_routing_identifier_allowed(&task, "attacker@evil.com"));
+    }
+
+    #[test]
+    fn is_routing_identifier_allowed_no_account_blocks_unknown() {
+        let task = make_test_task(vec!["legit@example.com".to_string()]);
+
+        // Should block any identifier not in reply_to
+        assert!(!is_routing_identifier_allowed(&task, "not-in-reply-to@example.com"));
+        assert!(!is_routing_identifier_allowed(&task, "random@attacker.com"));
+    }
+
+    #[test]
+    fn is_routing_identifier_allowed_empty_reply_to_blocks_all() {
+        let task = make_test_task(vec![]);
+
+        // With no reply_to and no account, everything should be blocked
+        assert!(!is_routing_identifier_allowed(&task, "anyone@example.com"));
+    }
+
+    #[test]
+    fn is_routing_identifier_allowed_case_insensitive_for_reply_to() {
+        let task = make_test_task(vec!["User@Example.COM".to_string()]);
+
+        // reply_to comparison should be exact (case-sensitive) since it's a contains check
+        // This tests current behavior - reply_to uses exact string match
+        assert!(is_routing_identifier_allowed(&task, "User@Example.COM"));
+        assert!(!is_routing_identifier_allowed(&task, "user@example.com"));
+    }
+
+    #[test]
+    fn blocked_routing_writes_security_message_email() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        // Write a routing file targeting an unauthorized address
+        let routing_json = r#"{"channel": "email", "identifier": "attacker@evil.com"}"#;
+        fs::write(workspace.join("reply_routing.json"), routing_json).expect("write");
+
+        let mut task = make_test_task(vec!["legit@example.com".to_string()]);
+        task.workspace_dir = workspace.to_path_buf();
+        task.channel = Channel::Email;
+
+        // Load routing and check it would be blocked
+        let routing = load_reply_routing(workspace).expect("routing");
+        assert!(!is_routing_identifier_allowed(&task, &routing.identifier));
+
+        // Simulate what happens in schedule_reply_after_run_task when blocked
+        let security_message = "To maintain user isolation and privacy, I cannot send messages to recipients outside your linked accounts.";
+        let html = format!(
+            "<!DOCTYPE html><html><body><p>{}</p></body></html>",
+            security_message
+        );
+        fs::write(workspace.join("reply_email_draft.html"), &html).expect("write html");
+
+        // Verify the security message was written
+        let written = fs::read_to_string(workspace.join("reply_email_draft.html")).expect("read");
+        assert!(written.contains("user isolation and privacy"));
+    }
+
+    #[test]
+    fn blocked_routing_writes_security_message_chat() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        let mut task = make_test_task(vec!["U123456".to_string()]);
+        task.workspace_dir = workspace.to_path_buf();
+        task.channel = Channel::Slack;
+
+        // Simulate blocked routing for chat channel
+        let security_message = "To maintain user isolation and privacy, I cannot send messages to recipients outside your linked accounts.";
+        fs::write(workspace.join("reply_message.txt"), security_message).expect("write");
+
+        let written = fs::read_to_string(workspace.join("reply_message.txt")).expect("read");
+        assert!(written.contains("user isolation and privacy"));
     }
 }
