@@ -47,11 +47,23 @@ const PAYMENT_ENV_KEYS: &[&str] = &[
     "X402_API_KEY",
     "X402_API_SECRET",
 ];
-const WEB_AUTH_ENV_KEYS: &[&str] = &[
-    "NOTION_ACCOUNT_EMAIL",
-    "NOTION_PASSWORD",
+const NOTION_EMAIL_ENV_KEYS: &[&str] = &["NOTION_ACCOUNT_EMAIL", "NOTION_EMAIL"];
+const NOTION_PASSWORD_ENV_KEYS: &[&str] = &["NOTION_PASSWORD"];
+const GOOGLE_EMAIL_ENV_KEYS: &[&str] = &[
     "GOOGLE_ACCOUNT_EMAIL",
+    "GOOGLE_EMAIL",
+    "GOOGLE_EMPLOYEE_EMAIL",
+];
+const GOOGLE_PASSWORD_ENV_KEYS: &[&str] = &[
     "GOOGLE_PASSWORD",
+    "GOOGLE_ACCOUNT_PASSWORD",
+    "GOOGLE_EMPLOYEE_PASSWORD",
+];
+const WEB_AUTH_ENV_MAPPINGS: &[(&str, &[&str])] = &[
+    ("NOTION_ACCOUNT_EMAIL", NOTION_EMAIL_ENV_KEYS),
+    ("NOTION_PASSWORD", NOTION_PASSWORD_ENV_KEYS),
+    ("GOOGLE_ACCOUNT_EMAIL", GOOGLE_EMAIL_ENV_KEYS),
+    ("GOOGLE_PASSWORD", GOOGLE_PASSWORD_ENV_KEYS),
 ];
 
 const REMOTE_OUTPUT_FILENAME: &str = ".codex_remote_output.log";
@@ -1624,18 +1636,29 @@ fn collect_payment_env_overrides() -> Vec<(String, String)> {
 
 fn collect_web_auth_env_overrides() -> Vec<(String, String)> {
     let prefix = resolve_web_auth_env_prefix();
-    WEB_AUTH_ENV_KEYS
+    WEB_AUTH_ENV_MAPPINGS
         .iter()
-        .filter_map(|key| {
-            read_env_trimmed(key)
-                .or_else(|| {
-                    prefix
-                        .as_ref()
-                        .and_then(|prefix| read_env_trimmed(&format!("{}_{}", prefix, key)))
-                })
-                .map(|value| ((*key).to_string(), value))
+        .filter_map(|(canonical_key, candidate_keys)| {
+            resolve_env_from_candidates(candidate_keys, prefix.as_deref())
+                .map(|value| ((*canonical_key).to_string(), value))
         })
         .collect()
+}
+
+fn resolve_env_from_candidates(candidates: &[&str], prefix: Option<&str>) -> Option<String> {
+    for key in candidates {
+        if let Some(value) = read_env_trimmed(key) {
+            return Some(value);
+        }
+    }
+    if let Some(prefix) = prefix {
+        for key in candidates {
+            if let Some(value) = read_env_trimmed(&format!("{}_{}", prefix, key)) {
+                return Some(value);
+            }
+        }
+    }
+    None
 }
 
 fn codex_add_dirs(workspace_dir: &Path, use_docker: bool) -> Result<Vec<String>, RunTaskError> {
@@ -2342,6 +2365,97 @@ mod tests {
         assert!(overrides
             .iter()
             .any(|(k, v)| k == "NOTION_ACCOUNT_EMAIL" && v == "global-notion@example.com"));
+    }
+
+    #[test]
+    fn test_collect_web_auth_env_overrides_maps_google_employee_aliases() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset("GOOGLE_ACCOUNT_EMAIL"),
+            EnvVarGuard::unset("GOOGLE_EMAIL"),
+            EnvVarGuard::unset("GOOGLE_ACCOUNT_PASSWORD"),
+            EnvVarGuard::unset("GOOGLE_PASSWORD"),
+            EnvVarGuard::set("GOOGLE_EMPLOYEE_EMAIL", "employee-google@example.com"),
+            EnvVarGuard::set("GOOGLE_EMPLOYEE_PASSWORD", "employee-password"),
+        ];
+
+        let overrides = collect_web_auth_env_overrides();
+        assert_eq!(
+            overrides
+                .iter()
+                .find(|(k, _)| k == "GOOGLE_ACCOUNT_EMAIL")
+                .map(|(_, v)| v.as_str()),
+            Some("employee-google@example.com")
+        );
+        assert_eq!(
+            overrides
+                .iter()
+                .find(|(k, _)| k == "GOOGLE_PASSWORD")
+                .map(|(_, v)| v.as_str()),
+            Some("employee-password")
+        );
+    }
+
+    #[test]
+    fn test_collect_web_auth_env_overrides_maps_prefixed_google_aliases() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset("GOOGLE_ACCOUNT_EMAIL"),
+            EnvVarGuard::unset("GOOGLE_EMAIL"),
+            EnvVarGuard::unset("GOOGLE_EMPLOYEE_EMAIL"),
+            EnvVarGuard::unset("GOOGLE_ACCOUNT_PASSWORD"),
+            EnvVarGuard::unset("GOOGLE_PASSWORD"),
+            EnvVarGuard::unset("GOOGLE_EMPLOYEE_PASSWORD"),
+            EnvVarGuard::set("EMPLOYEE_WEB_AUTH_ENV_PREFIX", "PROTO"),
+            EnvVarGuard::set(
+                "PROTO_GOOGLE_EMPLOYEE_EMAIL",
+                "proto-employee-google@example.com",
+            ),
+            EnvVarGuard::set("PROTO_GOOGLE_EMPLOYEE_PASSWORD", "proto-employee-password"),
+        ];
+
+        let overrides = collect_web_auth_env_overrides();
+        assert_eq!(
+            overrides
+                .iter()
+                .find(|(k, _)| k == "GOOGLE_ACCOUNT_EMAIL")
+                .map(|(_, v)| v.as_str()),
+            Some("proto-employee-google@example.com")
+        );
+        assert_eq!(
+            overrides
+                .iter()
+                .find(|(k, _)| k == "GOOGLE_PASSWORD")
+                .map(|(_, v)| v.as_str()),
+            Some("proto-employee-password")
+        );
+    }
+
+    #[test]
+    fn test_collect_web_auth_env_overrides_prefers_primary_google_keys_over_aliases() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set("GOOGLE_ACCOUNT_EMAIL", "primary-google@example.com"),
+            EnvVarGuard::set("GOOGLE_EMPLOYEE_EMAIL", "alias-google@example.com"),
+            EnvVarGuard::set("GOOGLE_PASSWORD", "primary-password"),
+            EnvVarGuard::set("GOOGLE_EMPLOYEE_PASSWORD", "alias-password"),
+        ];
+
+        let overrides = collect_web_auth_env_overrides();
+        assert_eq!(
+            overrides
+                .iter()
+                .find(|(k, _)| k == "GOOGLE_ACCOUNT_EMAIL")
+                .map(|(_, v)| v.as_str()),
+            Some("primary-google@example.com")
+        );
+        assert_eq!(
+            overrides
+                .iter()
+                .find(|(k, _)| k == "GOOGLE_PASSWORD")
+                .map(|(_, v)| v.as_str()),
+            Some("primary-password")
+        );
     }
 
     #[test]
