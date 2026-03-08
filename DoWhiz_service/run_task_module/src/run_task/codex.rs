@@ -762,13 +762,23 @@ fn run_codex_task_azure_aci(
         timeout,
     );
     eprintln!(
-        "[run_task] azure_aci delete container={} resource_group={}",
+        "[run_task] azure_aci delete-request container={} resource_group={}",
         container_name, config.resource_group
     );
-    if let Err(cleanup_err) = delete_aci_container_with_retry(&config, &container_name) {
+    if let Err(cleanup_err) =
+        delete_aci_container_with_timeout(&config, &container_name, Duration::from_secs(20))
+    {
+        if !is_aci_not_found_error(&cleanup_err) {
+            eprintln!(
+                "[run_task] azure_aci delete-request failed container={} resource_group={} error={}",
+                container_name, config.resource_group, cleanup_err
+            );
+        }
+    }
+    if execution.is_err() {
         eprintln!(
-            "[run_task] azure_aci delete failed container={} resource_group={} error={}",
-            container_name, config.resource_group, cleanup_err
+            "[run_task] azure_aci execution failed for container={} (cleanup requested)",
+            container_name
         );
     }
     deregister_aci_container(&container_name);
@@ -1015,6 +1025,7 @@ fn run_azure_aci_execution(
         .collect::<Vec<_>>()
         .join("\n");
     let bypass_enabled = if bypass_sandbox { "1" } else { "0" };
+    let execution_started = Instant::now();
 
     let script = format!(
         "set -euo pipefail\n\
@@ -1109,7 +1120,19 @@ exit \"$status\"\n",
         Err(err) => return Err(err),
     }
 
-    let container_state = poll_aci_state(config, container_name, timeout)?;
+    let elapsed_after_create = execution_started.elapsed();
+    if elapsed_after_create >= timeout {
+        return Err(RunTaskError::CommandTimeout {
+            command: "az container create",
+            timeout_secs: timeout.as_secs(),
+            output: format!(
+                "container create consumed run_task timeout budget before polling (elapsed={}s)",
+                elapsed_after_create.as_secs()
+            ),
+        });
+    }
+    let poll_timeout = timeout.saturating_sub(elapsed_after_create);
+    let container_state = poll_aci_state(config, container_name, poll_timeout)?;
     let logs = fetch_aci_logs(config, container_name).unwrap_or_default();
     Ok((container_state, logs))
 }
@@ -1121,6 +1144,17 @@ fn poll_aci_state(
 ) -> Result<String, RunTaskError> {
     let start = Instant::now();
     loop {
+        let elapsed = start.elapsed();
+        if elapsed >= timeout {
+            return Err(RunTaskError::CommandTimeout {
+                command: "az container show",
+                timeout_secs: timeout.as_secs(),
+                output: "container did not reach terminal state before timeout".to_string(),
+            });
+        }
+        let remaining = timeout.saturating_sub(elapsed);
+        let show_timeout = remaining.min(Duration::from_secs(60));
+
         let mut show_cmd = Command::new("az");
         show_cmd
             .arg("container")
@@ -1134,8 +1168,7 @@ fn poll_aci_state(
             .arg("--output")
             .arg("tsv")
             .arg("--only-show-errors");
-        let output =
-            run_command_with_timeout(show_cmd, Duration::from_secs(60), "az container show")?;
+        let output = run_command_with_timeout(show_cmd, show_timeout, "az container show")?;
         if !output.status.success() {
             let mut combined = String::new();
             combined.push_str(&String::from_utf8_lossy(&output.stdout));
@@ -1160,7 +1193,10 @@ fn poll_aci_state(
                 output: format!("last_state={state}"),
             });
         }
-        thread::sleep(Duration::from_secs(5));
+        let sleep_for = Duration::from_secs(5).min(timeout.saturating_sub(start.elapsed()));
+        if !sleep_for.is_zero() {
+            thread::sleep(sleep_for);
+        }
     }
 }
 
@@ -1318,7 +1354,11 @@ fn cleanup_stale_aci_containers(config: &AzureAciConfig) -> Result<usize, RunTas
     Ok(cleaned)
 }
 
-fn delete_aci_container(config: &AzureAciConfig, container_name: &str) -> Result<(), RunTaskError> {
+fn delete_aci_container_with_timeout(
+    config: &AzureAciConfig,
+    container_name: &str,
+    command_timeout: Duration,
+) -> Result<(), RunTaskError> {
     let mut delete_cmd = Command::new("az");
     delete_cmd
         .arg("container")
@@ -1329,8 +1369,7 @@ fn delete_aci_container(config: &AzureAciConfig, container_name: &str) -> Result
         .arg(&config.resource_group)
         .arg("--yes")
         .arg("--only-show-errors");
-    let output =
-        run_command_with_timeout(delete_cmd, Duration::from_secs(120), "az container delete")?;
+    let output = run_command_with_timeout(delete_cmd, command_timeout, "az container delete")?;
     if !output.status.success() {
         let mut combined = String::new();
         combined.push_str(&String::from_utf8_lossy(&output.stdout));
@@ -1341,6 +1380,10 @@ fn delete_aci_container(config: &AzureAciConfig, container_name: &str) -> Result
         });
     }
     Ok(())
+}
+
+fn delete_aci_container(config: &AzureAciConfig, container_name: &str) -> Result<(), RunTaskError> {
+    delete_aci_container_with_timeout(config, container_name, Duration::from_secs(120))
 }
 
 fn delete_aci_container_with_retry(

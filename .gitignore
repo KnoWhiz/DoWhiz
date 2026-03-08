@@ -54,3 +54,5 @@ DoWhiz_service/start_all.sh
 DoWhiz_service/.env.common
 DoWhiz_service/.env.prod
 DoWhiz_service/.env.staging
+/.deploy
+URL_AND_EMAIL.md

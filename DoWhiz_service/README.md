@@ -164,6 +164,8 @@ If using Azure raw payload storage (`RAW_PAYLOAD_STORAGE_BACKEND=azure`):
 - `auto` behavior:
   - `DEPLOY_TARGET in {staging,production}` -> Azure ACI
   - otherwise local
+- `TASK_TIMEOUT_SECS` controls scheduler watchdog stale-task detection (default: `600`).
+- `RUN_TASK_TIMEOUT_SECS` (optional) controls command timeout for run_task; runtime caps it below `TASK_TIMEOUT_SECS` to avoid stale-task retry loops (default effective value: `TASK_TIMEOUT_SECS - 30s`).
 
 In staging/production targets, local codex execution is blocked unless you explicitly avoid that policy.
 
@@ -192,6 +194,8 @@ Azure ACI execution path (required vars):
 - Web app auth bootstrap (optional, for private Notion/Google web links in tasks):
   `WEB_AUTH_BOOTSTRAP_ENABLED`, `WEB_AUTH_BOOTSTRAP_TIMEOUT_SECS`,
   `NOTION_ACCOUNT_EMAIL`, `NOTION_PASSWORD`, `GOOGLE_ACCOUNT_EMAIL`, `GOOGLE_PASSWORD`
+  (also supports `GOOGLE_EMPLOYEE_EMAIL`, `GOOGLE_EMPLOYEE_PASSWORD` aliases).
+  Notion bootstrap tries Notion password login first, then falls back to Google login.
 
 ## 5) Local Run Workflows
 

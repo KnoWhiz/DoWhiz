@@ -159,6 +159,42 @@ impl<E: TaskExecutor> Scheduler<E> {
         Ok(self.tasks.last().unwrap().id)
     }
 
+    /// Pushes a one-shot task into the future to avoid hot-loop retries.
+    pub fn defer_one_shot_task_by_id(
+        &mut self,
+        task_id: Uuid,
+        delay: chrono::Duration,
+    ) -> Result<bool, SchedulerError> {
+        let index = match self.tasks.iter().position(|task| task.id == task_id) {
+            Some(index) => index,
+            None => return Ok(false),
+        };
+        if !self.tasks[index].enabled {
+            return Ok(false);
+        }
+
+        let min_delay = chrono::Duration::seconds(1);
+        let effective_delay = if delay > chrono::Duration::zero() {
+            delay
+        } else {
+            min_delay
+        };
+
+        match &mut self.tasks[index].schedule {
+            Schedule::OneShot { run_at } => {
+                let deferred_until = Utc::now() + effective_delay;
+                if *run_at >= deferred_until {
+                    return Ok(false);
+                }
+                *run_at = deferred_until;
+                let updated_task = self.tasks[index].clone();
+                self.store.update_task(&updated_task)?;
+                Ok(true)
+            }
+            Schedule::Cron { .. } => Ok(false),
+        }
+    }
+
     pub fn execute_task_by_id(&mut self, task_id: Uuid) -> Result<bool, SchedulerError> {
         let now = Utc::now();
         let index = match self.tasks.iter().position(|task| task.id == task_id) {
@@ -214,8 +250,13 @@ impl<E: TaskExecutor> Scheduler<E> {
                         task_id, err
                     );
                 }
-                self.store
-                    .record_execution_finish(task_id, execution_id, executed_at, "success", None)?;
+                self.store.record_execution_finish(
+                    task_id,
+                    execution_id,
+                    executed_at,
+                    "success",
+                    None,
+                )?;
                 self.tasks[index].last_run = Some(executed_at);
                 match &mut self.tasks[index].schedule {
                     Schedule::Cron {

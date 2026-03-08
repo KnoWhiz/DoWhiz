@@ -6,6 +6,11 @@ use std::time::{Duration, Instant};
 
 use super::errors::RunTaskError;
 
+const DEFAULT_SCHEDULER_TASK_TIMEOUT_SECS: u64 = 600;
+const DEFAULT_RUN_TASK_TIMEOUT_SECS: u64 = 36000;
+const WATCHDOG_HEADROOM_SECS: u64 = 30;
+const MIN_RUN_TASK_TIMEOUT_SECS: u64 = 30;
+
 pub(super) fn tail_string(input: &str, max_len: usize) -> String {
     let trimmed = input.trim();
     if trimmed.len() <= max_len {
@@ -18,12 +23,28 @@ pub(super) fn tail_string(input: &str, max_len: usize) -> String {
     trimmed[start..].to_string()
 }
 
-pub(super) fn run_task_timeout() -> Duration {
-    let timeout_secs = std::env::var("RUN_TASK_TIMEOUT_SECS")
+fn parse_timeout_secs(key: &str) -> Option<u64> {
+    std::env::var(key)
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
         .filter(|value| *value > 0)
-        .unwrap_or(36000); // 10 hours
+}
+
+pub(super) fn run_task_timeout() -> Duration {
+    let requested_timeout_secs =
+        parse_timeout_secs("RUN_TASK_TIMEOUT_SECS").unwrap_or(DEFAULT_RUN_TASK_TIMEOUT_SECS);
+    let task_timeout_secs = parse_timeout_secs("TASK_TIMEOUT_SECS").unwrap_or_else(|| {
+        DEFAULT_SCHEDULER_TASK_TIMEOUT_SECS.max(
+            requested_timeout_secs
+                .saturating_add(WATCHDOG_HEADROOM_SECS)
+                .max(MIN_RUN_TASK_TIMEOUT_SECS),
+        )
+    });
+    // Keep run_task timeout below watchdog timeout to avoid stale-task retry storms.
+    let watchdog_budget_secs = task_timeout_secs
+        .saturating_sub(WATCHDOG_HEADROOM_SECS)
+        .max(MIN_RUN_TASK_TIMEOUT_SECS);
+    let timeout_secs = requested_timeout_secs.min(watchdog_budget_secs);
     Duration::from_secs(timeout_secs)
 }
 
@@ -127,4 +148,107 @@ pub(super) fn run_command_with_timeout(
         stdout,
         stderr,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.previous {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    #[test]
+    fn run_task_timeout_defaults_to_watchdog_budget_minus_headroom() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _guards = vec![
+            EnvVarGuard::unset("RUN_TASK_TIMEOUT_SECS"),
+            EnvVarGuard::unset("TASK_TIMEOUT_SECS"),
+        ];
+
+        assert_eq!(run_task_timeout(), Duration::from_secs(570));
+    }
+
+    #[test]
+    fn run_task_timeout_respects_shorter_explicit_override() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _guards = vec![
+            EnvVarGuard::set("RUN_TASK_TIMEOUT_SECS", "120"),
+            EnvVarGuard::unset("TASK_TIMEOUT_SECS"),
+        ];
+
+        assert_eq!(run_task_timeout(), Duration::from_secs(120));
+    }
+
+    #[test]
+    fn run_task_timeout_caps_explicit_value_to_watchdog_budget() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _guards = vec![
+            EnvVarGuard::set("RUN_TASK_TIMEOUT_SECS", "36000"),
+            EnvVarGuard::unset("TASK_TIMEOUT_SECS"),
+        ];
+
+        assert_eq!(run_task_timeout(), Duration::from_secs(570));
+    }
+
+    #[test]
+    fn run_task_timeout_uses_custom_task_timeout_budget() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _guards = vec![
+            EnvVarGuard::unset("RUN_TASK_TIMEOUT_SECS"),
+            EnvVarGuard::set("TASK_TIMEOUT_SECS", "900"),
+        ];
+
+        assert_eq!(run_task_timeout(), Duration::from_secs(870));
+    }
+
+    #[test]
+    fn run_task_timeout_caps_to_custom_task_timeout_budget() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _guards = vec![
+            EnvVarGuard::set("RUN_TASK_TIMEOUT_SECS", "880"),
+            EnvVarGuard::set("TASK_TIMEOUT_SECS", "900"),
+        ];
+
+        assert_eq!(run_task_timeout(), Duration::from_secs(870));
+    }
+
+    #[test]
+    fn run_task_timeout_ignores_invalid_values() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _guards = vec![
+            EnvVarGuard::set("RUN_TASK_TIMEOUT_SECS", "abc"),
+            EnvVarGuard::set("TASK_TIMEOUT_SECS", "0"),
+        ];
+
+        assert_eq!(run_task_timeout(), Duration::from_secs(570));
+    }
 }
