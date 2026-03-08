@@ -20,6 +20,8 @@ use super::BoxError;
 
 /// Default task timeout in seconds (10 minutes)
 const DEFAULT_TASK_TIMEOUT_SECS: u64 = 600;
+/// Keep run_task timeout below watchdog timeout by this margin.
+const WATCHDOG_TIMEOUT_HEADROOM_SECS: u64 = 30;
 /// Maximum number of retries before giving up
 const MAX_TASK_RETRIES: u32 = 3;
 /// Exponential backoff delays in seconds: 10s, 100s, 1000s
@@ -30,6 +32,23 @@ const WATCHDOG_INTERVAL_SECS: u64 = 30;
 const BUSY_LOG_THROTTLE_SECS: u64 = 10;
 /// Delay before retrying a run_task when the workspace thread is still busy
 const THREAD_BUSY_DEFER_SECS: i64 = 15;
+
+fn parse_timeout_secs_env(key: &str) -> Option<u64> {
+    std::env::var(key)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+}
+
+fn resolve_watchdog_task_timeout_secs() -> u64 {
+    if let Some(explicit_timeout) = parse_timeout_secs_env("TASK_TIMEOUT_SECS") {
+        return explicit_timeout;
+    }
+
+    let run_task_timeout =
+        parse_timeout_secs_env("RUN_TASK_TIMEOUT_SECS").unwrap_or(DEFAULT_TASK_TIMEOUT_SECS);
+    DEFAULT_TASK_TIMEOUT_SECS.max(run_task_timeout.saturating_add(WATCHDOG_TIMEOUT_HEADROOM_SECS))
+}
 
 struct RunningThreadGuard {
     running_threads: Arc<Mutex<HashSet<String>>>,
@@ -242,10 +261,7 @@ pub(super) fn start_scheduler_threads(
         let scheduler_stop = scheduler_stop.clone();
         let user_store = user_store.clone();
         let users_root = config.users_root.clone();
-        let task_timeout_secs = std::env::var("TASK_TIMEOUT_SECS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(DEFAULT_TASK_TIMEOUT_SECS);
+        let task_timeout_secs = resolve_watchdog_task_timeout_secs();
         let watchdog_interval_ms = std::env::var("WATCHDOG_INTERVAL_MS")
             .ok()
             .and_then(|v| v.parse::<u64>().ok())

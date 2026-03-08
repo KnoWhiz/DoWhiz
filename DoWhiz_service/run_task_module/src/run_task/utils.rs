@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use super::errors::RunTaskError;
 
 const DEFAULT_SCHEDULER_TASK_TIMEOUT_SECS: u64 = 600;
+const DEFAULT_RUN_TASK_TIMEOUT_SECS: u64 = 36000;
 const WATCHDOG_HEADROOM_SECS: u64 = 30;
 const MIN_RUN_TASK_TIMEOUT_SECS: u64 = 30;
 
@@ -30,15 +31,20 @@ fn parse_timeout_secs(key: &str) -> Option<u64> {
 }
 
 pub(super) fn run_task_timeout() -> Duration {
-    let task_timeout_secs =
-        parse_timeout_secs("TASK_TIMEOUT_SECS").unwrap_or(DEFAULT_SCHEDULER_TASK_TIMEOUT_SECS);
+    let requested_timeout_secs =
+        parse_timeout_secs("RUN_TASK_TIMEOUT_SECS").unwrap_or(DEFAULT_RUN_TASK_TIMEOUT_SECS);
+    let task_timeout_secs = parse_timeout_secs("TASK_TIMEOUT_SECS").unwrap_or_else(|| {
+        DEFAULT_SCHEDULER_TASK_TIMEOUT_SECS.max(
+            requested_timeout_secs
+                .saturating_add(WATCHDOG_HEADROOM_SECS)
+                .max(MIN_RUN_TASK_TIMEOUT_SECS),
+        )
+    });
     // Keep run_task timeout below watchdog timeout to avoid stale-task retry storms.
     let watchdog_budget_secs = task_timeout_secs
         .saturating_sub(WATCHDOG_HEADROOM_SECS)
         .max(MIN_RUN_TASK_TIMEOUT_SECS);
-    let timeout_secs = parse_timeout_secs("RUN_TASK_TIMEOUT_SECS")
-        .map(|value| value.min(watchdog_budget_secs))
-        .unwrap_or(watchdog_budget_secs);
+    let timeout_secs = requested_timeout_secs.min(watchdog_budget_secs);
     Duration::from_secs(timeout_secs)
 }
 
