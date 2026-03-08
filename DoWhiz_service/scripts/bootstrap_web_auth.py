@@ -395,6 +395,9 @@ def attempt_login(
     except PlaywrightTimeoutError:
         return False, "playwright timeout"
     except Exception as exc:  # pragma: no cover - external runtime failures
+        detail = first_text_snippet(str(exc), max_len=500)
+        if detail:
+            return False, f"playwright error: {type(exc).__name__}: {detail}"
         return False, f"playwright error: {type(exc).__name__}"
 
 

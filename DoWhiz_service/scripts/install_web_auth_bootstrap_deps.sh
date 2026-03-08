@@ -6,8 +6,9 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-set +e
-python3 - <<'PY'
+check_playwright_health() {
+  set +e
+  python3 - <<'PY'
 import importlib.util
 import os
 import sys
@@ -24,22 +25,48 @@ try:
     with sync_playwright() as playwright:
         chromium_path = playwright.chromium.executable_path
 except Exception:
-    sys.exit(2)
+    sys.exit(3)
 
 if not chromium_path or not os.path.exists(chromium_path):
     sys.exit(2)
 
+try:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(
+            headless=True,
+            args=["--disable-dev-shm-usage", "--no-sandbox"],
+        )
+        page = browser.new_page()
+        page.goto("about:blank", wait_until="domcontentloaded", timeout=10000)
+        browser.close()
+except Exception as exc:
+    message = str(exc).lower()
+    if (
+        "error while loading shared libraries" in message
+        or "host system is missing dependencies" in message
+        or "please install them with the following command" in message
+        or "apt-get install" in message
+    ):
+        sys.exit(4)
+    sys.exit(3)
+
 sys.exit(0)
 PY
+  local status=$?
+  set -e
+  return "$status"
+}
+
+check_playwright_health
 check_status=$?
-set -e
 
 install_pkg=0
 install_browser=0
+install_system_deps=0
 
 case "$check_status" in
   0)
-    echo "Playwright Python package and Chromium are already available."
+    echo "Playwright Python package, Chromium, and launch runtime are available."
     ;;
   1)
     echo "Playwright Python package is missing; installing."
@@ -55,10 +82,15 @@ case "$check_status" in
     install_pkg=1
     install_browser=1
     ;;
+  4)
+    echo "Playwright runtime dependencies are missing; installing system packages."
+    install_system_deps=1
+    ;;
   *)
-    echo "Unexpected Playwright check status (${check_status}); reinstalling."
+    echo "Unexpected Playwright check status (${check_status}); reinstalling and repairing dependencies."
     install_pkg=1
     install_browser=1
+    install_system_deps=1
     ;;
 esac
 
@@ -104,11 +136,38 @@ ensure_pip() {
   python3 -m pip --version >/dev/null 2>&1
 }
 
+run_playwright_install_deps() {
+  local deps_cmd=(python3 -m playwright install-deps chromium)
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "${deps_cmd[@]}"
+    return $?
+  fi
+  if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+    sudo "${deps_cmd[@]}"
+    return $?
+  fi
+  echo "Unable to install Playwright system dependencies automatically (requires passwordless sudo)." >&2
+  return 1
+}
+
 if [[ "$install_pkg" -eq 1 ]]; then
   ensure_pip
   run_with_pep668_retry python3 -m pip install --user --upgrade playwright
 fi
 
+if [[ "$install_system_deps" -eq 1 ]]; then
+  run_playwright_install_deps
+fi
+
 if [[ "$install_browser" -eq 1 ]]; then
   python3 -m playwright install chromium
 fi
+
+check_playwright_health
+final_status=$?
+if [[ "$final_status" -ne 0 ]]; then
+  echo "Playwright bootstrap dependencies are still not healthy after install (status=${final_status})." >&2
+  exit 1
+fi
+
+echo "Playwright bootstrap dependencies validated successfully."
