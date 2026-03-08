@@ -1396,8 +1396,8 @@ function App() {
           <div className="halo-effect"></div>
           <div className="container hero-content">
             <h1 className="hero-title">
-              Run Work Across Your Tools<br />
-              <span className="text-gradient">with Multi-Channel Digital Employees</span>
+              <span className="hero-title-line hero-title-line-primary">OpenClaw🦞, but scalable, accessible, and safe.</span>
+              <span className="hero-title-line hero-title-line-secondary">Message Anywhere, Done Everywhere!</span>
             </h1>
             <p className="hero-subtitle hero-subtitle-desktop">
               Collaborate with <a href="#roles" className="role-link">Oliver 🧸</a> (Generalist), <a href="#roles" className="role-link">Maggie 🐭</a> (TPM), <a href="#roles" className="role-link">Devin 🐙</a> (Coder), <a href="#roles" className="role-link">Lumio 🐉</a> (CEO), <a href="#roles" className="role-link">Claw 🦞</a> (Workflow Specialist), <a href="#roles" className="role-link">Jeffery 🐦</a> (DeepTutor), <a href="#roles" className="role-link">Anna 🐘</a> (Role Design), and <a href="#roles" className="role-link">Rachel 👾</a> (GTM Specialist), each focused on different functions and connected by shared memory.
