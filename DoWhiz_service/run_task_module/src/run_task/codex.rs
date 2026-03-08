@@ -1025,6 +1025,7 @@ fn run_azure_aci_execution(
         .collect::<Vec<_>>()
         .join("\n");
     let bypass_enabled = if bypass_sandbox { "1" } else { "0" };
+    let execution_started = Instant::now();
 
     let script = format!(
         "set -euo pipefail\n\
@@ -1119,7 +1120,19 @@ exit \"$status\"\n",
         Err(err) => return Err(err),
     }
 
-    let container_state = poll_aci_state(config, container_name, timeout)?;
+    let elapsed_after_create = execution_started.elapsed();
+    if elapsed_after_create >= timeout {
+        return Err(RunTaskError::CommandTimeout {
+            command: "az container create",
+            timeout_secs: timeout.as_secs(),
+            output: format!(
+                "container create consumed run_task timeout budget before polling (elapsed={}s)",
+                elapsed_after_create.as_secs()
+            ),
+        });
+    }
+    let poll_timeout = timeout.saturating_sub(elapsed_after_create);
+    let container_state = poll_aci_state(config, container_name, poll_timeout)?;
     let logs = fetch_aci_logs(config, container_name).unwrap_or_default();
     Ok((container_state, logs))
 }
