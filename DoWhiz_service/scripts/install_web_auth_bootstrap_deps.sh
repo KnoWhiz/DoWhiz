@@ -57,8 +57,11 @@ PY
   return "$status"
 }
 
-check_playwright_health
-check_status=$?
+if check_playwright_health; then
+  check_status=0
+else
+  check_status=$?
+fi
 
 install_pkg=0
 install_browser=0
@@ -163,8 +166,11 @@ if [[ "$install_browser" -eq 1 ]]; then
   python3 -m playwright install chromium
 fi
 
-check_playwright_health
-final_status=$?
+if check_playwright_health; then
+  final_status=0
+else
+  final_status=$?
+fi
 if [[ "$final_status" -ne 0 ]]; then
   echo "Playwright bootstrap dependencies are still not healthy after install (status=${final_status})." >&2
   exit 1
