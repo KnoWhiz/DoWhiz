@@ -677,6 +677,7 @@ ul {
   -webkit-text-fill-color: transparent;
   background-clip: text;
   color: var(--accent-color);
+  padding-bottom: 0.16em;
 }
 
 .hero-subtitle {
