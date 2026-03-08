@@ -200,26 +200,32 @@ def first_text_snippet(text: str, max_len: int = 200) -> str:
 
 
 def fill_first(page, selectors: Sequence[str], value: str, timeout_ms: int) -> bool:
-    for selector in selectors:
-        try:
-            handle = page.query_selector(selector)
-            if handle:
-                handle.fill(value, timeout=timeout_ms)
-                return True
-        except Exception:
-            continue
+    deadline = time.time() + (timeout_ms / 1000.0)
+    while time.time() < deadline:
+        for selector in selectors:
+            try:
+                handle = page.query_selector(selector)
+                if handle:
+                    handle.fill(value, timeout=min(3000, timeout_ms))
+                    return True
+            except Exception:
+                continue
+        page.wait_for_timeout(150)
     return False
 
 
 def click_first(page, selectors: Sequence[str], timeout_ms: int) -> bool:
-    for selector in selectors:
-        try:
-            handle = page.query_selector(selector)
-            if handle:
-                handle.click(timeout=timeout_ms)
-                return True
-        except Exception:
-            continue
+    deadline = time.time() + (timeout_ms / 1000.0)
+    while time.time() < deadline:
+        for selector in selectors:
+            try:
+                handle = page.query_selector(selector)
+                if handle:
+                    handle.click(timeout=min(3000, timeout_ms))
+                    return True
+            except Exception:
+                continue
+        page.wait_for_timeout(150)
     return False
 
 
@@ -246,13 +252,27 @@ def notion_login(page, context, email: str, password: str, timeout_ms: int) -> T
     if has_cookie(context, "https://www.notion.so", ("token_v2",)):
         return True, "already authenticated"
 
-    if not fill_first(
-        page,
-        ("input[type='email']", "input[name='email']", "input[placeholder*='mail']"),
-        email,
-        3000,
-    ):
-        return False, "email input not found"
+    email_selectors = (
+        "#notion-email-input-1",
+        "input[id^='notion-email-input']",
+        "input[type='email']",
+        "input[name='email']",
+        "input[placeholder*='mail']",
+    )
+
+    if not fill_first(page, email_selectors, email, 8000):
+        click_first(
+            page,
+            (
+                "button:has-text('Continue with email')",
+                "button:has-text('Email')",
+                "button:has-text('Sign in')",
+                "a:has-text('Sign in')",
+            ),
+            4000,
+        )
+        if not fill_first(page, email_selectors, email, 8000):
+            return False, "email input not found"
 
     click_first(
         page,
