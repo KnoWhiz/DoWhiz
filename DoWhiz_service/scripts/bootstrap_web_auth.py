@@ -44,8 +44,12 @@ EMPLOYEE_PREFIX_MAP = {
 NOTION_EMAIL_KEYS = ("NOTION_ACCOUNT_EMAIL", "NOTION_EMAIL")
 NOTION_PASSWORD_KEYS = ("NOTION_PASSWORD",)
 
-GOOGLE_EMAIL_KEYS = ("GOOGLE_ACCOUNT_EMAIL", "GOOGLE_EMAIL")
-GOOGLE_PASSWORD_KEYS = ("GOOGLE_PASSWORD",)
+GOOGLE_EMAIL_KEYS = ("GOOGLE_ACCOUNT_EMAIL", "GOOGLE_EMAIL", "GOOGLE_EMPLOYEE_EMAIL")
+GOOGLE_PASSWORD_KEYS = (
+    "GOOGLE_PASSWORD",
+    "GOOGLE_ACCOUNT_PASSWORD",
+    "GOOGLE_EMPLOYEE_PASSWORD",
+)
 
 
 def now_iso() -> str:
@@ -160,8 +164,8 @@ def resolve_credential(
     return None
 
 
-def fingerprint(email: str, password: str) -> str:
-    payload = f"{email}\0{password}".encode("utf-8")
+def fingerprint(*parts: str) -> str:
+    payload = "\0".join(parts).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -199,6 +203,14 @@ def first_text_snippet(text: str, max_len: int = 200) -> str:
     return cleaned[:max_len]
 
 
+def safe_page_wait(page, timeout_ms: int) -> bool:
+    try:
+        page.wait_for_timeout(timeout_ms)
+        return True
+    except Exception:
+        return False
+
+
 def fill_first(page, selectors: Sequence[str], value: str, timeout_ms: int) -> bool:
     deadline = time.time() + (timeout_ms / 1000.0)
     while time.time() < deadline:
@@ -210,7 +222,8 @@ def fill_first(page, selectors: Sequence[str], value: str, timeout_ms: int) -> b
                     return True
             except Exception:
                 continue
-        page.wait_for_timeout(150)
+        if not safe_page_wait(page, 150):
+            return False
     return False
 
 
@@ -225,7 +238,8 @@ def click_first(page, selectors: Sequence[str], timeout_ms: int) -> bool:
                     return True
             except Exception:
                 continue
-        page.wait_for_timeout(150)
+        if not safe_page_wait(page, 150):
+            return False
     return False
 
 
@@ -238,18 +252,29 @@ def wait_for_any_selector(page, selectors: Sequence[str], timeout_ms: int) -> bo
                     return True
             except Exception:
                 continue
-        page.wait_for_timeout(150)
+        if not safe_page_wait(page, 150):
+            return False
     return False
 
 
-def notion_login(page, context, email: str, password: str, timeout_ms: int) -> Tuple[bool, str]:
+def notion_session_ready(page, context) -> bool:
+    return has_cookie(
+        context,
+        "https://www.notion.so",
+        ("token_v2", "notion_user_id", "notion_users"),
+    )
+
+
+def notion_password_login(
+    page, context, email: str, password: str, timeout_ms: int
+) -> Tuple[bool, str]:
     page.goto(
         "https://www.notion.so/login",
         wait_until="domcontentloaded",
         timeout=timeout_ms,
     )
     page.wait_for_timeout(400)
-    if has_cookie(context, "https://www.notion.so", ("token_v2",)):
+    if notion_session_ready(page, context):
         return True, "already authenticated"
 
     email_selectors = (
@@ -295,7 +320,7 @@ def notion_login(page, context, email: str, password: str, timeout_ms: int) -> T
             3000,
         )
         if not wait_for_any_selector(page, ("input[type='password']",), 6000):
-            if has_cookie(context, "https://www.notion.so", ("token_v2",)):
+            if notion_session_ready(page, context):
                 return True, "authenticated without password step"
             return False, "password step not available"
 
@@ -316,10 +341,8 @@ def notion_login(page, context, email: str, password: str, timeout_ms: int) -> T
     deadline = time.time() + (timeout_ms / 1000.0)
     while time.time() < deadline:
         url = (page.url or "").lower()
-        if has_cookie(context, "https://www.notion.so", ("token_v2",)):
+        if notion_session_ready(page, context):
             return True, "signed in"
-        if "notion.so" in url and "/login" not in url and "/signin" not in url:
-            return True, "signed in (url)"
         if any(token in url for token in ("verify", "challenge", "mfa", "otp")):
             return False, "additional verification required"
         page.wait_for_timeout(350)
@@ -328,6 +351,142 @@ def notion_login(page, context, email: str, password: str, timeout_ms: int) -> T
     if body:
         return False, f"timeout waiting for authenticated session ({body})"
     return False, "timeout waiting for authenticated session"
+
+
+def notion_google_login(
+    page, context, google_email: str, google_password: str, timeout_ms: int
+) -> Tuple[bool, str]:
+    started = time.time()
+    preauth_timeout_ms = max(10000, int(timeout_ms * 0.55))
+    preauth_ok, preauth_message = google_login(
+        page,
+        context,
+        google_email,
+        google_password,
+        preauth_timeout_ms,
+    )
+    if not preauth_ok:
+        return False, f"google pre-auth failed ({preauth_message})"
+
+    elapsed_ms = int((time.time() - started) * 1000)
+    handshake_timeout_ms = max(10000, timeout_ms - elapsed_ms)
+
+    page.goto(
+        "https://www.notion.so/login",
+        wait_until="domcontentloaded",
+        timeout=handshake_timeout_ms,
+    )
+    page.wait_for_timeout(400)
+    if notion_session_ready(page, context):
+        return True, "already authenticated"
+
+    if not click_google_button(page, 10000):
+        return False, "google sign-in button not found"
+
+    deadline = time.time() + (handshake_timeout_ms / 1000.0)
+    account_selectors = (
+        f"[data-identifier='{google_email}']",
+        f"div[data-email='{google_email}']",
+        f"button:has-text('{google_email}')",
+        f"div:has-text('{google_email}')",
+    )
+    while time.time() < deadline:
+        if notion_session_ready(page, context):
+            return True, "signed in via google"
+
+        for candidate in context.pages:
+            try:
+                if candidate.is_closed():
+                    continue
+                url = (candidate.url or "").lower()
+            except Exception:
+                continue
+            if "accounts.google.com" in url:
+                click_first(candidate, account_selectors, 1200)
+                click_first(
+                    candidate,
+                    (
+                        "button:has-text('Continue')",
+                        "button:has-text('Next')",
+                        "button:has-text('Allow')",
+                    ),
+                    1200,
+                )
+        if not safe_page_wait(page, 200):
+            break
+
+    if notion_session_ready(page, context):
+        return True, "signed in via google"
+
+    body = ""
+    try:
+        body = first_text_snippet(page.inner_text("body"))
+    except Exception:
+        body = ""
+    if body:
+        return False, f"timeout waiting for notion session after google login ({body})"
+    return False, "timeout waiting for notion session after google login"
+
+
+def click_google_button(page, timeout_ms: int) -> bool:
+    if click_first(
+        page,
+        (
+            "button:has-text('Continue with Google')",
+            "button:has-text('Google')",
+            "a:has-text('Continue with Google')",
+            "a:has-text('Google')",
+            "button[aria-label='Google']",
+            "[role='button']:has-text('Google')",
+        ),
+        min(timeout_ms, 5000),
+    ):
+        return True
+
+    deadline = time.time() + (timeout_ms / 1000.0)
+    while time.time() < deadline:
+        for label in ("Continue with Google", "Google"):
+            try:
+                button = page.get_by_role("button", name=re.compile(label, re.IGNORECASE)).first
+                button.click(timeout=min(3000, timeout_ms))
+                return True
+            except Exception:
+                continue
+        if not safe_page_wait(page, 150):
+            return False
+    return False
+
+
+def notion_login(
+    page,
+    context,
+    email: str,
+    password: str,
+    timeout_ms: int,
+    google_email: Optional[str] = None,
+    google_password: Optional[str] = None,
+) -> Tuple[bool, str]:
+    started = time.time()
+    password_timeout_ms = max(10000, int(timeout_ms * 0.6))
+    ok, message = notion_password_login(page, context, email, password, password_timeout_ms)
+    if ok:
+        return ok, message
+
+    if not google_email or not google_password:
+        return False, message
+
+    elapsed_ms = int((time.time() - started) * 1000)
+    fallback_timeout_ms = max(10000, timeout_ms - elapsed_ms)
+    fallback_ok, fallback_message = notion_google_login(
+        page,
+        context,
+        google_email,
+        google_password,
+        fallback_timeout_ms,
+    )
+    if fallback_ok:
+        return True, f"password login failed ({message}); google fallback succeeded ({fallback_message})"
+    return False, f"password login failed ({message}); google fallback failed ({fallback_message})"
 
 
 def google_login(page, context, email: str, password: str, timeout_ms: int) -> Tuple[bool, str]:
@@ -385,6 +544,8 @@ def attempt_login(
     password: str,
     state_path: Path,
     timeout_secs: int,
+    fallback_email: Optional[str] = None,
+    fallback_password: Optional[str] = None,
 ) -> Tuple[bool, str]:
     if sync_playwright is None:
         message = PLAYWRIGHT_IMPORT_ERROR or "playwright is unavailable"
@@ -400,7 +561,15 @@ def attempt_login(
             context = browser.new_context()
             page = context.new_page()
             if provider == "notion":
-                ok, message = notion_login(page, context, email, password, timeout_ms)
+                ok, message = notion_login(
+                    page,
+                    context,
+                    email,
+                    password,
+                    timeout_ms,
+                    google_email=fallback_email,
+                    google_password=fallback_password,
+                )
             elif provider == "google":
                 ok, message = google_login(page, context, email, password, timeout_ms)
             else:
@@ -427,6 +596,9 @@ def bootstrap_provider(
     password: Optional[str],
     auth_dir: Path,
     timeout_secs: int,
+    fallback_email: Optional[str] = None,
+    fallback_password: Optional[str] = None,
+    extra_fingerprint_parts: Optional[Sequence[str]] = None,
 ) -> Dict[str, object]:
     result: Dict[str, object] = {
         "provider": provider,
@@ -443,7 +615,10 @@ def bootstrap_provider(
 
     state_path = auth_dir.joinpath(f"{provider}_state.json")
     meta_path = auth_dir.joinpath(f"{provider}_state.meta.json")
-    current_fp = fingerprint(email, password)
+    fp_parts = [email, password]
+    if extra_fingerprint_parts:
+        fp_parts.extend(extra_fingerprint_parts)
+    current_fp = fingerprint(*fp_parts)
     previous_meta = load_json(meta_path)
     previous_fp = previous_meta.get("fingerprint")
 
@@ -460,7 +635,15 @@ def bootstrap_provider(
             pass
 
     result["attempted"] = True
-    ok, message = attempt_login(provider, email, password, state_path, timeout_secs)
+    ok, message = attempt_login(
+        provider,
+        email,
+        password,
+        state_path,
+        timeout_secs,
+        fallback_email=fallback_email,
+        fallback_password=fallback_password,
+    )
     result["success"] = ok
     result["message"] = message
     if ok:
@@ -506,6 +689,11 @@ def main() -> int:
         notion_password,
         auth_dir,
         per_provider_timeout,
+        fallback_email=google_email,
+        fallback_password=google_password,
+        extra_fingerprint_parts=(
+            [google_email, google_password] if google_email and google_password else []
+        ),
     )
     providers["google"] = bootstrap_provider(
         "google",
