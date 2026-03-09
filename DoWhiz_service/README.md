@@ -190,6 +190,15 @@ Azure ACI execution path (required vars):
 - WhatsApp: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`
 - Twilio SMS: `TWILIO_*`
 - Google Workspace: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, refresh tokens, `GOOGLE_*_ENABLED`
+- Google Workspace CLI (`gws`):
+  `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` (preferred) or
+  `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID`,
+  `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET`,
+  `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN`,
+  optional `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE` (default `authorized_user`).
+  If component keys are set, run_task materializes
+  `.secrets/google_workspace_cli_credentials.json` in each workspace and injects
+  `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` for local/docker/Azure ACI execution.
 - Google Drive push: `GOOGLE_DRIVE_PUSH_ENABLED`, `GOOGLE_DRIVE_WEBHOOK_URL`
 - Web app auth bootstrap (optional, for private Notion/Google web links in tasks):
   `WEB_AUTH_BOOTSTRAP_ENABLED`, `WEB_AUTH_BOOTSTRAP_TIMEOUT_SECS`,
