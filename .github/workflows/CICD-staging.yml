@@ -251,6 +251,12 @@ jobs:
             exit 1
           }
 
+          # Prior VM builds can leave a very large Rust target directory that bloats Docker context.
+          if [[ -d "$APP_DIR/target" ]]; then
+            echo "Removing $APP_DIR/target before az acr build to keep context small"
+            rm -rf "$APP_DIR/target"
+          fi
+
           echo "Building ACI image via az acr build: $run_task_image"
           cd "$APP_ROOT"
           az acr build \
