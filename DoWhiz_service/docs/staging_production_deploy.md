@@ -82,7 +82,7 @@ Deployment workflows should:
 1. Write `.env` from `ENV_COMMON + ENV_STAGING/ENV_PROD`.
 2. Fail if `.env` contains keys matching `^(STAGING_|PROD_)`.
 3. Validate `GATEWAY_CONFIG_PATH` and `EMPLOYEE_CONFIG_PATH` exist and match expected target files.
-4. If Azure ACI backend is enabled (`RUN_TASK_EXECUTION_BACKEND=azure_aci` or `auto` with `DEPLOY_TARGET in {staging,production}`), remove `DoWhiz_service/target` on the VM first, then rebuild and push `RUN_TASK_AZURE_ACI_IMAGE` via `az acr build` before restarting services. This avoids sending stale Rust build artifacts in Docker context.
+4. If Azure ACI backend is enabled (`RUN_TASK_EXECUTION_BACKEND=azure_aci` or `auto` with `DEPLOY_TARGET in {staging,production}`), trim `DoWhiz_service/target` on the VM before `az acr build` (drop debug/intermediate artifacts, keep required release binaries), then rebuild and push `RUN_TASK_AZURE_ACI_IMAGE` before restarting services.
 5. Source `.env` before PM2 restarts and use `pm2 restart --update-env` so runtime env changes (for example `EMPLOYEE_ID`) are applied to existing processes.
 
 ## 5) Health Checks
