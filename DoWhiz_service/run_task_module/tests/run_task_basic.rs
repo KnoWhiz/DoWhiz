@@ -12,7 +12,7 @@ fn expected_codex_block(base_url: &str) -> String {
         r#"# IMPORTANT: Use your Azure *deployment name* here (e.g., "gpt-5.4")
 model = "gpt-5.4"
 model_provider = "azure"
-model_reasoning_effort = "xhigh"
+model_reasoning_effort = "high"
 web_search = "live"
 ask_for_approval = "never"
 sandbox = "workspace-write"
@@ -51,7 +51,7 @@ value = "keep"
 # IMPORTANT: Use your Azure *deployment name* here (e.g., "old")
 model = "old-model"
 model_provider = "azure"
-model_reasoning_effort = "xhigh"
+model_reasoning_effort = "high"
 
 [model_providers.azure]
 name = "Azure OpenAI"
