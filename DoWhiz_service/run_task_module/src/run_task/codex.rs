@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
@@ -1738,16 +1738,43 @@ struct GoogleWorkspaceCliCredentialParts {
 fn ensure_google_workspace_cli_credentials_file(
     workspace_dir: &Path,
 ) -> Result<Option<PathBuf>, RunTaskError> {
+    let mut unresolved_outside_workspace: Option<PathBuf> = None;
     if let Some(raw_path) = read_env_trimmed(GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV) {
         let resolved = resolve_google_workspace_cli_credentials_file_path(workspace_dir, &raw_path);
-        env::set_var(
+        if path_is_within_dir(&resolved, workspace_dir) {
+            env::set_var(
+                GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+                resolved.to_string_lossy().into_owned(),
+            );
+            return Ok(Some(resolved));
+        }
+
+        if resolved.exists() {
+            let materialized =
+                materialize_google_workspace_cli_credentials_file(workspace_dir, &resolved)?;
+            env::set_var(
+                GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+                materialized.to_string_lossy().into_owned(),
+            );
+            return Ok(Some(materialized));
+        }
+
+        eprintln!(
+            "[run_task] warning: {} points outside workspace and source file does not exist: {}",
             GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
-            resolved.to_string_lossy().into_owned(),
+            resolved.display()
         );
-        return Ok(Some(resolved));
+        unresolved_outside_workspace = Some(resolved);
     }
 
     let Some(parts) = load_google_workspace_cli_credential_parts() else {
+        if let Some(path) = unresolved_outside_workspace {
+            env::set_var(
+                GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+                path.to_string_lossy().into_owned(),
+            );
+            return Ok(Some(path));
+        }
         return Ok(None);
     };
 
@@ -1771,6 +1798,28 @@ fn ensure_google_workspace_cli_credentials_file(
     );
 
     Ok(Some(credentials_path))
+}
+
+fn materialize_google_workspace_cli_credentials_file(
+    workspace_dir: &Path,
+    source_path: &Path,
+) -> Result<PathBuf, RunTaskError> {
+    let credentials_path = workspace_dir.join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH);
+    if let Some(parent) = credentials_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(source_path, &credentials_path).map_err(RunTaskError::Io)?;
+    Ok(credentials_path)
+}
+
+fn path_is_within_dir(path: &Path, dir: &Path) -> bool {
+    path.strip_prefix(dir)
+        .map(|relative| {
+            !relative
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+        })
+        .unwrap_or(false)
 }
 
 fn resolve_google_workspace_cli_credentials_file_path(
@@ -2717,6 +2766,92 @@ mod tests {
             temp.path()
                 .join(".auth/google_workspace_cli_credentials.json")
         );
+    }
+
+    #[test]
+    fn test_collect_google_workspace_cli_env_overrides_materializes_external_file_env() {
+        let _lock = env_lock();
+        let workspace = tempfile::tempdir().expect("workspace tempdir");
+        let external = tempfile::tempdir().expect("external tempdir");
+        let external_file = external.path().join("credentials.json");
+        let external_file_str = external_file.to_string_lossy().to_string();
+        fs::write(
+            &external_file,
+            "{\n  \"client_id\": \"external-client\"\n}\n",
+        )
+        .expect("write external credentials");
+
+        let _guards = vec![
+            EnvVarGuard::set(GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV, &external_file_str),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE"),
+        ];
+
+        let overrides = collect_google_workspace_cli_env_overrides(workspace.path())
+            .expect("collect overrides");
+        let credentials_path = overrides
+            .iter()
+            .find(|(key, _)| key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV)
+            .map(|(_, value)| PathBuf::from(value))
+            .expect("credentials path override");
+        assert_eq!(
+            credentials_path,
+            workspace
+                .path()
+                .join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH)
+        );
+        let content = fs::read_to_string(&credentials_path).expect("read materialized credentials");
+        assert!(content.contains("external-client"));
+    }
+
+    #[test]
+    fn test_collect_google_workspace_cli_env_overrides_external_file_falls_back_to_components() {
+        let _lock = env_lock();
+        let workspace = tempfile::tempdir().expect("workspace tempdir");
+        let missing_external = workspace.path().join("..").join("missing-credentials.json");
+        let missing_external_str = missing_external.to_string_lossy().to_string();
+        let _guards = vec![
+            EnvVarGuard::set(
+                GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+                &missing_external_str,
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID",
+                "fallback-client",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET",
+                "fallback-secret",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN",
+                "fallback-refresh",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE",
+                "authorized_user",
+            ),
+        ];
+
+        let overrides = collect_google_workspace_cli_env_overrides(workspace.path())
+            .expect("collect overrides");
+        let credentials_path = overrides
+            .iter()
+            .find(|(key, _)| key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV)
+            .map(|(_, value)| PathBuf::from(value))
+            .expect("credentials path override");
+        assert_eq!(
+            credentials_path,
+            workspace
+                .path()
+                .join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH)
+        );
+        let content = fs::read_to_string(&credentials_path).expect("read generated credentials");
+        assert!(content.contains("fallback-client"));
+        assert!(content.contains("fallback-secret"));
+        assert!(content.contains("fallback-refresh"));
     }
 
     #[test]
