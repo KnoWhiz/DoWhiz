@@ -44,6 +44,15 @@ Common optional controls:
 - `CODEX_MODEL`, `CLAUDE_MODEL`
 - `RUN_TASK_TIMEOUT_SECS`
 - `CODEX_SANDBOX_MODE`, `CODEX_BYPASS_SANDBOX`
+- Google Workspace CLI (`gws`) auth:
+  - preferred: `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE`
+  - or components: `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID`,
+    `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET`,
+    `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN`,
+    optional `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE`
+  - when using component keys, run_task writes
+    `.secrets/google_workspace_cli_credentials.json` inside each workspace and
+    injects `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` for local/docker/Azure ACI runs
 
 ## Example Usage
 
