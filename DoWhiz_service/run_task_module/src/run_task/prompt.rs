@@ -192,7 +192,7 @@ fn build_web_auth_capabilities_section() -> &'static str {
   4. If browser launch fails before sign-in:
      - If error says Chrome is missing, retry with:
        - `export PLAYWRIGHT_MCP_EXECUTABLE_PATH=/opt/google/chrome/chrome`
-       - If that file does not exist, set it to the first hit under `/app/.cache/ms-playwright/*/chrome-linux/chrome`.
+       - If that file does not exist, set it to the first hit under `/app/.cache/ms-playwright/*/chrome-linux*/chrome`.
      - Avoid `npx playwright install ...` on mounted workspaces (can fail with symlink errors).
        Prefer `python3 -m playwright install chromium` or `playwright install chromium`.
        If npm must be used, set `NPM_CONFIG_CACHE=/tmp/.npm` first.
@@ -919,6 +919,8 @@ mod tests {
         // Verify security note and SKILL.md reference
         assert!(prompt.contains("CURRENT USER"));
         assert!(prompt.contains("SKILL.md"));
+        assert!(prompt.contains("/app/.cache/ms-playwright/*/chrome-linux*/chrome"));
+        assert!(prompt.contains("Never include raw credentials"));
     }
 
     #[test]

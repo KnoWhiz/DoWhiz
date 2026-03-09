@@ -1051,7 +1051,7 @@ if [ -z \"${{PLAYWRIGHT_MCP_EXECUTABLE_PATH:-}}\" ]; then\n\
   if [ -x /opt/google/chrome/chrome ]; then\n\
     export PLAYWRIGHT_MCP_EXECUTABLE_PATH=/opt/google/chrome/chrome\n\
   else\n\
-    playwright_exec=\"$(find \"$PLAYWRIGHT_BROWSERS_PATH\" -path '*/chrome-linux/chrome' -type f 2>/dev/null | head -n1 || true)\"\n\
+    playwright_exec=\"$(find \"$PLAYWRIGHT_BROWSERS_PATH\" -type f \\( -path '*/chrome-linux/chrome' -o -path '*/chrome-linux64/chrome' \\) 2>/dev/null | head -n1 || true)\"\n\
     if [ -n \"$playwright_exec\" ]; then\n\
       export PLAYWRIGHT_MCP_EXECUTABLE_PATH=\"$playwright_exec\"\n\
     fi\n\
