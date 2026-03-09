@@ -198,6 +198,9 @@ Azure ACI execution path (required vars):
   `GOOGLE_ACCOUNT_PASSWORD`, `GOOGLE_EMPLOYEE_PASSWORD`, and prefixed forms like
   `<PREFIX>_GOOGLE_EMPLOYEE_EMAIL` via `EMPLOYEE_WEB_AUTH_ENV_PREFIX`/`WEB_AUTH_ENV_PREFIX`).
   Notion bootstrap tries Notion password login first, then falls back to Google login.
+  ACI run_task also sets Playwright/NPM runtime defaults for mounted workspaces:
+  `PLAYWRIGHT_MCP_EXECUTABLE_PATH` auto-discovery, `PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright`,
+  and `NPM_CONFIG_CACHE=/tmp/.npm` to avoid symlink failures from `npx`.
 
 ## 5) Local Run Workflows
 

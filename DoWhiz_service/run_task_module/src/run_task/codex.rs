@@ -1042,6 +1042,21 @@ fn run_azure_aci_execution(
     let script = format!(
         "set -euo pipefail\n\
 export PATH=/app/bin:$PATH\n\
+export PLAYWRIGHT_BROWSERS_PATH=\"${{PLAYWRIGHT_BROWSERS_PATH:-/app/.cache/ms-playwright}}\"\n\
+export XDG_CACHE_HOME=\"${{XDG_CACHE_HOME:-/tmp/.cache}}\"\n\
+export NPM_CONFIG_CACHE=\"${{NPM_CONFIG_CACHE:-/tmp/.npm}}\"\n\
+export npm_config_cache=\"$NPM_CONFIG_CACHE\"\n\
+mkdir -p \"$PLAYWRIGHT_BROWSERS_PATH\" \"$XDG_CACHE_HOME\" \"$NPM_CONFIG_CACHE\" /tmp/.local/share\n\
+if [ -z \"${{PLAYWRIGHT_MCP_EXECUTABLE_PATH:-}}\" ]; then\n\
+  if [ -x /opt/google/chrome/chrome ]; then\n\
+    export PLAYWRIGHT_MCP_EXECUTABLE_PATH=/opt/google/chrome/chrome\n\
+  else\n\
+    playwright_exec=\"$(find \"$PLAYWRIGHT_BROWSERS_PATH\" -path '*/chrome-linux/chrome' -type f 2>/dev/null | head -n1 || true)\"\n\
+    if [ -n \"$playwright_exec\" ]; then\n\
+      export PLAYWRIGHT_MCP_EXECUTABLE_PATH=\"$playwright_exec\"\n\
+    fi\n\
+  fi\n\
+fi\n\
 rm -f {output} {exit} {output_tmp} {exit_tmp}\n\
 if ! cd {workspace}; then\n\
   printf 'workspace path unavailable: %s\\n' {workspace} > {output_tmp}\n\
