@@ -198,6 +198,69 @@ jobs:
           chmod 600 "$APP_DIR/.env"
           EOF
 
+      - name: Build and push ACI image on Azure VM
+        run: |
+          ssh -F ~/.ssh/config azureproduction << 'EOF'
+          set -e
+          APP_ROOT=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz
+          APP_DIR="$APP_ROOT/DoWhiz_service"
+          ENV_FILE="$APP_DIR/.env"
+          read_env_value() {
+            local key="$1"
+            local value
+            value="$(grep -E "^${key}=" "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+            value="${value#\"}"
+            value="${value%\"}"
+            value="${value#\'}"
+            value="${value%\'}"
+            printf '%s' "$value"
+          }
+
+          run_task_backend="$(read_env_value RUN_TASK_EXECUTION_BACKEND)"
+          deploy_target="$(read_env_value DEPLOY_TARGET)"
+          should_build=0
+          case "$run_task_backend" in
+            azure_aci)
+              should_build=1
+              ;;
+            auto)
+              if [[ "$deploy_target" == "staging" || "$deploy_target" == "production" ]]; then
+                should_build=1
+              fi
+              ;;
+          esac
+          if [[ "$should_build" -eq 0 ]]; then
+            echo "Skipping ACI image build: RUN_TASK_EXECUTION_BACKEND=$run_task_backend DEPLOY_TARGET=$deploy_target"
+            exit 0
+          fi
+
+          run_task_image="$(read_env_value RUN_TASK_AZURE_ACI_IMAGE)"
+          [[ -n "$run_task_image" ]] || {
+            echo "RUN_TASK_AZURE_ACI_IMAGE is required when Azure ACI backend is enabled" >&2
+            exit 1
+          }
+          login_server="${run_task_image%%/*}"
+          image_name="${run_task_image#*/}"
+          if [[ "$login_server" == "$run_task_image" || -z "$image_name" ]]; then
+            echo "Invalid RUN_TASK_AZURE_ACI_IMAGE: $run_task_image" >&2
+            exit 1
+          fi
+          registry_name="${login_server%%.*}"
+          [[ -n "$registry_name" ]] || {
+            echo "Unable to parse ACR registry name from image: $run_task_image" >&2
+            exit 1
+          }
+
+          echo "Building ACI image via az acr build: $run_task_image"
+          cd "$APP_ROOT"
+          az acr build \
+            --registry "$registry_name" \
+            --image "$image_name" \
+            --file Dockerfile \
+            . \
+            --only-show-errors
+          EOF
+
       - name: Restart DoWhiz services
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'
