@@ -252,9 +252,19 @@ jobs:
           }
 
           # Prior VM builds can leave a very large Rust target directory that bloats Docker context.
+          # Keep release binaries required by PM2 restarts, trim everything else.
           if [[ -d "$APP_DIR/target" ]]; then
-            echo "Removing $APP_DIR/target before az acr build to keep context small"
-            rm -rf "$APP_DIR/target"
+            echo "Trimming $APP_DIR/target before az acr build to keep context small"
+            if [[ -d "$APP_DIR/target/release" ]]; then
+              find "$APP_DIR/target/release" -mindepth 1 -maxdepth 1 \
+                ! -name rust_service \
+                ! -name inbound_gateway \
+                ! -name set_postmark_inbound_hook \
+                ! -name inbound_fanout \
+                ! -name google-docs \
+                -exec rm -rf {} +
+            fi
+            find "$APP_DIR/target" -mindepth 1 -maxdepth 1 ! -name release -exec rm -rf {} +
           fi
 
           echo "Building ACI image via az acr build: $run_task_image"
