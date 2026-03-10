@@ -93,8 +93,7 @@ impl GoogleDocsPollerConfig {
         let employee_id =
             std::env::var("EMPLOYEE_ID").unwrap_or_else(|_| "little_bear".to_string());
 
-        let model_name =
-            std::env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.4".to_string());
+        let model_name = std::env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.4".to_string());
 
         let runner = if std::env::var("CLAUDE_MODEL").is_ok() {
             "claude".to_string()
@@ -227,14 +226,12 @@ impl MongoDocsProcessedStore {
     fn is_processed(&self, document_id: &str, comment_id: &str) -> Result<bool, SchedulerError> {
         let found = self
             .processed_comments
-            .find_one(
-                doc! {
-                    "file_id": document_id,
-                    "file_type": "docs",
-                    "tracking_id": comment_id,
-                },
-                None,
-            )
+            .find_one(doc! {
+                "file_id": document_id,
+                "file_type": "docs",
+                "tracking_id": comment_id,
+            })
+            .run()
             .map_err(mongo_scheduler_err)?
             .is_some();
         Ok(found)
@@ -253,10 +250,13 @@ impl MongoDocsProcessedStore {
                         "processed_at": BsonDateTime::from_chrono(Utc::now()),
                     }
                 },
+            )
+            .with_options(
                 mongodb::options::UpdateOptions::builder()
                     .upsert(true)
                     .build(),
             )
+            .run()
             .map_err(mongo_scheduler_err)?;
         Ok(())
     }
@@ -264,7 +264,8 @@ impl MongoDocsProcessedStore {
     fn get_processed_ids(&self, document_id: &str) -> Result<HashSet<String>, SchedulerError> {
         let cursor = self
             .processed_comments
-            .find(doc! { "file_id": document_id, "file_type": "docs" }, None)
+            .find(doc! { "file_id": document_id, "file_type": "docs" })
+            .run()
             .map_err(mongo_scheduler_err)?;
         let mut ids = HashSet::new();
         for row in cursor {
@@ -296,10 +297,13 @@ impl MongoDocsProcessedStore {
                         "created_at": now,
                     }
                 },
+            )
+            .with_options(
                 mongodb::options::UpdateOptions::builder()
                     .upsert(true)
                     .build(),
             )
+            .run()
             .map_err(mongo_scheduler_err)?;
         Ok(())
     }
@@ -311,8 +315,8 @@ impl MongoDocsProcessedStore {
                 doc! {
                     "$set": { "last_checked_at": BsonDateTime::from_chrono(Utc::now()) }
                 },
-                None,
             )
+            .run()
             .map_err(mongo_scheduler_err)?;
         Ok(())
     }

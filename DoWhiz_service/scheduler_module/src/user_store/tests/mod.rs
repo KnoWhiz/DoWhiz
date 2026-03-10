@@ -175,8 +175,8 @@ fn user_store_refreshes_last_seen_after_interval() {
         .update_one(
             doc! { "user_id": user.user_id.as_str() },
             doc! { "$set": { "last_seen_at": BsonDateTime::from_chrono(stale) } },
-            None,
         )
+        .run()
         .unwrap();
 
     let refreshed = store
