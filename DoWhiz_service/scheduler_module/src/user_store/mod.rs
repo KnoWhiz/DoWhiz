@@ -255,13 +255,11 @@ impl MongoUserStore {
             .ok_or_else(|| UserStoreError::InvalidIdentifier(identifier.to_string()))?;
         let doc = self
             .users
-            .find_one(
-                doc! {
-                    "identifier_type": identifier_type,
-                    "identifier": normalized.as_str(),
-                },
-                None,
-            )?
+            .find_one(doc! {
+                "identifier_type": identifier_type,
+                "identifier": normalized.as_str(),
+            })
+            .run()?
             .map(document_to_user_record)
             .transpose()?;
         Ok(doc)
@@ -280,32 +278,33 @@ impl MongoUserStore {
             "identifier": normalized.as_str(),
         };
 
-        if let Some(existing) = self.users.find_one(filter.clone(), None)? {
+        if let Some(existing) = self.users.find_one(filter.clone()).run()? {
             let mut record = document_to_user_record(existing)?;
             if should_refresh_last_seen(record.last_seen_at, now) {
-                self.users.update_one(
-                    doc! {
-                        "user_id": record.user_id.as_str(),
-                    },
-                    doc! { "$set": { "last_seen_at": BsonDateTime::from_chrono(now) } },
-                    None,
-                )?;
+                self.users
+                    .update_one(
+                        doc! {
+                            "user_id": record.user_id.as_str(),
+                        },
+                        doc! { "$set": { "last_seen_at": BsonDateTime::from_chrono(now) } },
+                    )
+                    .run()?;
                 record.last_seen_at = now;
             }
             return Ok(record);
         }
 
         let new_user_id = Uuid::new_v4().to_string();
-        let insert_result = self.users.insert_one(
-            doc! {
+        let insert_result = self
+            .users
+            .insert_one(doc! {
                 "user_id": new_user_id.as_str(),
                 "identifier_type": identifier_type,
                 "identifier": normalized.as_str(),
                 "created_at": BsonDateTime::from_chrono(now),
                 "last_seen_at": BsonDateTime::from_chrono(now),
-            },
-            None,
-        );
+            })
+            .run();
 
         match insert_result {
             Ok(_) => Ok(UserRecord {
@@ -316,7 +315,7 @@ impl MongoUserStore {
                 last_seen_at: now,
             }),
             Err(err) => {
-                if let Some(existing) = self.users.find_one(filter, None)? {
+                if let Some(existing) = self.users.find_one(filter).run()? {
                     return document_to_user_record(existing);
                 }
                 Err(err.into())
@@ -326,13 +325,16 @@ impl MongoUserStore {
 
     fn list_user_ids(&self) -> Result<Vec<String>, UserStoreError> {
         let mut ids = Vec::new();
-        let cursor = self.users.find(
-            doc! {},
-            FindOptions::builder()
-                .sort(doc! { "created_at": 1 })
-                .projection(doc! { "user_id": 1 })
-                .build(),
-        )?;
+        let cursor = self
+            .users
+            .find(doc! {})
+            .with_options(
+                FindOptions::builder()
+                    .sort(doc! { "created_at": 1 })
+                    .projection(doc! { "user_id": 1 })
+                    .build(),
+            )
+            .run()?;
         for row in cursor {
             let document = row?;
             if let Ok(value) = document.get_str("user_id") {
@@ -396,16 +398,14 @@ static USER_STORE: std::sync::OnceLock<Option<Arc<UserStore>>> = std::sync::Once
 /// Get or initialize the global UserStore (returns None if not configured)
 pub fn get_global_user_store() -> Option<Arc<UserStore>> {
     USER_STORE
-        .get_or_init(|| {
-            match UserStore::new("") {
-                Ok(store) => {
-                    tracing::info!("UserStore initialized for user lookups");
-                    Some(Arc::new(store))
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to initialize UserStore: {}", e);
-                    None
-                }
+        .get_or_init(|| match UserStore::new("") {
+            Ok(store) => {
+                tracing::info!("UserStore initialized for user lookups");
+                Some(Arc::new(store))
+            }
+            Err(e) => {
+                tracing::warn!("Failed to initialize UserStore: {}", e);
+                None
             }
         })
         .clone()
