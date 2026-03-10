@@ -7,6 +7,10 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: cicd-production
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -357,6 +361,19 @@ jobs:
           # Ensure web auth bootstrap can use Playwright for Notion/Google sign-in.
           bash "$APP_DIR/scripts/install_web_auth_bootstrap_deps.sh"
 
+          required_bins=(
+            "$APP_DIR/target/release/rust_service"
+            "$APP_DIR/target/release/inbound_gateway"
+          )
+          for bin_path in "${required_bins[@]}"; do
+            if [[ ! -x "$bin_path" ]]; then
+              echo "Missing executable binary: $bin_path" >&2
+              ls -al "$APP_DIR/target" 2>/dev/null || true
+              ls -al "$APP_DIR/target/release" 2>/dev/null || true
+              exit 1
+            fi
+          done
+
           worker_running=0
           for service in dw_worker dowhiz_rust_service dowhiz-rust-service; do
             if pm2 describe "$service" >/dev/null 2>&1; then
@@ -383,4 +400,28 @@ jobs:
 
           pm2 save
           pm2 list
+
+          find_pm2_pid() {
+            local name
+            local pid
+            for name in "$@"; do
+              pid="$(pm2 pid "$name" | tr -d '[:space:]')"
+              if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+                echo "$pid"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          worker_pid="$(find_pm2_pid dw_worker dowhiz_rust_service dowhiz-rust-service || true)"
+          gateway_pid="$(find_pm2_pid dw_gateway dowhiz_inbound_gateway dowhiz_gateway dowhiz-inbound-gateway || true)"
+          [[ -n "$worker_pid" ]] || { echo "No running worker PID found after restart" >&2; exit 1; }
+          [[ -n "$gateway_pid" ]] || { echo "No running gateway PID found after restart" >&2; exit 1; }
+
+          worker_health="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 "http://127.0.0.1:${RUST_SERVICE_PORT:-9001}/health" || true)"
+          gateway_health="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 "http://127.0.0.1:${GATEWAY_PORT:-9100}/health" || true)"
+          [[ "$worker_health" == "200" ]] || { echo "Worker health check failed (HTTP $worker_health)" >&2; exit 1; }
+          [[ "$gateway_health" == "200" ]] || { echo "Gateway health check failed (HTTP $gateway_health)" >&2; exit 1; }
+          echo "Post-restart health check passed: worker=$worker_health gateway=$gateway_health"
           EOF
