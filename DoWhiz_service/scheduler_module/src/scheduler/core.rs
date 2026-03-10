@@ -653,12 +653,12 @@ fn notify_run_task_failure(
 fn run_task_retry_delay(retry_count: u32, error_message: &str) -> chrono::Duration {
     const GENERIC_BASE_DELAY_SECS: i64 = 30;
     const GENERIC_MAX_DELAY_SECS: i64 = 300;
-    const ACI_QUOTA_BASE_DELAY_SECS: i64 = 180;
-    const ACI_QUOTA_MAX_DELAY_SECS: i64 = 1800;
+    const CAPACITY_BASE_DELAY_SECS: i64 = 180;
+    const CAPACITY_MAX_DELAY_SECS: i64 = 1800;
 
-    let is_aci_quota = is_aci_capacity_error(error_message);
-    let (base_secs, max_secs) = if is_aci_quota {
-        (ACI_QUOTA_BASE_DELAY_SECS, ACI_QUOTA_MAX_DELAY_SECS)
+    let is_capacity_limited = is_capacity_retryable_error(error_message);
+    let (base_secs, max_secs) = if is_capacity_limited {
+        (CAPACITY_BASE_DELAY_SECS, CAPACITY_MAX_DELAY_SECS)
     } else {
         (GENERIC_BASE_DELAY_SECS, GENERIC_MAX_DELAY_SECS)
     };
@@ -668,12 +668,28 @@ fn run_task_retry_delay(retry_count: u32, error_message: &str) -> chrono::Durati
     chrono::Duration::seconds(secs.max(1))
 }
 
+fn is_capacity_retryable_error(error_message: &str) -> bool {
+    is_aci_capacity_error(error_message) || is_codex_capacity_error(error_message)
+}
+
 fn is_aci_capacity_error(error_message: &str) -> bool {
     let lowered = error_message.to_ascii_lowercase();
     lowered.contains("containergroupquotareached")
         || (lowered.contains("container group quota")
             && lowered.contains("microsoft.containerinstance/containergroups"))
         || lowered.contains("resource quota of container groups")
+}
+
+fn is_codex_capacity_error(error_message: &str) -> bool {
+    let lowered = error_message.to_ascii_lowercase();
+    [
+        "stream disconnected before completion",
+        "the system is currently experiencing high demand",
+        "maximum usage size allowed during peak load",
+        "provisioned throughput",
+    ]
+    .iter()
+    .any(|pattern| lowered.contains(pattern))
 }
 
 fn slack_thread_ts_from_thread_key(thread_key: Option<&str>) -> Option<String> {
@@ -760,6 +776,37 @@ mod tests {
 
         assert_eq!(channel_to_identifier_type(&Channel::Discord), "discord");
         assert_eq!(channel_to_identifier_type(&Channel::Slack), "slack");
+    }
+
+    #[test]
+    fn is_capacity_retryable_error_detects_codex_peak_load_message() {
+        let codex_peak_load = "stream disconnected before completion: The system is currently experiencing high demand and cannot process your request. Your request exceeds the maximum usage size allowed during peak load. For improved capacity reliability, consider switching to Provisioned Throughput.";
+        assert!(is_capacity_retryable_error(codex_peak_load));
+    }
+
+    #[test]
+    fn run_task_retry_delay_uses_capacity_backoff_for_codex_peak_load_message() {
+        let codex_peak_load = "stream disconnected before completion: The system is currently experiencing high demand and cannot process your request.";
+        assert_eq!(
+            run_task_retry_delay(1, codex_peak_load),
+            chrono::Duration::seconds(180)
+        );
+        assert_eq!(
+            run_task_retry_delay(2, codex_peak_load),
+            chrono::Duration::seconds(360)
+        );
+    }
+
+    #[test]
+    fn run_task_retry_delay_uses_generic_backoff_for_non_capacity_error() {
+        assert_eq!(
+            run_task_retry_delay(1, "permission denied"),
+            chrono::Duration::seconds(30)
+        );
+        assert_eq!(
+            run_task_retry_delay(2, "permission denied"),
+            chrono::Duration::seconds(60)
+        );
     }
 
     #[test]
