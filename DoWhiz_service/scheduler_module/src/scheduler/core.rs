@@ -283,7 +283,12 @@ impl<E: TaskExecutor> Scheduler<E> {
                         );
                     }
                     ingest_follow_up_tasks(self, task, &execution.follow_up_tasks);
-                    if let Err(err) = schedule_auto_reply(self, task) {
+                    if execution.skip_auto_reply {
+                        info!(
+                            "skip auto reply from {} (reply already handled in executor)",
+                            task.workspace_dir.display()
+                        );
+                    } else if let Err(err) = schedule_auto_reply(self, task) {
                         warn!(
                             "failed to schedule auto reply from {}: {}",
                             task.workspace_dir.display(),
