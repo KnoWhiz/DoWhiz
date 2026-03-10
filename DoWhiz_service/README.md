@@ -212,6 +212,16 @@ Azure ACI execution path (required vars):
   `PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright`,
   and `NPM_CONFIG_CACHE=/tmp/.npm` to avoid symlink failures from `npx`.
 
+### 4.6 Billing / insufficient-balance notices
+
+- Stripe billing routes are enabled only when both keys are present:
+  - `STRIPE_SECRET_KEY`
+  - `STRIPE_WEBHOOK_SECRET`
+- Optional fixed payment link for insufficient-balance auto notices:
+  - `INSUFFICIENT_BALANCE_PAYMENT_LINK` (preferred)
+  - fallback order: `BILLING_PAYMENT_LINK` -> `PAYMENT_LINK` -> `${FRONTEND_URL}/auth/index.html` -> `https://www.dowhiz.com/auth/index.html`
+- Insufficient-balance notices bypass agent execution and are sent directly by channel adapter (email HTML / other channels plain text).
+
 ## 5) Local Run Workflows
 
 ### 5.1 Fast path: one worker + one gateway
