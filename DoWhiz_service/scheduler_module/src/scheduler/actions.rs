@@ -33,6 +33,43 @@ const SECRET_ENV_KEY_MARKERS: &[&str] = &[
     "AUTH",
     "CREDENTIAL",
 ];
+const CLOSURE_SIGNAL_MARKERS: &[&str] = &[
+    "no further action",
+    "nothing further",
+    "nothing else needed",
+    "wrapped up",
+    "all set",
+    "no further changes",
+    "pass is complete",
+    "done on my side",
+    "complete on my side",
+    "thread tucked away",
+    "tucked away",
+    "已完成",
+    "无需进一步",
+    "没有进一步",
+    "不需要再",
+];
+const REQUEST_SIGNAL_MARKERS: &[&str] = &[
+    "can you",
+    "could you",
+    "would you",
+    "please ",
+    "please,",
+    "need you to",
+    "请你",
+    "请帮",
+    "麻烦",
+];
+const ACTION_SIGNAL_MARKERS: &[&str] = &[
+    "action item",
+    "next step",
+    "todo",
+    "to do",
+    "follow up",
+    "deadline",
+    "due by",
+];
 
 /// Cross-channel routing configuration written by codex.
 #[derive(Debug, Clone, Deserialize)]
@@ -342,6 +379,366 @@ fn thread_epoch_matches(task: &RunTaskTask) -> bool {
     }
 }
 
+fn normalize_signal_text(raw: &str) -> String {
+    raw.to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn has_any_signal(text: &str, markers: &[&str]) -> bool {
+    markers.iter().any(|marker| text.contains(marker))
+}
+
+fn has_request_signal(text: &str) -> bool {
+    text.contains('?') || text.contains('？') || has_any_signal(text, REQUEST_SIGNAL_MARKERS)
+}
+
+fn has_action_signal(text: &str) -> bool {
+    has_any_signal(text, ACTION_SIGNAL_MARKERS)
+}
+
+fn is_closure_only_message(raw: &str) -> bool {
+    let text = normalize_signal_text(raw);
+    if text.len() < 8 {
+        return false;
+    }
+    has_any_signal(&text, CLOSURE_SIGNAL_MARKERS)
+        && !has_request_signal(&text)
+        && !has_action_signal(&text)
+}
+
+fn strip_html_tags_lossy(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut in_tag = false;
+    for ch in raw.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                out.push(' ');
+            }
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn parse_leading_seq(name: &str) -> u64 {
+    let mut seq = String::new();
+    for ch in name.chars() {
+        if ch.is_ascii_digit() {
+            seq.push(ch);
+        } else {
+            break;
+        }
+    }
+    seq.parse::<u64>().unwrap_or(0)
+}
+
+fn normalize_identity_token(raw: &str) -> String {
+    raw.trim().to_ascii_lowercase()
+}
+
+fn parse_identity_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(normalize_identity_token)
+        .filter(|token| !token.is_empty())
+        .collect()
+}
+
+fn channel_internal_sender_env_key(channel: Channel) -> Option<&'static str> {
+    match channel {
+        Channel::Slack => Some("INTERNAL_SLACK_SENDER_IDS"),
+        Channel::Discord => Some("INTERNAL_DISCORD_SENDER_IDS"),
+        Channel::Telegram => Some("INTERNAL_TELEGRAM_SENDER_IDS"),
+        Channel::Sms => Some("INTERNAL_SMS_SENDER_IDS"),
+        Channel::WhatsApp => Some("INTERNAL_WHATSAPP_SENDER_IDS"),
+        Channel::BlueBubbles => Some("INTERNAL_BLUEBUBBLES_SENDER_IDS"),
+        _ => None,
+    }
+}
+
+fn load_internal_sender_id_whitelist(channel: Channel) -> HashSet<String> {
+    let mut allowlist = HashSet::new();
+
+    if let Some(key) = channel_internal_sender_env_key(channel) {
+        if let Ok(raw) = std::env::var(key) {
+            for token in parse_identity_list(&raw) {
+                allowlist.insert(token);
+            }
+        }
+    }
+
+    // Common convenience fallback for Slack bot user id.
+    if channel == Channel::Slack {
+        if let Ok(bot_user_id) = std::env::var("SLACK_BOT_USER_ID") {
+            let token = normalize_identity_token(&bot_user_id);
+            if !token.is_empty() {
+                allowlist.insert(token);
+            }
+        }
+    }
+
+    allowlist
+}
+
+fn do_whiz_service_root() -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if cwd
+        .file_name()
+        .map(|name| name == "DoWhiz_service")
+        .unwrap_or(false)
+    {
+        cwd
+    } else {
+        cwd.join("DoWhiz_service")
+    }
+}
+
+fn collect_internal_email_whitelist_from_paths(config_paths: &[PathBuf]) -> HashSet<String> {
+    let mut allowlist = HashSet::new();
+    for path in config_paths {
+        let directory = match employee_config::load_employee_directory(path) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        for employee in directory.employees {
+            for address in employee.addresses {
+                for token in crate::user_store::extract_emails(&address) {
+                    let normalized = normalize_identity_token(&token);
+                    if !normalized.is_empty() {
+                        allowlist.insert(normalized);
+                    }
+                }
+            }
+        }
+    }
+    allowlist
+}
+
+fn load_internal_email_whitelist() -> HashSet<String> {
+    let root = do_whiz_service_root();
+    let config_paths = vec![
+        root.join("employee.toml"),
+        root.join("employee.staging.toml"),
+    ];
+    collect_internal_email_whitelist_from_paths(&config_paths)
+}
+
+fn load_latest_email_sender(workspace_dir: &Path) -> Option<String> {
+    let payload_path = workspace_dir
+        .join("incoming_email")
+        .join("postmark_payload.json");
+    let raw = std::fs::read_to_string(payload_path).ok()?;
+    let payload: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let from = payload
+        .get("From")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim();
+    if from.is_empty() {
+        return None;
+    }
+    crate::user_store::extract_emails(from)
+        .into_iter()
+        .next()
+        .map(|value| normalize_identity_token(&value))
+        .filter(|value| !value.is_empty())
+}
+
+fn is_internal_sender(task: &RunTaskTask) -> bool {
+    match task.channel {
+        Channel::Email => {
+            let sender = match load_latest_email_sender(&task.workspace_dir) {
+                Some(value) => value,
+                None => return false,
+            };
+            load_internal_email_whitelist().contains(&sender)
+        }
+        Channel::Slack
+        | Channel::Discord
+        | Channel::Telegram
+        | Channel::Sms
+        | Channel::WhatsApp
+        | Channel::BlueBubbles => {
+            let sender = match task.reply_to.first() {
+                Some(value) => normalize_identity_token(value),
+                None => return false,
+            };
+            if sender.is_empty() {
+                return false;
+            }
+            let allowlist = load_internal_sender_id_whitelist(task.channel);
+            !allowlist.is_empty() && allowlist.contains(&sender)
+        }
+        Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => false,
+    }
+}
+
+fn load_latest_email_text_from_postmark_payload(payload_path: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(payload_path).ok()?;
+    let payload: serde_json::Value = serde_json::from_str(&raw).ok()?;
+
+    let stripped = payload
+        .get("StrippedTextReply")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if !stripped.is_empty() {
+        return Some(stripped);
+    }
+
+    let text = payload
+        .get("TextBody")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if !text.is_empty() {
+        return Some(text);
+    }
+
+    let html = payload
+        .get("HtmlBody")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if html.is_empty() {
+        return None;
+    }
+    Some(strip_html_tags_lossy(&html))
+}
+
+fn is_inbound_body_candidate_file(name: &str) -> bool {
+    if name == "email.html" || name == "email.txt" {
+        return true;
+    }
+    name.ends_with("_message.txt")
+        || name.ends_with("_telegram.txt")
+        || name.ends_with("_whatsapp.txt")
+        || name.ends_with("_email.html")
+        || name.ends_with("_email.txt")
+}
+
+fn load_latest_inbound_body_text(workspace_dir: &Path) -> Option<String> {
+    let incoming_dir = workspace_dir.join("incoming_email");
+    if !incoming_dir.is_dir() {
+        return None;
+    }
+
+    let payload_path = incoming_dir.join("postmark_payload.json");
+    if let Some(text) = load_latest_email_text_from_postmark_payload(&payload_path) {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    let mut latest: Option<(u64, std::time::SystemTime, PathBuf)> = None;
+    let entries = std::fs::read_dir(&incoming_dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = match path.file_name().and_then(|value| value.to_str()) {
+            Some(value) => value,
+            None => continue,
+        };
+        if !is_inbound_body_candidate_file(name) {
+            continue;
+        }
+        let seq = parse_leading_seq(name);
+        let modified = entry
+            .metadata()
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        match &latest {
+            Some((best_seq, best_modified, _))
+                if seq < *best_seq || (seq == *best_seq && modified <= *best_modified) => {}
+            _ => latest = Some((seq, modified, path)),
+        }
+    }
+
+    let (_, _, path) = latest?;
+    let body = std::fs::read_to_string(&path).ok()?;
+    let is_html = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
+        .unwrap_or(false);
+    let text = if is_html {
+        strip_html_tags_lossy(&body)
+    } else {
+        body
+    };
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn load_reply_text(reply_path: &Path) -> Option<String> {
+    if !reply_path.exists() {
+        return None;
+    }
+    let raw = std::fs::read_to_string(reply_path).ok()?;
+    let is_html = reply_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
+        .unwrap_or(false);
+    let text = if is_html {
+        strip_html_tags_lossy(&raw)
+    } else {
+        raw
+    };
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn should_skip_closure_loop_reply(
+    task: &RunTaskTask,
+    reply_path: &Path,
+    outbound_channel: Channel,
+) -> bool {
+    if !is_internal_sender(task) {
+        return false;
+    }
+    let inbound_text = match load_latest_inbound_body_text(&task.workspace_dir) {
+        Some(value) => value,
+        None => return false,
+    };
+    let reply_text = match load_reply_text(reply_path) {
+        Some(value) => value,
+        None => return false,
+    };
+
+    if is_closure_only_message(&inbound_text) && is_closure_only_message(&reply_text) {
+        info!(
+            "skip auto reply closure-loop guard in {} inbound={:?} outbound={:?}",
+            task.workspace_dir.display(),
+            task.channel,
+            outbound_channel
+        );
+        return true;
+    }
+
+    false
+}
+
 pub(crate) fn ingest_follow_up_tasks<E: TaskExecutor>(
     scheduler: &mut Scheduler<E>,
     task: &RunTaskTask,
@@ -497,6 +894,9 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
                 task.workspace_dir.display()
             );
         }
+        return Ok(false);
+    }
+    if should_skip_closure_loop_reply(task, &html_path, target_channel) {
         return Ok(false);
     }
     let attachments_dir = task.workspace_dir.join(attachments_dirname);
@@ -1420,5 +1820,86 @@ addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com"]
             &Channel::Email,
         );
         assert!(!blocked);
+    }
+
+    #[test]
+    fn internal_email_whitelist_merges_employee_and_staging_configs() {
+        let temp = TempDir::new().expect("tempdir");
+        let employee = temp.path().join("employee.toml");
+        let staging = temp.path().join("employee.staging.toml");
+        fs::write(
+            &employee,
+            r#"
+[[employees]]
+id = "little_bear"
+addresses = ["oliver@dowhiz.com"]
+"#,
+        )
+        .expect("write employee.toml");
+        fs::write(
+            &staging,
+            r#"
+[[employees]]
+id = "boiled_egg"
+addresses = ["dowhiz@deep-tutor.com"]
+"#,
+        )
+        .expect("write employee.staging.toml");
+
+        let whitelist = collect_internal_email_whitelist_from_paths(&vec![employee, staging]);
+        assert!(whitelist.contains("oliver@dowhiz.com"));
+        assert!(whitelist.contains("dowhiz@deep-tutor.com"));
+    }
+
+    #[test]
+    fn closure_loop_guard_skips_for_internal_slack_sender_only() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+        let incoming = workspace.join("incoming_email");
+        fs::create_dir_all(&incoming).expect("incoming dir");
+        fs::write(
+            incoming.join("00001_slack_message.txt"),
+            "All set on my side too, no further action needed.",
+        )
+        .expect("write inbound");
+        let reply_path = workspace.join("reply_message.txt");
+        fs::write(&reply_path, "Wrapped up on my side as well.").expect("write reply");
+
+        std::env::set_var("INTERNAL_SLACK_SENDER_IDS", "u_internal");
+        let mut task = make_test_task(vec!["U_INTERNAL".to_string()]);
+        task.workspace_dir = workspace.to_path_buf();
+        task.channel = Channel::Slack;
+        assert!(should_skip_closure_loop_reply(
+            &task,
+            &reply_path,
+            Channel::Slack
+        ));
+        std::env::remove_var("INTERNAL_SLACK_SENDER_IDS");
+    }
+
+    #[test]
+    fn closure_loop_guard_does_not_skip_for_external_slack_sender() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+        let incoming = workspace.join("incoming_email");
+        fs::create_dir_all(&incoming).expect("incoming dir");
+        fs::write(
+            incoming.join("00001_slack_message.txt"),
+            "All set on my side too, no further action needed.",
+        )
+        .expect("write inbound");
+        let reply_path = workspace.join("reply_message.txt");
+        fs::write(&reply_path, "Wrapped up on my side as well.").expect("write reply");
+
+        std::env::set_var("INTERNAL_SLACK_SENDER_IDS", "u_internal");
+        let mut task = make_test_task(vec!["U_EXTERNAL".to_string()]);
+        task.workspace_dir = workspace.to_path_buf();
+        task.channel = Channel::Slack;
+        assert!(!should_skip_closure_loop_reply(
+            &task,
+            &reply_path,
+            Channel::Slack
+        ));
+        std::env::remove_var("INTERNAL_SLACK_SENDER_IDS");
     }
 }
