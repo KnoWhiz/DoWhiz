@@ -78,7 +78,8 @@ fn sync_blob_memo_to_workspace(account_id: Uuid, workspace_memory_dir: &Path) ->
 
 use super::outbound::{
     execute_bluebubbles_send, execute_discord_send, execute_email_send, execute_google_docs_send,
-    execute_slack_send, execute_sms_send, execute_telegram_send, execute_whatsapp_send,
+    execute_slack_send, execute_sms_send, execute_telegram_send, execute_wechat_send,
+    execute_whatsapp_send,
 };
 use super::types::{SchedulerError, SendReplyTask, TaskExecution, TaskKind};
 use super::utils::load_google_access_token_from_service_env;
@@ -764,6 +765,9 @@ impl TaskExecutor for ModuleExecutor {
                     }
                     Channel::WhatsApp => {
                         execute_whatsapp_send(task)?;
+                    }
+                    Channel::WeChat => {
+                        execute_wechat_send(task)?;
                     }
                     Channel::Email => {
                         execute_email_send(task)?;

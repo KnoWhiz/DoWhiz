@@ -130,3 +130,271 @@ pub(super) fn verify_whatsapp_subscription(
 
     challenge.map(|c| c.to_string()).ok_or("missing_challenge")
 }
+
+/// Verify WeChat webhook callback URL.
+/// Returns the echostr if verification succeeds.
+/// WeChat sends: GET /wechat/webhook?msg_signature=xxx&timestamp=xxx&nonce=xxx&echostr=xxx
+pub(super) fn verify_wechat(
+    msg_signature: Option<&str>,
+    timestamp: Option<&str>,
+    nonce: Option<&str>,
+    echostr: Option<&str>,
+) -> Result<String, &'static str> {
+    let token = env::var("WECHAT_TOKEN").ok();
+    let Some(token) = token.filter(|value| !value.trim().is_empty()) else {
+        // If token not configured, just return echostr (allows testing)
+        return echostr.map(|e| e.to_string()).ok_or("missing_echostr");
+    };
+
+    let signature = msg_signature.ok_or("missing_signature")?;
+    let timestamp = timestamp.ok_or("missing_timestamp")?;
+    let nonce = nonce.ok_or("missing_nonce")?;
+    let echostr = echostr.ok_or("missing_echostr")?;
+
+    // WeChat signature: SHA1(sort([token, timestamp, nonce]))
+    let mut parts = vec![token.as_str(), timestamp, nonce];
+    parts.sort();
+    let data = parts.join("");
+
+    use sha1::{Digest, Sha1};
+    let mut hasher = Sha1::new();
+    hasher.update(data.as_bytes());
+    let result = hasher.finalize();
+    let expected = hex::encode(result);
+
+    if expected != signature {
+        return Err("invalid_signature");
+    }
+
+    Ok(echostr.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sha1::{Digest, Sha1};
+
+    // ==================== WeChat Verification Tests ====================
+
+    #[test]
+    fn verify_wechat_returns_echostr_when_no_token_configured() {
+        // When WECHAT_TOKEN is not set, should just return echostr
+        std::env::remove_var("WECHAT_TOKEN");
+
+        let result = verify_wechat(
+            Some("signature"),
+            Some("1234567890"),
+            Some("nonce"),
+            Some("test_echostr"),
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "test_echostr");
+    }
+
+    #[test]
+    fn verify_wechat_returns_error_when_missing_echostr_no_token() {
+        std::env::remove_var("WECHAT_TOKEN");
+
+        let result = verify_wechat(Some("sig"), Some("ts"), Some("nonce"), None);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "missing_echostr");
+    }
+
+    #[test]
+    fn verify_wechat_validates_signature_when_token_set() {
+        let token = "test_token_12345";
+        std::env::set_var("WECHAT_TOKEN", token);
+
+        let timestamp = "1609459200";
+        let nonce = "random_nonce";
+        let echostr = "challenge_string";
+
+        // Calculate the expected signature: SHA1(sort([token, timestamp, nonce]))
+        let mut parts = vec![token, timestamp, nonce];
+        parts.sort();
+        let data = parts.join("");
+        let mut hasher = Sha1::new();
+        hasher.update(data.as_bytes());
+        let valid_signature = hex::encode(hasher.finalize());
+
+        let result = verify_wechat(
+            Some(&valid_signature),
+            Some(timestamp),
+            Some(nonce),
+            Some(echostr),
+        );
+
+        // Clean up env var
+        std::env::remove_var("WECHAT_TOKEN");
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "challenge_string");
+    }
+
+    #[test]
+    fn verify_wechat_rejects_invalid_signature() {
+        std::env::set_var("WECHAT_TOKEN", "secret_token");
+
+        let result = verify_wechat(
+            Some("invalid_signature"),
+            Some("1234567890"),
+            Some("nonce123"),
+            Some("echostr"),
+        );
+
+        std::env::remove_var("WECHAT_TOKEN");
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "invalid_signature");
+    }
+
+    #[test]
+    fn verify_wechat_requires_signature_when_token_set() {
+        std::env::set_var("WECHAT_TOKEN", "token");
+
+        let result = verify_wechat(None, Some("ts"), Some("nonce"), Some("echo"));
+
+        std::env::remove_var("WECHAT_TOKEN");
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "missing_signature");
+    }
+
+    #[test]
+    fn verify_wechat_requires_timestamp_when_token_set() {
+        std::env::set_var("WECHAT_TOKEN", "token");
+
+        let result = verify_wechat(Some("sig"), None, Some("nonce"), Some("echo"));
+
+        std::env::remove_var("WECHAT_TOKEN");
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "missing_timestamp");
+    }
+
+    #[test]
+    fn verify_wechat_requires_nonce_when_token_set() {
+        std::env::set_var("WECHAT_TOKEN", "token");
+
+        let result = verify_wechat(Some("sig"), Some("ts"), None, Some("echo"));
+
+        std::env::remove_var("WECHAT_TOKEN");
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "missing_nonce");
+    }
+
+    #[test]
+    fn verify_wechat_requires_echostr_when_token_set() {
+        std::env::set_var("WECHAT_TOKEN", "token");
+
+        let result = verify_wechat(Some("sig"), Some("ts"), Some("nonce"), None);
+
+        std::env::remove_var("WECHAT_TOKEN");
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "missing_echostr");
+    }
+
+    #[test]
+    fn verify_wechat_ignores_empty_token() {
+        std::env::set_var("WECHAT_TOKEN", "   ");
+
+        let result = verify_wechat(
+            Some("any_signature"),
+            Some("ts"),
+            Some("nonce"),
+            Some("echostr"),
+        );
+
+        std::env::remove_var("WECHAT_TOKEN");
+
+        // Empty token is treated as not configured, so should pass
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "echostr");
+    }
+
+    #[test]
+    fn verify_wechat_signature_sort_order() {
+        // Test that the signature algorithm sorts parts correctly
+        // This is critical: WeChat sorts [token, timestamp, nonce] alphabetically
+        let token = "zzz_token";
+        let timestamp = "aaa_timestamp";
+        let nonce = "mmm_nonce";
+
+        std::env::set_var("WECHAT_TOKEN", token);
+
+        // Sorted: ["aaa_timestamp", "mmm_nonce", "zzz_token"]
+        let mut parts = vec![token, timestamp, nonce];
+        parts.sort();
+        assert_eq!(parts, vec!["aaa_timestamp", "mmm_nonce", "zzz_token"]);
+
+        let data = parts.join("");
+        let mut hasher = Sha1::new();
+        hasher.update(data.as_bytes());
+        let valid_signature = hex::encode(hasher.finalize());
+
+        let result = verify_wechat(
+            Some(&valid_signature),
+            Some(timestamp),
+            Some(nonce),
+            Some("echo"),
+        );
+
+        std::env::remove_var("WECHAT_TOKEN");
+
+        assert!(result.is_ok());
+    }
+
+    // ==================== WhatsApp Verification Tests ====================
+
+    #[test]
+    fn verify_whatsapp_subscription_requires_subscribe_mode() {
+        std::env::set_var("WHATSAPP_VERIFY_TOKEN", "my_token");
+
+        let result = verify_whatsapp_subscription(
+            Some("webhook"), // wrong mode
+            Some("my_token"),
+            Some("challenge123"),
+        );
+
+        std::env::remove_var("WHATSAPP_VERIFY_TOKEN");
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "invalid_mode");
+    }
+
+    #[test]
+    fn verify_whatsapp_subscription_validates_token() {
+        std::env::set_var("WHATSAPP_VERIFY_TOKEN", "correct_token");
+
+        let result = verify_whatsapp_subscription(
+            Some("subscribe"),
+            Some("wrong_token"),
+            Some("challenge"),
+        );
+
+        std::env::remove_var("WHATSAPP_VERIFY_TOKEN");
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "token_mismatch");
+    }
+
+    #[test]
+    fn verify_whatsapp_subscription_success() {
+        std::env::set_var("WHATSAPP_VERIFY_TOKEN", "my_secret_token");
+
+        let result = verify_whatsapp_subscription(
+            Some("subscribe"),
+            Some("my_secret_token"),
+            Some("hub.challenge.12345"),
+        );
+
+        std::env::remove_var("WHATSAPP_VERIFY_TOKEN");
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "hub.challenge.12345");
+    }
+}

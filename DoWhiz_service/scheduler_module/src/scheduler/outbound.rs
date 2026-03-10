@@ -604,6 +604,58 @@ pub(crate) fn execute_whatsapp_send(task: &SendReplyTask) -> Result<(), Schedule
     Ok(())
 }
 
+/// Execute a SendReplyTask via WeChat Work (企业微信).
+pub(crate) fn execute_wechat_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
+    use crate::adapters::wechat::WeChatOutboundAdapter;
+    use crate::channel::{ChannelMetadata, OutboundAdapter, OutboundMessage};
+
+    dotenvy::dotenv().ok();
+    let adapter = WeChatOutboundAdapter::from_env()
+        .map_err(|err| SchedulerError::TaskFailed(format!("WeChat config error: {}", err)))?;
+
+    // Read plain text content from reply_message.txt
+    let text_body = if task.html_path.exists() {
+        fs::read_to_string(&task.html_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let message = OutboundMessage {
+        channel: Channel::WeChat,
+        from: task.from.clone(),
+        to: task.to.clone(),
+        cc: vec![],
+        bcc: vec![],
+        subject: task.subject.clone(),
+        text_body,
+        html_body: String::new(),
+        html_path: Some(task.html_path.clone()),
+        attachments_dir: Some(task.attachments_dir.clone()),
+        thread_id: task.in_reply_to.clone(),
+        metadata: ChannelMetadata {
+            wechat_user_id: task.to.first().cloned(),
+            ..Default::default()
+        },
+    };
+
+    let result = adapter
+        .send(&message)
+        .map_err(|err| SchedulerError::TaskFailed(format!("WeChat send failed: {}", err)))?;
+
+    if !result.success {
+        return Err(SchedulerError::TaskFailed(format!(
+            "WeChat API error: {}",
+            result.error.unwrap_or_default()
+        )));
+    }
+
+    info!(
+        "sent WeChat message to {:?}, message_id={}",
+        task.to, result.message_id
+    );
+    Ok(())
+}
+
 /// Execute a SendReplyTask via SMS (Twilio).
 pub(crate) fn execute_sms_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
     dotenvy::dotenv().ok();

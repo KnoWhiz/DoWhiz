@@ -20,6 +20,7 @@ use scheduler_module::adapters::slack::{
     is_url_verification, SlackChallengeResponse, SlackEventWrapper, SlackInboundAdapter,
 };
 use scheduler_module::adapters::telegram::TelegramInboundAdapter;
+use scheduler_module::adapters::wechat::WeChatInboundAdapter;
 use scheduler_module::adapters::whatsapp::WhatsAppInboundAdapter;
 use scheduler_module::channel::{Channel, ChannelMetadata, InboundAdapter, InboundMessage};
 use scheduler_module::ingestion::{IngestionEnvelope, IngestionPayload};
@@ -30,7 +31,8 @@ use scheduler_module::user_store::extract_emails;
 use super::routes::{build_dedupe_key, normalize_email, normalize_phone_number, resolve_route};
 use super::state::{find_service_address, GatewayState, RouteDecision, RouteKey, RouteTarget};
 use super::verify::{
-    verify_bluebubbles, verify_postmark, verify_slack, verify_twilio, verify_whatsapp_subscription,
+    verify_bluebubbles, verify_postmark, verify_slack, verify_twilio, verify_wechat,
+    verify_whatsapp_subscription,
 };
 
 pub(super) async fn health() -> impl IntoResponse {
@@ -525,6 +527,80 @@ pub(super) async fn ingest_whatsapp(
     let envelope = match build_envelope(
         route,
         Channel::WhatsApp,
+        external_message_id,
+        &message,
+        &body,
+    )
+    .await
+    {
+        Ok(envelope) => envelope,
+        Err(err) => {
+            error!("gateway failed to store raw payload: {}", err);
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"status": "payload_store_failed"})),
+            );
+        }
+    };
+    enqueue_envelope(state.queue.clone(), envelope).await
+}
+
+/// Query parameters for WeChat webhook verification
+#[derive(Debug, Deserialize)]
+pub(super) struct WeChatVerifyParams {
+    pub msg_signature: Option<String>,
+    pub timestamp: Option<String>,
+    pub nonce: Option<String>,
+    pub echostr: Option<String>,
+}
+
+/// Handle WeChat webhook verification (GET request)
+pub(super) async fn verify_wechat_webhook(
+    Query(params): Query<WeChatVerifyParams>,
+) -> impl IntoResponse {
+    match verify_wechat(
+        params.msg_signature.as_deref(),
+        params.timestamp.as_deref(),
+        params.nonce.as_deref(),
+        params.echostr.as_deref(),
+    ) {
+        Ok(echostr) => (StatusCode::OK, echostr),
+        Err(reason) => {
+            info!("wechat webhook verification failed: {}", reason);
+            (StatusCode::FORBIDDEN, reason.to_string())
+        }
+    }
+}
+
+/// Handle WeChat inbound messages (POST request)
+pub(super) async fn ingest_wechat(
+    State(state): State<Arc<GatewayState>>,
+    body: Bytes,
+) -> impl IntoResponse {
+    let adapter = WeChatInboundAdapter::new();
+    let message = match adapter.parse(&body) {
+        Ok(message) => message,
+        Err(err) => {
+            debug!("gateway ignoring wechat event: {}", err);
+            return (StatusCode::OK, Json(json!({"status": "ignored"})));
+        }
+    };
+
+    let user_id = message
+        .metadata
+        .wechat_user_id
+        .clone()
+        .unwrap_or_else(|| message.sender.clone());
+
+    let Some(route) = resolve_route(Channel::WeChat, &user_id, &state) else {
+        info!("gateway no route for wechat user_id={}", user_id);
+        return (StatusCode::OK, Json(json!({"status": "no_route"})));
+    };
+
+    let external_message_id = message.message_id.clone();
+    let envelope = match build_envelope(
+        route,
+        Channel::WeChat,
         external_message_id,
         &message,
         &body,

@@ -89,6 +89,7 @@ fn parse_channel(channel_str: &str) -> Option<Channel> {
         "sms" => Some(Channel::Sms),
         "whatsapp" => Some(Channel::WhatsApp),
         "bluebubbles" => Some(Channel::BlueBubbles),
+        "wechat" => Some(Channel::WeChat),
         _ => {
             warn!("Unknown channel in reply_routing.json: {}", channel_str);
             None
@@ -474,7 +475,8 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         | Channel::BlueBubbles
         | Channel::Telegram
         | Channel::WhatsApp
-        | Channel::Sms => ("reply_message.txt", "reply_attachments"),
+        | Channel::Sms
+        | Channel::WeChat => ("reply_message.txt", "reply_attachments"),
         Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
             ("reply_email_draft.html", "reply_email_attachments")
         }
@@ -538,7 +540,8 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
             | Channel::BlueBubbles
             | Channel::Telegram
             | Channel::WhatsApp
-            | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
+            | Channel::Sms
+            | Channel::WeChat => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email
             | Channel::GoogleDocs
             | Channel::GoogleSheets
@@ -626,6 +629,7 @@ fn format_channel_name(channel: &Channel) -> &'static str {
         Channel::Sms => "SMS",
         Channel::WhatsApp => "WhatsApp",
         Channel::BlueBubbles => "iMessage",
+        Channel::WeChat => "WeChat",
         Channel::GoogleDocs => "Google Docs",
         Channel::GoogleSheets => "Google Sheets",
         Channel::GoogleSlides => "Google Slides",
@@ -968,6 +972,7 @@ mod tests {
         assert_eq!(parse_channel("sms"), Some(Channel::Sms));
         assert_eq!(parse_channel("whatsapp"), Some(Channel::WhatsApp));
         assert_eq!(parse_channel("bluebubbles"), Some(Channel::BlueBubbles));
+        assert_eq!(parse_channel("wechat"), Some(Channel::WeChat));
     }
 
     #[test]
@@ -1037,6 +1042,7 @@ mod tests {
         assert_eq!(format_channel_name(&Channel::Sms), "SMS");
         assert_eq!(format_channel_name(&Channel::WhatsApp), "WhatsApp");
         assert_eq!(format_channel_name(&Channel::BlueBubbles), "iMessage");
+        assert_eq!(format_channel_name(&Channel::WeChat), "WeChat");
         assert_eq!(format_channel_name(&Channel::GoogleDocs), "Google Docs");
         assert_eq!(format_channel_name(&Channel::GoogleSheets), "Google Sheets");
         assert_eq!(format_channel_name(&Channel::GoogleSlides), "Google Slides");
@@ -1052,7 +1058,8 @@ mod tests {
             | Channel::BlueBubbles
             | Channel::Telegram
             | Channel::WhatsApp
-            | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
+            | Channel::Sms
+            | Channel::WeChat => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email
             | Channel::GoogleDocs
             | Channel::GoogleSheets
@@ -1071,7 +1078,8 @@ mod tests {
             | Channel::BlueBubbles
             | Channel::Telegram
             | Channel::WhatsApp
-            | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
+            | Channel::Sms
+            | Channel::WeChat => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email
             | Channel::GoogleDocs
             | Channel::GoogleSheets
@@ -1420,5 +1428,140 @@ addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com"]
             &Channel::Email,
         );
         assert!(!blocked);
+    }
+
+    // ==================== WeChat Cross-Channel Tests ====================
+
+    #[test]
+    fn cross_channel_ack_file_format_for_wechat_inbound() {
+        // For WeChat inbound, ack should be plain text
+        let channel = Channel::WeChat;
+        let (ack_filename, attachments_dir) = match channel {
+            Channel::Slack
+            | Channel::Discord
+            | Channel::BlueBubbles
+            | Channel::Telegram
+            | Channel::WhatsApp
+            | Channel::Sms
+            | Channel::WeChat => ("cross_channel_ack.txt", "reply_attachments"),
+            Channel::Email
+            | Channel::GoogleDocs
+            | Channel::GoogleSheets
+            | Channel::GoogleSlides => ("cross_channel_ack.html", "reply_email_attachments"),
+        };
+        assert_eq!(ack_filename, "cross_channel_ack.txt");
+        assert_eq!(attachments_dir, "reply_attachments");
+    }
+
+    #[test]
+    fn parse_channel_wechat_aliases() {
+        // WeChat can be parsed with different aliases
+        assert_eq!(parse_channel("wechat"), Some(Channel::WeChat));
+        assert_eq!(parse_channel("WeChat"), Some(Channel::WeChat));
+        assert_eq!(parse_channel("WECHAT"), Some(Channel::WeChat));
+    }
+
+    #[test]
+    fn load_reply_routing_wechat_target() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        // Route to WeChat user
+        let routing_json = r#"{"channel": "wechat", "identifier": "zhangsan"}"#;
+        fs::write(workspace.join("reply_routing.json"), routing_json).expect("write");
+
+        let routing = load_reply_routing(workspace).expect("should parse");
+        assert_eq!(routing.channel, "wechat");
+        assert_eq!(routing.identifier, "zhangsan");
+
+        let parsed_channel = parse_channel(&routing.channel);
+        assert_eq!(parsed_channel, Some(Channel::WeChat));
+    }
+
+    #[test]
+    fn cross_channel_ack_content_for_wechat_target() {
+        let target_channel = Channel::WeChat;
+        let ack_message = format!(
+            "The request has been successfully completed! I've sent my response to you on {}.",
+            format_channel_name(&target_channel)
+        );
+
+        assert_eq!(
+            ack_message,
+            "The request has been successfully completed! I've sent my response to you on WeChat."
+        );
+    }
+
+    #[test]
+    fn reply_format_for_wechat_channel() {
+        // WeChat uses plain text reply_message.txt like other chat channels
+        let channel = Channel::WeChat;
+        let (reply_filename, attachments_dirname) = match channel {
+            Channel::Slack
+            | Channel::Discord
+            | Channel::BlueBubbles
+            | Channel::Telegram
+            | Channel::WhatsApp
+            | Channel::Sms
+            | Channel::WeChat => ("reply_message.txt", "reply_attachments"),
+            Channel::Email
+            | Channel::GoogleDocs
+            | Channel::GoogleSheets
+            | Channel::GoogleSlides => ("reply_email_draft.html", "reply_email_attachments"),
+        };
+        assert_eq!(reply_filename, "reply_message.txt");
+        assert_eq!(attachments_dirname, "reply_attachments");
+    }
+
+    #[test]
+    fn wechat_cross_channel_routing_to_email() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        // Simulate routing from WeChat to email
+        let routing_json = r#"{"channel": "email", "identifier": "user@example.com"}"#;
+        fs::write(workspace.join("reply_routing.json"), routing_json).expect("write");
+
+        let routing = load_reply_routing(workspace).expect("should parse");
+        let target_channel = parse_channel(&routing.channel);
+
+        assert_eq!(target_channel, Some(Channel::Email));
+        assert_eq!(routing.identifier, "user@example.com");
+
+        // For email target, reply format should be HTML
+        let (reply_filename, _) = match target_channel.unwrap() {
+            Channel::Email
+            | Channel::GoogleDocs
+            | Channel::GoogleSheets
+            | Channel::GoogleSlides => ("reply_email_draft.html", "reply_email_attachments"),
+            _ => ("reply_message.txt", "reply_attachments"),
+        };
+        assert_eq!(reply_filename, "reply_email_draft.html");
+    }
+
+    #[test]
+    fn email_cross_channel_routing_to_wechat() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        // Simulate routing from email to WeChat
+        let routing_json = r#"{"channel": "wechat", "identifier": "lisi"}"#;
+        fs::write(workspace.join("reply_routing.json"), routing_json).expect("write");
+
+        let routing = load_reply_routing(workspace).expect("should parse");
+        let target_channel = parse_channel(&routing.channel);
+
+        assert_eq!(target_channel, Some(Channel::WeChat));
+        assert_eq!(routing.identifier, "lisi");
+
+        // For WeChat target, reply format should be plain text
+        let (reply_filename, _) = match target_channel.unwrap() {
+            Channel::Email
+            | Channel::GoogleDocs
+            | Channel::GoogleSheets
+            | Channel::GoogleSlides => ("reply_email_draft.html", "reply_email_attachments"),
+            _ => ("reply_message.txt", "reply_attachments"),
+        };
+        assert_eq!(reply_filename, "reply_message.txt");
     }
 }
