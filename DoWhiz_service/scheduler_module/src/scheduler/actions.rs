@@ -38,8 +38,14 @@ const CLOSURE_SIGNAL_MARKERS: &[&str] = &[
     "nothing further",
     "nothing else needed",
     "no reply required",
+    "no reply needed",
+    "no reply should be sent",
+    "no outbound reply",
+    "no outgoing reply",
     "no outbound reply should be sent",
+    "no outgoing reply should be sent",
     "do not send another acknowledgement",
+    "avoid sending another acknowledgement",
     "wrapped up",
     "all set",
     "thread closed",
@@ -2060,13 +2066,13 @@ addresses = ["dowhiz@deep-tutor.com"]
         fs::create_dir_all(&incoming).expect("incoming dir");
         fs::write(
             incoming.join("00001_slack_message.txt"),
-            "No outbound reply should be sent for this message. Status: thread closed, no action requested.",
+            "No outgoing reply should be sent for this message. Status: thread closed, no action requested.",
         )
         .expect("write inbound");
         let reply_path = workspace.join("reply_message.txt");
         fs::write(
             &reply_path,
-            "No reply required. Do not send another acknowledgement unless there is a new task.",
+            "No reply needed. Avoid sending another acknowledgement unless there is a new task.",
         )
         .expect("write reply");
 
