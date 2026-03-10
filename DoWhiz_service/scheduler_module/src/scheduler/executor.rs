@@ -865,7 +865,6 @@ impl TaskExecutor for ModuleExecutor {
                         task.workspace_dir.display()
                     );
                 }
-                crate::web_auth_bootstrap::bootstrap_workspace_web_auth(&task.workspace_dir);
                 // Check balance before running task (only for unified accounts)
                 if let Some(account_id) = account_id {
                     if let Some(store) = get_global_account_store() {
