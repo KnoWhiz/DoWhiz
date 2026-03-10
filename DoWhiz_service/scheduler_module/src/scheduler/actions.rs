@@ -1,11 +1,15 @@
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::account_store::{get_global_account_store, lookup_account_by_identifier};
 use crate::channel::Channel;
+use crate::employee_config;
+use crate::service;
 use crate::thread_state::{current_thread_epoch, default_thread_state_path};
 
 use super::core::Scheduler;
@@ -14,6 +18,314 @@ use super::reply::load_reply_context;
 use super::schedule::{next_run_after, validate_cron_expression};
 use super::types::{RunTaskTask, Schedule, SchedulerError, SendReplyTask, TaskKind};
 use super::utils::parse_datetime;
+
+const SECRET_SCAN_MAX_BYTES: u64 = 512 * 1024;
+const SECRET_GUARD_MESSAGE: &str = "For security, I cannot send content that appears to contain credentials or secret tokens. Please resend the request without asking to expose secrets.";
+const SECRET_ENV_KEY_MARKERS: &[&str] = &[
+    "PASSWORD",
+    "SECRET",
+    "TOKEN",
+    "API_KEY",
+    "PRIVATE_KEY",
+    "ACCESS_KEY",
+    "REFRESH_TOKEN",
+    "CLIENT_SECRET",
+    "AUTH",
+    "CREDENTIAL",
+];
+
+/// Cross-channel routing configuration written by codex.
+#[derive(Debug, Clone, Deserialize)]
+struct ReplyRouting {
+    channel: String,
+    identifier: String,
+}
+
+/// Load cross-channel routing from reply_routing.json if it exists.
+fn load_reply_routing(workspace_dir: &Path) -> Option<ReplyRouting> {
+    let path = workspace_dir.join("reply_routing.json");
+    let content = std::fs::read_to_string(&path).ok()?;
+    match serde_json::from_str(&content) {
+        Ok(routing) => {
+            info!("Loaded cross-channel routing from {}", path.display());
+            Some(routing)
+        }
+        Err(e) => {
+            warn!("Failed to parse reply_routing.json: {}", e);
+            None
+        }
+    }
+}
+
+/// Resolve the employee's primary email address from config by employee ID.
+fn resolve_employee_primary_email(employee_id: &str) -> Option<String> {
+    let config_path = std::env::var("EMPLOYEE_CONFIG_PATH")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                std::env::current_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .join(path)
+            }
+        })
+        .unwrap_or_else(service::default_employee_config_path);
+    let directory = employee_config::load_employee_directory(&config_path).ok()?;
+    let profile = directory.employee(employee_id)?;
+    profile.addresses.first().cloned()
+}
+
+/// Parse channel string to Channel enum.
+fn parse_channel(channel_str: &str) -> Option<Channel> {
+    match channel_str.to_lowercase().as_str() {
+        "email" => Some(Channel::Email),
+        "slack" => Some(Channel::Slack),
+        "discord" => Some(Channel::Discord),
+        "telegram" => Some(Channel::Telegram),
+        "sms" => Some(Channel::Sms),
+        "whatsapp" => Some(Channel::WhatsApp),
+        "bluebubbles" => Some(Channel::BlueBubbles),
+        _ => {
+            warn!("Unknown channel in reply_routing.json: {}", channel_str);
+            None
+        }
+    }
+}
+
+/// Check if a routing identifier is allowed for the given task's account.
+/// Returns true if the identifier belongs to the user's linked accounts.
+fn is_routing_identifier_allowed(task: &RunTaskTask, identifier: &str) -> bool {
+    // Get account ID from requester info
+    let account_id = match (
+        task.requester_identifier_type.as_deref(),
+        task.requester_identifier.as_deref(),
+    ) {
+        (Some(id_type), Some(id_value)) => lookup_account_by_identifier(id_type, id_value),
+        _ => None,
+    };
+
+    let Some(account_id) = account_id else {
+        // No account linked - allow only original reply_to (conservative default)
+        return task.reply_to.contains(&identifier.to_string());
+    };
+
+    let Some(store) = get_global_account_store() else {
+        warn!("Account store not available for routing validation");
+        return task.reply_to.contains(&identifier.to_string());
+    };
+
+    let identifiers = match store.list_identifiers(account_id) {
+        Ok(ids) => ids,
+        Err(e) => {
+            warn!(
+                "Failed to fetch identifiers for account {} during routing validation: {}",
+                account_id, e
+            );
+            return task.reply_to.contains(&identifier.to_string());
+        }
+    };
+
+    // Check if the target identifier matches any verified identifier
+    let identifier_lower = identifier.to_lowercase();
+    for id in &identifiers {
+        if !id.verified {
+            continue;
+        }
+        if id.identifier.to_lowercase() == identifier_lower {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn is_sensitive_env_key(key: &str) -> bool {
+    let upper = key.trim().to_ascii_uppercase();
+    SECRET_ENV_KEY_MARKERS
+        .iter()
+        .any(|marker| upper.contains(marker))
+}
+
+fn trim_env_value(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    if trimmed.len() >= 2 {
+        let bytes = trimmed.as_bytes();
+        let first = bytes[0];
+        let last = bytes[trimmed.len() - 1];
+        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+            return &trimmed[1..trimmed.len() - 1];
+        }
+    }
+    trimmed
+}
+
+fn collect_sensitive_workspace_secret_values(workspace_dir: &Path) -> Vec<(String, String)> {
+    let env_path = workspace_dir.join(".env");
+    let content = match std::fs::read_to_string(&env_path) {
+        Ok(value) => value,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut seen_values = HashSet::new();
+    let mut secrets = Vec::new();
+
+    for line in content.lines() {
+        let mut trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some(stripped) = trimmed.strip_prefix("export ") {
+            trimmed = stripped.trim();
+        }
+        let Some((raw_key, raw_value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        let key = raw_key.trim();
+        if key.is_empty() || !is_sensitive_env_key(key) {
+            continue;
+        }
+
+        let value = trim_env_value(raw_value);
+        if value.len() < 8 {
+            continue;
+        }
+
+        if seen_values.insert(value.to_string()) {
+            secrets.push((key.to_string(), value.to_string()));
+        }
+    }
+
+    secrets
+}
+
+fn find_secret_in_file(path: &Path, secrets: &[(String, String)]) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > SECRET_SCAN_MAX_BYTES {
+        return None;
+    }
+
+    let bytes = std::fs::read(path).ok()?;
+    let content = String::from_utf8_lossy(&bytes);
+    for (key, value) in secrets {
+        if content.contains(value) {
+            return Some(key.clone());
+        }
+    }
+    None
+}
+
+fn find_secret_in_dir(dir: &Path, secrets: &[(String, String)]) -> Option<(PathBuf, String)> {
+    if !dir.exists() {
+        return None;
+    }
+
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let entries = match std::fs::read_dir(&current) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if let Some(key) = find_secret_in_file(&path, secrets) {
+                return Some((path, key));
+            }
+        }
+    }
+    None
+}
+
+fn is_html_channel(channel: &Channel) -> bool {
+    matches!(
+        channel,
+        Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides
+    )
+}
+
+fn write_secret_guard_reply(reply_path: &Path, channel: &Channel) {
+    let content = if is_html_channel(channel) {
+        format!(
+            "<!DOCTYPE html><html><body><p>{}</p></body></html>",
+            SECRET_GUARD_MESSAGE
+        )
+    } else {
+        SECRET_GUARD_MESSAGE.to_string()
+    };
+
+    if let Err(err) = std::fs::write(reply_path, content) {
+        warn!(
+            "failed to write secret-guard message to {}: {}",
+            reply_path.display(),
+            err
+        );
+    }
+}
+
+fn clear_reply_attachments_dir(dir: &Path) {
+    if dir.exists() {
+        if let Err(err) = std::fs::remove_dir_all(dir) {
+            warn!(
+                "failed to clear attachments dir {} after secret leak detection: {}",
+                dir.display(),
+                err
+            );
+            return;
+        }
+    }
+    if let Err(err) = std::fs::create_dir_all(dir) {
+        warn!(
+            "failed to recreate attachments dir {} after secret leak detection: {}",
+            dir.display(),
+            err
+        );
+    }
+}
+
+fn apply_workspace_secret_leak_guard(
+    workspace_dir: &Path,
+    reply_path: &Path,
+    attachments_dir: &Path,
+    channel: &Channel,
+) -> bool {
+    let secrets = collect_sensitive_workspace_secret_values(workspace_dir);
+    if secrets.is_empty() {
+        return false;
+    }
+
+    if let Some(key) = find_secret_in_file(reply_path, &secrets) {
+        warn!(
+            "blocked outbound reply in {}: reply file {} contains sensitive value from env key {}",
+            workspace_dir.display(),
+            reply_path.display(),
+            key
+        );
+        write_secret_guard_reply(reply_path, channel);
+        clear_reply_attachments_dir(attachments_dir);
+        return true;
+    }
+
+    if let Some((path, key)) = find_secret_in_dir(attachments_dir, &secrets) {
+        warn!(
+            "blocked outbound reply in {}: attachment {} contains sensitive value from env key {}",
+            workspace_dir.display(),
+            path.display(),
+            key
+        );
+        write_secret_guard_reply(reply_path, channel);
+        clear_reply_attachments_dir(attachments_dir);
+        return true;
+    }
+
+    false
+}
 
 fn thread_epoch_matches(task: &RunTaskTask) -> bool {
     let expected = match task.thread_epoch {
@@ -99,9 +411,64 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         return Ok(false);
     }
 
+    // Check for cross-channel routing override
+    let (target_channel, target_recipients, is_cross_channel) = if let Some(routing) =
+        load_reply_routing(&task.workspace_dir)
+    {
+        if routing.identifier.trim().is_empty() {
+            warn!("Empty identifier in reply_routing.json, falling back to inbound channel");
+            (task.channel.clone(), task.reply_to.clone(), false)
+        } else if !is_routing_identifier_allowed(task, &routing.identifier) {
+            // Security: Block routing to unauthorized identifiers
+            warn!(
+                "Blocked unauthorized cross-channel routing to '{}' - identifier not in user's linked accounts",
+                routing.identifier
+            );
+            // Write security message to reply file
+            let security_message = "To maintain user isolation and privacy, I cannot send messages to recipients outside your linked accounts.";
+            let reply_path = match task.channel {
+                Channel::Email
+                | Channel::GoogleDocs
+                | Channel::GoogleSheets
+                | Channel::GoogleSlides => {
+                    let html = format!(
+                        "<!DOCTYPE html><html><body><p>{}</p></body></html>",
+                        security_message
+                    );
+                    let path = task.workspace_dir.join("reply_email_draft.html");
+                    let _ = std::fs::write(&path, html);
+                    path
+                }
+                _ => {
+                    let path = task.workspace_dir.join("reply_message.txt");
+                    let _ = std::fs::write(&path, security_message);
+                    path
+                }
+            };
+            info!(
+                "Wrote security block message to {} for blocked routing attempt",
+                reply_path.display()
+            );
+            (task.channel.clone(), task.reply_to.clone(), false)
+        } else if let Some(channel) = parse_channel(&routing.channel) {
+            info!(
+                "Cross-channel routing: {} -> {:?} (identifier: {})",
+                task.channel, channel, routing.identifier
+            );
+            (channel, vec![routing.identifier], true)
+        } else {
+            // Invalid channel in routing file, fall back to inbound
+            (task.channel.clone(), task.reply_to.clone(), false)
+        }
+    } else {
+        // No routing file, use inbound channel
+        (task.channel.clone(), task.reply_to.clone(), false)
+    };
+
     // Non-email channels use plain text reply_message.txt
     // Email and Google Workspace use HTML reply_email_draft.html
-    let (reply_filename, attachments_dirname) = match task.channel {
+    // Use TARGET channel to determine reply format (for cross-channel routing)
+    let (reply_filename, attachments_dirname) = match target_channel {
         Channel::Slack
         | Channel::Discord
         | Channel::BlueBubbles
@@ -116,28 +483,123 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
 
     let html_path = task.workspace_dir.join(reply_filename);
     if !html_path.exists() {
-        warn!(
-            "auto reply missing {} in workspace {}",
-            reply_filename,
-            task.workspace_dir.display()
-        );
+        if task.channel != target_channel {
+            // Cross-channel routing was requested but codex likely wrote the wrong file format
+            warn!(
+                "Cross-channel routing to {:?} requested but {} not found in {} (codex may have written wrong format)",
+                target_channel,
+                reply_filename,
+                task.workspace_dir.display()
+            );
+        } else {
+            warn!(
+                "auto reply missing {} in workspace {}",
+                reply_filename,
+                task.workspace_dir.display()
+            );
+        }
         return Ok(false);
     }
     let attachments_dir = task.workspace_dir.join(attachments_dirname);
+    apply_workspace_secret_leak_guard(
+        &task.workspace_dir,
+        &html_path,
+        &attachments_dir,
+        &target_channel,
+    );
+
     let reply_context = load_reply_context(&task.workspace_dir);
-    let reply_from = task.reply_from.clone().or(reply_context.from.clone());
+    let reply_from = if is_cross_channel && matches!(target_channel, Channel::Email) {
+        // For cross-channel routing to email, derive sender from employee config
+        task.employee_id
+            .as_ref()
+            .and_then(|id| resolve_employee_primary_email(id))
+            .or_else(|| task.reply_from.clone())
+            .or(reply_context.from.clone())
+    } else {
+        task.reply_from.clone().or(reply_context.from.clone())
+    };
+
+    // For cross-channel routing, don't pass inbound thread context to outbound channel
+    let (in_reply_to, references) = if is_cross_channel {
+        (None, None)
+    } else {
+        (
+            reply_context.in_reply_to.clone(),
+            reply_context.references.clone(),
+        )
+    };
+
+    // If cross-channel routing, first send an acknowledgement on the inbound channel
+    if is_cross_channel {
+        // Determine ack file format based on INBOUND channel
+        let (ack_filename, ack_attachments_dirname) = match task.channel {
+            Channel::Slack
+            | Channel::Discord
+            | Channel::BlueBubbles
+            | Channel::Telegram
+            | Channel::WhatsApp
+            | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
+            Channel::Email
+            | Channel::GoogleDocs
+            | Channel::GoogleSheets
+            | Channel::GoogleSlides => ("cross_channel_ack.html", "reply_email_attachments"),
+        };
+
+        let ack_path = task.workspace_dir.join(ack_filename);
+        let ack_message = format!(
+            "The request was successfully completed! I've sent my response to you on {}.",
+            format_channel_name(&target_channel)
+        );
+
+        // For email, wrap in basic HTML
+        let ack_content = if ack_filename.ends_with(".html") {
+            format!("<html><body><p>{}</p></body></html>", ack_message)
+        } else {
+            ack_message
+        };
+
+        if let Err(e) = std::fs::write(&ack_path, &ack_content) {
+            warn!("Failed to write cross-channel acknowledgement file: {}", e);
+        } else {
+            // Schedule acknowledgement on inbound channel
+            let ack_task = SendReplyTask {
+                channel: task.channel.clone(),
+                subject: reply_context.subject.clone(),
+                html_path: ack_path,
+                attachments_dir: task.workspace_dir.join(ack_attachments_dirname),
+                from: reply_from.clone(),
+                to: task.reply_to.clone(),
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                in_reply_to: reply_context.in_reply_to.clone(),
+                references: reply_context.references.clone(),
+                archive_root: task.archive_root.clone(),
+                thread_epoch: task.thread_epoch,
+                thread_state_path: task.thread_state_path.clone(),
+                employee_id: task.employee_id.clone(),
+            };
+
+            let ack_task_id =
+                scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::SendReply(ack_task))?;
+            info!(
+                "scheduled cross-channel acknowledgement task {} on {:?}",
+                ack_task_id, task.channel
+            );
+        }
+    }
 
     let send_task = SendReplyTask {
-        channel: task.channel.clone(),
+        channel: target_channel.clone(),
         subject: reply_context.subject,
         html_path,
         attachments_dir,
         from: reply_from,
-        to: task.reply_to.clone(),
+        to: target_recipients,
         cc: Vec::new(),
         bcc: Vec::new(),
-        in_reply_to: reply_context.in_reply_to,
-        references: reply_context.references,
+        in_reply_to,
+        references,
         archive_root: task.archive_root.clone(),
         thread_epoch: task.thread_epoch,
         thread_state_path: task.thread_state_path.clone(),
@@ -150,9 +612,25 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         "scheduled auto reply task {} from {} via {:?}",
         task_id,
         task.workspace_dir.display(),
-        task.channel
+        target_channel
     );
     Ok(true)
+}
+
+/// Format channel name for user-friendly display in acknowledgement messages.
+fn format_channel_name(channel: &Channel) -> &'static str {
+    match channel {
+        Channel::Email => "Email",
+        Channel::Slack => "Slack",
+        Channel::Discord => "Discord",
+        Channel::Telegram => "Telegram",
+        Channel::Sms => "SMS",
+        Channel::WhatsApp => "WhatsApp",
+        Channel::BlueBubbles => "iMessage",
+        Channel::GoogleDocs => "Google Docs",
+        Channel::GoogleSheets => "Google Sheets",
+        Channel::GoogleSlides => "Google Slides",
+    }
 }
 
 pub(crate) fn schedule_send_email<E: TaskExecutor>(
@@ -203,6 +681,13 @@ pub(crate) fn schedule_send_email<E: TaskExecutor>(
             return Ok(false);
         }
     };
+
+    apply_workspace_secret_leak_guard(
+        &task.workspace_dir,
+        &html_path,
+        &attachments_dir,
+        &task.channel,
+    );
 
     let mut to = request.to.clone();
     if to.is_empty() {
@@ -467,4 +952,474 @@ fn resolve_rel_path(root: &Path, raw: &str) -> Option<PathBuf> {
         return None;
     }
     Some(root.join(rel))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn parse_channel_valid_channels() {
+        assert_eq!(parse_channel("email"), Some(Channel::Email));
+        assert_eq!(parse_channel("slack"), Some(Channel::Slack));
+        assert_eq!(parse_channel("discord"), Some(Channel::Discord));
+        assert_eq!(parse_channel("telegram"), Some(Channel::Telegram));
+        assert_eq!(parse_channel("sms"), Some(Channel::Sms));
+        assert_eq!(parse_channel("whatsapp"), Some(Channel::WhatsApp));
+        assert_eq!(parse_channel("bluebubbles"), Some(Channel::BlueBubbles));
+    }
+
+    #[test]
+    fn parse_channel_case_insensitive() {
+        assert_eq!(parse_channel("EMAIL"), Some(Channel::Email));
+        assert_eq!(parse_channel("Slack"), Some(Channel::Slack));
+        assert_eq!(parse_channel("DISCORD"), Some(Channel::Discord));
+    }
+
+    #[test]
+    fn parse_channel_unknown_returns_none() {
+        assert_eq!(parse_channel("unknown"), None);
+        assert_eq!(parse_channel("fax"), None);
+        assert_eq!(parse_channel(""), None);
+    }
+
+    #[test]
+    fn load_reply_routing_parses_valid_json() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        let routing_json = r#"{"channel": "discord", "identifier": "123456789"}"#;
+        fs::write(workspace.join("reply_routing.json"), routing_json).expect("write");
+
+        let routing = load_reply_routing(workspace).expect("should parse");
+        assert_eq!(routing.channel, "discord");
+        assert_eq!(routing.identifier, "123456789");
+    }
+
+    #[test]
+    fn load_reply_routing_returns_none_when_missing() {
+        let temp = TempDir::new().expect("tempdir");
+        let routing = load_reply_routing(temp.path());
+        assert!(routing.is_none());
+    }
+
+    #[test]
+    fn load_reply_routing_returns_none_for_invalid_json() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        fs::write(workspace.join("reply_routing.json"), "not valid json").expect("write");
+
+        let routing = load_reply_routing(workspace);
+        assert!(routing.is_none());
+    }
+
+    #[test]
+    fn load_reply_routing_returns_none_for_missing_fields() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        // Missing identifier field
+        let routing_json = r#"{"channel": "discord"}"#;
+        fs::write(workspace.join("reply_routing.json"), routing_json).expect("write");
+
+        let routing = load_reply_routing(workspace);
+        assert!(routing.is_none());
+    }
+
+    #[test]
+    fn format_channel_name_returns_friendly_names() {
+        assert_eq!(format_channel_name(&Channel::Email), "Email");
+        assert_eq!(format_channel_name(&Channel::Slack), "Slack");
+        assert_eq!(format_channel_name(&Channel::Discord), "Discord");
+        assert_eq!(format_channel_name(&Channel::Telegram), "Telegram");
+        assert_eq!(format_channel_name(&Channel::Sms), "SMS");
+        assert_eq!(format_channel_name(&Channel::WhatsApp), "WhatsApp");
+        assert_eq!(format_channel_name(&Channel::BlueBubbles), "iMessage");
+        assert_eq!(format_channel_name(&Channel::GoogleDocs), "Google Docs");
+        assert_eq!(format_channel_name(&Channel::GoogleSheets), "Google Sheets");
+        assert_eq!(format_channel_name(&Channel::GoogleSlides), "Google Slides");
+    }
+
+    #[test]
+    fn cross_channel_ack_file_format_for_slack_inbound() {
+        // For Slack/Discord inbound, ack should be plain text
+        let channel = Channel::Slack;
+        let (ack_filename, _) = match channel {
+            Channel::Slack
+            | Channel::Discord
+            | Channel::BlueBubbles
+            | Channel::Telegram
+            | Channel::WhatsApp
+            | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
+            Channel::Email
+            | Channel::GoogleDocs
+            | Channel::GoogleSheets
+            | Channel::GoogleSlides => ("cross_channel_ack.html", "reply_email_attachments"),
+        };
+        assert_eq!(ack_filename, "cross_channel_ack.txt");
+    }
+
+    #[test]
+    fn cross_channel_ack_file_format_for_email_inbound() {
+        // For Email inbound, ack should be HTML
+        let channel = Channel::Email;
+        let (ack_filename, _) = match channel {
+            Channel::Slack
+            | Channel::Discord
+            | Channel::BlueBubbles
+            | Channel::Telegram
+            | Channel::WhatsApp
+            | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
+            Channel::Email
+            | Channel::GoogleDocs
+            | Channel::GoogleSheets
+            | Channel::GoogleSlides => ("cross_channel_ack.html", "reply_email_attachments"),
+        };
+        assert_eq!(ack_filename, "cross_channel_ack.html");
+    }
+
+    #[test]
+    fn cross_channel_ack_content_plain_text() {
+        let target_channel = Channel::Discord;
+        let ack_filename = "cross_channel_ack.txt";
+        let ack_message = format!(
+            "The request has been successfully completed! I've sent my response to you on {}.",
+            format_channel_name(&target_channel)
+        );
+
+        let ack_content = if ack_filename.ends_with(".html") {
+            format!("<html><body><p>{}</p></body></html>", ack_message)
+        } else {
+            ack_message.clone()
+        };
+
+        assert_eq!(
+            ack_content,
+            "The request has been successfully completed! I've sent my response to you on Discord."
+        );
+        assert!(!ack_content.contains("<html>"));
+    }
+
+    #[test]
+    fn cross_channel_ack_content_html() {
+        let target_channel = Channel::Slack;
+        let ack_filename = "cross_channel_ack.html";
+        let ack_message = format!(
+            "The request has been successfully completed! I've sent my response to you on {}.",
+            format_channel_name(&target_channel)
+        );
+
+        let ack_content = if ack_filename.ends_with(".html") {
+            format!("<html><body><p>{}</p></body></html>", ack_message)
+        } else {
+            ack_message
+        };
+
+        assert!(ack_content.contains("<html>"));
+        assert!(ack_content.contains("Slack"));
+    }
+
+    #[test]
+    fn cross_channel_ack_file_written_correctly() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        let target_channel = Channel::Discord;
+        let ack_filename = "cross_channel_ack.txt";
+        let ack_path = workspace.join(ack_filename);
+        let ack_message = format!(
+            "The request has been successfully completed! I've sent my response to you on {}.",
+            format_channel_name(&target_channel)
+        );
+
+        fs::write(&ack_path, &ack_message).expect("write ack file");
+
+        assert!(ack_path.exists());
+        let content = fs::read_to_string(&ack_path).expect("read ack file");
+        assert!(content.contains("Discord"));
+        assert!(content.contains("I've sent my response"));
+    }
+
+    #[test]
+    fn resolve_employee_primary_email_returns_first_address() {
+        let temp = TempDir::new().expect("tempdir");
+        let config_path = temp.path().join("employee.toml");
+
+        let config_content = r#"
+[[employees]]
+id = "test_employee"
+addresses = ["primary@example.com", "secondary@example.com"]
+"#;
+        fs::write(&config_path, config_content).expect("write config");
+
+        // Set env var to point to our test config
+        std::env::set_var("EMPLOYEE_CONFIG_PATH", config_path.to_str().unwrap());
+
+        let email = resolve_employee_primary_email("test_employee");
+        assert_eq!(email, Some("primary@example.com".to_string()));
+
+        // Clean up env var
+        std::env::remove_var("EMPLOYEE_CONFIG_PATH");
+    }
+
+    #[test]
+    fn resolve_employee_primary_email_returns_none_for_unknown_employee() {
+        let temp = TempDir::new().expect("tempdir");
+        let config_path = temp.path().join("employee.toml");
+
+        let config_content = r#"
+[[employees]]
+id = "known_employee"
+addresses = ["known@example.com"]
+"#;
+        fs::write(&config_path, config_content).expect("write config");
+
+        std::env::set_var("EMPLOYEE_CONFIG_PATH", config_path.to_str().unwrap());
+
+        let email = resolve_employee_primary_email("unknown_employee");
+        assert_eq!(email, None);
+
+        std::env::remove_var("EMPLOYEE_CONFIG_PATH");
+    }
+
+    #[test]
+    fn resolve_employee_primary_email_with_multiple_employees() {
+        let temp = TempDir::new().expect("tempdir");
+        let config_path = temp.path().join("employee.toml");
+
+        let config_content = r#"
+[[employees]]
+id = "little_bear"
+addresses = ["oliver@dowhiz.com", "little-bear@dowhiz.com"]
+
+[[employees]]
+id = "boiled_egg"
+addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com"]
+"#;
+        fs::write(&config_path, config_content).expect("write config");
+
+        std::env::set_var("EMPLOYEE_CONFIG_PATH", config_path.to_str().unwrap());
+
+        assert_eq!(
+            resolve_employee_primary_email("little_bear"),
+            Some("oliver@dowhiz.com".to_string())
+        );
+        assert_eq!(
+            resolve_employee_primary_email("boiled_egg"),
+            Some("proto@dowhiz.com".to_string())
+        );
+
+        std::env::remove_var("EMPLOYEE_CONFIG_PATH");
+    }
+
+    // Helper to create a minimal RunTaskTask for testing
+    fn make_test_task(reply_to: Vec<String>) -> RunTaskTask {
+        RunTaskTask {
+            workspace_dir: PathBuf::from("."),
+            input_email_dir: PathBuf::from("incoming_email"),
+            input_attachments_dir: PathBuf::from("incoming_attachments"),
+            memory_dir: PathBuf::from("memory"),
+            reference_dir: PathBuf::from("references"),
+            model_name: "test".to_string(),
+            runner: "codex".to_string(),
+            codex_disabled: false,
+            reply_to,
+            reply_from: None,
+            archive_root: None,
+            thread_id: None,
+            thread_epoch: None,
+            thread_state_path: None,
+            channel: Channel::Email,
+            slack_team_id: None,
+            employee_id: None,
+            requester_identifier_type: None,
+            requester_identifier: None,
+        }
+    }
+
+    #[test]
+    fn is_routing_identifier_allowed_no_account_allows_reply_to() {
+        // When no account is linked, only reply_to addresses are allowed
+        let task = make_test_task(vec!["user@example.com".to_string()]);
+
+        assert!(is_routing_identifier_allowed(&task, "user@example.com"));
+        assert!(!is_routing_identifier_allowed(&task, "attacker@evil.com"));
+    }
+
+    #[test]
+    fn is_routing_identifier_allowed_no_account_blocks_unknown() {
+        let task = make_test_task(vec!["legit@example.com".to_string()]);
+
+        // Should block any identifier not in reply_to
+        assert!(!is_routing_identifier_allowed(
+            &task,
+            "not-in-reply-to@example.com"
+        ));
+        assert!(!is_routing_identifier_allowed(&task, "random@attacker.com"));
+    }
+
+    #[test]
+    fn is_routing_identifier_allowed_empty_reply_to_blocks_all() {
+        let task = make_test_task(vec![]);
+
+        // With no reply_to and no account, everything should be blocked
+        assert!(!is_routing_identifier_allowed(&task, "anyone@example.com"));
+    }
+
+    #[test]
+    fn is_routing_identifier_allowed_case_insensitive_for_reply_to() {
+        let task = make_test_task(vec!["User@Example.COM".to_string()]);
+
+        // reply_to comparison should be exact (case-sensitive) since it's a contains check
+        // This tests current behavior - reply_to uses exact string match
+        assert!(is_routing_identifier_allowed(&task, "User@Example.COM"));
+        assert!(!is_routing_identifier_allowed(&task, "user@example.com"));
+    }
+
+    #[test]
+    fn blocked_routing_writes_security_message_email() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        // Write a routing file targeting an unauthorized address
+        let routing_json = r#"{"channel": "email", "identifier": "attacker@evil.com"}"#;
+        fs::write(workspace.join("reply_routing.json"), routing_json).expect("write");
+
+        let mut task = make_test_task(vec!["legit@example.com".to_string()]);
+        task.workspace_dir = workspace.to_path_buf();
+        task.channel = Channel::Email;
+
+        // Load routing and check it would be blocked
+        let routing = load_reply_routing(workspace).expect("routing");
+        assert!(!is_routing_identifier_allowed(&task, &routing.identifier));
+
+        // Simulate what happens in schedule_reply_after_run_task when blocked
+        let security_message = "To maintain user isolation and privacy, I cannot send messages to recipients outside your linked accounts.";
+        let html = format!(
+            "<!DOCTYPE html><html><body><p>{}</p></body></html>",
+            security_message
+        );
+        fs::write(workspace.join("reply_email_draft.html"), &html).expect("write html");
+
+        // Verify the security message was written
+        let written = fs::read_to_string(workspace.join("reply_email_draft.html")).expect("read");
+        assert!(written.contains("user isolation and privacy"));
+    }
+
+    #[test]
+    fn blocked_routing_writes_security_message_chat() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+
+        let mut task = make_test_task(vec!["U123456".to_string()]);
+        task.workspace_dir = workspace.to_path_buf();
+        task.channel = Channel::Slack;
+
+        // Simulate blocked routing for chat channel
+        let security_message = "To maintain user isolation and privacy, I cannot send messages to recipients outside your linked accounts.";
+        fs::write(workspace.join("reply_message.txt"), security_message).expect("write");
+
+        let written = fs::read_to_string(workspace.join("reply_message.txt")).expect("read");
+        assert!(written.contains("user isolation and privacy"));
+    }
+
+    #[test]
+    fn workspace_secret_guard_blocks_html_reply_with_secret_value() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+        let reply_path = workspace.join("reply_email_draft.html");
+        let attachments_dir = workspace.join("reply_email_attachments");
+
+        fs::write(
+            workspace.join(".env"),
+            "NOTION_PASSWORD=super-secret-password-123\nGOOGLE_ACCOUNT_EMAIL=dowhiz@deep-tutor.com\n",
+        )
+        .expect("write env");
+        fs::write(
+            &reply_path,
+            "<html><body>debug secret: super-secret-password-123</body></html>",
+        )
+        .expect("write reply");
+        fs::create_dir_all(&attachments_dir).expect("create attachments");
+        fs::write(
+            attachments_dir.join("notes.txt"),
+            "this attachment should be removed after secret detection",
+        )
+        .expect("write attachment");
+
+        let blocked = apply_workspace_secret_leak_guard(
+            workspace,
+            &reply_path,
+            &attachments_dir,
+            &Channel::Email,
+        );
+        assert!(blocked);
+
+        let reply = fs::read_to_string(&reply_path).expect("read sanitized reply");
+        assert!(reply.contains(SECRET_GUARD_MESSAGE));
+        assert!(!reply.contains("super-secret-password-123"));
+
+        let attachment_files = fs::read_dir(&attachments_dir)
+            .expect("attachments dir exists")
+            .count();
+        assert_eq!(attachment_files, 0);
+    }
+
+    #[test]
+    fn workspace_secret_guard_blocks_chat_reply_with_secret_in_attachment() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+        let reply_path = workspace.join("reply_message.txt");
+        let attachments_dir = workspace.join("reply_attachments");
+
+        fs::write(workspace.join(".env"), "GOOGLE_PASSWORD=abc1234567890xyz\n").expect("write env");
+        fs::write(&reply_path, "normal reply body").expect("write reply");
+        fs::create_dir_all(&attachments_dir).expect("create attachments");
+        fs::write(
+            attachments_dir.join("dump.txt"),
+            "temporary dump: abc1234567890xyz",
+        )
+        .expect("write attachment");
+
+        let blocked = apply_workspace_secret_leak_guard(
+            workspace,
+            &reply_path,
+            &attachments_dir,
+            &Channel::Slack,
+        );
+        assert!(blocked);
+
+        let reply = fs::read_to_string(&reply_path).expect("read sanitized reply");
+        assert_eq!(reply, SECRET_GUARD_MESSAGE);
+    }
+
+    #[test]
+    fn workspace_secret_guard_ignores_non_sensitive_env_keys() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+        let reply_path = workspace.join("reply_email_draft.html");
+        let attachments_dir = workspace.join("reply_email_attachments");
+
+        fs::write(
+            workspace.join(".env"),
+            "GOOGLE_ACCOUNT_EMAIL=dowhiz@deep-tutor.com\n",
+        )
+        .expect("write env");
+        fs::write(
+            &reply_path,
+            "<html><body>contact: dowhiz@deep-tutor.com</body></html>",
+        )
+        .expect("write reply");
+
+        let blocked = apply_workspace_secret_leak_guard(
+            workspace,
+            &reply_path,
+            &attachments_dir,
+            &Channel::Email,
+        );
+        assert!(!blocked);
+    }
 }

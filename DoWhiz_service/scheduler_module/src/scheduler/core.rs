@@ -1,12 +1,11 @@
 use chrono::{DateTime, Local, Utc};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::account_store::lookup_account_by_channel;
+use crate::account_store::{lookup_account_by_channel, lookup_account_by_identifier};
 use crate::channel::Channel;
 
 use super::actions::{apply_scheduler_actions, ingest_follow_up_tasks, schedule_auto_reply};
@@ -26,7 +25,6 @@ pub struct Scheduler<E: TaskExecutor> {
     pub(super) tasks: Vec<ScheduledTask>,
     executor: E,
     pub(super) store: SchedulerStore,
-    failure_counts: HashMap<Uuid, u32>,
 }
 
 impl<E: TaskExecutor> Scheduler<E> {
@@ -38,7 +36,6 @@ impl<E: TaskExecutor> Scheduler<E> {
             tasks,
             executor,
             store,
-            failure_counts: HashMap::new(),
         })
     }
 
@@ -162,6 +159,42 @@ impl<E: TaskExecutor> Scheduler<E> {
         Ok(self.tasks.last().unwrap().id)
     }
 
+    /// Pushes a one-shot task into the future to avoid hot-loop retries.
+    pub fn defer_one_shot_task_by_id(
+        &mut self,
+        task_id: Uuid,
+        delay: chrono::Duration,
+    ) -> Result<bool, SchedulerError> {
+        let index = match self.tasks.iter().position(|task| task.id == task_id) {
+            Some(index) => index,
+            None => return Ok(false),
+        };
+        if !self.tasks[index].enabled {
+            return Ok(false);
+        }
+
+        let min_delay = chrono::Duration::seconds(1);
+        let effective_delay = if delay > chrono::Duration::zero() {
+            delay
+        } else {
+            min_delay
+        };
+
+        match &mut self.tasks[index].schedule {
+            Schedule::OneShot { run_at } => {
+                let deferred_until = Utc::now() + effective_delay;
+                if *run_at >= deferred_until {
+                    return Ok(false);
+                }
+                *run_at = deferred_until;
+                let updated_task = self.tasks[index].clone();
+                self.store.update_task(&updated_task)?;
+                Ok(true)
+            }
+            Schedule::Cron { .. } => Ok(false),
+        }
+    }
+
     pub fn execute_task_by_id(&mut self, task_id: Uuid) -> Result<bool, SchedulerError> {
         let now = Utc::now();
         let index = match self.tasks.iter().position(|task| task.id == task_id) {
@@ -211,9 +244,19 @@ impl<E: TaskExecutor> Scheduler<E> {
 
         match result {
             Ok(execution) => {
-                self.failure_counts.remove(&task_id);
-                self.store
-                    .record_execution_finish(execution_id, executed_at, "success", None)?;
+                if let Err(err) = self.store.reset_retry_count(&task_id.to_string()) {
+                    warn!(
+                        "failed to reset retry count for task {} after success: {}",
+                        task_id, err
+                    );
+                }
+                self.store.record_execution_finish(
+                    task_id,
+                    execution_id,
+                    executed_at,
+                    "success",
+                    None,
+                )?;
                 self.tasks[index].last_run = Some(executed_at);
                 match &mut self.tasks[index].schedule {
                     Schedule::Cron {
@@ -266,6 +309,7 @@ impl<E: TaskExecutor> Scheduler<E> {
             Err(err) => {
                 let message = err.to_string();
                 self.store.record_execution_finish(
+                    task_id,
                     execution_id,
                     executed_at,
                     "failed",
@@ -283,20 +327,39 @@ impl<E: TaskExecutor> Scheduler<E> {
                 }
                 // Disable one-shot tasks on failure, but allow a few retries for RunTask.
                 if matches!(self.tasks[index].schedule, Schedule::OneShot { .. }) {
-                    let mut should_disable = true;
+                    let mut disable_task = true;
                     if let TaskKind::RunTask(task) = &self.tasks[index].kind {
-                        let failures = self.failure_counts.entry(task_id).or_insert(0);
-                        *failures += 1;
-                        if *failures < RUN_TASK_FAILURE_LIMIT {
-                            should_disable = false;
+                        let task_id_str = task_id.to_string();
+                        let retry_count = self.store.increment_retry_count(&task_id_str)?;
+                        if retry_count < RUN_TASK_FAILURE_LIMIT {
+                            disable_task = false;
+                            let delay = run_task_retry_delay(retry_count, &message);
+                            if let Schedule::OneShot { run_at } = &mut self.tasks[index].schedule {
+                                *run_at = executed_at + delay;
+                            }
+                            let updated_task = self.tasks[index].clone();
+                            self.store.update_task(&updated_task)?;
+                            warn!(
+                                "run_task one-shot {} failed (attempt {}/{}), retrying in {}s: {}",
+                                task_id,
+                                retry_count,
+                                RUN_TASK_FAILURE_LIMIT,
+                                delay.num_seconds(),
+                                message
+                            );
                         } else {
                             if let Err(err) = notify_run_task_failure(task_id, task, &message) {
                                 warn!("failed to notify run_task failure: {}", err);
                             }
-                            self.failure_counts.remove(&task_id);
+                            if let Err(err) = self.store.reset_retry_count(&task_id_str) {
+                                warn!(
+                                    "failed to reset retry count for disabled task {}: {}",
+                                    task_id, err
+                                );
+                            }
                         }
                     }
-                    if should_disable {
+                    if disable_task {
                         self.tasks[index].enabled = false;
                         let updated_task = self.tasks[index].clone();
                         self.store.update_task(&updated_task)?;
@@ -353,7 +416,6 @@ impl<E: TaskExecutor> Scheduler<E> {
 
 /// Sync task execution status to user's account-level tasks.db for Discord/Google Workspace channels.
 /// This allows users to see task status in their dashboard for linked accounts.
-/// Note: Slack is excluded because reply_to contains channel_id, not user_id - Slack uses legacy user storage.
 fn sync_task_status_to_user_storage(
     task_id: Uuid,
     task: &RunTaskTask,
@@ -361,32 +423,50 @@ fn sync_task_status_to_user_storage(
     status: &str,
     error_message: Option<&str>,
 ) {
-    // Only sync for channels that support unified accounts (Slack excluded - uses legacy user storage)
+    // Only sync for channels that support unified accounts
     if !matches!(
         task.channel,
-        Channel::Discord | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides
+        Channel::Discord
+            | Channel::Slack
+            | Channel::Email
+            | Channel::GoogleDocs
+            | Channel::GoogleSheets
+            | Channel::GoogleSlides
     ) {
         return;
     }
 
-    // Get the identifier from reply_to (Discord: user_id, Google*: email)
-    let identifier = match task.reply_to.first() {
-        Some(id) => id,
-        None => {
-            warn!(
-                "no reply_to identifier for task {} to sync to user storage",
-                task_id
-            );
-            return;
+    // Look up the account using requester info if available, otherwise fall back to channel/reply_to
+    let account_id = if let (Some(id_type), Some(id_value)) = (
+        task.requester_identifier_type.as_ref(),
+        task.requester_identifier.as_ref(),
+    ) {
+        // Use explicit requester info (handles GitHub notifications via email correctly)
+        match lookup_account_by_identifier(id_type, id_value) {
+            Some(id) => id,
+            None => {
+                // No linked account, nothing to sync
+                return;
+            }
         }
-    };
-
-    // Look up the account by channel identifier
-    let account_id = match lookup_account_by_channel(&task.channel, identifier) {
-        Some(id) => id,
-        None => {
-            // No linked account, nothing to sync
-            return;
+    } else {
+        // Fall back to channel-based lookup for backwards compatibility
+        let identifier = match task.reply_to.first() {
+            Some(id) => id,
+            None => {
+                warn!(
+                    "no reply_to identifier for task {} to sync to user storage",
+                    task_id
+                );
+                return;
+            }
+        };
+        match lookup_account_by_channel(&task.channel, identifier) {
+            Some(id) => id,
+            None => {
+                // No linked account, nothing to sync
+                return;
+            }
         }
     };
 
@@ -415,6 +495,7 @@ fn sync_task_status_to_user_storage(
             match store.record_execution_start(task_id, executed_at) {
                 Ok(execution_id) => {
                     if let Err(err) = store.record_execution_finish(
+                        task_id,
                         execution_id,
                         executed_at,
                         status,
@@ -562,6 +643,32 @@ fn notify_run_task_failure(
     }
 
     Ok(())
+}
+
+fn run_task_retry_delay(retry_count: u32, error_message: &str) -> chrono::Duration {
+    const GENERIC_BASE_DELAY_SECS: i64 = 30;
+    const GENERIC_MAX_DELAY_SECS: i64 = 300;
+    const ACI_QUOTA_BASE_DELAY_SECS: i64 = 180;
+    const ACI_QUOTA_MAX_DELAY_SECS: i64 = 1800;
+
+    let is_aci_quota = is_aci_capacity_error(error_message);
+    let (base_secs, max_secs) = if is_aci_quota {
+        (ACI_QUOTA_BASE_DELAY_SECS, ACI_QUOTA_MAX_DELAY_SECS)
+    } else {
+        (GENERIC_BASE_DELAY_SECS, GENERIC_MAX_DELAY_SECS)
+    };
+    let exponent = retry_count.saturating_sub(1);
+    let multiplier = 2_i64.saturating_pow(exponent.min(10));
+    let secs = (base_secs.saturating_mul(multiplier)).min(max_secs);
+    chrono::Duration::seconds(secs.max(1))
+}
+
+fn is_aci_capacity_error(error_message: &str) -> bool {
+    let lowered = error_message.to_ascii_lowercase();
+    lowered.contains("containergroupquotareached")
+        || (lowered.contains("container group quota")
+            && lowered.contains("microsoft.containerinstance/containergroups"))
+        || lowered.contains("resource quota of container groups")
 }
 
 fn slack_thread_ts_from_thread_key(thread_key: Option<&str>) -> Option<String> {

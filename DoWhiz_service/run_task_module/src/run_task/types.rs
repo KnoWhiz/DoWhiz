@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Token usage from Codex JSON output
@@ -8,6 +8,32 @@ pub struct TokenUsage {
     #[serde(default)]
     pub cached_input_tokens: u64,
     pub output_tokens: u64,
+}
+
+/// User's linked channel identifiers for cross-channel routing
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UserIdentities {
+    /// DoWhiz account ID (UUID as string)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    /// Verified email addresses
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub emails: Vec<String>,
+    /// Slack user IDs (e.g., "U1234567890")
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slack_user_ids: Vec<String>,
+    /// Discord user IDs (e.g., "123456789012345678")
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discord_user_ids: Vec<String>,
+    /// Phone numbers (for SMS/WhatsApp/BlueBubbles)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub phone_numbers: Vec<String>,
+    /// Telegram user IDs
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub telegram_user_ids: Vec<String>,
+    /// Filesystem user IDs (UUIDs) that this account can access
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_user_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +53,8 @@ pub struct RunTaskParams {
     pub google_access_token: Option<String>,
     /// Whether the user has a unified DoWhiz account (for cross-channel memo sync)
     pub has_unified_account: bool,
+    /// User's linked channel identifiers for cross-channel routing
+    pub user_identities: UserIdentities,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +69,7 @@ pub(super) struct RunTaskRequest<'a> {
     pub(super) channel: &'a str,
     pub(super) google_access_token: Option<&'a str>,
     pub(super) has_unified_account: bool,
+    pub(super) user_identities: &'a UserIdentities,
 }
 
 #[derive(Debug, Clone, Deserialize)]

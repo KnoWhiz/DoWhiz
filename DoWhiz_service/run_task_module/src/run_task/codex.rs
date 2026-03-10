@@ -1,15 +1,17 @@
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::constants::{
-    CODEX_BASE_URL, CODEX_CONFIG_BLOCK_TEMPLATE, CODEX_CONFIG_MARKER, CODEX_MODEL_NAME,
-    CODEX_SANDBOX_MODE, DOCKER_CODEX_HOME_DIR, DOCKER_WORKSPACE_DIR,
+    CODEX_CONFIG_BASE_URL_PLACEHOLDER, CODEX_CONFIG_BLOCK_TEMPLATE, CODEX_CONFIG_MARKER,
+    CODEX_MODEL_NAME, CODEX_SANDBOX_MODE, DOCKER_CODEX_HOME_DIR, DOCKER_WORKSPACE_DIR,
 };
 use super::docker::{docker_cli_available, ensure_docker_image_available};
 use super::env::{env_enabled, normalize_env_prefix, read_env_list, read_env_trimmed};
@@ -45,10 +47,105 @@ const PAYMENT_ENV_KEYS: &[&str] = &[
     "X402_API_KEY",
     "X402_API_SECRET",
 ];
+const NOTION_EMAIL_ENV_KEYS: &[&str] = &["NOTION_ACCOUNT_EMAIL", "NOTION_EMAIL"];
+const NOTION_PASSWORD_ENV_KEYS: &[&str] = &["NOTION_PASSWORD"];
+const GOOGLE_EMAIL_ENV_KEYS: &[&str] = &[
+    "GOOGLE_ACCOUNT_EMAIL",
+    "GOOGLE_EMAIL",
+    "GOOGLE_EMPLOYEE_EMAIL",
+];
+const GOOGLE_PASSWORD_ENV_KEYS: &[&str] = &[
+    "GOOGLE_PASSWORD",
+    "GOOGLE_ACCOUNT_PASSWORD",
+    "GOOGLE_EMPLOYEE_PASSWORD",
+];
+const GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV: &str = "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE";
+const GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS: &[&str] = &[
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID",
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET",
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN",
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE",
+];
+const GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH: &str =
+    ".secrets/google_workspace_cli_credentials.json";
+const WEB_AUTH_ENV_MAPPINGS: &[(&str, &[&str])] = &[
+    ("NOTION_ACCOUNT_EMAIL", NOTION_EMAIL_ENV_KEYS),
+    ("NOTION_PASSWORD", NOTION_PASSWORD_ENV_KEYS),
+    ("GOOGLE_ACCOUNT_EMAIL", GOOGLE_EMAIL_ENV_KEYS),
+    ("GOOGLE_PASSWORD", GOOGLE_PASSWORD_ENV_KEYS),
+];
 
 const REMOTE_OUTPUT_FILENAME: &str = ".codex_remote_output.log";
 const REMOTE_EXIT_CODE_FILENAME: &str = ".codex_remote_exit_code";
 static ACI_CONTAINER_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Global registry of active ACI containers created by this process.
+/// Used for cleanup on shutdown to prevent orphaned containers.
+static ACTIVE_ACI_CONTAINERS: LazyLock<Mutex<HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn register_aci_container(name: &str) {
+    if let Ok(mut containers) = ACTIVE_ACI_CONTAINERS.lock() {
+        containers.insert(name.to_string());
+    }
+}
+
+fn deregister_aci_container(name: &str) {
+    if let Ok(mut containers) = ACTIVE_ACI_CONTAINERS.lock() {
+        containers.remove(name);
+    }
+}
+
+/// Clean up all active ACI containers created by this process.
+/// Called on shutdown to prevent orphaned containers.
+/// Returns the number of containers that were cleaned up.
+pub fn cleanup_all_aci_containers() -> usize {
+    let containers: Vec<String> = match ACTIVE_ACI_CONTAINERS.lock() {
+        Ok(mut guard) => guard.drain().collect(),
+        Err(poisoned) => poisoned.into_inner().drain().collect(),
+    };
+
+    if containers.is_empty() {
+        return 0;
+    }
+
+    eprintln!(
+        "[cleanup] cleaning up {} active ACI container(s) on shutdown",
+        containers.len()
+    );
+
+    let config = match load_azure_aci_config() {
+        Ok(config) => config,
+        Err(err) => {
+            eprintln!(
+                "[cleanup] failed to load ACI config, cannot clean up containers: {:?}",
+                err
+            );
+            return 0;
+        }
+    };
+
+    let mut cleaned = 0;
+    for container_name in &containers {
+        eprintln!("[cleanup] deleting ACI container: {}", container_name);
+        match delete_aci_container_with_retry(&config, container_name) {
+            Ok(()) => {
+                eprintln!("[cleanup] successfully deleted: {}", container_name);
+                cleaned += 1;
+            }
+            Err(err) => {
+                eprintln!("[cleanup] failed to delete {}: {:?}", container_name, err);
+            }
+        }
+    }
+
+    eprintln!(
+        "[cleanup] finished cleaning up {}/{} ACI container(s)",
+        cleaned,
+        containers.len()
+    );
+    cleaned
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExecutionBackend {
@@ -71,6 +168,43 @@ struct AzureAciConfig {
     file_share: String,
     host_share_root: PathBuf,
     container_share_root: PathBuf,
+}
+
+/// Check if cross-channel routing was requested and return the correct expected reply path.
+/// If reply_routing.json specifies a different target channel, compute the expected file for that target.
+fn resolve_expected_reply_path(workspace_dir: &Path, default_path: PathBuf) -> PathBuf {
+    let routing_file = workspace_dir.join("reply_routing.json");
+    if !routing_file.exists() {
+        return default_path;
+    }
+
+    // Try to read and parse reply_routing.json
+    let routing_content = match fs::read_to_string(&routing_file) {
+        Ok(content) => content,
+        Err(_) => return default_path,
+    };
+
+    // Parse the JSON to get target channel
+    let routing: serde_json::Value = match serde_json::from_str(&routing_content) {
+        Ok(v) => v,
+        Err(_) => return default_path,
+    };
+
+    let target_channel = match routing.get("channel").and_then(|c| c.as_str()) {
+        Some(ch) => ch.to_lowercase(),
+        None => return default_path,
+    };
+
+    // Determine expected reply path based on TARGET channel
+    match target_channel.as_str() {
+        "email" | "googledocs" | "googlesheets" | "googleslides" => {
+            workspace_dir.join("reply_email_draft.html")
+        }
+        "slack" | "discord" | "telegram" | "sms" | "whatsapp" | "bluebubbles" => {
+            workspace_dir.join("reply_message.txt")
+        }
+        _ => default_path,
+    }
 }
 
 pub(super) fn run_codex_task(
@@ -139,7 +273,7 @@ pub(super) fn run_codex_task(
             key: "AZURE_OPENAI_API_KEY_BACKUP",
         });
     }
-    let azure_endpoint = normalize_azure_endpoint(CODEX_BASE_URL);
+    let azure_endpoint = azure_endpoint_from_env()?;
     // Use model from request/database, fallback to env var, then constant
     let model_name = if request.model_name.trim().is_empty() {
         env::var("CODEX_MODEL").unwrap_or_else(|_| CODEX_MODEL_NAME.to_string())
@@ -160,12 +294,22 @@ pub(super) fn run_codex_task(
             .as_ref()
             .map(|dir| dir.join(DOCKER_CODEX_HOME_DIR))
             .unwrap_or_else(|| request.workspace_dir.join(DOCKER_CODEX_HOME_DIR));
-        ensure_codex_config_at(&codex_home, Path::new(DOCKER_WORKSPACE_DIR))?;
+        ensure_codex_config_at(
+            &codex_home,
+            Path::new(DOCKER_WORKSPACE_DIR),
+            &azure_endpoint,
+        )?;
     } else {
-        ensure_codex_config(request.workspace_dir)?;
+        ensure_codex_config(request.workspace_dir, &azure_endpoint)?;
     }
     ensure_github_cli_auth(&github_auth)?;
     let payment_env_overrides = collect_payment_env_overrides();
+    let web_auth_env_overrides = collect_web_auth_env_overrides();
+    let google_workspace_cli_env_overrides = collect_google_workspace_cli_env_overrides(
+        host_workspace_dir
+            .as_deref()
+            .unwrap_or(request.workspace_dir),
+    )?;
 
     let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
     let prompt = build_prompt(
@@ -179,6 +323,7 @@ pub(super) fn run_codex_task(
         !request.reply_to.is_empty(),
         request.channel,
         request.has_unified_account,
+        request.user_identities,
     );
 
     let timeout = run_task_timeout();
@@ -242,6 +387,27 @@ pub(super) fn run_codex_task(
         }
         for (key, value) in &payment_env_overrides {
             cmd.arg("-e").arg(format!("{}={}", key, value));
+        }
+        for (key, value) in &web_auth_env_overrides {
+            cmd.arg("-e").arg(format!("{}={}", key, value));
+        }
+        for (key, value) in &google_workspace_cli_env_overrides {
+            if key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV {
+                let host_path = PathBuf::from(value);
+                if let Some(container_path) =
+                    workspace_path_in_container(&host_path, host_workspace_dir)
+                {
+                    cmd.arg("-e")
+                        .arg(format!("{}={}", key, container_path.display()));
+                } else {
+                    eprintln!(
+                        "[run_task] warning: {} is outside workspace mount; skipping container override",
+                        GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV
+                    );
+                }
+            } else {
+                cmd.arg("-e").arg(format!("{}={}", key, value));
+            }
         }
         for (key, value) in &github_auth.env_overrides {
             cmd.arg("-e").arg(format!("{}={}", key, value));
@@ -348,6 +514,12 @@ pub(super) fn run_codex_task(
         for (key, value) in &payment_env_overrides {
             cmd.env(key, value);
         }
+        for (key, value) in &web_auth_env_overrides {
+            cmd.env(key, value);
+        }
+        for (key, value) in &google_workspace_cli_env_overrides {
+            cmd.env(key, value);
+        }
         for (key, value) in github_auth.env_overrides {
             cmd.env(key, value);
         }
@@ -420,15 +592,18 @@ pub(super) fn run_codex_task(
     }
 
     // Only check for reply file if a reply was expected
-    if !request.reply_to.is_empty() && !reply_html_path.exists() {
+    // Use cross-channel routing to determine actual expected path
+    let expected_reply_path =
+        resolve_expected_reply_path(request.workspace_dir, reply_html_path.clone());
+    if !request.reply_to.is_empty() && !expected_reply_path.exists() {
         return Err(RunTaskError::OutputMissing {
-            path: reply_html_path,
+            path: expected_reply_path,
             output: output_tail.clone(),
         });
     }
 
     Ok(RunTaskOutput {
-        reply_html_path,
+        reply_html_path: expected_reply_path,
         reply_attachments_dir,
         codex_output: output_tail,
         scheduled_tasks,
@@ -508,7 +683,7 @@ fn run_codex_task_azure_aci(
         });
     }
 
-    let azure_endpoint = normalize_azure_endpoint(CODEX_BASE_URL);
+    let azure_endpoint = azure_endpoint_from_env()?;
     let model_name = if request.model_name.trim().is_empty() {
         env::var("CODEX_MODEL").unwrap_or_else(|_| CODEX_MODEL_NAME.to_string())
     } else {
@@ -523,8 +698,11 @@ fn run_codex_task_azure_aci(
 
     let add_dirs = codex_add_dirs_remote(&host_workspace_dir, &container_workspace_dir)?;
     let codex_home = host_workspace_dir.join(DOCKER_CODEX_HOME_DIR);
-    ensure_codex_config_at(&codex_home, &container_workspace_dir)?;
+    ensure_codex_config_at(&codex_home, &container_workspace_dir, &azure_endpoint)?;
     let payment_env_overrides = collect_payment_env_overrides();
+    let web_auth_env_overrides = collect_web_auth_env_overrides();
+    let google_workspace_cli_env_overrides =
+        collect_google_workspace_cli_env_overrides(&host_workspace_dir)?;
 
     let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
     let prompt = build_prompt(
@@ -538,6 +716,7 @@ fn run_codex_task_azure_aci(
         !request.reply_to.is_empty(),
         request.channel,
         request.has_unified_account,
+        request.user_identities,
     );
 
     // Remote executor reads prompt from workspace file to avoid oversized command lines.
@@ -594,6 +773,26 @@ fn run_codex_task_azure_aci(
     for (key, value) in payment_env_overrides {
         env_overrides.push((key, value));
     }
+    for (key, value) in web_auth_env_overrides {
+        env_overrides.push((key, value));
+    }
+    for (key, value) in google_workspace_cli_env_overrides {
+        if key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV {
+            let host_path = PathBuf::from(&value);
+            if let Some(container_path) =
+                map_path_to_container(&host_path, &host_workspace_dir, &container_workspace_dir)
+            {
+                env_overrides.push((key, container_path.to_string_lossy().into_owned()));
+            } else {
+                eprintln!(
+                    "[run_task] warning: {} is outside Azure Files workspace mount; skipping container override",
+                    GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV
+                );
+            }
+        } else {
+            env_overrides.push((key, value));
+        }
+    }
     for (key, value) in github_auth.env_overrides {
         env_overrides.push((key, value));
     }
@@ -609,6 +808,9 @@ fn run_codex_task_azure_aci(
     }
 
     let container_name = build_aci_container_name();
+    // Register container BEFORE creation so it gets cleaned up on shutdown
+    // even if creation succeeds but execution fails partway through
+    register_aci_container(&container_name);
     eprintln!(
         "[run_task] azure_aci create container={} resource_group={} image={}",
         container_name, config.resource_group, config.image
@@ -626,10 +828,26 @@ fn run_codex_task_azure_aci(
         timeout,
     );
     eprintln!(
-        "[run_task] azure_aci delete container={} resource_group={}",
+        "[run_task] azure_aci delete-request container={} resource_group={}",
         container_name, config.resource_group
     );
-    let _ = delete_aci_container(&config, &container_name);
+    if let Err(cleanup_err) =
+        delete_aci_container_with_timeout(&config, &container_name, Duration::from_secs(20))
+    {
+        if !is_aci_not_found_error(&cleanup_err) {
+            eprintln!(
+                "[run_task] azure_aci delete-request failed container={} resource_group={} error={}",
+                container_name, config.resource_group, cleanup_err
+            );
+        }
+    }
+    if execution.is_err() {
+        eprintln!(
+            "[run_task] azure_aci execution failed for container={} (cleanup requested)",
+            container_name
+        );
+    }
+    deregister_aci_container(&container_name);
 
     let (container_state, container_logs) = execution?;
     eprintln!(
@@ -673,15 +891,18 @@ fn run_codex_task_azure_aci(
         });
     }
 
-    if !request.reply_to.is_empty() && !reply_html_path.exists() {
+    // Use cross-channel routing to determine actual expected path
+    let expected_reply_path =
+        resolve_expected_reply_path(request.workspace_dir, reply_html_path.clone());
+    if !request.reply_to.is_empty() && !expected_reply_path.exists() {
         return Err(RunTaskError::OutputMissing {
-            path: reply_html_path,
+            path: expected_reply_path,
             output: output_tail,
         });
     }
 
     Ok(RunTaskOutput {
-        reply_html_path,
+        reply_html_path: expected_reply_path,
         reply_attachments_dir,
         codex_output: output_tail,
         scheduled_tasks,
@@ -845,8 +1066,18 @@ fn run_azure_aci_execution(
     timeout: Duration,
 ) -> Result<(String, String), RunTaskError> {
     let workspace_sh = shell_quote(&container_workspace_dir.to_string_lossy());
-    let output_file = shell_quote(REMOTE_OUTPUT_FILENAME);
-    let exit_file = shell_quote(REMOTE_EXIT_CODE_FILENAME);
+    let output_file = shell_quote(
+        &container_workspace_dir
+            .join(REMOTE_OUTPUT_FILENAME)
+            .to_string_lossy(),
+    );
+    let exit_file = shell_quote(
+        &container_workspace_dir
+            .join(REMOTE_EXIT_CODE_FILENAME)
+            .to_string_lossy(),
+    );
+    let output_tmp = shell_quote(&format!("/tmp/{container_name}{REMOTE_OUTPUT_FILENAME}"));
+    let exit_tmp = shell_quote(&format!("/tmp/{container_name}{REMOTE_EXIT_CODE_FILENAME}"));
     let model_name_sh = shell_quote(model_name);
     let sandbox_mode_sh = shell_quote(sandbox_mode);
     let web_search_cfg = shell_quote("web_search=\"live\"");
@@ -860,13 +1091,35 @@ fn run_azure_aci_execution(
         .collect::<Vec<_>>()
         .join("\n");
     let bypass_enabled = if bypass_sandbox { "1" } else { "0" };
+    let execution_started = Instant::now();
 
     let script = format!(
         "set -euo pipefail\n\
 export PATH=/app/bin:$PATH\n\
-cd {workspace}\n\
+export PLAYWRIGHT_BROWSERS_PATH=\"${{PLAYWRIGHT_BROWSERS_PATH:-/app/.cache/ms-playwright}}\"\n\
+export XDG_CACHE_HOME=\"${{XDG_CACHE_HOME:-/tmp/.cache}}\"\n\
+export NPM_CONFIG_CACHE=\"${{NPM_CONFIG_CACHE:-/tmp/.npm}}\"\n\
+export npm_config_cache=\"$NPM_CONFIG_CACHE\"\n\
+mkdir -p \"$PLAYWRIGHT_BROWSERS_PATH\" \"$XDG_CACHE_HOME\" \"$NPM_CONFIG_CACHE\" /tmp/.local/share\n\
+if [ -z \"${{PLAYWRIGHT_MCP_EXECUTABLE_PATH:-}}\" ]; then\n\
+  if [ -x /opt/google/chrome/chrome ]; then\n\
+    export PLAYWRIGHT_MCP_EXECUTABLE_PATH=/opt/google/chrome/chrome\n\
+  else\n\
+    playwright_exec=\"$(find \"$PLAYWRIGHT_BROWSERS_PATH\" -type f \\( -path '*/chrome-linux/chrome' -o -path '*/chrome-linux64/chrome' \\) 2>/dev/null | head -n1 || true)\"\n\
+    if [ -n \"$playwright_exec\" ]; then\n\
+      export PLAYWRIGHT_MCP_EXECUTABLE_PATH=\"$playwright_exec\"\n\
+    fi\n\
+  fi\n\
+fi\n\
+rm -f {output} {exit} {output_tmp} {exit_tmp}\n\
+if ! cd {workspace}; then\n\
+  printf 'workspace path unavailable: %s\\n' {workspace} > {output_tmp}\n\
+  printf '%s' '1' > {exit_tmp}\n\
+  cp {output_tmp} {output} 2>/dev/null || true\n\
+  cp {exit_tmp} {exit} 2>/dev/null || true\n\
+  exit 1\n\
+fi\n\
 mkdir -p .config/gh .codex\n\
-rm -f {output} {exit}\n\
 codex_help=\"$(codex exec --help 2>/dev/null || true)\"\n\
 codex_cmd=(codex exec --json)\n\
 if printf '%s' \"$codex_help\" | grep -q -- '--search'; then\n\
@@ -894,13 +1147,23 @@ fi\n\
 {add_dirs}\n\
 codex_cmd+=(--skip-git-repo-check -m {model_name} -c {azure_env_cfg} --cd {workspace} \"$(cat .codex_remote_prompt.txt)\")\n\
 set +e\n\
-\"${{codex_cmd[@]}}\" > {output} 2>&1\n\
+\"${{codex_cmd[@]}}\" > {output_tmp} 2>&1\n\
 status=$?\n\
-printf '%s' \"$status\" > {exit}\n\
+printf '%s' \"$status\" > {exit_tmp}\n\
+cp {output_tmp} {output} 2>/dev/null || true\n\
+cp {exit_tmp} {exit} 2>/dev/null || true\n\
+if [ ! -f {output} ]; then\n\
+  echo '[run_task] warning: failed to persist codex output to workspace' >&2\n\
+fi\n\
+if [ ! -f {exit} ]; then\n\
+  echo '[run_task] warning: failed to persist codex exit code to workspace' >&2\n\
+fi\n\
 exit \"$status\"\n",
         workspace = workspace_sh,
         output = output_file,
         exit = exit_file,
+        output_tmp = output_tmp,
+        exit_tmp = exit_tmp,
         web_search_cfg = web_search_cfg,
         ask_for_approval_cfg = ask_for_approval_cfg,
         sandbox_mode = sandbox_mode_sh,
@@ -911,6 +1174,172 @@ exit \"$status\"\n",
         azure_env_cfg = azure_env_cfg,
     );
 
+    let create_command = format!("/bin/bash -lc {}", shell_quote(&script));
+    match create_aci_container(config, container_name, &create_command, env_overrides) {
+        Ok(()) => {}
+        Err(err) if is_aci_quota_error(&err) => {
+            eprintln!(
+                "[run_task] azure_aci quota reached for container={}, attempting stale cleanup",
+                container_name
+            );
+            match cleanup_stale_aci_containers(config) {
+                Ok(cleaned) => {
+                    eprintln!(
+                        "[run_task] azure_aci stale cleanup deleted {} container(s)",
+                        cleaned
+                    );
+                }
+                Err(cleanup_err) => {
+                    eprintln!(
+                        "[run_task] azure_aci stale cleanup failed before retry: {}",
+                        cleanup_err
+                    );
+                }
+            }
+            create_aci_container(config, container_name, &create_command, env_overrides)?;
+        }
+        Err(err) => return Err(err),
+    }
+
+    let elapsed_after_create = execution_started.elapsed();
+    if elapsed_after_create >= timeout {
+        return Err(RunTaskError::CommandTimeout {
+            command: "az container create",
+            timeout_secs: timeout.as_secs(),
+            output: format!(
+                "container create consumed run_task timeout budget before polling (elapsed={}s)",
+                elapsed_after_create.as_secs()
+            ),
+        });
+    }
+    let poll_timeout = timeout.saturating_sub(elapsed_after_create);
+    let container_state = poll_aci_state(config, container_name, poll_timeout)?;
+    let logs = fetch_aci_logs(config, container_name).unwrap_or_default();
+    Ok((container_state, logs))
+}
+
+fn poll_aci_state(
+    config: &AzureAciConfig,
+    container_name: &str,
+    timeout: Duration,
+) -> Result<String, RunTaskError> {
+    let start = Instant::now();
+    loop {
+        let elapsed = start.elapsed();
+        if elapsed >= timeout {
+            return Err(RunTaskError::CommandTimeout {
+                command: "az container show",
+                timeout_secs: timeout.as_secs(),
+                output: "container did not reach terminal state before timeout".to_string(),
+            });
+        }
+        let remaining = timeout.saturating_sub(elapsed);
+        let show_timeout = remaining.min(Duration::from_secs(60));
+
+        let mut show_cmd = Command::new("az");
+        show_cmd
+            .arg("container")
+            .arg("show")
+            .arg("--name")
+            .arg(container_name)
+            .arg("--resource-group")
+            .arg(&config.resource_group)
+            .arg("--query")
+            .arg("instanceView.state")
+            .arg("--output")
+            .arg("tsv")
+            .arg("--only-show-errors");
+        let output = run_command_with_timeout(show_cmd, show_timeout, "az container show")?;
+        if !output.status.success() {
+            let mut combined = String::new();
+            combined.push_str(&String::from_utf8_lossy(&output.stdout));
+            combined.push_str(&String::from_utf8_lossy(&output.stderr));
+            return Err(RunTaskError::CodexFailed {
+                status: output.status.code(),
+                output: tail_string(&combined, 4000),
+            });
+        }
+        let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if state.eq_ignore_ascii_case("Succeeded")
+            || state.eq_ignore_ascii_case("Failed")
+            || state.eq_ignore_ascii_case("Terminated")
+            || state.eq_ignore_ascii_case("Stopped")
+        {
+            return Ok(state);
+        }
+        if start.elapsed() >= timeout {
+            return Err(RunTaskError::CommandTimeout {
+                command: "az container show",
+                timeout_secs: timeout.as_secs(),
+                output: format!("last_state={state}"),
+            });
+        }
+        let sleep_for = Duration::from_secs(5).min(timeout.saturating_sub(start.elapsed()));
+        if !sleep_for.is_zero() {
+            thread::sleep(sleep_for);
+        }
+    }
+}
+
+fn fetch_aci_logs(config: &AzureAciConfig, container_name: &str) -> Result<String, RunTaskError> {
+    let mut logs_cmd = Command::new("az");
+    logs_cmd
+        .arg("container")
+        .arg("logs")
+        .arg("--name")
+        .arg(container_name)
+        .arg("--resource-group")
+        .arg(&config.resource_group)
+        .arg("--only-show-errors")
+        .arg("--output")
+        .arg("tsv");
+    let output = run_command_with_timeout(logs_cmd, Duration::from_secs(120), "az container logs")?;
+    if !output.status.success() {
+        return Ok(String::new());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn create_aci_container(
+    config: &AzureAciConfig,
+    container_name: &str,
+    create_command: &str,
+    env_overrides: &[(String, String)],
+) -> Result<(), RunTaskError> {
+    let mut create_cmd = build_aci_create_command(config, container_name, create_command);
+    if !env_overrides.is_empty() {
+        create_cmd.arg("--environment-variables");
+        for (key, value) in env_overrides {
+            create_cmd.arg(format!("{key}={value}"));
+        }
+    }
+
+    let create_output =
+        match run_command_with_timeout(create_cmd, Duration::from_secs(300), "az container create")
+        {
+            Ok(output) => output,
+            Err(RunTaskError::Io(err)) if err.kind() == io::ErrorKind::NotFound => {
+                return Err(RunTaskError::AzureCliNotFound)
+            }
+            Err(err) => return Err(err),
+        };
+    if !create_output.status.success() {
+        let mut combined = String::new();
+        combined.push_str(&String::from_utf8_lossy(&create_output.stdout));
+        combined.push_str(&String::from_utf8_lossy(&create_output.stderr));
+        return Err(RunTaskError::CodexFailed {
+            status: create_output.status.code(),
+            output: tail_string(&combined, 4000),
+        });
+    }
+    Ok(())
+}
+
+fn build_aci_create_command(
+    config: &AzureAciConfig,
+    container_name: &str,
+    create_command: &str,
+) -> Command {
     let mut create_cmd = Command::new("az");
     create_cmd
         .arg("container")
@@ -938,10 +1367,11 @@ exit \"$status\"\n",
         .arg("--azure-file-volume-mount-path")
         .arg(&config.container_share_root)
         .arg("--command-line")
-        .arg(format!("/bin/bash -lc {}", shell_quote(&script)))
+        .arg(create_command)
         .arg("--only-show-errors")
         .arg("--output")
         .arg("json");
+
     if let Some(location) = &config.location {
         create_cmd.arg("--location").arg(location);
     }
@@ -958,108 +1388,58 @@ exit \"$status\"\n",
             .arg("--registry-password")
             .arg(password);
     }
+    create_cmd
+}
 
-    if !env_overrides.is_empty() {
-        create_cmd.arg("--environment-variables");
-        for (key, value) in env_overrides {
-            create_cmd.arg(format!("{key}={value}"));
-        }
-    }
-
-    let create_output =
-        match run_command_with_timeout(create_cmd, Duration::from_secs(300), "az container create")
-        {
-            Ok(output) => output,
-            Err(RunTaskError::Io(err)) if err.kind() == io::ErrorKind::NotFound => {
-                return Err(RunTaskError::AzureCliNotFound)
-            }
-            Err(err) => return Err(err),
-        };
-    if !create_output.status.success() {
+fn cleanup_stale_aci_containers(config: &AzureAciConfig) -> Result<usize, RunTaskError> {
+    let mut list_cmd = Command::new("az");
+    list_cmd
+        .arg("container")
+        .arg("list")
+        .arg("--resource-group")
+        .arg(&config.resource_group)
+        .arg("--query")
+        .arg("[?starts_with(name, 'dwz-codex-') && (instanceView.state == null || instanceView.state == 'Succeeded' || instanceView.state == 'Failed' || instanceView.state == 'Terminated' || instanceView.state == 'Stopped')].name")
+        .arg("--output")
+        .arg("tsv")
+        .arg("--only-show-errors");
+    let output = run_command_with_timeout(list_cmd, Duration::from_secs(120), "az container list")?;
+    if !output.status.success() {
         let mut combined = String::new();
-        combined.push_str(&String::from_utf8_lossy(&create_output.stdout));
-        combined.push_str(&String::from_utf8_lossy(&create_output.stderr));
+        combined.push_str(&String::from_utf8_lossy(&output.stdout));
+        combined.push_str(&String::from_utf8_lossy(&output.stderr));
         return Err(RunTaskError::CodexFailed {
-            status: create_output.status.code(),
+            status: output.status.code(),
             output: tail_string(&combined, 4000),
         });
     }
+    let names = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>();
 
-    let container_state = poll_aci_state(config, container_name, timeout)?;
-    let logs = fetch_aci_logs(config, container_name).unwrap_or_default();
-    Ok((container_state, logs))
+    let mut cleaned = 0usize;
+    for name in names {
+        match delete_aci_container_with_retry(config, &name) {
+            Ok(()) => cleaned += 1,
+            Err(err) => {
+                eprintln!(
+                    "[run_task] azure_aci stale cleanup delete failed container={} error={}",
+                    name, err
+                );
+            }
+        }
+    }
+    Ok(cleaned)
 }
 
-fn poll_aci_state(
+fn delete_aci_container_with_timeout(
     config: &AzureAciConfig,
     container_name: &str,
-    timeout: Duration,
-) -> Result<String, RunTaskError> {
-    let start = Instant::now();
-    loop {
-        let mut show_cmd = Command::new("az");
-        show_cmd
-            .arg("container")
-            .arg("show")
-            .arg("--name")
-            .arg(container_name)
-            .arg("--resource-group")
-            .arg(&config.resource_group)
-            .arg("--query")
-            .arg("instanceView.state")
-            .arg("--output")
-            .arg("tsv")
-            .arg("--only-show-errors");
-        let output =
-            run_command_with_timeout(show_cmd, Duration::from_secs(60), "az container show")?;
-        if !output.status.success() {
-            let mut combined = String::new();
-            combined.push_str(&String::from_utf8_lossy(&output.stdout));
-            combined.push_str(&String::from_utf8_lossy(&output.stderr));
-            return Err(RunTaskError::CodexFailed {
-                status: output.status.code(),
-                output: tail_string(&combined, 4000),
-            });
-        }
-        let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if state.eq_ignore_ascii_case("Succeeded")
-            || state.eq_ignore_ascii_case("Failed")
-            || state.eq_ignore_ascii_case("Terminated")
-            || state.eq_ignore_ascii_case("Stopped")
-        {
-            return Ok(state);
-        }
-        if start.elapsed() >= timeout {
-            return Err(RunTaskError::CommandTimeout {
-                command: "az container show",
-                timeout_secs: timeout.as_secs(),
-                output: format!("last_state={state}"),
-            });
-        }
-        thread::sleep(Duration::from_secs(5));
-    }
-}
-
-fn fetch_aci_logs(config: &AzureAciConfig, container_name: &str) -> Result<String, RunTaskError> {
-    let mut logs_cmd = Command::new("az");
-    logs_cmd
-        .arg("container")
-        .arg("logs")
-        .arg("--name")
-        .arg(container_name)
-        .arg("--resource-group")
-        .arg(&config.resource_group)
-        .arg("--only-show-errors")
-        .arg("--output")
-        .arg("tsv");
-    let output = run_command_with_timeout(logs_cmd, Duration::from_secs(120), "az container logs")?;
-    if !output.status.success() {
-        return Ok(String::new());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-fn delete_aci_container(config: &AzureAciConfig, container_name: &str) -> Result<(), RunTaskError> {
+    command_timeout: Duration,
+) -> Result<(), RunTaskError> {
     let mut delete_cmd = Command::new("az");
     delete_cmd
         .arg("container")
@@ -1070,8 +1450,7 @@ fn delete_aci_container(config: &AzureAciConfig, container_name: &str) -> Result
         .arg(&config.resource_group)
         .arg("--yes")
         .arg("--only-show-errors");
-    let output =
-        run_command_with_timeout(delete_cmd, Duration::from_secs(120), "az container delete")?;
+    let output = run_command_with_timeout(delete_cmd, command_timeout, "az container delete")?;
     if !output.status.success() {
         let mut combined = String::new();
         combined.push_str(&String::from_utf8_lossy(&output.stdout));
@@ -1082,6 +1461,109 @@ fn delete_aci_container(config: &AzureAciConfig, container_name: &str) -> Result
         });
     }
     Ok(())
+}
+
+fn delete_aci_container(config: &AzureAciConfig, container_name: &str) -> Result<(), RunTaskError> {
+    delete_aci_container_with_timeout(config, container_name, Duration::from_secs(120))
+}
+
+fn delete_aci_container_with_retry(
+    config: &AzureAciConfig,
+    container_name: &str,
+) -> Result<(), RunTaskError> {
+    const DELETE_ATTEMPTS: usize = 3;
+    const DELETE_WAIT_TIMEOUT: Duration = Duration::from_secs(180);
+
+    let mut last_error: Option<RunTaskError> = None;
+    for attempt in 1..=DELETE_ATTEMPTS {
+        match delete_aci_container(config, container_name) {
+            Ok(()) => {
+                match wait_for_aci_container_deleted(config, container_name, DELETE_WAIT_TIMEOUT) {
+                    Ok(()) => return Ok(()),
+                    Err(err) => {
+                        last_error = Some(err);
+                    }
+                }
+            }
+            Err(err) if is_aci_not_found_error(&err) => return Ok(()),
+            Err(err) => {
+                last_error = Some(err);
+            }
+        }
+
+        if attempt < DELETE_ATTEMPTS {
+            thread::sleep(Duration::from_secs((attempt as u64) * 5));
+        }
+    }
+
+    Err(last_error.expect("delete_aci_container_with_retry exhausted without error"))
+}
+
+fn wait_for_aci_container_deleted(
+    config: &AzureAciConfig,
+    container_name: &str,
+    timeout: Duration,
+) -> Result<(), RunTaskError> {
+    let started = Instant::now();
+    loop {
+        let mut show_cmd = Command::new("az");
+        show_cmd
+            .arg("container")
+            .arg("show")
+            .arg("--name")
+            .arg(container_name)
+            .arg("--resource-group")
+            .arg(&config.resource_group)
+            .arg("--only-show-errors")
+            .arg("--output")
+            .arg("json");
+        let output =
+            run_command_with_timeout(show_cmd, Duration::from_secs(60), "az container show")?;
+        if output.status.success() {
+            if started.elapsed() >= timeout {
+                return Err(RunTaskError::CommandTimeout {
+                    command: "az container delete",
+                    timeout_secs: timeout.as_secs(),
+                    output: format!("container {} still exists", container_name),
+                });
+            }
+            thread::sleep(Duration::from_secs(5));
+            continue;
+        }
+
+        let mut combined = String::new();
+        combined.push_str(&String::from_utf8_lossy(&output.stdout));
+        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+        if is_aci_not_found_output(&combined) {
+            return Ok(());
+        }
+        return Err(RunTaskError::CodexFailed {
+            status: output.status.code(),
+            output: tail_string(&combined, 4000),
+        });
+    }
+}
+
+fn is_aci_quota_error(err: &RunTaskError) -> bool {
+    let message = err.to_string().to_ascii_lowercase();
+    message.contains("containergroupquotareached")
+        || (message.contains("container group quota")
+            && message.contains("microsoft.containerinstance/containergroups"))
+        || message.contains("resource quota of container groups")
+}
+
+fn is_aci_not_found_error(err: &RunTaskError) -> bool {
+    match err {
+        RunTaskError::CodexFailed { output, .. } => is_aci_not_found_output(output),
+        _ => false,
+    }
+}
+
+fn is_aci_not_found_output(output: &str) -> bool {
+    let lowered = output.to_ascii_lowercase();
+    lowered.contains("resourcenotfound")
+        || lowered.contains("could not be found")
+        || lowered.contains("was not found")
 }
 
 fn read_remote_exit_code(path: &Path) -> Option<i32> {
@@ -1102,15 +1584,16 @@ fn shell_quote(value: &str) -> String {
     out
 }
 
-fn ensure_codex_config(workspace_dir: &Path) -> Result<(), RunTaskError> {
+fn ensure_codex_config(workspace_dir: &Path, azure_endpoint: &str) -> Result<(), RunTaskError> {
     let home = env::var("HOME").map_err(|_| RunTaskError::MissingEnv { key: "HOME" })?;
     let config_dir = PathBuf::from(home).join(".codex");
-    ensure_codex_config_at(&config_dir, workspace_dir)
+    ensure_codex_config_at(&config_dir, workspace_dir, azure_endpoint)
 }
 
 fn ensure_codex_config_at(
     config_dir: &Path,
     trust_workspace_dir: &Path,
+    azure_endpoint: &str,
 ) -> Result<(), RunTaskError> {
     let config_path = config_dir.join("config.toml");
     let config_dir = config_path.parent().ok_or(RunTaskError::InvalidPath {
@@ -1120,7 +1603,7 @@ fn ensure_codex_config_at(
     })?;
     fs::create_dir_all(config_dir)?;
 
-    let block = CODEX_CONFIG_BLOCK_TEMPLATE;
+    let block = build_codex_config_block(azure_endpoint);
 
     let existing = if config_path.exists() {
         fs::read_to_string(&config_path)?
@@ -1198,6 +1681,12 @@ fn resolve_payment_env_prefix() -> Option<String> {
         })
 }
 
+fn resolve_web_auth_env_prefix() -> Option<String> {
+    read_env_trimmed("EMPLOYEE_WEB_AUTH_ENV_PREFIX")
+        .or_else(|| read_env_trimmed("WEB_AUTH_ENV_PREFIX"))
+        .or_else(resolve_payment_env_prefix)
+}
+
 fn collect_payment_env_overrides() -> Vec<(String, String)> {
     let prefix = resolve_payment_env_prefix();
     PAYMENT_ENV_KEYS
@@ -1214,6 +1703,187 @@ fn collect_payment_env_overrides() -> Vec<(String, String)> {
         .collect()
 }
 
+fn collect_web_auth_env_overrides() -> Vec<(String, String)> {
+    let prefix = resolve_web_auth_env_prefix();
+    WEB_AUTH_ENV_MAPPINGS
+        .iter()
+        .filter_map(|(canonical_key, candidate_keys)| {
+            resolve_env_from_candidates(candidate_keys, prefix.as_deref())
+                .map(|value| ((*canonical_key).to_string(), value))
+        })
+        .collect()
+}
+
+fn collect_google_workspace_cli_env_overrides(
+    workspace_dir: &Path,
+) -> Result<Vec<(String, String)>, RunTaskError> {
+    let mut overrides = Vec::new();
+    if let Some(path) = ensure_google_workspace_cli_credentials_file(workspace_dir)? {
+        overrides.push((
+            GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV.to_string(),
+            path.to_string_lossy().into_owned(),
+        ));
+    }
+    Ok(overrides)
+}
+
+#[derive(Debug)]
+struct GoogleWorkspaceCliCredentialParts {
+    client_id: String,
+    client_secret: String,
+    refresh_token: String,
+    credential_type: String,
+}
+
+fn ensure_google_workspace_cli_credentials_file(
+    workspace_dir: &Path,
+) -> Result<Option<PathBuf>, RunTaskError> {
+    let mut unresolved_outside_workspace: Option<PathBuf> = None;
+    if let Some(raw_path) = read_env_trimmed(GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV) {
+        let resolved = resolve_google_workspace_cli_credentials_file_path(workspace_dir, &raw_path);
+        if path_is_within_dir(&resolved, workspace_dir) {
+            env::set_var(
+                GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+                resolved.to_string_lossy().into_owned(),
+            );
+            return Ok(Some(resolved));
+        }
+
+        if resolved.exists() {
+            let materialized =
+                materialize_google_workspace_cli_credentials_file(workspace_dir, &resolved)?;
+            env::set_var(
+                GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+                materialized.to_string_lossy().into_owned(),
+            );
+            return Ok(Some(materialized));
+        }
+
+        eprintln!(
+            "[run_task] warning: {} points outside workspace and source file does not exist: {}",
+            GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+            resolved.display()
+        );
+        unresolved_outside_workspace = Some(resolved);
+    }
+
+    let Some(parts) = load_google_workspace_cli_credential_parts() else {
+        if let Some(path) = unresolved_outside_workspace {
+            env::set_var(
+                GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+                path.to_string_lossy().into_owned(),
+            );
+            return Ok(Some(path));
+        }
+        return Ok(None);
+    };
+
+    let credentials_path = workspace_dir.join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH);
+    if let Some(parent) = credentials_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let payload = serde_json::json!({
+        "client_id": parts.client_id,
+        "client_secret": parts.client_secret,
+        "refresh_token": parts.refresh_token,
+        "type": parts.credential_type,
+    });
+    let rendered = serde_json::to_string_pretty(&payload)
+        .map_err(|err| RunTaskError::Io(io::Error::other(err.to_string())))?;
+    fs::write(&credentials_path, format!("{rendered}\n"))?;
+    env::set_var(
+        GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+        credentials_path.to_string_lossy().into_owned(),
+    );
+
+    Ok(Some(credentials_path))
+}
+
+fn materialize_google_workspace_cli_credentials_file(
+    workspace_dir: &Path,
+    source_path: &Path,
+) -> Result<PathBuf, RunTaskError> {
+    let credentials_path = workspace_dir.join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH);
+    if let Some(parent) = credentials_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(source_path, &credentials_path).map_err(RunTaskError::Io)?;
+    Ok(credentials_path)
+}
+
+fn path_is_within_dir(path: &Path, dir: &Path) -> bool {
+    path.strip_prefix(dir)
+        .map(|relative| {
+            !relative
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+        })
+        .unwrap_or(false)
+}
+
+fn resolve_google_workspace_cli_credentials_file_path(
+    workspace_dir: &Path,
+    raw_path: &str,
+) -> PathBuf {
+    let candidate = PathBuf::from(raw_path);
+    if candidate.is_absolute() {
+        candidate
+    } else {
+        workspace_dir.join(candidate)
+    }
+}
+
+fn load_google_workspace_cli_credential_parts() -> Option<GoogleWorkspaceCliCredentialParts> {
+    let client_id = read_env_trimmed("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID");
+    let client_secret = read_env_trimmed("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET");
+    let refresh_token = read_env_trimmed("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN");
+    let credential_type = read_env_trimmed("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE")
+        .unwrap_or_else(|| "authorized_user".to_string());
+
+    let has_any = GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS
+        .iter()
+        .any(|key| read_env_trimmed(key).is_some());
+    if !has_any {
+        return None;
+    }
+
+    let (Some(client_id), Some(client_secret), Some(refresh_token)) =
+        (client_id, client_secret, refresh_token)
+    else {
+        eprintln!(
+            "[run_task] warning: incomplete Google Workspace CLI credential components; expected {}, {}, {}",
+            GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS[0],
+            GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS[1],
+            GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS[2],
+        );
+        return None;
+    };
+
+    Some(GoogleWorkspaceCliCredentialParts {
+        client_id,
+        client_secret,
+        refresh_token,
+        credential_type,
+    })
+}
+
+fn resolve_env_from_candidates(candidates: &[&str], prefix: Option<&str>) -> Option<String> {
+    for key in candidates {
+        if let Some(value) = read_env_trimmed(key) {
+            return Some(value);
+        }
+    }
+    if let Some(prefix) = prefix {
+        for key in candidates {
+            if let Some(value) = read_env_trimmed(&format!("{}_{}", prefix, key)) {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
 fn codex_add_dirs(workspace_dir: &Path, use_docker: bool) -> Result<Vec<String>, RunTaskError> {
     let mut add_dirs = Vec::new();
     if use_docker {
@@ -1227,6 +1897,18 @@ fn codex_add_dirs(workspace_dir: &Path, use_docker: bool) -> Result<Vec<String>,
         add_dirs.push(gh_config_dir.to_string_lossy().into_owned());
     }
     Ok(add_dirs)
+}
+
+fn azure_endpoint_from_env() -> Result<String, RunTaskError> {
+    let endpoint =
+        read_env_trimmed("AZURE_OPENAI_ENDPOINT_BACKUP").ok_or(RunTaskError::MissingEnv {
+            key: "AZURE_OPENAI_ENDPOINT_BACKUP",
+        })?;
+    Ok(normalize_azure_endpoint(&endpoint))
+}
+
+fn build_codex_config_block(azure_endpoint: &str) -> String {
+    CODEX_CONFIG_BLOCK_TEMPLATE.replace(CODEX_CONFIG_BASE_URL_PLACEHOLDER, azure_endpoint)
 }
 
 fn normalize_azure_endpoint(endpoint: &str) -> String {
@@ -1868,6 +2550,335 @@ mod tests {
     }
 
     #[test]
+    fn test_collect_web_auth_env_overrides_uses_employee_prefix_fallback() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset("NOTION_ACCOUNT_EMAIL"),
+            EnvVarGuard::unset("NOTION_PASSWORD"),
+            EnvVarGuard::unset("EMPLOYEE_WEB_AUTH_ENV_PREFIX"),
+            EnvVarGuard::unset("WEB_AUTH_ENV_PREFIX"),
+            EnvVarGuard::unset("EMPLOYEE_PAYMENT_ENV_PREFIX"),
+            EnvVarGuard::unset("PAYMENT_ENV_PREFIX"),
+            EnvVarGuard::unset("EMPLOYEE_GITHUB_ENV_PREFIX"),
+            EnvVarGuard::unset("GITHUB_ENV_PREFIX"),
+            EnvVarGuard::set("EMPLOYEE_ID", "boiled_egg"),
+            EnvVarGuard::set("PROTO_NOTION_ACCOUNT_EMAIL", "proto-notion@example.com"),
+            EnvVarGuard::set("PROTO_NOTION_PASSWORD", "proto-password"),
+        ];
+
+        let overrides = collect_web_auth_env_overrides();
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "NOTION_ACCOUNT_EMAIL" && v == "proto-notion@example.com"));
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "NOTION_PASSWORD" && v == "proto-password"));
+    }
+
+    #[test]
+    fn test_collect_web_auth_env_overrides_prefers_unprefixed_values() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set("EMPLOYEE_WEB_AUTH_ENV_PREFIX", "PROTO"),
+            EnvVarGuard::set("NOTION_ACCOUNT_EMAIL", "global-notion@example.com"),
+            EnvVarGuard::set("PROTO_NOTION_ACCOUNT_EMAIL", "prefixed-notion@example.com"),
+        ];
+
+        let overrides = collect_web_auth_env_overrides();
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "NOTION_ACCOUNT_EMAIL" && v == "global-notion@example.com"));
+    }
+
+    #[test]
+    fn test_collect_web_auth_env_overrides_maps_google_employee_aliases() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset("GOOGLE_ACCOUNT_EMAIL"),
+            EnvVarGuard::unset("GOOGLE_EMAIL"),
+            EnvVarGuard::unset("GOOGLE_ACCOUNT_PASSWORD"),
+            EnvVarGuard::unset("GOOGLE_PASSWORD"),
+            EnvVarGuard::set("GOOGLE_EMPLOYEE_EMAIL", "employee-google@example.com"),
+            EnvVarGuard::set("GOOGLE_EMPLOYEE_PASSWORD", "employee-password"),
+        ];
+
+        let overrides = collect_web_auth_env_overrides();
+        assert_eq!(
+            overrides
+                .iter()
+                .find(|(k, _)| k == "GOOGLE_ACCOUNT_EMAIL")
+                .map(|(_, v)| v.as_str()),
+            Some("employee-google@example.com")
+        );
+        assert_eq!(
+            overrides
+                .iter()
+                .find(|(k, _)| k == "GOOGLE_PASSWORD")
+                .map(|(_, v)| v.as_str()),
+            Some("employee-password")
+        );
+    }
+
+    #[test]
+    fn test_collect_web_auth_env_overrides_maps_prefixed_google_aliases() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset("GOOGLE_ACCOUNT_EMAIL"),
+            EnvVarGuard::unset("GOOGLE_EMAIL"),
+            EnvVarGuard::unset("GOOGLE_EMPLOYEE_EMAIL"),
+            EnvVarGuard::unset("GOOGLE_ACCOUNT_PASSWORD"),
+            EnvVarGuard::unset("GOOGLE_PASSWORD"),
+            EnvVarGuard::unset("GOOGLE_EMPLOYEE_PASSWORD"),
+            EnvVarGuard::set("EMPLOYEE_WEB_AUTH_ENV_PREFIX", "PROTO"),
+            EnvVarGuard::set(
+                "PROTO_GOOGLE_EMPLOYEE_EMAIL",
+                "proto-employee-google@example.com",
+            ),
+            EnvVarGuard::set("PROTO_GOOGLE_EMPLOYEE_PASSWORD", "proto-employee-password"),
+        ];
+
+        let overrides = collect_web_auth_env_overrides();
+        assert_eq!(
+            overrides
+                .iter()
+                .find(|(k, _)| k == "GOOGLE_ACCOUNT_EMAIL")
+                .map(|(_, v)| v.as_str()),
+            Some("proto-employee-google@example.com")
+        );
+        assert_eq!(
+            overrides
+                .iter()
+                .find(|(k, _)| k == "GOOGLE_PASSWORD")
+                .map(|(_, v)| v.as_str()),
+            Some("proto-employee-password")
+        );
+    }
+
+    #[test]
+    fn test_collect_web_auth_env_overrides_prefers_primary_google_keys_over_aliases() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set("GOOGLE_ACCOUNT_EMAIL", "primary-google@example.com"),
+            EnvVarGuard::set("GOOGLE_EMPLOYEE_EMAIL", "alias-google@example.com"),
+            EnvVarGuard::set("GOOGLE_PASSWORD", "primary-password"),
+            EnvVarGuard::set("GOOGLE_EMPLOYEE_PASSWORD", "alias-password"),
+        ];
+
+        let overrides = collect_web_auth_env_overrides();
+        assert_eq!(
+            overrides
+                .iter()
+                .find(|(k, _)| k == "GOOGLE_ACCOUNT_EMAIL")
+                .map(|(_, v)| v.as_str()),
+            Some("primary-google@example.com")
+        );
+        assert_eq!(
+            overrides
+                .iter()
+                .find(|(k, _)| k == "GOOGLE_PASSWORD")
+                .map(|(_, v)| v.as_str()),
+            Some("primary-password")
+        );
+    }
+
+    #[test]
+    fn test_collect_google_workspace_cli_env_overrides_builds_credentials_file() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset(GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID",
+                "client-id-123",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET",
+                "client-secret-456",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN",
+                "refresh-token-789",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE",
+                "authorized_user",
+            ),
+        ];
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let overrides =
+            collect_google_workspace_cli_env_overrides(temp.path()).expect("collect overrides");
+        let credentials_path = overrides
+            .iter()
+            .find(|(key, _)| key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV)
+            .map(|(_, value)| PathBuf::from(value))
+            .expect("credentials path override");
+        assert_eq!(
+            credentials_path,
+            temp.path().join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH)
+        );
+        assert!(credentials_path.exists());
+
+        let json = fs::read_to_string(&credentials_path).expect("read credentials file");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json).expect("parse credentials json");
+        assert_eq!(
+            parsed.get("client_id").and_then(|value| value.as_str()),
+            Some("client-id-123")
+        );
+        assert_eq!(
+            parsed.get("client_secret").and_then(|value| value.as_str()),
+            Some("client-secret-456")
+        );
+        assert_eq!(
+            parsed.get("refresh_token").and_then(|value| value.as_str()),
+            Some("refresh-token-789")
+        );
+        assert_eq!(
+            parsed.get("type").and_then(|value| value.as_str()),
+            Some("authorized_user")
+        );
+    }
+
+    #[test]
+    fn test_collect_google_workspace_cli_env_overrides_uses_existing_file_env() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set(
+                GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+                ".auth/google_workspace_cli_credentials.json",
+            ),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE"),
+        ];
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let overrides =
+            collect_google_workspace_cli_env_overrides(temp.path()).expect("collect overrides");
+        let credentials_path = overrides
+            .iter()
+            .find(|(key, _)| key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV)
+            .map(|(_, value)| PathBuf::from(value))
+            .expect("credentials path override");
+        assert_eq!(
+            credentials_path,
+            temp.path()
+                .join(".auth/google_workspace_cli_credentials.json")
+        );
+    }
+
+    #[test]
+    fn test_collect_google_workspace_cli_env_overrides_materializes_external_file_env() {
+        let _lock = env_lock();
+        let workspace = tempfile::tempdir().expect("workspace tempdir");
+        let external = tempfile::tempdir().expect("external tempdir");
+        let external_file = external.path().join("credentials.json");
+        let external_file_str = external_file.to_string_lossy().to_string();
+        fs::write(
+            &external_file,
+            "{\n  \"client_id\": \"external-client\"\n}\n",
+        )
+        .expect("write external credentials");
+
+        let _guards = vec![
+            EnvVarGuard::set(GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV, &external_file_str),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE"),
+        ];
+
+        let overrides = collect_google_workspace_cli_env_overrides(workspace.path())
+            .expect("collect overrides");
+        let credentials_path = overrides
+            .iter()
+            .find(|(key, _)| key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV)
+            .map(|(_, value)| PathBuf::from(value))
+            .expect("credentials path override");
+        assert_eq!(
+            credentials_path,
+            workspace
+                .path()
+                .join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH)
+        );
+        let content = fs::read_to_string(&credentials_path).expect("read materialized credentials");
+        assert!(content.contains("external-client"));
+    }
+
+    #[test]
+    fn test_collect_google_workspace_cli_env_overrides_external_file_falls_back_to_components() {
+        let _lock = env_lock();
+        let workspace = tempfile::tempdir().expect("workspace tempdir");
+        let missing_external = workspace.path().join("..").join("missing-credentials.json");
+        let missing_external_str = missing_external.to_string_lossy().to_string();
+        let _guards = vec![
+            EnvVarGuard::set(
+                GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+                &missing_external_str,
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID",
+                "fallback-client",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET",
+                "fallback-secret",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN",
+                "fallback-refresh",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE",
+                "authorized_user",
+            ),
+        ];
+
+        let overrides = collect_google_workspace_cli_env_overrides(workspace.path())
+            .expect("collect overrides");
+        let credentials_path = overrides
+            .iter()
+            .find(|(key, _)| key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV)
+            .map(|(_, value)| PathBuf::from(value))
+            .expect("credentials path override");
+        assert_eq!(
+            credentials_path,
+            workspace
+                .path()
+                .join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH)
+        );
+        let content = fs::read_to_string(&credentials_path).expect("read generated credentials");
+        assert!(content.contains("fallback-client"));
+        assert!(content.contains("fallback-secret"));
+        assert!(content.contains("fallback-refresh"));
+    }
+
+    #[test]
+    fn test_collect_google_workspace_cli_env_overrides_skips_when_components_incomplete() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset(GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID",
+                "client-id-123",
+            ),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE"),
+        ];
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let overrides =
+            collect_google_workspace_cli_env_overrides(temp.path()).expect("collect overrides");
+        assert!(overrides.is_empty());
+        assert!(!temp
+            .path()
+            .join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH)
+            .exists());
+    }
+
+    #[test]
     fn test_codex_sandbox_mode_prefers_codex_sandbox_mode() {
         let _lock = env_lock();
         let _guards = vec![
@@ -1924,6 +2935,24 @@ mod tests {
             EnvVarGuard::set("RUN_TASK_EXECUTION_BACKEND", "azure_aci"),
         ];
         assert_eq!(resolve_execution_backend(), ExecutionBackend::AzureAci);
+    }
+
+    #[test]
+    fn test_is_aci_quota_error_detects_container_group_quota_reached() {
+        let err = RunTaskError::CodexFailed {
+            status: Some(1),
+            output: "ERROR: (ContainerGroupQuotaReached) quota exceeded".to_string(),
+        };
+        assert!(is_aci_quota_error(&err));
+    }
+
+    #[test]
+    fn test_is_aci_not_found_error_detects_missing_container_group() {
+        let err = RunTaskError::CodexFailed {
+            status: Some(3),
+            output: "ERROR: (ResourceNotFound) The Resource 'Microsoft.ContainerInstance/containerGroups/dwz-codex-abc' under resource group 'rg' was not found.".to_string(),
+        };
+        assert!(is_aci_not_found_error(&err));
     }
 
     #[test]
@@ -1995,5 +3024,143 @@ mod tests {
         let first = build_aci_container_name();
         let second = build_aci_container_name();
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn test_register_and_deregister_aci_container() {
+        let name = "test-container-12345";
+        register_aci_container(name);
+        {
+            let containers = ACTIVE_ACI_CONTAINERS.lock().unwrap();
+            assert!(containers.contains(name));
+        }
+        deregister_aci_container(name);
+        {
+            let containers = ACTIVE_ACI_CONTAINERS.lock().unwrap();
+            assert!(!containers.contains(name));
+        }
+    }
+
+    /// E2E test that creates a real ACI container and verifies cleanup works.
+    /// Run with: cargo test -p run_task_module test_aci_cleanup_e2e -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn test_aci_cleanup_e2e() {
+        // Skip if Azure credentials not configured
+        let config = match load_azure_aci_config() {
+            Ok(config) => config,
+            Err(err) => {
+                eprintln!("Skipping ACI cleanup E2E test: {:?}", err);
+                return;
+            }
+        };
+
+        // Create a minimal container that just sleeps
+        let container_name = build_aci_container_name();
+        eprintln!("[test] Creating ACI container: {}", container_name);
+
+        let mut create_cmd = Command::new("az");
+        create_cmd
+            .arg("container")
+            .arg("create")
+            .arg("--name")
+            .arg(&container_name)
+            .arg("--resource-group")
+            .arg(&config.resource_group)
+            .arg("--image")
+            .arg("mcr.microsoft.com/azuredocs/aci-helloworld:latest")
+            .arg("--os-type")
+            .arg("Linux")
+            .arg("--restart-policy")
+            .arg("Never")
+            .arg("--cpu")
+            .arg("0.5")
+            .arg("--memory")
+            .arg("0.5")
+            .arg("--only-show-errors")
+            .arg("--output")
+            .arg("json");
+
+        let create_output = create_cmd
+            .output()
+            .expect("failed to run az container create");
+        if !create_output.status.success() {
+            let stderr = String::from_utf8_lossy(&create_output.stderr);
+            panic!("Failed to create test container: {}", stderr);
+        }
+        eprintln!("[test] Container created successfully");
+
+        // Register it (simulating what run_codex_task_azure_aci does)
+        register_aci_container(&container_name);
+        {
+            let containers = ACTIVE_ACI_CONTAINERS.lock().unwrap();
+            assert!(
+                containers.contains(&container_name),
+                "Container should be registered"
+            );
+        }
+
+        // Now call cleanup (simulating shutdown without normal deletion)
+        eprintln!("[test] Calling cleanup_all_aci_containers...");
+        let cleaned = cleanup_all_aci_containers();
+        assert_eq!(cleaned, 1, "Should have cleaned up 1 container");
+
+        // Verify the registry is empty
+        {
+            let containers = ACTIVE_ACI_CONTAINERS.lock().unwrap();
+            assert!(
+                containers.is_empty(),
+                "Registry should be empty after cleanup"
+            );
+        }
+
+        // Verify container is actually deleted by trying to show it
+        eprintln!("[test] Verifying container is deleted...");
+        let mut show_cmd = Command::new("az");
+        show_cmd
+            .arg("container")
+            .arg("show")
+            .arg("--name")
+            .arg(&container_name)
+            .arg("--resource-group")
+            .arg(&config.resource_group)
+            .arg("--only-show-errors");
+
+        let show_output = show_cmd.output().expect("failed to run az container show");
+        assert!(
+            !show_output.status.success(),
+            "Container should not exist after cleanup"
+        );
+        eprintln!("[test] SUCCESS: Container was deleted by cleanup!");
+    }
+
+    #[test]
+    fn test_resolve_expected_reply_path_with_cross_channel_routing_to_email() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let workspace = temp_dir.path();
+
+        // Write reply_routing.json specifying email target
+        let routing = r#"{"channel": "email", "identifier": "user@example.com"}"#;
+        fs::write(workspace.join("reply_routing.json"), routing).expect("write routing file");
+
+        let default_path = workspace.join("reply_message.txt");
+        let resolved = resolve_expected_reply_path(workspace, default_path.clone());
+
+        // Should resolve to reply_email_draft.html for email target
+        assert_eq!(resolved, workspace.join("reply_email_draft.html"));
+        assert_ne!(resolved, default_path);
+    }
+
+    #[test]
+    fn test_resolve_expected_reply_path_fallback_when_no_routing_file() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let workspace = temp_dir.path();
+
+        // No reply_routing.json exists
+        let default_path = workspace.join("reply_message.txt");
+        let resolved = resolve_expected_reply_path(workspace, default_path.clone());
+
+        // Should return the default path as fallback
+        assert_eq!(resolved, default_path);
     }
 }

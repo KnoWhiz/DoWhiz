@@ -1,11 +1,33 @@
 # Contributing to DoWhiz
 
-Thanks for contributing! We keep setup, run, and testing instructions in `README.md`. Please start there for prerequisites, dev commands, and links to component-specific docs (Rust service and website).
+## Development Flow
 
-Deployment and config policy:
-- Production deploy branch is `main` (CI/CD baseline).
-- Staging deploy branch is `dev` (CI/CD rollout target).
-- Keep one `DoWhiz_service/.env`; use base keys for production and `STAGING_`-prefixed keys for staging.
-- For exact staging/prod runbooks and rollback, follow `DoWhiz_service/docs/staging_production_deploy.md`.
+1. Branch from latest `dev` for non-trivial work.
+2. Keep commits scoped and easy to review.
+3. Update related docs when behavior/config changes.
 
-When opening a PR, include a short summary, tests run, and screenshots for UI changes.
+## Documentation and Accuracy
+
+- Code behavior is source of truth.
+- If docs conflict with code, update docs in the same PR.
+
+## Testing
+
+- For `DoWhiz_service` changes, use:
+  `reference_documentation/test_plans/DoWhiz_service_tests.md`
+- Run relevant AUTO tests.
+- For LIVE/MANUAL/PLANNED entries, mark SKIP with reason unless explicitly executed.
+
+## Deployment Policy
+
+- Production deploy branch: `main`
+- Staging deploy branch: `dev`
+- Runtime `.env` on VM must use unprefixed keys only.
+- VM `.env` should be merged from secret sets (`ENV_COMMON + ENV_STAGING/ENV_PROD`) per CI workflow logic.
+
+## PR Checklist
+
+- Short summary of changes
+- Test commands and results
+- Any env/config migration notes
+- Screenshots for UI changes (if applicable)

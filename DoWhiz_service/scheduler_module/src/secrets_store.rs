@@ -97,6 +97,8 @@ mod tests {
             channel: crate::channel::Channel::default(),
             slack_team_id: None,
             employee_id: None,
+            requester_identifier_type: None,
+            requester_identifier: None,
         }
     }
 

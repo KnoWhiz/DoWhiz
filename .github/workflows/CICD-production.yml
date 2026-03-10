@@ -7,11 +7,17 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: cicd-production
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
     environment: production
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    env:
+      CARGO_INCREMENTAL: 0
 
     defaults:
       run:
@@ -24,15 +30,18 @@ jobs:
           ref: ${{ github.ref }}
 
       - name: Build
-        run: cargo build --verbose
+        run: cargo build
 
       - name: Run tests (scheduler_module)
-        run: cargo test -p scheduler_module --verbose
+        run: cargo test -p scheduler_module
         continue-on-error: true
 
       - name: Run tests (run_task_module)
-        run: cargo test -p run_task_module --verbose
+        run: cargo test -p run_task_module
         continue-on-error: true
+
+      - name: Clean target before release build
+        run: cargo clean
 
       - name: Build release binaries
         run: cargo build -p scheduler_module --bins --release
@@ -144,17 +153,132 @@ jobs:
           set -e
           APP_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
           mkdir -p "$APP_DIR"
-          cat << 'ENVEOF' > "$APP_DIR/.env"
+          COMMON_ENV_FILE="$APP_DIR/.env.common.tmp"
+          TARGET_ENV_FILE="$APP_DIR/.env.target.tmp"
+          cat << 'ENV_COMMON_EOF' > "$COMMON_ENV_FILE"
           ${{ secrets.ENV_COMMON }}
+          ENV_COMMON_EOF
+          cat << 'ENV_TARGET_EOF' > "$TARGET_ENV_FILE"
           ${{ secrets.ENV_PROD }}
-          ENVEOF
+          ENV_TARGET_EOF
+
           ENV_FILE="$APP_DIR/.env"
+          # Merge key/value pairs with target env taking precedence over common env.
+          awk '
+            function trim(value) {
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", value);
+              return value;
+            }
+            {
+              line = $0;
+              sub(/\r$/, "", line);
+              if (line ~ /^[[:space:]]*($|#)/) next;
+              if (line ~ /^export[[:space:]]+/) sub(/^export[[:space:]]+/, "", line);
+              pos = index(line, "=");
+              if (pos == 0) next;
+              key = trim(substr(line, 1, pos - 1));
+              if (key == "") next;
+              value = substr(line, pos + 1);
+              if (!(key in seen)) {
+                seen[key] = 1;
+                order[++count] = key;
+              }
+              env[key] = value;
+            }
+            END {
+              for (i = 1; i <= count; i++) {
+                key = order[i];
+                print key "=" env[key];
+              }
+            }
+          ' "$COMMON_ENV_FILE" "$TARGET_ENV_FILE" > "$ENV_FILE"
+          rm -f "$COMMON_ENV_FILE" "$TARGET_ENV_FILE"
+
           if grep -Eq '^(STAGING_|PROD_)' "$ENV_FILE"; then
             echo "ERROR: Prefixed env keys are not allowed in deployment .env" >&2
             grep -En '^(STAGING_|PROD_)' "$ENV_FILE" >&2 || true
             exit 1
           fi
           chmod 600 "$APP_DIR/.env"
+          EOF
+
+      - name: Build and push ACI image on Azure VM
+        run: |
+          ssh -F ~/.ssh/config azureproduction << 'EOF'
+          set -e
+          APP_ROOT=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz
+          APP_DIR="$APP_ROOT/DoWhiz_service"
+          ENV_FILE="$APP_DIR/.env"
+          read_env_value() {
+            local key="$1"
+            local value
+            value="$(grep -E "^${key}=" "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+            value="${value#\"}"
+            value="${value%\"}"
+            value="${value#\'}"
+            value="${value%\'}"
+            printf '%s' "$value"
+          }
+
+          run_task_backend="$(read_env_value RUN_TASK_EXECUTION_BACKEND)"
+          deploy_target="$(read_env_value DEPLOY_TARGET)"
+          should_build=0
+          case "$run_task_backend" in
+            azure_aci)
+              should_build=1
+              ;;
+            auto)
+              if [[ "$deploy_target" == "staging" || "$deploy_target" == "production" ]]; then
+                should_build=1
+              fi
+              ;;
+          esac
+          if [[ "$should_build" -eq 0 ]]; then
+            echo "Skipping ACI image build: RUN_TASK_EXECUTION_BACKEND=$run_task_backend DEPLOY_TARGET=$deploy_target"
+            exit 0
+          fi
+
+          run_task_image="$(read_env_value RUN_TASK_AZURE_ACI_IMAGE)"
+          [[ -n "$run_task_image" ]] || {
+            echo "RUN_TASK_AZURE_ACI_IMAGE is required when Azure ACI backend is enabled" >&2
+            exit 1
+          }
+          login_server="${run_task_image%%/*}"
+          image_name="${run_task_image#*/}"
+          if [[ "$login_server" == "$run_task_image" || -z "$image_name" ]]; then
+            echo "Invalid RUN_TASK_AZURE_ACI_IMAGE: $run_task_image" >&2
+            exit 1
+          fi
+          registry_name="${login_server%%.*}"
+          [[ -n "$registry_name" ]] || {
+            echo "Unable to parse ACR registry name from image: $run_task_image" >&2
+            exit 1
+          }
+
+          # Prior VM builds can leave a very large Rust target directory that bloats Docker context.
+          # Keep release binaries required by PM2 restarts, trim everything else.
+          if [[ -d "$APP_DIR/target" ]]; then
+            echo "Trimming $APP_DIR/target before az acr build to keep context small"
+            if [[ -d "$APP_DIR/target/release" ]]; then
+              find "$APP_DIR/target/release" -mindepth 1 -maxdepth 1 \
+                ! -name rust_service \
+                ! -name inbound_gateway \
+                ! -name set_postmark_inbound_hook \
+                ! -name inbound_fanout \
+                ! -name google-docs \
+                -exec rm -rf {} +
+            fi
+            find "$APP_DIR/target" -mindepth 1 -maxdepth 1 ! -name release -exec rm -rf {} +
+          fi
+
+          echo "Building ACI image via az acr build: $run_task_image"
+          cd "$APP_ROOT"
+          az acr build \
+            --registry "$registry_name" \
+            --image "$image_name" \
+            --file Dockerfile \
+            . \
+            --only-show-errors
           EOF
 
       - name: Restart DoWhiz services
@@ -170,7 +294,10 @@ jobs:
             local key="$1"
             local value
             value="$(grep -E "^${key}=" "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
-            value="$(printf '%s' "$value" | sed -e 's/^\"//' -e 's/\"$//' -e \"s/^'//\" -e \"s/'$//\")"
+            value="${value#\"}"
+            value="${value%\"}"
+            value="${value#\'}"
+            value="${value%\'}"
             printf '%s' "$value"
           }
           GATEWAY_CONFIG_PATH="$(read_env_value GATEWAY_CONFIG_PATH)"
@@ -198,26 +325,71 @@ jobs:
             exit 1
           }
 
+          set -a
+          source "$ENV_FILE"
+          set +a
+
+          default_employee_id="$(awk -F'"' '/^[[:space:]]*default_employee_id[[:space:]]*=/{print $2; exit}' "$EMPLOYEE_CONFIG_PATH_RESOLVED")"
+          if [[ -z "${EMPLOYEE_ID:-}" ]]; then
+            EMPLOYEE_ID="$default_employee_id"
+            export EMPLOYEE_ID
+          fi
+          [[ -n "${EMPLOYEE_ID:-}" ]] || {
+            echo "EMPLOYEE_ID is missing in .env and employee config has no default_employee_id" >&2
+            exit 1
+          }
+          if ! awk -v id="$EMPLOYEE_ID" -F'"' '
+            /^[[:space:]]*id[[:space:]]*=/ {
+              if ($2 == id) {
+                found = 1
+              }
+            }
+            END { exit(found ? 0 : 1) }
+          ' "$EMPLOYEE_CONFIG_PATH_RESOLVED"; then
+            echo "Configured EMPLOYEE_ID '$EMPLOYEE_ID' not found in $EMPLOYEE_CONFIG_PATH_RESOLVED" >&2
+            exit 1
+          fi
+
+          echo "Using EMPLOYEE_ID=$EMPLOYEE_ID"
+          echo "Using GATEWAY_CONFIG_PATH=$GATEWAY_CONFIG_PATH"
+          echo "Using EMPLOYEE_CONFIG_PATH=$EMPLOYEE_CONFIG_PATH"
+
           # Ensure Azure Files mount is present before starting worker
           # so ACI tasks share workspace/memory paths correctly.
           bash "$APP_DIR/scripts/ensure_aci_share_mount.sh"
 
+          # Ensure web auth bootstrap can use Playwright for Notion/Google sign-in.
+          bash "$APP_DIR/scripts/install_web_auth_bootstrap_deps.sh"
+
+          required_bins=(
+            "$APP_DIR/target/release/rust_service"
+            "$APP_DIR/target/release/inbound_gateway"
+          )
+          for bin_path in "${required_bins[@]}"; do
+            if [[ ! -x "$bin_path" ]]; then
+              echo "Missing executable binary: $bin_path" >&2
+              ls -al "$APP_DIR/target" 2>/dev/null || true
+              ls -al "$APP_DIR/target/release" 2>/dev/null || true
+              exit 1
+            fi
+          done
+
           worker_running=0
           for service in dw_worker dowhiz_rust_service dowhiz-rust-service; do
             if pm2 describe "$service" >/dev/null 2>&1; then
-              pm2 restart "$service"
+              pm2 restart "$service" --update-env
               worker_running=1
             fi
           done
           if [ "$worker_running" -eq 0 ]; then
             echo "No worker process found in PM2, starting dw_worker."
-            pm2 start "$APP_DIR/target/release/rust_service" --name dw_worker --cwd "$APP_DIR" -- --host 0.0.0.0 --port 9001
+            pm2 start "$APP_DIR/target/release/rust_service" --name dw_worker --cwd "$APP_DIR" -- --host 0.0.0.0 --port "${RUST_SERVICE_PORT:-9001}"
           fi
 
           gateway_running=0
           for service in dw_gateway dowhiz_inbound_gateway dowhiz_gateway dowhiz-inbound-gateway; do
             if pm2 describe "$service" >/dev/null 2>&1; then
-              pm2 restart "$service"
+              pm2 restart "$service" --update-env
               gateway_running=1
             fi
           done
@@ -228,4 +400,28 @@ jobs:
 
           pm2 save
           pm2 list
+
+          find_pm2_pid() {
+            local name
+            local pid
+            for name in "$@"; do
+              pid="$(pm2 pid "$name" | tr -d '[:space:]')"
+              if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+                echo "$pid"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          worker_pid="$(find_pm2_pid dw_worker dowhiz_rust_service dowhiz-rust-service || true)"
+          gateway_pid="$(find_pm2_pid dw_gateway dowhiz_inbound_gateway dowhiz_gateway dowhiz-inbound-gateway || true)"
+          [[ -n "$worker_pid" ]] || { echo "No running worker PID found after restart" >&2; exit 1; }
+          [[ -n "$gateway_pid" ]] || { echo "No running gateway PID found after restart" >&2; exit 1; }
+
+          worker_health="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 "http://127.0.0.1:${RUST_SERVICE_PORT:-9001}/health" || true)"
+          gateway_health="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 "http://127.0.0.1:${GATEWAY_PORT:-9100}/health" || true)"
+          [[ "$worker_health" == "200" ]] || { echo "Worker health check failed (HTTP $worker_health)" >&2; exit 1; }
+          [[ "$gateway_health" == "200" ]] || { echo "Gateway health check failed (HTTP $gateway_health)" >&2; exit 1; }
+          echo "Post-restart health check passed: worker=$worker_health gateway=$gateway_health"
           EOF

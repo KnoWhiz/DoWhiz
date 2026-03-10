@@ -1076,6 +1076,53 @@ impl GoogleDocsOutboundAdapter {
         self.insert_image(document_id, image_url, end_idx, width_pt, height_pt)
     }
 
+    /// Create a new document.
+    ///
+    /// Returns the document ID of the newly created document.
+    pub fn create_document(&self, title: &str) -> Result<String, AdapterError> {
+        let access_token = self
+            .auth
+            .get_access_token()
+            .map_err(|e| AdapterError::ConfigError(e.to_string()))?;
+
+        let client = reqwest::blocking::Client::new();
+
+        let url = "https://docs.googleapis.com/v1/documents";
+
+        let payload = serde_json::json!({
+            "title": title
+        });
+
+        let response = client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .map_err(|e| AdapterError::SendError(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().unwrap_or_default();
+            error!("Failed to create document '{}': {} - {}", title, status, body);
+            return Err(AdapterError::SendError(format!("HTTP {}: {}", status, body)));
+        }
+
+        let json: serde_json::Value = response
+            .json()
+            .map_err(|e| AdapterError::ParseError(e.to_string()))?;
+
+        let document_id = json
+            .get("documentId")
+            .and_then(|id| id.as_str())
+            .ok_or_else(|| AdapterError::ParseError("Missing documentId in response".to_string()))?
+            .to_string();
+
+        info!("Created new document '{}' with ID {}", title, document_id);
+
+        Ok(document_id)
+    }
+
     /// Get the end index of the document (for appending content).
     pub fn get_document_end_index(&self, document_id: &str) -> Result<i64, AdapterError> {
         let doc = self.get_document_structure(document_id)?;

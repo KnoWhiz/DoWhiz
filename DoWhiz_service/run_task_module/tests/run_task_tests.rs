@@ -51,10 +51,10 @@ fn run_task_success_with_fake_codex() {
 
     let config_path = home_dir.join(".codex").join("config.toml");
     let config = fs::read_to_string(config_path).unwrap();
-    assert!(config.contains("model = \"gpt-5.3-codex\""));
-    assert!(config.contains("https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1"));
+    assert!(config.contains("model = \"gpt-5.4\""));
+    assert!(config.contains("https://example.azure.com/openai/v1"));
     assert!(!config.contains("model = \"override-model\""));
-    assert!(!config.contains("https://example.azure.com/openai/v1"));
+    assert!(!config.contains("https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1"));
 }
 
 #[test]
@@ -76,6 +76,7 @@ fn run_task_skips_yolo_without_bypass() {
         ("HOME", home_dir.to_str().unwrap()),
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
         ("CODEX_BYPASS_SANDBOX", "0"),
         ("GH_AUTH_DISABLED", "1"),
     ]);
@@ -105,6 +106,7 @@ fn run_task_uses_yolo_with_bypass() {
         ("HOME", home_dir.to_str().unwrap()),
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
         ("CODEX_BYPASS_SANDBOX", "1"),
         ("GH_AUTH_DISABLED", "1"),
     ]);
@@ -134,6 +136,7 @@ fn run_task_uses_danger_sandbox_with_bypass() {
         ("HOME", home_dir.to_str().unwrap()),
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
         ("CODEX_BYPASS_SANDBOX", "1"),
         ("GH_AUTH_DISABLED", "1"),
     ]);
@@ -166,6 +169,7 @@ fn run_task_passes_add_dir_for_gh_config() {
         ("HOME", home_dir.to_str().unwrap()),
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
         ("GH_AUTH_DISABLED", "1"),
         ("EXPECTED_ADD_DIR", expected_add_dir),
     ]);
@@ -291,6 +295,7 @@ fn run_task_times_out_with_codex() {
         ("HOME", home_dir.to_str().unwrap()),
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
         ("GH_AUTH_DISABLED", "1"),
         ("RUN_TASK_TIMEOUT_SECS", "1"),
         ("SLEEP_SECS", "2"),
@@ -498,6 +503,7 @@ GOATX402_API_SECRET="secret_direct"
         ("HOME", home_dir.to_str().unwrap()),
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
         ("GH_AUTH_DISABLED", "1"),
         ("EXPECTED_GOATX402_API_URL", "https://x402-api.example.test"),
         ("EXPECTED_GOATX402_MERCHANT_ID", "dowhiz_agent"),
@@ -551,6 +557,7 @@ OLIVER_GOATX402_API_SECRET="secret_prefixed"
         ("HOME", home_dir.to_str().unwrap()),
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
         ("GH_AUTH_DISABLED", "1"),
         ("EMPLOYEE_ID", "little_bear"),
         (
@@ -623,6 +630,7 @@ fn run_task_rejects_absolute_input_dir() {
         channel: "email".to_string(),
         google_access_token: std::env::var("GOOGLE_ACCESS_TOKEN").ok(),
         has_unified_account: true,
+        user_identities: Default::default(),
     };
 
     let err = run_task(&request).unwrap_err();
@@ -669,6 +677,7 @@ fn run_task_real_codex_e2e_when_enabled() {
     }
 
     require_env("AZURE_OPENAI_API_KEY_BACKUP");
+    require_env("AZURE_OPENAI_ENDPOINT_BACKUP");
 
     let temp = TempDir::new("codex_task_real_e2e").unwrap();
     let workspace = create_workspace(&temp.path).unwrap();

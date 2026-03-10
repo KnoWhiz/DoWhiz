@@ -1,10 +1,47 @@
 use std::env;
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::constants::{CLAUDE_FOUNDRY_RESOURCE_DEFAULT, DEFAULT_CLAUDE_MODEL};
+
+/// Check if cross-channel routing was requested and return the correct expected reply path.
+/// If reply_routing.json specifies a different target channel, compute the expected file for that target.
+fn resolve_expected_reply_path(workspace_dir: &Path, default_path: PathBuf) -> PathBuf {
+    let routing_file = workspace_dir.join("reply_routing.json");
+    if !routing_file.exists() {
+        return default_path;
+    }
+
+    // Try to read and parse reply_routing.json
+    let routing_content = match fs::read_to_string(&routing_file) {
+        Ok(content) => content,
+        Err(_) => return default_path,
+    };
+
+    // Parse the JSON to get target channel
+    let routing: serde_json::Value = match serde_json::from_str(&routing_content) {
+        Ok(v) => v,
+        Err(_) => return default_path,
+    };
+
+    let target_channel = match routing.get("channel").and_then(|c| c.as_str()) {
+        Some(ch) => ch.to_lowercase(),
+        None => return default_path,
+    };
+
+    // Determine expected reply path based on TARGET channel
+    match target_channel.as_str() {
+        "email" | "googledocs" | "googlesheets" | "googleslides" => {
+            workspace_dir.join("reply_email_draft.html")
+        }
+        "slack" | "discord" | "telegram" | "sms" | "whatsapp" | "bluebubbles" => {
+            workspace_dir.join("reply_message.txt")
+        }
+        _ => default_path,
+    }
+}
 use super::env::load_env_sources;
 use super::errors::RunTaskError;
 use super::github_auth::{ensure_github_cli_auth, resolve_github_auth};
@@ -50,6 +87,7 @@ pub(super) fn run_claude_task(
         !request.reply_to.is_empty(),
         request.channel,
         request.has_unified_account,
+        request.user_identities,
     );
 
     ensure_github_cli_auth(&github_auth)?;
@@ -90,15 +128,17 @@ pub(super) fn run_claude_task(
     let assistant_tail = tail_string(&assistant_text, 2000);
 
     // Only check for reply file if a reply was expected
-    if !request.reply_to.is_empty() && !reply_html_path.exists() {
+    // Use cross-channel routing to determine actual expected path
+    let expected_reply_path = resolve_expected_reply_path(request.workspace_dir, reply_html_path.clone());
+    if !request.reply_to.is_empty() && !expected_reply_path.exists() {
         return Err(RunTaskError::OutputMissing {
-            path: reply_html_path,
+            path: expected_reply_path,
             output: assistant_tail,
         });
     }
 
     Ok(RunTaskOutput {
-        reply_html_path,
+        reply_html_path: expected_reply_path,
         reply_attachments_dir,
         codex_output: assistant_tail,
         scheduled_tasks,

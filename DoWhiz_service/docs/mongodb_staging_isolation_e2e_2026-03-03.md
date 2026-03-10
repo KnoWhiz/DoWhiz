@@ -13,8 +13,12 @@ Validate Mongo-backed staging flow for:
 - Branch: `oliver/mongodb-azure-refactor`
 - Staging VM: `dowhizstaging`
 - Deploy target: `staging`
-- Storage backend: `mongo` (via `STAGING_STORAGE_BACKEND`, `STAGING_MONGODB_URI`, `STAGING_MONGODB_DATABASE`)
+- Storage backend: `mongo` (runtime keys in current policy are unprefixed: `STORAGE_BACKEND`, `MONGODB_URI`, `MONGODB_DATABASE`)
 - Codex execution backend: Azure ACI (staging-targeted keys)
+
+Note:
+- This file is a dated E2E evidence snapshot from 2026-03-03.
+- Current deployment policy uses unprefixed runtime `.env` keys; CI/CD merges environment-specific secret sets before writing `.env`.
 
 ## Senders / Users
 
@@ -61,4 +65,3 @@ Queried staging database (`dowhiz_staging_little_bear`) with PyMongo 3.13:
   - result: `CROSS_VIOLATIONS = 0`
 
 Conclusion: user-scoped task ownership and execution isolation are working in staging with MongoDB.
-

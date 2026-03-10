@@ -84,6 +84,7 @@ impl TaskExecutor for RecordingExecutor {
                     google_access_token:
                         scheduler_module::load_google_access_token_from_service_env(),
                     has_unified_account: false,
+                    user_identities: Default::default(),
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -225,7 +226,7 @@ fn run_scheduler_x402_env_test(
         input_attachments_dir: PathBuf::from("incoming_attachments"),
         memory_dir: PathBuf::from("memory"),
         reference_dir: PathBuf::from("references"),
-        model_name: "gpt-5.3-codex".to_string(),
+        model_name: "gpt-5.4".to_string(),
         runner: "codex".to_string(),
         codex_disabled: false,
         reply_to: vec!["user@example.com".to_string()],
@@ -237,6 +238,8 @@ fn run_scheduler_x402_env_test(
         channel: scheduler_module::channel::Channel::default(),
         slack_team_id: None,
         employee_id: None,
+        requester_identifier_type: None,
+        requester_identifier: None,
     };
 
     scheduler

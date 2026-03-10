@@ -52,7 +52,7 @@ fn run_task_followups_persist_across_restarts() {
         input_attachments_dir: PathBuf::from("incoming_attachments"),
         memory_dir: PathBuf::from("memory"),
         reference_dir: PathBuf::from("references"),
-        model_name: "gpt-5.3-codex".to_string(),
+        model_name: "gpt-5.4".to_string(),
         runner: "codex".to_string(),
         codex_disabled: true,
         reply_to: Vec::new(),
@@ -64,6 +64,8 @@ fn run_task_followups_persist_across_restarts() {
         channel: scheduler_module::channel::Channel::default(),
         slack_team_id: None,
         employee_id: None,
+        requester_identifier_type: None,
+        requester_identifier: None,
     };
 
     let mut scheduler =

@@ -4,12 +4,15 @@
 //! - Shared data models for comments and file metadata
 //! - Common comments API operations (list, filter, reply)
 //! - File type detection and routing
+//! - Google Drive operations (sharing, permissions, links)
 
 mod comments;
+mod drive;
 mod models;
 mod types;
 
 pub use comments::{filter_actionable_comments, GoogleCommentsClient};
+pub use drive::{FileLinks, GoogleDriveClient, PermissionRole, ShareResult};
 pub use models::{
     ActionableComment, CommentAuthor, CommentReply, CommentsListResponse, DriveFile,
     DriveFileOwner, FilesListResponse, GoogleComment, QuotedFileContent,

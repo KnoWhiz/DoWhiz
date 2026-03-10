@@ -90,12 +90,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             memory_dir: PathBuf::from("memory"),
             reference_dir: PathBuf::from("references"),
             reply_to,
-            model_name: "gpt-5.2-codex".to_string(),
+            model_name: "gpt-5.4".to_string(),
             runner: runner.clone(),
             codex_disabled: false,
             channel: "email".to_string(),
             google_access_token: None,
             has_unified_account: false,
+            user_identities: Default::default(),
         });
     }
 

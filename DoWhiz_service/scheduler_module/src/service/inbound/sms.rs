@@ -91,6 +91,8 @@ pub(crate) fn process_sms_message(
         channel: Channel::Sms,
         slack_team_id: None,
         employee_id: Some(config.employee_profile.id.clone()),
+        requester_identifier_type: None,
+        requester_identifier: None,
     };
 
     let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
@@ -239,7 +241,7 @@ mod tests {
             users_root: users_root.clone(),
             users_db_path: state_root.join("users.db"),
             task_index_path: state_root.join("task_index.db"),
-            codex_model: "gpt-5.3-codex".to_string(),
+            codex_model: "gpt-5.4".to_string(),
             codex_disabled: true,
             scheduler_poll_interval: Duration::from_millis(50),
             scheduler_max_concurrency: 1,

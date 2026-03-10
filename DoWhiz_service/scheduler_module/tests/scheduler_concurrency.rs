@@ -102,7 +102,7 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
             input_attachments_dir: PathBuf::from("incoming_attachments"),
             memory_dir: PathBuf::from("memory"),
             reference_dir: PathBuf::from("references"),
-            model_name: "gpt-5.3-codex".to_string(),
+            model_name: "gpt-5.4".to_string(),
             runner: "codex".to_string(),
             codex_disabled: false,
             reply_to: Vec::new(),
@@ -114,6 +114,8 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
             channel: scheduler_module::channel::Channel::default(),
             slack_team_id: None,
             employee_id: None,
+            requester_identifier_type: None,
+            requester_identifier: None,
         };
 
         let mut scheduler = Scheduler::load(&paths.tasks_db_path, ModuleExecutor::default())?;
@@ -143,7 +145,7 @@ fn scheduler_parallelism_reduces_wall_clock_time() -> Result<(), Box<dyn std::er
         users_root: users_root.clone(),
         users_db_path: state_dir.join("users.db"),
         task_index_path: state_dir.join("task_index.db"),
-        codex_model: "gpt-5.3-codex".to_string(),
+        codex_model: "gpt-5.4".to_string(),
         codex_disabled: false,
         scheduler_poll_interval: Duration::from_millis(100),
         scheduler_max_concurrency: CONCURRENCY_LIMIT,

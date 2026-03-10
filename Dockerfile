@@ -58,8 +58,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
   && apt-get install -y --no-install-recommends nodejs \
   && rm -rf /var/lib/apt/lists/*
 
-# Install global npm packages (playwright-cli, Codex CLI, Claude CLI, doc/pptx tooling, pnpm)
-RUN npm install -g @playwright/cli@latest @openai/codex@latest @anthropic-ai/claude-code@latest docx pptxgenjs pnpm
+# Install global npm packages (playwright-cli, Codex CLI, Claude CLI, Google Workspace CLI, doc/pptx tooling, pnpm)
+RUN npm install -g @playwright/cli@latest @openai/codex@latest @anthropic-ai/claude-code@latest @googleworkspace/cli@latest docx pptxgenjs pnpm
 
 # Install Playwright browsers (Chromium only to save space)
 ENV PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
@@ -124,6 +124,7 @@ COPY DoWhiz_service/employees/ /app/DoWhiz_service/employees/
 
 # Copy skills directory for Codex
 COPY DoWhiz_service/skills/ /app/DoWhiz_service/skills/
+COPY DoWhiz_service/scripts/bootstrap_web_auth.py /app/DoWhiz_service/scripts/bootstrap_web_auth.py
 
 RUN chown -R app:nogroup /app/DoWhiz_service /app/bin
 

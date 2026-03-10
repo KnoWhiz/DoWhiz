@@ -1,6 +1,7 @@
 mod test_support;
 
 use run_task_module::RunTaskParams;
+use scheduler_module::account_store::AccountStore;
 use scheduler_module::employee_config::{EmployeeDirectory, EmployeeProfile};
 use scheduler_module::index_store::IndexStore;
 use scheduler_module::service::{
@@ -132,6 +133,7 @@ impl TaskExecutor for RecordingExecutor {
                     google_access_token:
                         scheduler_module::load_google_access_token_from_service_env(),
                     has_unified_account: false,
+                    user_identities: Default::default(),
                 };
                 let output = run_task_module::run_task(&params)
                     .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
@@ -342,7 +344,7 @@ fn email_flow_injects_github_env() {
         users_root: users_root.clone(),
         users_db_path: state_root.join("users.db"),
         task_index_path: state_root.join("task_index.db"),
-        codex_model: "gpt-5.3-codex".to_string(),
+        codex_model: "gpt-5.4".to_string(),
         codex_disabled: false,
         scheduler_poll_interval: Duration::from_millis(50),
         scheduler_max_concurrency: 1,
@@ -368,6 +370,7 @@ fn email_flow_injects_github_env() {
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
+    let account_store = AccountStore::new(&config.ingestion_db_url).expect("account store");
 
     let sender_email = unique_test_email("alice");
     let inbound_raw = serde_json::json!({
@@ -383,6 +386,7 @@ fn email_flow_injects_github_env() {
         &config,
         &user_store,
         &index_store,
+        &account_store,
         &payload,
         inbound_raw.as_bytes(),
     )
@@ -481,7 +485,7 @@ fn email_flow_injects_employee_github_env() {
         users_root: users_root.clone(),
         users_db_path: state_root.join("users.db"),
         task_index_path: state_root.join("task_index.db"),
-        codex_model: "gpt-5.3-codex".to_string(),
+        codex_model: "gpt-5.4".to_string(),
         codex_disabled: false,
         scheduler_poll_interval: Duration::from_millis(50),
         scheduler_max_concurrency: 1,
@@ -507,6 +511,7 @@ fn email_flow_injects_employee_github_env() {
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
+    let account_store = AccountStore::new(&config.ingestion_db_url).expect("account store");
 
     let sender_email = unique_test_email("alice");
     let inbound_raw = serde_json::json!({
@@ -522,6 +527,7 @@ fn email_flow_injects_employee_github_env() {
         &config,
         &user_store,
         &index_store,
+        &account_store,
         &payload,
         inbound_raw.as_bytes(),
     )
@@ -630,7 +636,7 @@ fn email_flow_injects_x402_env() {
         users_root: users_root.clone(),
         users_db_path: state_root.join("users.db"),
         task_index_path: state_root.join("task_index.db"),
-        codex_model: "gpt-5.3-codex".to_string(),
+        codex_model: "gpt-5.4".to_string(),
         codex_disabled: false,
         scheduler_poll_interval: Duration::from_millis(50),
         scheduler_max_concurrency: 1,
@@ -656,6 +662,7 @@ fn email_flow_injects_x402_env() {
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
+    let account_store = AccountStore::new(&config.ingestion_db_url).expect("account store");
 
     let sender_email = unique_test_email("alice");
     let inbound_raw = serde_json::json!({
@@ -671,6 +678,7 @@ fn email_flow_injects_x402_env() {
         &config,
         &user_store,
         &index_store,
+        &account_store,
         &payload,
         inbound_raw.as_bytes(),
     )
@@ -790,7 +798,7 @@ fn email_flow_injects_employee_prefixed_x402_env() {
         users_root: users_root.clone(),
         users_db_path: state_root.join("users.db"),
         task_index_path: state_root.join("task_index.db"),
-        codex_model: "gpt-5.3-codex".to_string(),
+        codex_model: "gpt-5.4".to_string(),
         codex_disabled: false,
         scheduler_poll_interval: Duration::from_millis(50),
         scheduler_max_concurrency: 1,
@@ -816,6 +824,7 @@ fn email_flow_injects_employee_prefixed_x402_env() {
 
     let user_store = UserStore::new(&config.users_db_path).expect("user store");
     let index_store = IndexStore::new(&config.task_index_path).expect("index store");
+    let account_store = AccountStore::new(&config.ingestion_db_url).expect("account store");
 
     let sender_email = unique_test_email("alice");
     let inbound_raw = serde_json::json!({
@@ -831,6 +840,7 @@ fn email_flow_injects_employee_prefixed_x402_env() {
         &config,
         &user_store,
         &index_store,
+        &account_store,
         &payload,
         inbound_raw.as_bytes(),
     )

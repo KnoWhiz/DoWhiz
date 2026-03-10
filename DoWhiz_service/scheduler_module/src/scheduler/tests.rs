@@ -23,6 +23,24 @@ impl TaskExecutor for NoopExecutor {
     }
 }
 
+struct FailingExecutor {
+    message: String,
+}
+
+impl FailingExecutor {
+    fn new(message: &str) -> Self {
+        Self {
+            message: message.to_string(),
+        }
+    }
+}
+
+impl TaskExecutor for FailingExecutor {
+    fn execute(&self, _task: &TaskKind) -> Result<TaskExecution, SchedulerError> {
+        Err(SchedulerError::TaskFailed(self.message.clone()))
+    }
+}
+
 fn base_run_task(workspace: &Path, mail_root: &Path) -> RunTaskTask {
     RunTaskTask {
         workspace_dir: workspace.to_path_buf(),
@@ -42,7 +60,92 @@ fn base_run_task(workspace: &Path, mail_root: &Path) -> RunTaskTask {
         channel: Channel::default(),
         slack_team_id: None,
         employee_id: None,
+        requester_identifier_type: None,
+        requester_identifier: None,
     }
+}
+
+fn force_one_shot_due<E: TaskExecutor>(scheduler: &mut Scheduler<E>, task_id: Uuid) {
+    let index = scheduler
+        .tasks
+        .iter()
+        .position(|task| task.id == task_id)
+        .expect("task exists");
+    scheduler.tasks[index].enabled = true;
+    scheduler.tasks[index].schedule = Schedule::OneShot {
+        run_at: Utc::now() - chrono::Duration::seconds(1),
+    };
+    let updated = scheduler.tasks[index].clone();
+    scheduler
+        .store
+        .update_task(&updated)
+        .expect("persist forced one-shot schedule");
+}
+
+#[test]
+fn defer_one_shot_task_by_id_pushes_run_at_forward_and_persists() {
+    let temp = TempDir::new().expect("tempdir");
+    let tasks_db = temp.path().join("tasks.db");
+    let mut scheduler = Scheduler::load(&tasks_db, NoopExecutor::default()).expect("load");
+
+    let task_id = scheduler
+        .add_one_shot_in(Duration::from_secs(0), TaskKind::Noop)
+        .expect("add task");
+    force_one_shot_due(&mut scheduler, task_id);
+
+    let changed = scheduler
+        .defer_one_shot_task_by_id(task_id, chrono::Duration::seconds(15))
+        .expect("defer");
+    assert!(changed, "expected defer to update one-shot run_at");
+
+    let deferred_run_at = match &scheduler
+        .tasks()
+        .iter()
+        .find(|task| task.id == task_id)
+        .expect("task exists")
+        .schedule
+    {
+        Schedule::OneShot { run_at } => *run_at,
+        _ => panic!("expected one-shot schedule"),
+    };
+    assert!(
+        deferred_run_at >= Utc::now() + chrono::Duration::seconds(10),
+        "deferred run_at should be pushed into the future"
+    );
+
+    let reloaded = Scheduler::load(&tasks_db, NoopExecutor::default()).expect("reload");
+    let persisted_run_at = match &reloaded
+        .tasks()
+        .iter()
+        .find(|task| task.id == task_id)
+        .expect("task exists after reload")
+        .schedule
+    {
+        Schedule::OneShot { run_at } => *run_at,
+        _ => panic!("expected one-shot schedule"),
+    };
+    assert_eq!(
+        persisted_run_at, deferred_run_at,
+        "deferred run_at should persist to storage"
+    );
+}
+
+#[test]
+fn defer_one_shot_task_by_id_is_noop_for_cron_tasks() {
+    let temp = TempDir::new().expect("tempdir");
+    let tasks_db = temp.path().join("tasks.db");
+    let mut scheduler = Scheduler::load(&tasks_db, NoopExecutor::default()).expect("load");
+
+    let task_id = scheduler
+        .add_cron_task("0 * * * * *", TaskKind::Noop)
+        .expect("add cron task");
+    let changed = scheduler
+        .defer_one_shot_task_by_id(task_id, chrono::Duration::seconds(15))
+        .expect("defer should not fail");
+    assert!(
+        !changed,
+        "cron tasks should not be deferred via one-shot API"
+    );
 }
 
 #[test]
@@ -350,7 +453,7 @@ fn execution_status_can_be_recorded_for_task() {
             .expect("record start");
         scheduler
             .store
-            .record_execution_finish(execution_id, now, "success", None)
+            .record_execution_finish(specific_id, execution_id, now, "success", None)
             .expect("record finish");
     }
 
@@ -417,6 +520,8 @@ fn discord_run_task(workspace: &Path) -> RunTaskTask {
         channel: Channel::Discord,
         slack_team_id: None,
         employee_id: Some("test_employee".to_string()),
+        requester_identifier_type: None,
+        requester_identifier: None,
     }
 }
 
@@ -441,6 +546,8 @@ fn slack_run_task(workspace: &Path) -> RunTaskTask {
         channel: Channel::Slack,
         slack_team_id: Some("T12345678".to_string()),
         employee_id: Some("test_employee".to_string()),
+        requester_identifier_type: None,
+        requester_identifier: None,
     }
 }
 
@@ -521,7 +628,7 @@ fn full_discord_flow_task_sync_and_status_update() {
             .record_execution_start(task_id, executed_at)
             .expect("record start");
         workspace_store
-            .record_execution_finish(execution_id, executed_at, "success", None)
+            .record_execution_finish(task_id, execution_id, executed_at, "success", None)
             .expect("record finish");
     }
 
@@ -533,7 +640,7 @@ fn full_discord_flow_task_sync_and_status_update() {
             .record_execution_start(task_id, executed_at)
             .expect("record start");
         user_store
-            .record_execution_finish(execution_id, executed_at, "success", None)
+            .record_execution_finish(task_id, execution_id, executed_at, "success", None)
             .expect("record finish");
     }
 
@@ -635,7 +742,13 @@ fn full_slack_flow_task_sync_and_status_update() {
             .record_execution_start(task_id, executed_at)
             .expect("record start");
         workspace_store
-            .record_execution_finish(execution_id, executed_at, "failed", Some(error_message))
+            .record_execution_finish(
+                task_id,
+                execution_id,
+                executed_at,
+                "failed",
+                Some(error_message),
+            )
             .expect("record finish");
     }
 
@@ -647,7 +760,13 @@ fn full_slack_flow_task_sync_and_status_update() {
             .record_execution_start(task_id, executed_at)
             .expect("record start");
         account_store
-            .record_execution_finish(execution_id, executed_at, "failed", Some(error_message))
+            .record_execution_finish(
+                task_id,
+                execution_id,
+                executed_at,
+                "failed",
+                Some(error_message),
+            )
             .expect("record finish");
     }
 
@@ -748,7 +867,7 @@ fn multiple_tasks_sync_independently() {
             .record_execution_start(task_id_1, executed_at)
             .expect("start 1");
         user_store
-            .record_execution_finish(exec_id_1, executed_at, "success", None)
+            .record_execution_finish(task_id_1, exec_id_1, executed_at, "success", None)
             .expect("finish 1");
 
         // Task 2: failed
@@ -756,7 +875,7 @@ fn multiple_tasks_sync_independently() {
             .record_execution_start(task_id_2, executed_at)
             .expect("start 2");
         user_store
-            .record_execution_finish(exec_id_2, executed_at, "failed", Some("timeout"))
+            .record_execution_finish(task_id_2, exec_id_2, executed_at, "failed", Some("timeout"))
             .expect("finish 2");
     }
 
@@ -782,6 +901,72 @@ fn multiple_tasks_sync_independently() {
         assert!(task_1.error_message.is_none());
         assert_eq!(task_2.error_message, Some("timeout".to_string()));
     }
+}
+
+#[test]
+fn run_task_failures_persist_retry_count_and_disable_at_limit() {
+    let temp = TempDir::new().expect("tempdir");
+    let tasks_db = temp.path().join("tasks.db");
+    let workspace = temp.path().join("workspace");
+    let mail_root = temp.path().join("mail");
+    fs::create_dir_all(&workspace).expect("workspace");
+    fs::create_dir_all(&mail_root).expect("mail");
+    let run_task = base_run_task(&workspace, &mail_root);
+    let quota_error = "ContainerGroupQuotaReached: container group quota reached";
+
+    let mut scheduler =
+        Scheduler::load(&tasks_db, FailingExecutor::new(quota_error)).expect("load scheduler");
+    let task_id = scheduler
+        .add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))
+        .expect("add run_task");
+    assert!(scheduler.execute_task_by_id(task_id).is_err());
+
+    let mut scheduler =
+        Scheduler::load(&tasks_db, FailingExecutor::new(quota_error)).expect("reload scheduler");
+    let first_retry_task = scheduler
+        .tasks()
+        .iter()
+        .find(|task| task.id == task_id)
+        .expect("task exists");
+    let first_retry_at = match first_retry_task.schedule {
+        Schedule::OneShot { run_at } => run_at,
+        _ => panic!("expected one-shot schedule"),
+    };
+    assert!(first_retry_task.enabled);
+    assert!(first_retry_at > Utc::now() + chrono::Duration::seconds(120));
+    assert_eq!(
+        scheduler
+            .get_retry_count(&task_id.to_string())
+            .expect("retry count"),
+        1
+    );
+
+    force_one_shot_due(&mut scheduler, task_id);
+    assert!(scheduler.execute_task_by_id(task_id).is_err());
+    assert_eq!(
+        scheduler
+            .get_retry_count(&task_id.to_string())
+            .expect("retry count"),
+        2
+    );
+
+    force_one_shot_due(&mut scheduler, task_id);
+    assert!(scheduler.execute_task_by_id(task_id).is_err());
+
+    let scheduler =
+        Scheduler::load(&tasks_db, FailingExecutor::new(quota_error)).expect("final reload");
+    let final_task = scheduler
+        .tasks()
+        .iter()
+        .find(|task| task.id == task_id)
+        .expect("final task exists");
+    assert!(!final_task.enabled);
+    assert_eq!(
+        scheduler
+            .get_retry_count(&task_id.to_string())
+            .expect("retry count"),
+        0
+    );
 }
 
 #[test]

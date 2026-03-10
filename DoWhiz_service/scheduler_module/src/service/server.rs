@@ -1,6 +1,8 @@
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
+use socket2::{Domain, Protocol, Socket, Type};
+
 use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect};
@@ -48,6 +50,24 @@ pub async fn run_server(
             mongo_database_name_from_env()
         );
     }
+
+    // Bind to the HTTP port FIRST, before starting any background tasks.
+    // This ensures we fail fast if the port is already in use, rather than
+    // starting the scheduler (which may create ACI containers) only to fail later.
+    // We use SO_REUSEADDR to allow binding even if the port is in TIME_WAIT state
+    // from a previous process that recently exited.
+    let host: IpAddr = config
+        .host
+        .parse()
+        .map_err(|_| format!("invalid host: {}", config.host))?;
+    let addr = SocketAddr::new(host, config.port);
+    let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
+    socket.set_reuse_address(true)?;
+    socket.set_nonblocking(true)?;
+    socket.bind(&addr.into())?;
+    socket.listen(1024)?;
+    let listener = tokio::net::TcpListener::from_std(socket.into())?;
+    info!("Rust email service listening on {}", addr);
 
     // Export SLACK_STORE_PATH so execute_slack_send can find the OAuth tokens
     std::env::set_var("SLACK_STORE_PATH", &config.slack_store_path);
@@ -141,6 +161,11 @@ pub async fn run_server(
     let slack_client_secret = std::env::var("SLACK_CLIENT_SECRET").ok();
     let slack_redirect_uri = std::env::var("SLACK_AUTH_REDIRECT_URI").ok();
 
+    // GitHub OAuth config (optional)
+    let github_client_id = std::env::var("GITHUB_CLIENT_ID").ok();
+    let github_client_secret = std::env::var("GITHUB_CLIENT_SECRET").ok();
+    let github_redirect_uri = std::env::var("GITHUB_REDIRECT_URI").ok();
+
     // Frontend URL for OAuth redirects
     let frontend_url =
         std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:5173".to_string());
@@ -161,18 +186,14 @@ pub async fn run_server(
         slack_client_id,
         slack_client_secret,
         slack_redirect_uri,
+        github_client_id,
+        github_client_secret,
+        github_redirect_uri,
         frontend_url,
         user_store: Some(user_store.clone()),
         users_root: Some(config.users_root.clone()),
     };
     let agent_market_state = AgentMarketState::from_env();
-
-    let host: IpAddr = config
-        .host
-        .parse()
-        .map_err(|_| format!("invalid host: {}", config.host))?;
-    let addr = SocketAddr::new(host, config.port);
-    info!("Rust email service listening on {}", addr);
 
     let mut app = Router::new()
         .route("/", get(health))
@@ -197,12 +218,19 @@ pub async fn run_server(
                 .allow_headers(Any),
         );
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
         .await;
+    info!("shutdown signal received, stopping services...");
     ingestion_control.stop_and_join();
     scheduler_control.stop_and_join();
+
+    // Clean up any active ACI containers to prevent orphans
+    let cleaned = run_task_module::cleanup_all_aci_containers();
+    if cleaned > 0 {
+        info!("cleaned up {} orphaned ACI container(s) on shutdown", cleaned);
+    }
+
     serve_result?;
     Ok(())
 }

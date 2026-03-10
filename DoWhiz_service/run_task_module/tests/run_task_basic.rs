@@ -7,10 +7,12 @@ use support::{
     build_params, create_workspace, write_fake_codex, EnvGuard, FakeCodexMode, TempDir, ENV_MUTEX,
 };
 
-const EXPECTED_CODEX_BLOCK: &str = r#"# IMPORTANT: Use your Azure *deployment name* here (e.g., "gpt-5.3-codex")
-model = "gpt-5.3-codex"
+fn expected_codex_block(base_url: &str) -> String {
+    format!(
+        r#"# IMPORTANT: Use your Azure *deployment name* here (e.g., "gpt-5.4")
+model = "gpt-5.4"
 model_provider = "azure"
-model_reasoning_effort = "xhigh"
+model_reasoning_effort = "high"
 web_search = "live"
 ask_for_approval = "never"
 sandbox = "workspace-write"
@@ -20,9 +22,11 @@ network_access=true
 
 [model_providers.azure]
 name = "Azure OpenAI"
-base_url = "https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1"
+base_url = "{base_url}"
 env_key = "AZURE_OPENAI_API_KEY_BACKUP"
-wire_api = "responses""#;
+wire_api = "responses""#
+    )
+}
 
 #[test]
 #[cfg(unix)]
@@ -47,7 +51,7 @@ value = "keep"
 # IMPORTANT: Use your Azure *deployment name* here (e.g., "old")
 model = "old-model"
 model_provider = "azure"
-model_reasoning_effort = "xhigh"
+model_reasoning_effort = "high"
 
 [model_providers.azure]
 name = "Azure OpenAI"
@@ -78,12 +82,11 @@ value = "still"
     let updated = fs::read_to_string(&config_path).unwrap();
     assert!(updated.contains("value = \"keep\""));
     assert!(updated.contains("value = \"still\""));
-    assert!(updated.contains("model = \"gpt-5.3-codex\""));
+    assert!(updated.contains("model = \"gpt-5.4\""));
     assert!(!updated.contains("model = \"old-model\""));
     assert!(!updated.contains("model = \"override-model\""));
-    assert!(updated.contains("https://knowhiz-service-openai-backup-2.openai.azure.com/openai/v1"));
+    assert!(updated.contains("https://example.azure.com/openai/v1"));
     assert!(!updated.contains("https://old.azure.com/openai/v1"));
-    assert!(!updated.contains("https://example.azure.com/openai/v1"));
 }
 
 #[test]
@@ -105,6 +108,7 @@ fn run_task_writes_expected_codex_block() {
         ("HOME", home_dir.to_str().unwrap()),
         ("PATH", &new_path),
         ("AZURE_OPENAI_API_KEY_BACKUP", "test-key"),
+        ("AZURE_OPENAI_ENDPOINT_BACKUP", "https://example.azure.com/"),
         ("GH_AUTH_DISABLED", "1"),
     ]);
 
@@ -113,8 +117,9 @@ fn run_task_writes_expected_codex_block() {
 
     let config_path = home_dir.join(".codex").join("config.toml");
     let config = fs::read_to_string(&config_path).unwrap();
+    let expected = expected_codex_block("https://example.azure.com/openai/v1");
     assert!(
-        config.contains(EXPECTED_CODEX_BLOCK),
+        config.contains(&expected),
         "codex config block should match the expected canonical content"
     );
 }

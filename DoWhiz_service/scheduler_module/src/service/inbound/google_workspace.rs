@@ -229,6 +229,8 @@ pub(crate) fn process_google_workspace_message(
         channel: channel.clone(),
         slack_team_id: None,
         employee_id: Some(config.employee_profile.id.clone()),
+        requester_identifier_type: None,
+        requester_identifier: None,
     };
 
     // Clone run_task before consuming it, in case we need to write to account-level storage
@@ -601,7 +603,7 @@ mod tests {
             users_root,
             users_db_path: state_root.join("users.db"),
             task_index_path: state_root.join("task_index.db"),
-            codex_model: "gpt-5.3-codex".to_string(),
+            codex_model: "gpt-5.4".to_string(),
             codex_disabled: true,
             scheduler_poll_interval: Duration::from_millis(50),
             scheduler_max_concurrency: 1,

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::errors::RunTaskError;
+use super::types::UserIdentities;
 use super::workspace::resolve_rel_dir;
 
 const GITHUB_NOTIFICATIONS_ADDRESS: &str = "notifications@github.com";
@@ -30,6 +31,7 @@ pub(super) fn build_prompt(
     reply_required: bool,
     channel: &str,
     has_unified_account: bool,
+    user_identities: &UserIdentities,
 ) -> String {
     let memory_section = if memory_context.trim().is_empty() {
         "Memory context (from memory/*.md):\n- (no memory files found)\n\n".to_string()
@@ -76,6 +78,10 @@ pub(super) fn build_prompt(
         String::new()
     };
     let github_coauthor_section = build_github_coauthor_section(workspace_dir, input_email_dir);
+    let user_identities_section = build_user_identities_section(user_identities);
+    let filesystem_security_section =
+        build_allowed_paths_section(&user_identities.allowed_user_ids);
+    let web_auth_capabilities_section = build_web_auth_capabilities_section();
 
     // Build registration prompt section if user doesn't have a unified account
     // and we haven't prompted them yet in this thread
@@ -131,6 +137,9 @@ Memory management and maintain policy:
 Scheduling:
 - For any scheduling (email or task), you MUST use the skill "scheduler_maintain".
 
+{cross_channel_capabilities}
+{web_auth_capabilities_section}
+{user_identities_section}
 Rules:
 - Each workspace includes a `.env` file at the workspace root. You may edit it to manage per-user secrets; updates are synced back after the task completes.
 - Do not modify input directories. Any file editing requests should be done on the copied version of attachments and save into reply_email_attachments/ to be sent back to the user. Mark version updates as "_v2", "_v3", etc. in the filename.
@@ -138,7 +147,7 @@ Rules:
   Prefer creating a work/ directory for clones, patches, and build artifacts.
 - If attachments include version suffixes like _v1, _v2, the highest version should be the latest version.
 - Avoid interactive commands; use non-interactive flags for git/gh (for example, `gh pr create --title ... --body ...`).
-{registration_section}"#,
+{filesystem_security_section}{registration_section}"#,
         input_email = input_email_dir.display(),
         input_attachments = input_attachments_dir.display(),
         memory = memory_dir.display(),
@@ -148,7 +157,174 @@ Rules:
         reply_instruction = reply_instruction,
         discord_context_section = discord_context_section,
         github_coauthor_section = github_coauthor_section,
+        cross_channel_capabilities = build_cross_channel_capabilities_section(),
+        web_auth_capabilities_section = web_auth_capabilities_section,
+        user_identities_section = user_identities_section,
+        filesystem_security_section = filesystem_security_section,
         registration_section = registration_section,
+    )
+}
+
+/// Build the cross-channel capabilities section that informs the agent
+/// about available tools for operating across different channels.
+fn build_cross_channel_capabilities_section() -> &'static str {
+    r#"Cross-channel Tools (if user's Google account is linked):
+- `gws` - Google Workspace CLI for Gmail/Drive/Docs operations
+- `google-docs` - Create/read/edit documents, share files
+- `google-slides` - Create/read/edit presentations, share files
+- `google-sheets` - Read/write spreadsheet data
+
+Security: Only access files the CURRENT USER has shared. Never access other users' files.
+See `.agents/skills/google-*/SKILL.md` for detailed command references.
+
+"#
+}
+
+fn build_web_auth_capabilities_section() -> &'static str {
+    r#"Web Workspace Auth (Notion / Google web pages):
+- Workspace may include pre-bootstrapped browser states in `.auth/notion_state.json` and `.auth/google_state.json`.
+- For private Notion/Google pages, use browser automation (for example `playwright-cli`) instead of plain HTTP fetches.
+- Follow this login sequence:
+  1. If `.auth/bootstrap_status.json` exists, quickly check it for previous bootstrap failures.
+  2. Before opening private URLs, load available state files:
+     - `playwright-cli state-load .auth/notion_state.json`
+     - `playwright-cli state-load .auth/google_state.json`
+  3. Open the target page and verify you are already authenticated.
+  4. If browser launch fails before sign-in:
+     - If error says Chrome is missing, retry with:
+       - `export PLAYWRIGHT_MCP_EXECUTABLE_PATH=/opt/google/chrome/chrome`
+       - If that file does not exist, set it to the first hit under `/app/.cache/ms-playwright/*/chrome-linux*/chrome`.
+     - Avoid `npx playwright install ...` on mounted workspaces (can fail with symlink errors).
+       Prefer `python3 -m playwright install chromium` or `playwright install chromium`.
+       If npm must be used, set `NPM_CONFIG_CACHE=/tmp/.npm` first.
+  5. If still redirected to sign-in, use env credentials with this order:
+     - Notion email: `NOTION_ACCOUNT_EMAIL`, then `NOTION_EMAIL`
+     - Notion password: `NOTION_PASSWORD`
+     - Google email: `GOOGLE_ACCOUNT_EMAIL`, `GOOGLE_EMAIL`, `GOOGLE_EMPLOYEE_EMAIL`
+     - Google password: `GOOGLE_PASSWORD`, `GOOGLE_ACCOUNT_PASSWORD`, `GOOGLE_EMPLOYEE_PASSWORD`
+     - Also try prefixed keys (`<PREFIX>_<KEY>`) when `EMPLOYEE_WEB_AUTH_ENV_PREFIX` or `WEB_AUTH_ENV_PREFIX` is set.
+  6. After successful sign-in, refresh storage state in `.auth/` so retries are faster.
+- Never include raw credentials in any user-facing reply, logs, or generated files.
+- Do not conclude "cannot access due to sign-in" until the sequence above has been attempted.
+
+"#
+}
+
+fn build_user_identities_section(identities: &UserIdentities) -> String {
+    let has_any = identities.account_id.is_some()
+        || !identities.emails.is_empty()
+        || !identities.slack_user_ids.is_empty()
+        || !identities.discord_user_ids.is_empty()
+        || !identities.phone_numbers.is_empty()
+        || !identities.telegram_user_ids.is_empty();
+
+    if !has_any {
+        return "Cross-channel routing: Not available (user has no linked DoWhiz account). \
+If the user requests a reply on a different channel, politely explain they need to link \
+their accounts at dowhiz.com first.\n"
+            .to_string();
+    }
+
+    let mut channels = Vec::new();
+    if let Some(id) = &identities.account_id {
+        channels.push(format!("- DoWhiz Account ID: {}", id));
+    }
+    if !identities.emails.is_empty() {
+        channels.push(format!("- Email: {}", identities.emails.join(", ")));
+    }
+    if !identities.slack_user_ids.is_empty() {
+        channels.push(format!(
+            "- Slack User IDs: {}",
+            identities.slack_user_ids.join(", ")
+        ));
+    }
+    if !identities.discord_user_ids.is_empty() {
+        channels.push(format!(
+            "- Discord User IDs: {}",
+            identities.discord_user_ids.join(", ")
+        ));
+    }
+    if !identities.phone_numbers.is_empty() {
+        channels.push(format!(
+            "- Phone Numbers: {}",
+            identities.phone_numbers.join(", ")
+        ));
+    }
+    if !identities.telegram_user_ids.is_empty() {
+        channels.push(format!(
+            "- Telegram User IDs: {}",
+            identities.telegram_user_ids.join(", ")
+        ));
+    }
+
+    format!(
+        r#"Cross-channel routing (user's linked channels):
+{channels}
+
+Cross-channel Reply Routing:
+If the user requests a reply on a different channel than the inbound channel,
+write a `reply_routing.json` file in the workspace root to route the reply.
+If no routing file is written, the reply goes to the original inbound channel.
+
+reply_routing.json schema:
+```json
+{{
+  "channel": "email" | "slack" | "discord" | "telegram" | "sms" | "whatsapp" | "bluebubbles",
+  "identifier": "<target identifier for the channel>"
+}}
+```
+
+Identifier format per channel:
+- email: email address (e.g., "user@example.com")
+- slack: Slack user ID (e.g., "U1234567890")
+- discord: Discord user ID (e.g., "123456789012345678")
+- telegram: Telegram user ID (e.g., "123456789")
+- sms/whatsapp/bluebubbles: phone number (e.g., "+15551234567")
+
+IMPORTANT: When using cross-channel routing, write the reply in the TARGET channel's format:
+- email target: reply_email_draft.html (HTML), attachments in reply_email_attachments/
+- slack target: reply_message.txt (Slack mrkdwn: *bold*, _italic_, `code`)
+- discord target: reply_message.txt (Discord markdown: **bold**, *italic*, `code`)
+- telegram target: reply_message.txt (MarkdownV2)
+- sms/whatsapp/bluebubbles target: reply_message.txt (plain text)
+- Attachments for non-email channels go in reply_attachments/
+
+Example: Inbound is email, user says "reply to my Discord instead"
+1. Write reply_routing.json: {{"channel": "discord", "identifier": "123456789012345678"}}
+2. Write reply_message.txt (NOT reply_email_draft.html) with Discord markdown
+
+SECURITY: You may ONLY route replies to the identifiers listed above under "user's linked channels".
+Do NOT route replies to any other email addresses, user IDs, or phone numbers not listed.
+If the user requests routing to an unlisted identifier, politely decline and explain they need to link that channel first.
+"#,
+        channels = channels.join("\n")
+    )
+}
+
+fn build_allowed_paths_section(allowed_user_ids: &[String]) -> String {
+    if allowed_user_ids.is_empty() {
+        return r#"
+Filesystem Security:
+- You may ONLY access files within your current workspace directory.
+- Do NOT traverse to parent directories or access paths outside this workspace.
+"#
+        .to_string();
+    }
+
+    let allowed_paths: Vec<String> = allowed_user_ids
+        .iter()
+        .map(|id| format!("  - /users/{}/", id))
+        .collect();
+
+    format!(
+        r#"
+Filesystem Security:
+- You may ONLY access files within the following user directories:
+{allowed_paths}
+- Do NOT access any paths outside these directories.
+- Do NOT attempt to access other users' data.
+"#,
+        allowed_paths = allowed_paths.join("\n")
     )
 }
 
@@ -465,6 +641,7 @@ mod tests {
             true,
             "email",
             true, // has_unified_account
+            &UserIdentities::default(),
         );
 
         assert!(prompt.contains("Memory context"));
@@ -487,6 +664,7 @@ mod tests {
             false,
             "email",
             true, // has_unified_account
+            &UserIdentities::default(),
         );
 
         assert!(prompt.contains("non-replyable"));
@@ -509,6 +687,7 @@ mod tests {
             true,
             "email",
             false, // has_unified_account = false
+            &UserIdentities::default(),
         );
 
         assert!(prompt.contains("Account Registration Notice"));
@@ -526,6 +705,7 @@ mod tests {
             true,
             "email",
             false,
+            &UserIdentities::default(),
         );
 
         assert!(!prompt2.contains("Account Registration Notice"));
@@ -554,6 +734,7 @@ mod tests {
             true,
             "discord",
             true,
+            &UserIdentities::default(),
         );
 
         assert!(prompt.contains("Discord context snapshot (auto-generated"));
@@ -586,6 +767,7 @@ mod tests {
             true,
             "email",
             true,
+            &UserIdentities::default(),
         );
 
         assert!(prompt.contains("GitHub Attribution Requirement"));
@@ -621,9 +803,681 @@ mod tests {
             true,
             "email",
             true,
+            &UserIdentities::default(),
         );
 
         assert!(!prompt.contains("GitHub Attribution Requirement"));
         assert!(!prompt.contains("Co-authored-by:"));
+    }
+
+    #[test]
+    fn build_user_identities_section_shows_not_available_for_default() {
+        let identities = UserIdentities::default();
+        let section = build_user_identities_section(&identities);
+        assert!(section.contains("Not available"));
+        assert!(section.contains("no linked DoWhiz account"));
+    }
+
+    #[test]
+    fn build_user_identities_section_includes_account_id() {
+        let identities = UserIdentities {
+            account_id: Some("test-account-123".to_string()),
+            ..Default::default()
+        };
+        let section = build_user_identities_section(&identities);
+        assert!(section.contains("DoWhiz Account ID: test-account-123"));
+        assert!(section.contains("Cross-channel routing"));
+    }
+
+    #[test]
+    fn build_user_identities_section_includes_all_channels() {
+        let identities = UserIdentities {
+            account_id: Some("acct-123".to_string()),
+            emails: vec!["user@example.com".to_string()],
+            slack_user_ids: vec!["U123456".to_string()],
+            discord_user_ids: vec!["987654321".to_string()],
+            phone_numbers: vec!["+15551234567".to_string()],
+            telegram_user_ids: vec!["12345678".to_string()],
+            allowed_user_ids: vec![],
+        };
+        let section = build_user_identities_section(&identities);
+
+        assert!(section.contains("Email: user@example.com"));
+        assert!(section.contains("Slack User IDs: U123456"));
+        assert!(section.contains("Discord User IDs: 987654321"));
+        assert!(section.contains("Phone Numbers: +15551234567"));
+        assert!(section.contains("Telegram User IDs: 12345678"));
+    }
+
+    #[test]
+    fn build_user_identities_section_includes_routing_instructions() {
+        let identities = UserIdentities {
+            account_id: Some("acct-123".to_string()),
+            ..Default::default()
+        };
+        let section = build_user_identities_section(&identities);
+
+        assert!(section.contains("reply_routing.json"));
+        assert!(section.contains("IMPORTANT: When using cross-channel routing"));
+        assert!(section.contains("email target: reply_email_draft.html"));
+        assert!(section.contains("discord target: reply_message.txt"));
+    }
+
+    #[test]
+    fn build_prompt_includes_user_identities_when_present() {
+        let temp = TempDir::new().expect("tempdir");
+        let identities = UserIdentities {
+            account_id: Some("test-acct".to_string()),
+            emails: vec!["test@example.com".to_string()],
+            discord_user_ids: vec!["123456789".to_string()],
+            ..Default::default()
+        };
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            true,
+            &identities,
+        );
+
+        assert!(prompt.contains("Cross-channel routing"));
+        assert!(prompt.contains("test@example.com"));
+        assert!(prompt.contains("123456789"));
+        assert!(prompt.contains("reply_routing.json"));
+    }
+
+    #[test]
+    fn build_prompt_includes_cross_channel_capabilities() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            true,
+            &UserIdentities::default(),
+        );
+
+        // Verify cross-channel tools section is included
+        assert!(prompt.contains("Cross-channel Tools"));
+        assert!(prompt.contains("`gws`"));
+        assert!(prompt.contains("google-docs"));
+        assert!(prompt.contains("google-slides"));
+        assert!(prompt.contains("google-sheets"));
+
+        // Verify security note and SKILL.md reference
+        assert!(prompt.contains("CURRENT USER"));
+        assert!(prompt.contains("SKILL.md"));
+        assert!(prompt.contains("/app/.cache/ms-playwright/*/chrome-linux*/chrome"));
+        assert!(prompt.contains("Never include raw credentials"));
+    }
+
+    #[test]
+    fn build_allowed_paths_section_empty_returns_workspace_only() {
+        let section = build_allowed_paths_section(&[]);
+        assert!(section.contains("Filesystem Security"));
+        assert!(section.contains("ONLY access files within your current workspace directory"));
+        assert!(section.contains("Do NOT traverse to parent directories"));
+    }
+
+    #[test]
+    fn build_allowed_paths_section_with_user_ids_lists_paths() {
+        let user_ids = vec![
+            "550e8400-e29b-41d4-a716-446655440000".to_string(),
+            "660f9500-f39c-52e5-b827-557766551111".to_string(),
+        ];
+        let section = build_allowed_paths_section(&user_ids);
+
+        assert!(section.contains("Filesystem Security"));
+        assert!(section.contains("/users/550e8400-e29b-41d4-a716-446655440000/"));
+        assert!(section.contains("/users/660f9500-f39c-52e5-b827-557766551111/"));
+        assert!(section.contains("Do NOT access any paths outside these directories"));
+        assert!(section.contains("Do NOT attempt to access other users' data"));
+    }
+
+    #[test]
+    fn build_prompt_includes_filesystem_security_section() {
+        let temp = TempDir::new().expect("tempdir");
+        let identities = UserIdentities {
+            allowed_user_ids: vec!["test-user-uuid".to_string()],
+            ..Default::default()
+        };
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            false,
+            &identities,
+        );
+
+        assert!(prompt.contains("Filesystem Security"));
+        assert!(prompt.contains("/users/test-user-uuid/"));
+    }
+
+    #[test]
+    fn build_prompt_includes_workspace_only_security_when_no_user_ids() {
+        let temp = TempDir::new().expect("tempdir");
+        let identities = UserIdentities::default();
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            false,
+            &identities,
+        );
+
+        assert!(prompt.contains("Filesystem Security"));
+        assert!(prompt.contains("ONLY access files within your current workspace directory"));
+    }
+
+    // ==================== Linked vs Unlinked Account Tests ====================
+
+    #[test]
+    fn unlinked_account_gets_workspace_only_restriction() {
+        // User without a unified account: no account_id, no allowed_user_ids
+        let temp = TempDir::new().expect("tempdir");
+        let identities = UserIdentities {
+            account_id: None,
+            emails: vec![],
+            slack_user_ids: vec![],
+            discord_user_ids: vec![],
+            phone_numbers: vec![],
+            telegram_user_ids: vec![],
+            allowed_user_ids: vec![],
+        };
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            false, // has_unified_account = false
+            &identities,
+        );
+
+        // Should have workspace-only restriction
+        assert!(prompt.contains("ONLY access files within your current workspace directory"));
+        assert!(prompt.contains("Do NOT traverse to parent directories"));
+        // Should NOT mention /users/ paths
+        assert!(!prompt.contains("/users/"));
+    }
+
+    #[test]
+    fn linked_account_single_channel_gets_one_user_path() {
+        // User with unified account, single channel (e.g., just email)
+        let temp = TempDir::new().expect("tempdir");
+        let user_uuid = "abc12345-def6-7890-abcd-ef1234567890";
+        let identities = UserIdentities {
+            account_id: Some("unified-account-123".to_string()),
+            emails: vec!["user@example.com".to_string()],
+            slack_user_ids: vec![],
+            discord_user_ids: vec![],
+            phone_numbers: vec![],
+            telegram_user_ids: vec![],
+            allowed_user_ids: vec![user_uuid.to_string()],
+        };
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            true, // has_unified_account = true
+            &identities,
+        );
+
+        // Should have the specific user path
+        assert!(prompt.contains(&format!("/users/{}/", user_uuid)));
+        // Should have the multi-directory restriction message
+        assert!(prompt.contains("ONLY access files within the following user directories"));
+        assert!(prompt.contains("Do NOT access any paths outside these directories"));
+        // Should NOT have workspace-only message
+        assert!(!prompt.contains("ONLY access files within your current workspace directory"));
+    }
+
+    #[test]
+    fn linked_account_multiple_channels_gets_all_user_paths() {
+        // User with unified account, multiple channels (email + slack + discord)
+        let temp = TempDir::new().expect("tempdir");
+        let email_uuid = "email-uuid-1111-2222-333344445555";
+        let slack_uuid = "slack-uuid-6666-7777-888899990000";
+        let discord_uuid = "discord-uuid-aaaa-bbbb-ccccddddeeee";
+
+        let identities = UserIdentities {
+            account_id: Some("unified-account-456".to_string()),
+            emails: vec!["user@example.com".to_string()],
+            slack_user_ids: vec!["U12345678".to_string()],
+            discord_user_ids: vec!["987654321012345678".to_string()],
+            phone_numbers: vec![],
+            telegram_user_ids: vec![],
+            allowed_user_ids: vec![
+                email_uuid.to_string(),
+                slack_uuid.to_string(),
+                discord_uuid.to_string(),
+            ],
+        };
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            true,
+            &identities,
+        );
+
+        // Should have all user paths
+        assert!(prompt.contains(&format!("/users/{}/", email_uuid)));
+        assert!(prompt.contains(&format!("/users/{}/", slack_uuid)));
+        assert!(prompt.contains(&format!("/users/{}/", discord_uuid)));
+        // Should have the restriction message
+        assert!(prompt.contains("Do NOT attempt to access other users' data"));
+    }
+
+    #[test]
+    fn linked_account_with_account_id_but_no_user_ids_falls_back_to_workspace() {
+        // Edge case: has account_id but allowed_user_ids is empty
+        // (could happen if UserStore lookup fails)
+        let temp = TempDir::new().expect("tempdir");
+        let identities = UserIdentities {
+            account_id: Some("unified-account-789".to_string()),
+            emails: vec!["user@example.com".to_string()],
+            slack_user_ids: vec![],
+            discord_user_ids: vec![],
+            phone_numbers: vec![],
+            telegram_user_ids: vec![],
+            allowed_user_ids: vec![], // Empty even though account exists
+        };
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            true, // has_unified_account = true
+            &identities,
+        );
+
+        // Should fall back to workspace-only restriction
+        assert!(prompt.contains("ONLY access files within your current workspace directory"));
+        // Should NOT mention /users/ paths
+        assert!(!prompt.contains("/users/"));
+    }
+
+    #[test]
+    fn security_section_appears_after_rules_section() {
+        let temp = TempDir::new().expect("tempdir");
+        let identities = UserIdentities::default();
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            false,
+            &identities,
+        );
+
+        // Security section should appear after the rules
+        let rules_pos = prompt
+            .find("Avoid interactive commands")
+            .expect("rules section");
+        let security_pos = prompt
+            .find("Filesystem Security")
+            .expect("security section");
+        assert!(
+            security_pos > rules_pos,
+            "Security section should appear after rules"
+        );
+    }
+
+    #[test]
+    fn unlinked_account_does_not_get_cross_channel_routing() {
+        let temp = TempDir::new().expect("tempdir");
+        let identities = UserIdentities::default();
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            false,
+            &identities,
+        );
+
+        // Should mention that cross-channel is not available
+        assert!(prompt.contains("no linked DoWhiz account"));
+        // But should still have filesystem security
+        assert!(prompt.contains("Filesystem Security"));
+    }
+
+    #[test]
+    fn linked_account_gets_both_cross_channel_and_security() {
+        let temp = TempDir::new().expect("tempdir");
+        let identities = UserIdentities {
+            account_id: Some("test-account".to_string()),
+            emails: vec!["user@example.com".to_string()],
+            allowed_user_ids: vec!["user-uuid-1234".to_string()],
+            ..Default::default()
+        };
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            true,
+            &identities,
+        );
+
+        // Should have cross-channel routing info
+        assert!(prompt.contains("Cross-channel routing"));
+        assert!(prompt.contains("reply_routing.json"));
+        // And filesystem security with user path
+        assert!(prompt.contains("Filesystem Security"));
+        assert!(prompt.contains("/users/user-uuid-1234/"));
+    }
+
+    // ==================== Production Flow Simulation Tests ====================
+    // These tests simulate what happens in production when:
+    // 1. AccountStore returns identifiers for a unified account
+    // 2. UserStore maps each identifier to a filesystem user_id
+    // 3. The prompt is generated with all allowed paths
+
+    #[test]
+    fn production_flow_email_only_account() {
+        // Simulates: User signed up via email only, no other channels linked
+        // AccountStore returns: [email: "alice@example.com"]
+        // UserStore returns: email -> "uuid-email-alice"
+        let temp = TempDir::new().expect("tempdir");
+
+        let identities = UserIdentities {
+            account_id: Some("acct-alice-123".to_string()),
+            emails: vec!["alice@example.com".to_string()],
+            slack_user_ids: vec![],
+            discord_user_ids: vec![],
+            phone_numbers: vec![],
+            telegram_user_ids: vec![],
+            allowed_user_ids: vec!["uuid-email-alice".to_string()],
+        };
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            true,
+            &identities,
+        );
+
+        // Codex should see exactly one allowed path
+        assert!(prompt.contains("/users/uuid-email-alice/"));
+        // And the security instruction
+        assert!(prompt.contains("ONLY access files within the following user directories"));
+        // Cross-channel should show email is available
+        assert!(prompt.contains("Email: alice@example.com"));
+    }
+
+    #[test]
+    fn production_flow_multi_channel_account() {
+        // Simulates: User linked email, Slack, Discord, and phone
+        // AccountStore returns all 4 identifiers
+        // UserStore returns a unique user_id for each
+        let temp = TempDir::new().expect("tempdir");
+
+        let identities = UserIdentities {
+            account_id: Some("acct-bob-456".to_string()),
+            emails: vec!["bob@company.com".to_string()],
+            slack_user_ids: vec!["U0BOB12345".to_string()],
+            discord_user_ids: vec!["123456789012345678".to_string()],
+            phone_numbers: vec!["+15551234567".to_string()],
+            telegram_user_ids: vec![],
+            // Each channel has its own filesystem user directory
+            allowed_user_ids: vec![
+                "uuid-email-bob".to_string(),
+                "uuid-slack-bob".to_string(),
+                "uuid-discord-bob".to_string(),
+                "uuid-phone-bob".to_string(),
+            ],
+        };
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email", // inbound channel is email
+            true,
+            &identities,
+        );
+
+        // Codex should see ALL four allowed paths
+        assert!(prompt.contains("/users/uuid-email-bob/"));
+        assert!(prompt.contains("/users/uuid-slack-bob/"));
+        assert!(prompt.contains("/users/uuid-discord-bob/"));
+        assert!(prompt.contains("/users/uuid-phone-bob/"));
+
+        // Count occurrences - should be exactly 4 user directories listed
+        let user_path_count = prompt.matches("/users/").count();
+        assert_eq!(user_path_count, 4, "Should have exactly 4 /users/ paths");
+
+        // Cross-channel routing should list all channels
+        assert!(prompt.contains("Email: bob@company.com"));
+        assert!(prompt.contains("Slack User IDs: U0BOB12345"));
+        assert!(prompt.contains("Discord User IDs: 123456789012345678"));
+        assert!(prompt.contains("Phone Numbers: +15551234567"));
+    }
+
+    #[test]
+    fn production_flow_same_user_id_for_multiple_channels() {
+        // Edge case: Two identifiers map to the same user_id
+        // (Could happen if user used same email for Slack integration)
+        let temp = TempDir::new().expect("tempdir");
+
+        let identities = UserIdentities {
+            account_id: Some("acct-charlie-789".to_string()),
+            emails: vec!["charlie@example.com".to_string()],
+            slack_user_ids: vec!["UCHARLIE123".to_string()],
+            discord_user_ids: vec![],
+            phone_numbers: vec![],
+            telegram_user_ids: vec![],
+            // In production, identifiers_to_user_identities deduplicates
+            // So if email and slack both map to same user_id, only one entry
+            allowed_user_ids: vec!["uuid-charlie-shared".to_string()],
+        };
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            true,
+            &identities,
+        );
+
+        // Should only list the path once (deduplicated)
+        let user_path_count = prompt.matches("/users/uuid-charlie-shared/").count();
+        assert_eq!(
+            user_path_count, 1,
+            "Deduplicated user_id should appear once"
+        );
+    }
+
+    #[test]
+    fn production_flow_inbound_via_slack() {
+        // Simulates: Message came in via Slack, not email
+        let temp = TempDir::new().expect("tempdir");
+
+        let identities = UserIdentities {
+            account_id: Some("acct-dave-000".to_string()),
+            emails: vec!["dave@example.com".to_string()],
+            slack_user_ids: vec!["UDAVE99999".to_string()],
+            discord_user_ids: vec![],
+            phone_numbers: vec![],
+            telegram_user_ids: vec![],
+            allowed_user_ids: vec!["uuid-email-dave".to_string(), "uuid-slack-dave".to_string()],
+        };
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"), // Still "incoming_email" dir name
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "slack", // <-- Inbound channel is Slack
+            true,
+            &identities,
+        );
+
+        // Should still have both paths - channel doesn't affect security
+        assert!(prompt.contains("/users/uuid-email-dave/"));
+        assert!(prompt.contains("/users/uuid-slack-dave/"));
+
+        // Reply instruction should be Slack-specific
+        assert!(prompt.contains("reply_message.txt"));
+        assert!(prompt.contains("Slack mrkdwn"));
+    }
+
+    #[test]
+    fn codex_sees_exact_security_message_for_linked_account() {
+        // Verify the EXACT wording Codex sees
+        let temp = TempDir::new().expect("tempdir");
+
+        let identities = UserIdentities {
+            account_id: Some("test-acct".to_string()),
+            allowed_user_ids: vec!["first-uuid".to_string(), "second-uuid".to_string()],
+            ..Default::default()
+        };
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            true,
+            &identities,
+        );
+
+        // Check exact phrases Codex will see
+        assert!(prompt.contains("Filesystem Security:"));
+        assert!(prompt.contains("You may ONLY access files within the following user directories:"));
+        assert!(prompt.contains("  - /users/first-uuid/"));
+        assert!(prompt.contains("  - /users/second-uuid/"));
+        assert!(prompt.contains("Do NOT access any paths outside these directories."));
+        assert!(prompt.contains("Do NOT attempt to access other users' data."));
+    }
+
+    #[test]
+    fn codex_sees_exact_security_message_for_unlinked_account() {
+        // Verify the EXACT wording Codex sees for unlinked accounts
+        let temp = TempDir::new().expect("tempdir");
+        let identities = UserIdentities::default();
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            false,
+            &identities,
+        );
+
+        // Check exact phrases
+        assert!(prompt.contains("Filesystem Security:"));
+        assert!(
+            prompt.contains("You may ONLY access files within your current workspace directory.")
+        );
+        assert!(prompt.contains(
+            "Do NOT traverse to parent directories or access paths outside this workspace."
+        ));
     }
 }
