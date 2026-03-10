@@ -78,6 +78,13 @@ const REQUEST_SIGNAL_MARKERS: &[&str] = &[
     "请帮",
     "麻烦",
 ];
+const CLOSURE_NON_REQUEST_GUIDANCE_MARKERS: &[&str] = &[
+    "please start a fresh thread",
+    "please start a new thread",
+    "please start a fresh email",
+    "please start a new email",
+    "please send a new task in a fresh thread",
+];
 const ACTION_SIGNAL_MARKERS: &[&str] = &[
     "action item",
     "next step",
@@ -409,7 +416,13 @@ fn has_any_signal(text: &str, markers: &[&str]) -> bool {
 }
 
 fn has_request_signal(text: &str) -> bool {
-    text.contains('?') || text.contains('？') || has_any_signal(text, REQUEST_SIGNAL_MARKERS)
+    let mut sanitized = text.to_string();
+    for marker in CLOSURE_NON_REQUEST_GUIDANCE_MARKERS {
+        sanitized = sanitized.replace(marker, " ");
+    }
+    sanitized.contains('?')
+        || sanitized.contains('？')
+        || has_any_signal(&sanitized, REQUEST_SIGNAL_MARKERS)
 }
 
 fn has_action_signal(text: &str) -> bool {
@@ -2109,6 +2122,36 @@ addresses = ["dowhiz@deep-tutor.com"]
         fs::write(
             &reply_path,
             "This is another generated reply in the same closed loop. I did not find a new task request.",
+        )
+        .expect("write reply");
+
+        std::env::set_var("INTERNAL_SLACK_SENDER_IDS", "u_internal");
+        let mut task = make_test_task(vec!["U_INTERNAL".to_string()]);
+        task.workspace_dir = workspace.to_path_buf();
+        task.channel = Channel::Slack;
+        assert!(should_skip_closure_loop_reply(
+            &task,
+            &reply_path,
+            Channel::Slack
+        ));
+        std::env::remove_var("INTERNAL_SLACK_SENDER_IDS");
+    }
+
+    #[test]
+    fn closure_loop_guard_skips_when_fresh_thread_guidance_is_present() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+        let incoming = workspace.join("incoming_email");
+        fs::create_dir_all(&incoming).expect("incoming dir");
+        fs::write(
+            incoming.join("00001_slack_message.txt"),
+            "No reply needed. This thread is closed. If you mean to send a real task later, please start a fresh thread with only the new request.",
+        )
+        .expect("write inbound");
+        let reply_path = workspace.join("reply_message.txt");
+        fs::write(
+            &reply_path,
+            "No outbound reply should be sent. This is an already-closed thread.",
         )
         .expect("write reply");
 
