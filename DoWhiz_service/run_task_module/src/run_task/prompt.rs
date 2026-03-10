@@ -65,6 +65,9 @@ pub(super) fn build_prompt(
             "whatsapp" => {
                 "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Keep the reply concise and conversational. Do not use HTML. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."
             }
+            "wechat" => {
+                "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Keep the reply concise and conversational. Do not use HTML or markdown. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."
+            }
             _ => {
                 // Default to email (HTML)
                 "2. After finishing the task (step one), make sure you write a proper HTML email draft in reply_email_draft.html in the workspace root. If there are files to attach, put them in reply_email_attachments/ and reference them in the email draft. Do not pretend the job has been done without actually doing it, and do not write the email draft until the task is done. If you are not sure about the task, send another email to ask for clarification (and if any, attach information about why did you fail to get the task done, what is the exact error you encountered)."
@@ -269,7 +272,7 @@ If no routing file is written, the reply goes to the original inbound channel.
 reply_routing.json schema:
 ```json
 {{
-  "channel": "email" | "slack" | "discord" | "telegram" | "sms" | "whatsapp" | "bluebubbles",
+  "channel": "email" | "slack" | "discord" | "telegram" | "sms" | "whatsapp" | "bluebubbles" | "wechat",
   "identifier": "<target identifier for the channel>"
 }}
 ```
@@ -280,13 +283,14 @@ Identifier format per channel:
 - discord: Discord user ID (e.g., "123456789012345678")
 - telegram: Telegram user ID (e.g., "123456789")
 - sms/whatsapp/bluebubbles: phone number (e.g., "+15551234567")
+- wechat: WeChat Work UserID (e.g., "zhangsan")
 
 IMPORTANT: When using cross-channel routing, write the reply in the TARGET channel's format:
 - email target: reply_email_draft.html (HTML), attachments in reply_email_attachments/
 - slack target: reply_message.txt (Slack mrkdwn: *bold*, _italic_, `code`)
 - discord target: reply_message.txt (Discord markdown: **bold**, *italic*, `code`)
 - telegram target: reply_message.txt (MarkdownV2)
-- sms/whatsapp/bluebubbles target: reply_message.txt (plain text)
+- sms/whatsapp/bluebubbles/wechat target: reply_message.txt (plain text)
 - Attachments for non-email channels go in reply_attachments/
 
 Example: Inbound is email, user says "reply to my Discord instead"
