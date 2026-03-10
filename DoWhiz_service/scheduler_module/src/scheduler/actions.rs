@@ -37,8 +37,13 @@ const CLOSURE_SIGNAL_MARKERS: &[&str] = &[
     "no further action",
     "nothing further",
     "nothing else needed",
+    "no reply required",
+    "no outbound reply should be sent",
+    "do not send another acknowledgement",
     "wrapped up",
     "all set",
+    "thread closed",
+    "no action requested",
     "no further changes",
     "pass is complete",
     "done on my side",
@@ -2040,6 +2045,36 @@ addresses = ["dowhiz@deep-tutor.com"]
         task.workspace_dir = workspace.to_path_buf();
         task.channel = Channel::Slack;
         assert!(!should_skip_closure_loop_reply(
+            &task,
+            &reply_path,
+            Channel::Slack
+        ));
+        std::env::remove_var("INTERNAL_SLACK_SENDER_IDS");
+    }
+
+    #[test]
+    fn closure_loop_guard_skips_for_no_reply_required_language() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+        let incoming = workspace.join("incoming_email");
+        fs::create_dir_all(&incoming).expect("incoming dir");
+        fs::write(
+            incoming.join("00001_slack_message.txt"),
+            "No outbound reply should be sent for this message. Status: thread closed, no action requested.",
+        )
+        .expect("write inbound");
+        let reply_path = workspace.join("reply_message.txt");
+        fs::write(
+            &reply_path,
+            "No reply required. Do not send another acknowledgement unless there is a new task.",
+        )
+        .expect("write reply");
+
+        std::env::set_var("INTERNAL_SLACK_SENDER_IDS", "u_internal");
+        let mut task = make_test_task(vec!["U_INTERNAL".to_string()]);
+        task.workspace_dir = workspace.to_path_buf();
+        task.channel = Channel::Slack;
+        assert!(should_skip_closure_loop_reply(
             &task,
             &reply_path,
             Channel::Slack
