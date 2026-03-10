@@ -1,27 +1,45 @@
-//! Standalone Notion browser poller for local testing.
+//! Standalone Notion browser poller for local testing and E2E.
 //!
-//! This binary runs the Notion browser poller independently,
-//! without requiring the full inbound gateway infrastructure.
+//! This binary runs the Notion browser poller independently.
+//! If SERVICE_BUS_CONNECTION_STRING is set, it will enqueue messages for worker processing.
 //!
 //! Usage:
-//!   IN_DOCKER=true cargo run --release -p scheduler_module --bin notion_poller
+//!   IN_DOCKER=true cargo run -p scheduler_module --bin notion_poller
 
 use std::env;
+use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
 
 use scheduler_module::notion_browser::{
     MongoNotionProcessedStore, NotionBrowserPoller, NotionPollerConfig,
 };
+use scheduler_module::service_bus_queue::ServiceBusIngestionQueue;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt()
         .with_target(false)
         .init();
     dotenvy::dotenv().ok();
 
-    info!("=== Notion Browser Poller (Local Test Mode) ===");
+    tracing::info!("=== Notion Browser Poller (E2E Test Mode) ===");
+
+    // For standalone testing, run without queue (local mode)
+    // For full E2E with queue, use the inbound_gateway binary instead
+    let queue: Option<Arc<ServiceBusIngestionQueue>> = None;
+    tracing::info!("Running in local test mode (no queue). Use inbound_gateway for E2E.");
+
+    // Now enter async runtime
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async_main())
+}
+
+async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // For standalone testing, no queue (local mode)
+    let queue: Option<Arc<ServiceBusIngestionQueue>> = None;
+    info!("=== Starting Notion Browser Poller ===");
 
     // Check required environment variables
     let notion_email = env::var("NOTION_EMPLOYEE_EMAIL")
@@ -93,8 +111,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let _ = shutdown_tx_clone.send(());
     });
 
-    // Run the poller (without Service Bus queue - local mode)
-    let mut poller = NotionBrowserPoller::new(config, processed_store, None)
+    // Run the poller (queue was created before async runtime)
+    let mut poller = NotionBrowserPoller::new(config, processed_store, queue)
         .with_shutdown(shutdown_tx.subscribe());
 
     if let Err(e) = poller.run().await {

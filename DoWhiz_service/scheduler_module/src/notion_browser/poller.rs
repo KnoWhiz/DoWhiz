@@ -2,29 +2,71 @@
 //!
 //! This module provides the main polling loop that:
 //! 1. Navigates to the Notion notifications page
-//! 2. Parses @mentions from browser state
+//! 2. Parses @mentions from browser state (via LLM or regex patterns)
 //! 3. Filters out already-processed notifications
 //! 4. Extracts context from mentioned pages
 //! 5. Creates InboundMessages for the task queue
 //! 6. Processes pending reply requests from the queue
+//!
+//! ## Detection Modes
+//!
+//! The poller supports two detection modes:
+//! - `AgentDriven`: Uses LLM (Claude Haiku) to analyze inbox screenshots (recommended)
+//! - `Hardcoded`: Uses regex patterns to parse browser state (legacy, fallback)
+//!
+//! Set `NOTION_DETECTION_MODE=agent_driven` (default) or `hardcoded` to switch.
 
 use chrono::Utc;
 use regex::Regex;
+use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
+use uuid::Uuid;
+
 use crate::channel::{Channel, ChannelMetadata, InboundMessage};
+use crate::ingestion::{IngestionEnvelope, IngestionPayload};
 use crate::service_bus_queue::ServiceBusIngestionQueue;
 
+use super::agent_detector::{AgentDetector, DetectedMention, UiAction};
 use super::browser::{NotionBrowser, NotionBrowserConfig};
 use super::models::{NotionMention, NotionNotification, NotionPageContext};
 use super::store::MongoNotionProcessedStore;
 use super::NotionError;
+
+/// Detection mode for inbox mentions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetectionMode {
+    /// Use LLM to analyze inbox screenshots (recommended)
+    AgentDriven,
+    /// Use hardcoded regex patterns (legacy fallback)
+    Hardcoded,
+}
+
+impl Default for DetectionMode {
+    fn default() -> Self {
+        Self::AgentDriven
+    }
+}
+
+impl DetectionMode {
+    /// Parse from environment variable or string.
+    pub fn from_env() -> Self {
+        match env::var("NOTION_DETECTION_MODE")
+            .unwrap_or_default()
+            .to_lowercase()
+            .as_str()
+        {
+            "hardcoded" | "regex" | "legacy" => Self::Hardcoded,
+            _ => Self::AgentDriven,
+        }
+    }
+}
 
 /// Configuration for the Notion browser poller.
 #[derive(Debug, Clone)]
@@ -43,6 +85,8 @@ pub struct NotionPollerConfig {
     pub employee_name: String,
     /// Tenant ID for routing
     pub tenant_id: String,
+    /// Detection mode (agent-driven or hardcoded)
+    pub detection_mode: DetectionMode,
 }
 
 impl NotionPollerConfig {
@@ -77,6 +121,8 @@ impl NotionPollerConfig {
         let tenant_id = env::var("TENANT_ID")
             .unwrap_or_else(|_| "default".to_string());
 
+        let detection_mode = DetectionMode::from_env();
+
         Ok(Self {
             employee_id: employee_id.to_string(),
             notion_email,
@@ -92,6 +138,7 @@ impl NotionPollerConfig {
             },
             employee_name,
             tenant_id,
+            detection_mode,
         })
     }
 }
@@ -103,6 +150,8 @@ pub struct NotionBrowserPoller {
     processed_store: MongoNotionProcessedStore,
     queue: Option<Arc<ServiceBusIngestionQueue>>,
     shutdown_rx: Option<broadcast::Receiver<()>>,
+    agent_detector: Option<AgentDetector>,
+    detection_mode: DetectionMode,
 }
 
 impl NotionBrowserPoller {
@@ -112,12 +161,43 @@ impl NotionBrowserPoller {
         processed_store: MongoNotionProcessedStore,
         queue: Option<Arc<ServiceBusIngestionQueue>>,
     ) -> Self {
+        let detection_mode = config.detection_mode;
+
+        // Initialize agent detector if using agent-driven mode
+        let agent_detector = if detection_mode == DetectionMode::AgentDriven {
+            match AgentDetector::from_env(&config.employee_name) {
+                Ok(detector) => {
+                    info!("Agent detector initialized for employee: {}", config.employee_name);
+                    Some(detector)
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to initialize agent detector, falling back to hardcoded mode: {}",
+                        e
+                    );
+                    None
+                }
+            }
+        } else {
+            info!("Using hardcoded detection mode");
+            None
+        };
+
+        // Adjust detection mode if agent detector failed to initialize
+        let effective_mode = if detection_mode == DetectionMode::AgentDriven && agent_detector.is_none() {
+            DetectionMode::Hardcoded
+        } else {
+            detection_mode
+        };
+
         Self {
             config,
             browser: None,
             processed_store,
             queue,
             shutdown_rx: None,
+            agent_detector,
+            detection_mode: effective_mode,
         }
     }
 
@@ -148,8 +228,8 @@ impl NotionBrowserPoller {
     /// Run the polling loop.
     pub async fn run(&mut self) -> Result<(), NotionError> {
         info!(
-            "Starting Notion browser poller for employee {} with {}s interval",
-            self.config.employee_id, self.config.poll_interval_secs
+            "Starting Notion browser poller for employee {} with {}s interval (mode: {:?})",
+            self.config.employee_id, self.config.poll_interval_secs, self.detection_mode
         );
 
         loop {
@@ -287,9 +367,20 @@ impl NotionBrowserPoller {
                 debug!("Saved {} inbox state to {} ({} bytes)", workspace_name, debug_file, state.raw.len());
             }
 
-            // Parse notifications from state
-            let notifications = self.parse_notifications_from_state(&state.raw);
-            info!("Parsed {} notifications from {} inbox", notifications.len(), workspace_name);
+            // Parse notifications using appropriate detection method
+            let notifications = match self.detection_mode {
+                DetectionMode::AgentDriven => {
+                    self.detect_mentions_with_agent(browser, workspace_name).await
+                        .unwrap_or_else(|e| {
+                            warn!("Agent detection failed for {}, falling back to hardcoded: {}", workspace_name, e);
+                            self.parse_notifications_from_state(&state.raw)
+                        })
+                }
+                DetectionMode::Hardcoded => {
+                    self.parse_notifications_from_state(&state.raw)
+                }
+            };
+            info!("Detected {} notifications from {} inbox (mode: {:?})", notifications.len(), workspace_name, self.detection_mode);
 
             // Filter to unprocessed, unread mentions
             for mut notification in notifications {
@@ -340,7 +431,139 @@ impl NotionBrowserPoller {
         Ok(all_mentions)
     }
 
-    /// Parse notifications from browser state output.
+    /// Detect mentions using the agent (LLM-based analysis).
+    async fn detect_mentions_with_agent(
+        &self,
+        browser: &NotionBrowser,
+        workspace_name: &str,
+    ) -> Result<Vec<NotionNotification>, NotionError> {
+        let agent = self.agent_detector.as_ref().ok_or_else(|| {
+            NotionError::ConfigError("Agent detector not initialized".to_string())
+        })?;
+
+        // Take a screenshot of the inbox
+        let screenshot_path = format!(
+            "/tmp/notion_inbox_{}_{}.png",
+            workspace_name.replace(' ', "_").replace("'", ""),
+            chrono::Utc::now().timestamp()
+        );
+        browser.screenshot(&screenshot_path).await?;
+
+        // Get current browser state for element indices
+        let state = browser.get_state().await?;
+
+        // Check for UI blockers first
+        let ui_state = agent.check_ui_state(Path::new(&screenshot_path), &state.raw).await?;
+
+        if ui_state.blocked {
+            info!(
+                "UI blocked by {:?}, attempting to dismiss",
+                ui_state.blocker_type
+            );
+            match ui_state.dismiss_action {
+                UiAction::Click(idx) => {
+                    browser.click(idx).await?;
+                    sleep(Duration::from_secs(1)).await;
+                    // Retake screenshot after dismissing
+                    browser.screenshot(&screenshot_path).await?;
+                }
+                UiAction::PressEscape => {
+                    browser.send_keys("Escape").await?;
+                    sleep(Duration::from_secs(1)).await;
+                    browser.screenshot(&screenshot_path).await?;
+                }
+                UiAction::Refresh => {
+                    browser.navigate("https://www.notion.so").await?;
+                    sleep(Duration::from_secs(2)).await;
+                    browser.open_inbox().await?;
+                    sleep(Duration::from_secs(2)).await;
+                    browser.screenshot(&screenshot_path).await?;
+                }
+                UiAction::Wait(secs) => {
+                    sleep(Duration::from_secs(secs as u64)).await;
+                    browser.screenshot(&screenshot_path).await?;
+                }
+                UiAction::None => {}
+            }
+        }
+
+        // Get updated state after any UI fixes
+        let state = browser.get_state().await?;
+
+        // Analyze the inbox with the agent
+        let analysis = agent.analyze_inbox(Path::new(&screenshot_path), &state.raw).await?;
+
+        if let Some(error) = analysis.error {
+            warn!("Agent analysis returned error: {}", error);
+        }
+
+        if analysis.inbox_empty {
+            debug!("Agent detected empty inbox for {}", workspace_name);
+            return Ok(vec![]);
+        }
+
+        // Convert detected mentions to NotionNotification
+        let notifications: Vec<NotionNotification> = analysis
+            .mentions
+            .into_iter()
+            .filter(|m| m.confidence >= 0.5) // Filter low-confidence detections
+            .map(|m| self.detected_mention_to_notification(m, workspace_name))
+            .collect();
+
+        info!(
+            "Agent detected {} mentions in {} (scroll_needed: {})",
+            notifications.len(),
+            workspace_name,
+            analysis.scroll_needed
+        );
+
+        // TODO: Handle scroll_needed - scroll down and analyze again if true
+
+        // Cleanup screenshot
+        let _ = std::fs::remove_file(&screenshot_path);
+
+        Ok(notifications)
+    }
+
+    /// Convert a DetectedMention from agent analysis to NotionNotification.
+    fn detected_mention_to_notification(
+        &self,
+        mention: DetectedMention,
+        workspace_name: &str,
+    ) -> NotionNotification {
+        // Build ID from element index and page title for deduplication
+        let id = if let Some(idx) = mention.element_index {
+            format!(
+                "agent_{}_{}_{}",
+                idx,
+                mention.page_title.replace(' ', "_").replace("'", ""),
+                workspace_name.replace(' ', "_")
+            )
+        } else {
+            format!(
+                "agent_{}_{}",
+                mention.page_title.replace(' ', "_").replace("'", ""),
+                chrono::Utc::now().timestamp_millis()
+            )
+        };
+
+        NotionNotification {
+            id,
+            notification_type: "mention".to_string(),
+            workspace_id: None,
+            workspace_name: Some(workspace_name.to_string()),
+            page_id: String::new(), // Will be extracted when navigating to page
+            block_id: None,
+            actor_id: None,
+            actor_name: Some(mention.mentioner),
+            preview_text: Some(mention.snippet),
+            url: mention.page_url.unwrap_or_default(),
+            created_at: None,
+            is_read: false,
+        }
+    }
+
+    /// Parse notifications from browser state output (hardcoded patterns).
     fn parse_notifications_from_state(&self, raw: &str) -> Vec<NotionNotification> {
         let mut notifications = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
@@ -812,14 +1035,44 @@ impl NotionBrowserPoller {
 
     /// Enqueue an inbound message for processing.
     async fn enqueue_message(&self, message: InboundMessage) -> Result<(), NotionError> {
+        let Some(ref queue) = self.queue else {
+            warn!(
+                "No queue configured, Notion message from {} will not be processed",
+                message.sender
+            );
+            return Ok(());
+        };
+
+        // Create dedupe key from sender + page + timestamp prefix (minute granularity)
+        let dedupe_key = format!(
+            "notion:{}:{}:{}",
+            message.sender,
+            message.thread_id,
+            Utc::now().format("%Y%m%d%H%M")
+        );
+
+        let envelope = IngestionEnvelope {
+            envelope_id: Uuid::new_v4(),
+            received_at: Utc::now(),
+            tenant_id: None,
+            employee_id: self.config.employee_id.clone(),
+            channel: Channel::Notion,
+            external_message_id: message.message_id.clone(),
+            dedupe_key,
+            payload: IngestionPayload::from_inbound(&message),
+            raw_payload_ref: None,
+        };
+
+        queue
+            .enqueue(&envelope)
+            .map_err(|e| NotionError::QueueError(e.to_string()))?;
+
         info!(
-            "Enqueueing Notion message from {} about {}",
+            "Enqueued Notion message: {} from {} about {}",
+            envelope.envelope_id,
             message.sender,
             message.subject.as_deref().unwrap_or("(no subject)")
         );
-
-        // TODO: Integrate with actual queue
-        let _ = self.queue;
 
         Ok(())
     }
@@ -1049,6 +1302,7 @@ mod tests {
             browser_config: NotionBrowserConfig::default(),
             employee_name: "Test".to_string(),
             tenant_id: "default".to_string(),
+            detection_mode: DetectionMode::Hardcoded, // Use hardcoded for unit tests
         };
 
         let poller = NotionBrowserPoller::new(

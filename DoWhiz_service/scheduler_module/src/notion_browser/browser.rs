@@ -422,9 +422,12 @@ impl NotionBrowser {
         // Usually at top of sidebar
 
         // Look for button with workspace-like content at start of sidebar
+        // Supports Unicode names (Chinese, etc.)
         let patterns = [
-            r"\[(\d+)\]<div[^>]*role=button[^>]*expanded=false[^>]*>\s*\n\s+([A-Za-z][^\n\[]{5,})'s",
-            r"\[(\d+)\]<div[^>]*role=button[^>]*>\s*\n\s+([A-Za-z][^\n\[]+)\s*\n\s+(?:免费|Free|Plus|Business)",
+            // Pattern: expanded=false button with name ending in 's or -
+            r"\[(\d+)\]<div[^>]*role=button[^>]*expanded=false[^>]*>\s*\n\s+[^\n\[\]<>]{3,}(?:'s|-)",
+            // Pattern: button followed by plan tier (Free, Plus, Business, 免费)
+            r"\[(\d+)\]<div[^>]*role=button[^>]*>\s*\n\s+[^\n\[\]<>]{3,}\s*\n\s+(?:免费|Free|Plus|Business)",
         ];
 
         for pattern in &patterns {
@@ -447,11 +450,11 @@ impl NotionBrowser {
         let mut workspaces = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
-        // Pattern 1: Workspace entries in dropdown
+        // Pattern 1: Workspace entries with email below (supports Unicode names)
         // [idx]<div role=button>
-        //     Workspace Name
+        //     Workspace Name (may contain Chinese/Unicode)
         //     email@domain.com
-        if let Ok(re) = Regex::new(r"\[(\d+)\]<div[^>]*role=button[^>]*>\s*\n\s+([A-Za-z][A-Za-z0-9\s']+(?:'s\s+(?:Space|Notion|Workspace)|的\s*Notion)?)\s*\n\s+[a-z0-9._%+-]+@") {
+        if let Ok(re) = Regex::new(r"\[(\d+)\]<div[^>]*role=button[^>]*>\s*\n\s+([^\n\[\]<>]{2,}(?:'s\s+(?:Space|Notion|Workspace)|的\s*Notion)?)\s*\n\s+[a-z0-9._%+-]+@") {
             for caps in re.captures_iter(raw) {
                 if let (Some(idx), Some(name)) = (caps.get(1), caps.get(2)) {
                     if let Ok(n) = idx.as_str().parse::<u32>() {
@@ -465,8 +468,26 @@ impl NotionBrowser {
             }
         }
 
-        // Pattern 2: Simpler workspace entries with checkmark for current
-        if let Ok(re) = Regex::new(r"\[(\d+)\]<[^>]+>\s*\n\s+([A-Za-z][^\n\[]{5,}(?:Space|Notion|Workspace|的\s*Notion)[^\n]*)") {
+        // Pattern 2: Workspace entries with Notion/Space suffix (supports Unicode)
+        if let Ok(re) = Regex::new(r"\[(\d+)\]<[^>]+>\s*\n\s+([^\n\[\]<>]{3,}(?:Space|Notion|Workspace|的\s*Notion)[^\n]*)") {
+            for caps in re.captures_iter(raw) {
+                if let (Some(idx), Some(name)) = (caps.get(1), caps.get(2)) {
+                    if let Ok(n) = idx.as_str().parse::<u32>() {
+                        let workspace_name = name.as_str().trim().to_string();
+                        if !seen.contains(&workspace_name) && !workspace_name.is_empty() {
+                            seen.insert(workspace_name.clone());
+                            workspaces.push((workspace_name, n));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Pattern 3: Workspace entries with "Guest" label (for workspaces you've been invited to)
+        // [idx]<...>
+        //     Workspace Name
+        //     Guest
+        if let Ok(re) = Regex::new(r"\[(\d+)\]<[^>]+>\s*\n\s+([^\n\[\]<>]{2,})\s*\n\s+Guest") {
             for caps in re.captures_iter(raw) {
                 if let (Some(idx), Some(name)) = (caps.get(1), caps.get(2)) {
                     if let Ok(n) = idx.as_str().parse::<u32>() {
@@ -838,12 +859,43 @@ impl NotionBrowser {
             state.viewport = (w, h);
         }
 
-        // Parse elements with indices: [123]<tag>text
+        // Parse elements with indices: [123]<tag>text (text on same line)
         if let Ok(re) = Regex::new(r"\[(\d+)\]<[^>]+>([^<\n\[]+)") {
             for caps in re.captures_iter(raw) {
                 if let (Some(idx), Some(text)) = (caps.get(1), caps.get(2)) {
                     if let Ok(i) = idx.as_str().parse::<u32>() {
-                        state.elements.insert(i, text.as_str().trim().to_string());
+                        let t = text.as_str().trim();
+                        if !t.is_empty() {
+                            state.elements.insert(i, t.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Parse elements with text on next line: [123]<tag />\n    text
+        if let Ok(re) = Regex::new(r"\[(\d+)\]<[^>]+/>\s*\n\s*([^\n\[]+)") {
+            for caps in re.captures_iter(raw) {
+                if let (Some(idx), Some(text)) = (caps.get(1), caps.get(2)) {
+                    if let Ok(i) = idx.as_str().parse::<u32>() {
+                        let t = text.as_str().trim();
+                        if !t.is_empty() && !state.elements.contains_key(&i) {
+                            state.elements.insert(i, t.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Parse non-self-closing elements with text on next line: [123]<tag>\n    text
+        if let Ok(re) = Regex::new(r"\[(\d+)\]<[^/>]+>\s*\n\s*([^\n\[]+)") {
+            for caps in re.captures_iter(raw) {
+                if let (Some(idx), Some(text)) = (caps.get(1), caps.get(2)) {
+                    if let Ok(i) = idx.as_str().parse::<u32>() {
+                        let t = text.as_str().trim();
+                        if !t.is_empty() && !state.elements.contains_key(&i) {
+                            state.elements.insert(i, t.to_string());
+                        }
                     }
                 }
             }

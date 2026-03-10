@@ -1055,7 +1055,8 @@ mod tests {
             | Channel::BlueBubbles
             | Channel::Telegram
             | Channel::WhatsApp
-            | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
+            | Channel::Sms
+            | Channel::Notion => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email
             | Channel::GoogleDocs
             | Channel::GoogleSheets
@@ -1074,7 +1075,8 @@ mod tests {
             | Channel::BlueBubbles
             | Channel::Telegram
             | Channel::WhatsApp
-            | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
+            | Channel::Sms
+            | Channel::Notion => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email
             | Channel::GoogleDocs
             | Channel::GoogleSheets
