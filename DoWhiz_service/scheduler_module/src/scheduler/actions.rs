@@ -56,6 +56,12 @@ const CLOSURE_SIGNAL_MARKERS: &[&str] = &[
     "complete on my side",
     "thread tucked away",
     "tucked away",
+    "another generated reply in the same closed loop",
+    "another generated reply",
+    "same closed loop",
+    "not a fresh task",
+    "not a new task request",
+    "not a new task",
     "已完成",
     "无需进一步",
     "没有进一步",
@@ -2073,6 +2079,36 @@ addresses = ["dowhiz@deep-tutor.com"]
         fs::write(
             &reply_path,
             "No reply needed. Avoid sending another acknowledgement unless there is a new task.",
+        )
+        .expect("write reply");
+
+        std::env::set_var("INTERNAL_SLACK_SENDER_IDS", "u_internal");
+        let mut task = make_test_task(vec!["U_INTERNAL".to_string()]);
+        task.workspace_dir = workspace.to_path_buf();
+        task.channel = Channel::Slack;
+        assert!(should_skip_closure_loop_reply(
+            &task,
+            &reply_path,
+            Channel::Slack
+        ));
+        std::env::remove_var("INTERNAL_SLACK_SENDER_IDS");
+    }
+
+    #[test]
+    fn closure_loop_guard_skips_for_loop_diagnostic_language() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+        let incoming = workspace.join("incoming_email");
+        fs::create_dir_all(&incoming).expect("incoming dir");
+        fs::write(
+            incoming.join("00001_slack_message.txt"),
+            "This thread is still another generated reply in the same closed loop, and I did not find a fresh task to carry out from this message.",
+        )
+        .expect("write inbound");
+        let reply_path = workspace.join("reply_message.txt");
+        fs::write(
+            &reply_path,
+            "This is another generated reply in the same closed loop. I did not find a new task request.",
         )
         .expect("write reply");
 
