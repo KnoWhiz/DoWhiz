@@ -1021,8 +1021,6 @@ impl TaskExecutor for ModuleExecutor {
                         task.workspace_dir.display()
                     );
                 }
-                crate::web_auth_bootstrap::bootstrap_workspace_web_auth(&task.workspace_dir);
-
                 let user_identities = fetch_user_identities(account_id);
                 let params = run_task_module::RunTaskParams {
                     workspace_dir: task.workspace_dir.clone(),

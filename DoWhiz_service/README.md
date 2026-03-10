@@ -201,14 +201,9 @@ Azure ACI execution path (required vars):
   `.secrets/google_workspace_cli_credentials.json` in each workspace and injects
   `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` for local/docker/Azure ACI execution.
 - Google Drive push: `GOOGLE_DRIVE_PUSH_ENABLED`, `GOOGLE_DRIVE_WEBHOOK_URL`
-- Web app auth bootstrap (optional, for private Notion/Google web links in tasks):
-  `WEB_AUTH_BOOTSTRAP_ENABLED`, `WEB_AUTH_BOOTSTRAP_TIMEOUT_SECS`,
-  `NOTION_ACCOUNT_EMAIL`, `NOTION_PASSWORD`, `GOOGLE_ACCOUNT_EMAIL`, `GOOGLE_PASSWORD`
-  (also supports aliases: `NOTION_EMAIL`, `GOOGLE_EMAIL`, `GOOGLE_EMPLOYEE_EMAIL`,
-  `GOOGLE_ACCOUNT_PASSWORD`, `GOOGLE_EMPLOYEE_PASSWORD`, and prefixed forms like
-  `<PREFIX>_GOOGLE_EMPLOYEE_EMAIL` via `EMPLOYEE_WEB_AUTH_ENV_PREFIX`/`WEB_AUTH_ENV_PREFIX`).
-  Notion bootstrap tries Notion password login first, then falls back to Google login.
-  ACI run_task also sets Playwright/NPM runtime defaults for mounted workspaces:
+- Browser-based web auth for private Notion/Google pages is agent-driven at task runtime
+  (no service-side bootstrap step).
+- ACI run_task sets Playwright/NPM runtime defaults for mounted workspaces:
   `PLAYWRIGHT_MCP_EXECUTABLE_PATH` auto-discovery (`chrome-linux` / `chrome-linux64`),
   `PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright`,
   and `NPM_CONFIG_CACHE=/tmp/.npm` to avoid symlink failures from `npx`.

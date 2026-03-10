@@ -358,9 +358,6 @@ jobs:
           # so ACI tasks share workspace/memory paths correctly.
           bash "$APP_DIR/scripts/ensure_aci_share_mount.sh"
 
-          # Ensure web auth bootstrap can use Playwright for Notion/Google sign-in.
-          bash "$APP_DIR/scripts/install_web_auth_bootstrap_deps.sh"
-
           required_bins=(
             "$APP_DIR/target/release/rust_service"
             "$APP_DIR/target/release/inbound_gateway"
