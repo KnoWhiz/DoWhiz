@@ -749,26 +749,29 @@ fn should_skip_closure_loop_reply(
     if !is_internal_sender(task) {
         return false;
     }
-    let inbound_text = match load_latest_inbound_body_text(&task.workspace_dir) {
-        Some(value) => value,
-        None => return false,
-    };
-    let reply_text = match load_reply_text(reply_path) {
-        Some(value) => value,
-        None => return false,
-    };
+    let inbound_is_closure_only = load_latest_inbound_body_text(&task.workspace_dir)
+        .map(|value| is_closure_only_message(&value))
+        .unwrap_or(false);
+    let reply_is_closure_only = load_reply_text(reply_path)
+        .map(|value| is_closure_only_message(&value))
+        .unwrap_or(false);
 
-    if is_closure_only_message(&inbound_text) && is_closure_only_message(&reply_text) {
+    if inbound_is_closure_only && reply_is_closure_only {
         info!(
             "skip auto reply closure-loop guard in {} inbound={:?} outbound={:?}",
             task.workspace_dir.display(),
             task.channel,
             outbound_channel
         );
-        return true;
+    } else {
+        info!(
+            "skip auto reply internal-sender guard in {} inbound={:?} outbound={:?}",
+            task.workspace_dir.display(),
+            task.channel,
+            outbound_channel
+        );
     }
-
-    false
+    true
 }
 
 pub(crate) fn ingest_follow_up_tasks<E: TaskExecutor>(
@@ -2154,6 +2157,32 @@ addresses = ["dowhiz@deep-tutor.com"]
             "No outbound reply should be sent. This is an already-closed thread.",
         )
         .expect("write reply");
+
+        std::env::set_var("INTERNAL_SLACK_SENDER_IDS", "u_internal");
+        let mut task = make_test_task(vec!["U_INTERNAL".to_string()]);
+        task.workspace_dir = workspace.to_path_buf();
+        task.channel = Channel::Slack;
+        assert!(should_skip_closure_loop_reply(
+            &task,
+            &reply_path,
+            Channel::Slack
+        ));
+        std::env::remove_var("INTERNAL_SLACK_SENDER_IDS");
+    }
+
+    #[test]
+    fn internal_sender_always_skips_even_without_closure_text() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+        let incoming = workspace.join("incoming_email");
+        fs::create_dir_all(&incoming).expect("incoming dir");
+        fs::write(
+            incoming.join("00001_slack_message.txt"),
+            "Can you run a fresh check and send details back?",
+        )
+        .expect("write inbound");
+        let reply_path = workspace.join("reply_message.txt");
+        fs::write(&reply_path, "I will run the check and send details.").expect("write reply");
 
         std::env::set_var("INTERNAL_SLACK_SENDER_IDS", "u_internal");
         let mut task = make_test_task(vec!["U_INTERNAL".to_string()]);
