@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -78,7 +78,8 @@ fn sync_blob_memo_to_workspace(account_id: Uuid, workspace_memory_dir: &Path) ->
 
 use super::outbound::{
     execute_bluebubbles_send, execute_discord_send, execute_email_send, execute_google_docs_send,
-    execute_slack_send, execute_sms_send, execute_telegram_send, execute_whatsapp_send,
+    execute_slack_send, execute_sms_send, execute_telegram_send, execute_wechat_send,
+    execute_whatsapp_send,
 };
 use super::types::{SchedulerError, SendReplyTask, TaskExecution, TaskKind};
 use super::utils::load_google_access_token_from_service_env;
@@ -247,6 +248,182 @@ fn write_github_sender_parse_failed_reply(
 </html>
 "#;
     std::fs::write(reply_path, html)?;
+    Ok(())
+}
+
+fn read_non_empty_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn configured_insufficient_balance_payment_link() -> Option<String> {
+    [
+        "INSUFFICIENT_BALANCE_PAYMENT_LINK",
+        "BILLING_PAYMENT_LINK",
+        "PAYMENT_LINK",
+    ]
+    .iter()
+    .find_map(|key| read_non_empty_env(key))
+}
+
+fn default_billing_link() -> String {
+    read_non_empty_env("FRONTEND_URL")
+        .map(|url| format!("{}/auth/index.html", url.trim_end_matches('/')))
+        .unwrap_or_else(|| "https://www.dowhiz.com/auth/index.html".to_string())
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn build_insufficient_balance_plain_text(payment_link: &str) -> String {
+    format!(
+        "Insufficient balance. I could not run this request.\n\
+Please add more employee hours, then resend your message.\n\
+Payment link: {payment_link}"
+    )
+}
+
+fn build_insufficient_balance_email_html(payment_link: &str) -> String {
+    let escaped_link = html_escape(payment_link);
+    format!(
+        r#"<!DOCTYPE html>
+<html>
+<body>
+  <p>Hi there,</p>
+  <p>Your account currently has insufficient balance, so I could not run this request.</p>
+  <p>Please add more employee hours, then resend your message.</p>
+  <p>Payment link: <a href="{link}">{link}</a></p>
+</body>
+</html>
+"#,
+        link = escaped_link
+    )
+}
+
+fn write_insufficient_balance_notice_body(
+    task: &super::types::RunTaskTask,
+    payment_link: &str,
+) -> Result<PathBuf, SchedulerError> {
+    let (filename, body) = match task.channel {
+        Channel::Email => (
+            ".insufficient_balance_notice.html",
+            build_insufficient_balance_email_html(payment_link),
+        ),
+        _ => (
+            ".insufficient_balance_notice.txt",
+            build_insufficient_balance_plain_text(payment_link),
+        ),
+    };
+    let path = task.workspace_dir.join(filename);
+    std::fs::write(&path, body)?;
+    Ok(path)
+}
+
+fn dispatch_send_reply_task(task: &SendReplyTask) -> Result<(), SchedulerError> {
+    if let Some(expected_epoch) = task.thread_epoch {
+        let state_path = task
+            .thread_state_path
+            .clone()
+            .or_else(|| task.html_path.parent().and_then(find_thread_state_path));
+        if let Some(state_path) = state_path {
+            if let Some(current_epoch) = current_thread_epoch(&state_path) {
+                if current_epoch != expected_epoch {
+                    info!(
+                        "skip stale send_email (expected epoch {}, current {}) for {}",
+                        expected_epoch,
+                        current_epoch,
+                        task.html_path.display()
+                    );
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    match task.channel {
+        Channel::Slack => {
+            delete_slack_working_placeholder_before_send(task);
+            execute_slack_send(task)?;
+        }
+        Channel::Discord => {
+            execute_discord_send(task)?;
+        }
+        Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
+            execute_google_docs_send(task)?;
+        }
+        Channel::Sms => {
+            execute_sms_send(task)?;
+        }
+        Channel::BlueBubbles => {
+            execute_bluebubbles_send(task)?;
+        }
+        Channel::Telegram => {
+            execute_telegram_send(task)?;
+        }
+        Channel::WhatsApp => {
+            execute_whatsapp_send(task)?;
+        }
+        Channel::WeChat => {
+            execute_wechat_send(task)?;
+        }
+        Channel::Email => {
+            execute_email_send(task)?;
+        }
+    }
+    Ok(())
+}
+
+fn send_insufficient_balance_notice(
+    task: &super::types::RunTaskTask,
+    account_id: Uuid,
+) -> Result<(), SchedulerError> {
+    if task.reply_to.is_empty() {
+        warn!(
+            "Account {} has insufficient balance but no reply recipients for workspace {}",
+            account_id,
+            task.workspace_dir.display()
+        );
+        return Ok(());
+    }
+
+    let payment_link =
+        configured_insufficient_balance_payment_link().unwrap_or_else(default_billing_link);
+    let body_path = write_insufficient_balance_notice_body(task, &payment_link)?;
+    let attachments_dir = task
+        .workspace_dir
+        .join(".insufficient_balance_notice_attachments");
+    std::fs::create_dir_all(&attachments_dir)?;
+    let reply_context = super::reply::load_reply_context(&task.workspace_dir);
+
+    let send_task = SendReplyTask {
+        channel: task.channel.clone(),
+        subject: reply_context.subject,
+        html_path: body_path,
+        attachments_dir,
+        from: task.reply_from.clone().or(reply_context.from),
+        to: task.reply_to.clone(),
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        in_reply_to: reply_context.in_reply_to,
+        references: reply_context.references,
+        archive_root: task.archive_root.clone(),
+        thread_epoch: task.thread_epoch,
+        thread_state_path: task.thread_state_path.clone(),
+        employee_id: task.employee_id.clone(),
+    };
+
+    dispatch_send_reply_task(&send_task)?;
+    info!(
+        "sent insufficient-balance notice for account {} via {:?}",
+        account_id, task.channel
+    );
     Ok(())
 }
 
@@ -721,54 +898,7 @@ impl TaskExecutor for ModuleExecutor {
     fn execute(&self, task: &TaskKind) -> Result<TaskExecution, SchedulerError> {
         match task {
             TaskKind::SendReply(task) => {
-                if let Some(expected_epoch) = task.thread_epoch {
-                    let state_path = task
-                        .thread_state_path
-                        .clone()
-                        .or_else(|| task.html_path.parent().and_then(find_thread_state_path));
-                    if let Some(state_path) = state_path {
-                        if let Some(current_epoch) = current_thread_epoch(&state_path) {
-                            if current_epoch != expected_epoch {
-                                info!(
-                                    "skip stale send_email (expected epoch {}, current {}) for {}",
-                                    expected_epoch,
-                                    current_epoch,
-                                    task.html_path.display()
-                                );
-                                return Ok(TaskExecution::empty());
-                            }
-                        }
-                    }
-                }
-
-                // Dispatch to the appropriate adapter based on channel
-                match task.channel {
-                    Channel::Slack => {
-                        delete_slack_working_placeholder_before_send(task);
-                        execute_slack_send(task)?;
-                    }
-                    Channel::Discord => {
-                        execute_discord_send(task)?;
-                    }
-                    Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
-                        execute_google_docs_send(task)?;
-                    }
-                    Channel::Sms => {
-                        execute_sms_send(task)?;
-                    }
-                    Channel::BlueBubbles => {
-                        execute_bluebubbles_send(task)?;
-                    }
-                    Channel::Telegram => {
-                        execute_telegram_send(task)?;
-                    }
-                    Channel::WhatsApp => {
-                        execute_whatsapp_send(task)?;
-                    }
-                    Channel::Email => {
-                        execute_email_send(task)?;
-                    }
-                }
+                dispatch_send_reply_task(task)?;
                 Ok(TaskExecution::empty())
             }
             TaskKind::RunTask(task) => {
@@ -793,6 +923,32 @@ impl TaskExecutor for ModuleExecutor {
                                 "skipping run_task for github notification: unable to extract sender login"
                             );
                             return Ok(TaskExecution::empty());
+                        }
+                    }
+                }
+
+                // Check balance before any run_task side effects.
+                if let Some(account_id) = account_id {
+                    if let Some(store) = get_global_account_store() {
+                        match store.has_sufficient_balance(account_id) {
+                            Ok(false) => {
+                                warn!(
+                                    "Account {} has insufficient balance, skipping task execution",
+                                    account_id
+                                );
+                                send_insufficient_balance_notice(task, account_id)?;
+                                let mut execution = TaskExecution::empty();
+                                execution.skip_auto_reply = true;
+                                return Ok(execution);
+                            }
+                            Ok(true) => {}
+                            Err(e) => {
+                                // Balance check failed - log but continue (fail open)
+                                warn!(
+                                    "Failed to check balance for account {}: {}, continuing anyway",
+                                    account_id, e
+                                );
+                            }
                         }
                     }
                 }
@@ -865,50 +1021,6 @@ impl TaskExecutor for ModuleExecutor {
                         task.workspace_dir.display()
                     );
                 }
-                // Check balance before running task (only for unified accounts)
-                if let Some(account_id) = account_id {
-                    if let Some(store) = get_global_account_store() {
-                        match store.has_sufficient_balance(account_id) {
-                            Ok(false) => {
-                                // Insufficient balance - write error reply and skip task
-                                warn!(
-                                    "Account {} has insufficient balance, skipping task execution",
-                                    account_id
-                                );
-                                let reply_message = "Insufficient balance. Please increase your balance for more employee hours.";
-
-                                // Write to appropriate reply file based on channel
-                                let reply_path = match task.channel {
-                                    Channel::Email
-                                    | Channel::GoogleDocs
-                                    | Channel::GoogleSheets
-                                    | Channel::GoogleSlides => {
-                                        task.workspace_dir.join("reply_email_draft.html")
-                                    }
-                                    _ => task.workspace_dir.join("reply_message.txt"),
-                                };
-
-                                if let Err(e) = std::fs::write(&reply_path, reply_message) {
-                                    warn!("Failed to write balance error reply: {}", e);
-                                }
-
-                                // Return empty execution (no token usage, task considered complete)
-                                return Ok(TaskExecution::empty());
-                            }
-                            Ok(true) => {
-                                // Sufficient balance, continue with task
-                            }
-                            Err(e) => {
-                                // Balance check failed - log but continue (fail open)
-                                warn!(
-                                    "Failed to check balance for account {}: {}, continuing anyway",
-                                    account_id, e
-                                );
-                            }
-                        }
-                    }
-                }
-
                 let user_identities = fetch_user_identities(account_id);
                 let params = run_task_module::RunTaskParams {
                     workspace_dir: task.workspace_dir.clone(),
@@ -1015,6 +1127,7 @@ impl TaskExecutor for ModuleExecutor {
                     follow_up_error: output.scheduled_tasks_error,
                     scheduler_actions: output.scheduler_actions,
                     scheduler_actions_error: output.scheduler_actions_error,
+                    skip_auto_reply: false,
                 })
             }
             TaskKind::Noop => Ok(TaskExecution::empty()),

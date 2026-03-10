@@ -188,6 +188,7 @@ Azure ACI execution path (required vars):
 - Discord: `DISCORD_*` and/or employee-specific Discord token envs
 - Telegram: `TELEGRAM_BOT_TOKEN` or employee-derived env keys
 - WhatsApp: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`
+- WeChat Work: `WECHAT_CORP_ID`, `WECHAT_CORP_SECRET`, `WECHAT_AGENT_ID`, `WECHAT_TOKEN`, `WECHAT_ENCODING_AES_KEY`
 - Twilio SMS: `TWILIO_*`
 - Google Workspace: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, refresh tokens, `GOOGLE_*_ENABLED`
 - Google Workspace CLI (`gws`):
@@ -206,6 +207,16 @@ Azure ACI execution path (required vars):
   `PLAYWRIGHT_MCP_EXECUTABLE_PATH` auto-discovery (`chrome-linux` / `chrome-linux64`),
   `PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright`,
   and `NPM_CONFIG_CACHE=/tmp/.npm` to avoid symlink failures from `npx`.
+
+### 4.6 Billing / insufficient-balance notices
+
+- Stripe billing routes are enabled only when both keys are present:
+  - `STRIPE_SECRET_KEY`
+  - `STRIPE_WEBHOOK_SECRET`
+- Optional fixed payment link for insufficient-balance auto notices:
+  - `INSUFFICIENT_BALANCE_PAYMENT_LINK` (preferred)
+  - fallback order: `BILLING_PAYMENT_LINK` -> `PAYMENT_LINK` -> `${FRONTEND_URL}/auth/index.html` -> `https://www.dowhiz.com/auth/index.html`
+- Insufficient-balance notices bypass agent execution and are sent directly by channel adapter (email HTML / other channels plain text).
 
 ## 5) Local Run Workflows
 
