@@ -156,6 +156,7 @@ pub struct TaskExecution {
     pub follow_up_error: Option<String>,
     pub scheduler_actions: Vec<run_task_module::SchedulerActionRequest>,
     pub scheduler_actions_error: Option<String>,
+    pub skip_auto_reply: bool,
 }
 
 impl TaskExecution {

@@ -188,6 +188,7 @@ Azure ACI execution path (required vars):
 - Discord: `DISCORD_*` and/or employee-specific Discord token envs
 - Telegram: `TELEGRAM_BOT_TOKEN` or employee-derived env keys
 - WhatsApp: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`
+- WeChat Work: `WECHAT_CORP_ID`, `WECHAT_CORP_SECRET`, `WECHAT_AGENT_ID`, `WECHAT_TOKEN`, `WECHAT_ENCODING_AES_KEY`
 - Twilio SMS: `TWILIO_*`
 - Google Workspace: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, refresh tokens, `GOOGLE_*_ENABLED`
 - Google Workspace CLI (`gws`):
@@ -200,17 +201,22 @@ Azure ACI execution path (required vars):
   `.secrets/google_workspace_cli_credentials.json` in each workspace and injects
   `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` for local/docker/Azure ACI execution.
 - Google Drive push: `GOOGLE_DRIVE_PUSH_ENABLED`, `GOOGLE_DRIVE_WEBHOOK_URL`
-- Web app auth bootstrap (optional, for private Notion/Google web links in tasks):
-  `WEB_AUTH_BOOTSTRAP_ENABLED`, `WEB_AUTH_BOOTSTRAP_TIMEOUT_SECS`,
-  `NOTION_ACCOUNT_EMAIL`, `NOTION_PASSWORD`, `GOOGLE_ACCOUNT_EMAIL`, `GOOGLE_PASSWORD`
-  (also supports aliases: `NOTION_EMAIL`, `GOOGLE_EMAIL`, `GOOGLE_EMPLOYEE_EMAIL`,
-  `GOOGLE_ACCOUNT_PASSWORD`, `GOOGLE_EMPLOYEE_PASSWORD`, and prefixed forms like
-  `<PREFIX>_GOOGLE_EMPLOYEE_EMAIL` via `EMPLOYEE_WEB_AUTH_ENV_PREFIX`/`WEB_AUTH_ENV_PREFIX`).
-  Notion bootstrap tries Notion password login first, then falls back to Google login.
-  ACI run_task also sets Playwright/NPM runtime defaults for mounted workspaces:
+- Browser-based web auth for private Notion/Google pages is agent-driven at task runtime
+  (no service-side bootstrap step).
+- ACI run_task sets Playwright/NPM runtime defaults for mounted workspaces:
   `PLAYWRIGHT_MCP_EXECUTABLE_PATH` auto-discovery (`chrome-linux` / `chrome-linux64`),
   `PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright`,
   and `NPM_CONFIG_CACHE=/tmp/.npm` to avoid symlink failures from `npx`.
+
+### 4.6 Billing / insufficient-balance notices
+
+- Stripe billing routes are enabled only when both keys are present:
+  - `STRIPE_SECRET_KEY`
+  - `STRIPE_WEBHOOK_SECRET`
+- Optional fixed payment link for insufficient-balance auto notices:
+  - `INSUFFICIENT_BALANCE_PAYMENT_LINK` (preferred)
+  - fallback order: `BILLING_PAYMENT_LINK` -> `PAYMENT_LINK` -> `${FRONTEND_URL}/auth/index.html` -> `https://www.dowhiz.com/auth/index.html`
+- Insufficient-balance notices bypass agent execution and are sent directly by channel adapter (email HTML / other channels plain text).
 
 ## 5) Local Run Workflows
 

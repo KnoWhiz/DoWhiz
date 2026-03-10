@@ -43,7 +43,7 @@ use google_drive_webhook::handle_google_drive_webhook;
 use google_workspace::spawn_google_workspace_poller;
 use handlers::{
     health, ingest_bluebubbles, ingest_postmark, ingest_slack, ingest_sms, ingest_telegram,
-    ingest_whatsapp, verify_whatsapp_webhook,
+    ingest_wechat, ingest_whatsapp, verify_wechat_webhook, verify_whatsapp_webhook,
 };
 use routes::normalize_routes;
 use state::{build_address_map, GatewayConfig, GatewayState};
@@ -203,6 +203,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/sms/twilio", post(ingest_sms))
         .route("/whatsapp/webhook", get(verify_whatsapp_webhook))
         .route("/whatsapp/webhook", post(ingest_whatsapp))
+        .route("/wechat/webhook", get(verify_wechat_webhook))
+        .route("/wechat/webhook", post(ingest_wechat))
         .route(
             "/webhooks/google-drive-changes",
             post(handle_google_drive_webhook),

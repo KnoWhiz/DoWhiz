@@ -65,6 +65,9 @@ pub(super) fn build_prompt(
             "whatsapp" => {
                 "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Keep the reply concise and conversational. Do not use HTML. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."
             }
+            "wechat" => {
+                "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Keep the reply concise and conversational. Do not use HTML or markdown. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."
+            }
             _ => {
                 // Default to email (HTML)
                 "2. After finishing the task (step one), make sure you write a proper HTML email draft in reply_email_draft.html in the workspace root. If there are files to attach, put them in reply_email_attachments/ and reference them in the email draft. Do not pretend the job has been done without actually doing it, and do not write the email draft until the task is done. If you are not sure about the task, send another email to ask for clarification (and if any, attach information about why did you fail to get the task done, what is the exact error you encountered)."
@@ -182,30 +185,18 @@ See `.agents/skills/google-*/SKILL.md` for detailed command references.
 
 fn build_web_auth_capabilities_section() -> &'static str {
     r#"Web Workspace Auth (Notion / Google web pages):
-- Workspace may include pre-bootstrapped browser states in `.auth/notion_state.json` and `.auth/google_state.json`.
 - For private Notion/Google pages, use browser automation (for example `playwright-cli`) instead of plain HTTP fetches.
-- Follow this login sequence:
-  1. If `.auth/bootstrap_status.json` exists, quickly check it for previous bootstrap failures.
-  2. Before opening private URLs, load available state files:
-     - `playwright-cli state-load .auth/notion_state.json`
-     - `playwright-cli state-load .auth/google_state.json`
-  3. Open the target page and verify you are already authenticated.
-  4. If browser launch fails before sign-in:
-     - If error says Chrome is missing, retry with:
-       - `export PLAYWRIGHT_MCP_EXECUTABLE_PATH=/opt/google/chrome/chrome`
-       - If that file does not exist, set it to the first hit under `/app/.cache/ms-playwright/*/chrome-linux*/chrome`.
-     - Avoid `npx playwright install ...` on mounted workspaces (can fail with symlink errors).
-       Prefer `python3 -m playwright install chromium` or `playwright install chromium`.
-       If npm must be used, set `NPM_CONFIG_CACHE=/tmp/.npm` first.
-  5. If still redirected to sign-in, use env credentials with this order:
-     - Notion email: `NOTION_ACCOUNT_EMAIL`, then `NOTION_EMAIL`
-     - Notion password: `NOTION_PASSWORD`
-     - Google email: `GOOGLE_ACCOUNT_EMAIL`, `GOOGLE_EMAIL`, `GOOGLE_EMPLOYEE_EMAIL`
-     - Google password: `GOOGLE_PASSWORD`, `GOOGLE_ACCOUNT_PASSWORD`, `GOOGLE_EMPLOYEE_PASSWORD`
-     - Also try prefixed keys (`<PREFIX>_<KEY>`) when `EMPLOYEE_WEB_AUTH_ENV_PREFIX` or `WEB_AUTH_ENV_PREFIX` is set.
-  6. After successful sign-in, refresh storage state in `.auth/` so retries are faster.
+- Complete sign-in only through the active browser session when needed.
+- Do not assume pre-bootstrapped auth state exists in the workspace.
+- If browser launch fails before sign-in:
+  - If error says Chrome is missing, retry with:
+    - `export PLAYWRIGHT_MCP_EXECUTABLE_PATH=/opt/google/chrome/chrome`
+    - If that file does not exist, set it to the first hit under `/app/.cache/ms-playwright/*/chrome-linux*/chrome`.
+  - Avoid `npx playwright install ...` on mounted workspaces (can fail with symlink errors).
+    Prefer `python3 -m playwright install chromium` or `playwright install chromium`.
+    If npm must be used, set `NPM_CONFIG_CACHE=/tmp/.npm` first.
 - Never include raw credentials in any user-facing reply, logs, or generated files.
-- Do not conclude "cannot access due to sign-in" until the sequence above has been attempted.
+- Do not conclude "cannot access due to sign-in" until browser-based sign-in has been attempted.
 
 "#
 }
@@ -269,7 +260,7 @@ If no routing file is written, the reply goes to the original inbound channel.
 reply_routing.json schema:
 ```json
 {{
-  "channel": "email" | "slack" | "discord" | "telegram" | "sms" | "whatsapp" | "bluebubbles",
+  "channel": "email" | "slack" | "discord" | "telegram" | "sms" | "whatsapp" | "bluebubbles" | "wechat",
   "identifier": "<target identifier for the channel>"
 }}
 ```
@@ -280,13 +271,14 @@ Identifier format per channel:
 - discord: Discord user ID (e.g., "123456789012345678")
 - telegram: Telegram user ID (e.g., "123456789")
 - sms/whatsapp/bluebubbles: phone number (e.g., "+15551234567")
+- wechat: WeChat Work UserID (e.g., "zhangsan")
 
 IMPORTANT: When using cross-channel routing, write the reply in the TARGET channel's format:
 - email target: reply_email_draft.html (HTML), attachments in reply_email_attachments/
 - slack target: reply_message.txt (Slack mrkdwn: *bold*, _italic_, `code`)
 - discord target: reply_message.txt (Discord markdown: **bold**, *italic*, `code`)
 - telegram target: reply_message.txt (MarkdownV2)
-- sms/whatsapp/bluebubbles target: reply_message.txt (plain text)
+- sms/whatsapp/bluebubbles/wechat target: reply_message.txt (plain text)
 - Attachments for non-email channels go in reply_attachments/
 
 Example: Inbound is email, user says "reply to my Discord instead"

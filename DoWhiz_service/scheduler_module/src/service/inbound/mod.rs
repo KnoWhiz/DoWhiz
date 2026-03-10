@@ -6,6 +6,7 @@ mod quick_responses;
 mod slack;
 mod sms;
 mod telegram;
+mod wechat;
 mod whatsapp;
 
 pub(super) use bluebubbles::process_bluebubbles_event;
@@ -22,4 +23,5 @@ pub(super) use quick_responses::{
 pub(super) use slack::process_slack_event;
 pub(super) use sms::process_sms_message;
 pub(super) use telegram::process_telegram_event;
+pub(super) use wechat::process_wechat_event;
 pub(super) use whatsapp::process_whatsapp_event;
