@@ -172,6 +172,7 @@ Rules:
 /// about available tools for operating across different channels.
 fn build_cross_channel_capabilities_section() -> &'static str {
     r#"Cross-channel Tools (if user's Google account is linked):
+- `gws` - Google Workspace CLI for Gmail/Drive/Docs operations
 - `google-docs` - Create/read/edit documents, share files
 - `google-slides` - Create/read/edit presentations, share files
 - `google-sheets` - Read/write spreadsheet data
@@ -916,6 +917,7 @@ mod tests {
 
         // Verify cross-channel tools section is included
         assert!(prompt.contains("Cross-channel Tools"));
+        assert!(prompt.contains("`gws`"));
         assert!(prompt.contains("google-docs"));
         assert!(prompt.contains("google-slides"));
         assert!(prompt.contains("google-sheets"));

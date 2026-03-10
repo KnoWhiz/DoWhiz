@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
@@ -59,6 +59,15 @@ const GOOGLE_PASSWORD_ENV_KEYS: &[&str] = &[
     "GOOGLE_ACCOUNT_PASSWORD",
     "GOOGLE_EMPLOYEE_PASSWORD",
 ];
+const GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV: &str = "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE";
+const GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS: &[&str] = &[
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID",
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET",
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN",
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE",
+];
+const GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH: &str =
+    ".secrets/google_workspace_cli_credentials.json";
 const WEB_AUTH_ENV_MAPPINGS: &[(&str, &[&str])] = &[
     ("NOTION_ACCOUNT_EMAIL", NOTION_EMAIL_ENV_KEYS),
     ("NOTION_PASSWORD", NOTION_PASSWORD_ENV_KEYS),
@@ -296,6 +305,11 @@ pub(super) fn run_codex_task(
     ensure_github_cli_auth(&github_auth)?;
     let payment_env_overrides = collect_payment_env_overrides();
     let web_auth_env_overrides = collect_web_auth_env_overrides();
+    let google_workspace_cli_env_overrides = collect_google_workspace_cli_env_overrides(
+        host_workspace_dir
+            .as_deref()
+            .unwrap_or(request.workspace_dir),
+    )?;
 
     let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
     let prompt = build_prompt(
@@ -376,6 +390,24 @@ pub(super) fn run_codex_task(
         }
         for (key, value) in &web_auth_env_overrides {
             cmd.arg("-e").arg(format!("{}={}", key, value));
+        }
+        for (key, value) in &google_workspace_cli_env_overrides {
+            if key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV {
+                let host_path = PathBuf::from(value);
+                if let Some(container_path) =
+                    workspace_path_in_container(&host_path, host_workspace_dir)
+                {
+                    cmd.arg("-e")
+                        .arg(format!("{}={}", key, container_path.display()));
+                } else {
+                    eprintln!(
+                        "[run_task] warning: {} is outside workspace mount; skipping container override",
+                        GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV
+                    );
+                }
+            } else {
+                cmd.arg("-e").arg(format!("{}={}", key, value));
+            }
         }
         for (key, value) in &github_auth.env_overrides {
             cmd.arg("-e").arg(format!("{}={}", key, value));
@@ -483,6 +515,9 @@ pub(super) fn run_codex_task(
             cmd.env(key, value);
         }
         for (key, value) in &web_auth_env_overrides {
+            cmd.env(key, value);
+        }
+        for (key, value) in &google_workspace_cli_env_overrides {
             cmd.env(key, value);
         }
         for (key, value) in github_auth.env_overrides {
@@ -666,6 +701,8 @@ fn run_codex_task_azure_aci(
     ensure_codex_config_at(&codex_home, &container_workspace_dir, &azure_endpoint)?;
     let payment_env_overrides = collect_payment_env_overrides();
     let web_auth_env_overrides = collect_web_auth_env_overrides();
+    let google_workspace_cli_env_overrides =
+        collect_google_workspace_cli_env_overrides(&host_workspace_dir)?;
 
     let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
     let prompt = build_prompt(
@@ -738,6 +775,23 @@ fn run_codex_task_azure_aci(
     }
     for (key, value) in web_auth_env_overrides {
         env_overrides.push((key, value));
+    }
+    for (key, value) in google_workspace_cli_env_overrides {
+        if key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV {
+            let host_path = PathBuf::from(&value);
+            if let Some(container_path) =
+                map_path_to_container(&host_path, &host_workspace_dir, &container_workspace_dir)
+            {
+                env_overrides.push((key, container_path.to_string_lossy().into_owned()));
+            } else {
+                eprintln!(
+                    "[run_task] warning: {} is outside Azure Files workspace mount; skipping container override",
+                    GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV
+                );
+            }
+        } else {
+            env_overrides.push((key, value));
+        }
     }
     for (key, value) in github_auth.env_overrides {
         env_overrides.push((key, value));
@@ -1660,6 +1714,160 @@ fn collect_web_auth_env_overrides() -> Vec<(String, String)> {
         .collect()
 }
 
+fn collect_google_workspace_cli_env_overrides(
+    workspace_dir: &Path,
+) -> Result<Vec<(String, String)>, RunTaskError> {
+    let mut overrides = Vec::new();
+    if let Some(path) = ensure_google_workspace_cli_credentials_file(workspace_dir)? {
+        overrides.push((
+            GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV.to_string(),
+            path.to_string_lossy().into_owned(),
+        ));
+    }
+    Ok(overrides)
+}
+
+#[derive(Debug)]
+struct GoogleWorkspaceCliCredentialParts {
+    client_id: String,
+    client_secret: String,
+    refresh_token: String,
+    credential_type: String,
+}
+
+fn ensure_google_workspace_cli_credentials_file(
+    workspace_dir: &Path,
+) -> Result<Option<PathBuf>, RunTaskError> {
+    let mut unresolved_outside_workspace: Option<PathBuf> = None;
+    if let Some(raw_path) = read_env_trimmed(GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV) {
+        let resolved = resolve_google_workspace_cli_credentials_file_path(workspace_dir, &raw_path);
+        if path_is_within_dir(&resolved, workspace_dir) {
+            env::set_var(
+                GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+                resolved.to_string_lossy().into_owned(),
+            );
+            return Ok(Some(resolved));
+        }
+
+        if resolved.exists() {
+            let materialized =
+                materialize_google_workspace_cli_credentials_file(workspace_dir, &resolved)?;
+            env::set_var(
+                GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+                materialized.to_string_lossy().into_owned(),
+            );
+            return Ok(Some(materialized));
+        }
+
+        eprintln!(
+            "[run_task] warning: {} points outside workspace and source file does not exist: {}",
+            GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+            resolved.display()
+        );
+        unresolved_outside_workspace = Some(resolved);
+    }
+
+    let Some(parts) = load_google_workspace_cli_credential_parts() else {
+        if let Some(path) = unresolved_outside_workspace {
+            env::set_var(
+                GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+                path.to_string_lossy().into_owned(),
+            );
+            return Ok(Some(path));
+        }
+        return Ok(None);
+    };
+
+    let credentials_path = workspace_dir.join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH);
+    if let Some(parent) = credentials_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let payload = serde_json::json!({
+        "client_id": parts.client_id,
+        "client_secret": parts.client_secret,
+        "refresh_token": parts.refresh_token,
+        "type": parts.credential_type,
+    });
+    let rendered = serde_json::to_string_pretty(&payload)
+        .map_err(|err| RunTaskError::Io(io::Error::other(err.to_string())))?;
+    fs::write(&credentials_path, format!("{rendered}\n"))?;
+    env::set_var(
+        GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+        credentials_path.to_string_lossy().into_owned(),
+    );
+
+    Ok(Some(credentials_path))
+}
+
+fn materialize_google_workspace_cli_credentials_file(
+    workspace_dir: &Path,
+    source_path: &Path,
+) -> Result<PathBuf, RunTaskError> {
+    let credentials_path = workspace_dir.join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH);
+    if let Some(parent) = credentials_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(source_path, &credentials_path).map_err(RunTaskError::Io)?;
+    Ok(credentials_path)
+}
+
+fn path_is_within_dir(path: &Path, dir: &Path) -> bool {
+    path.strip_prefix(dir)
+        .map(|relative| {
+            !relative
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+        })
+        .unwrap_or(false)
+}
+
+fn resolve_google_workspace_cli_credentials_file_path(
+    workspace_dir: &Path,
+    raw_path: &str,
+) -> PathBuf {
+    let candidate = PathBuf::from(raw_path);
+    if candidate.is_absolute() {
+        candidate
+    } else {
+        workspace_dir.join(candidate)
+    }
+}
+
+fn load_google_workspace_cli_credential_parts() -> Option<GoogleWorkspaceCliCredentialParts> {
+    let client_id = read_env_trimmed("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID");
+    let client_secret = read_env_trimmed("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET");
+    let refresh_token = read_env_trimmed("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN");
+    let credential_type = read_env_trimmed("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE")
+        .unwrap_or_else(|| "authorized_user".to_string());
+
+    let has_any = GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS
+        .iter()
+        .any(|key| read_env_trimmed(key).is_some());
+    if !has_any {
+        return None;
+    }
+
+    let (Some(client_id), Some(client_secret), Some(refresh_token)) =
+        (client_id, client_secret, refresh_token)
+    else {
+        eprintln!(
+            "[run_task] warning: incomplete Google Workspace CLI credential components; expected {}, {}, {}",
+            GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS[0],
+            GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS[1],
+            GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS[2],
+        );
+        return None;
+    };
+
+    Some(GoogleWorkspaceCliCredentialParts {
+        client_id,
+        client_secret,
+        refresh_token,
+        credential_type,
+    })
+}
+
 fn resolve_env_from_candidates(candidates: &[&str], prefix: Option<&str>) -> Option<String> {
     for key in candidates {
         if let Some(value) = read_env_trimmed(key) {
@@ -2471,6 +2679,203 @@ mod tests {
                 .map(|(_, v)| v.as_str()),
             Some("primary-password")
         );
+    }
+
+    #[test]
+    fn test_collect_google_workspace_cli_env_overrides_builds_credentials_file() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset(GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID",
+                "client-id-123",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET",
+                "client-secret-456",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN",
+                "refresh-token-789",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE",
+                "authorized_user",
+            ),
+        ];
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let overrides =
+            collect_google_workspace_cli_env_overrides(temp.path()).expect("collect overrides");
+        let credentials_path = overrides
+            .iter()
+            .find(|(key, _)| key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV)
+            .map(|(_, value)| PathBuf::from(value))
+            .expect("credentials path override");
+        assert_eq!(
+            credentials_path,
+            temp.path().join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH)
+        );
+        assert!(credentials_path.exists());
+
+        let json = fs::read_to_string(&credentials_path).expect("read credentials file");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json).expect("parse credentials json");
+        assert_eq!(
+            parsed.get("client_id").and_then(|value| value.as_str()),
+            Some("client-id-123")
+        );
+        assert_eq!(
+            parsed.get("client_secret").and_then(|value| value.as_str()),
+            Some("client-secret-456")
+        );
+        assert_eq!(
+            parsed.get("refresh_token").and_then(|value| value.as_str()),
+            Some("refresh-token-789")
+        );
+        assert_eq!(
+            parsed.get("type").and_then(|value| value.as_str()),
+            Some("authorized_user")
+        );
+    }
+
+    #[test]
+    fn test_collect_google_workspace_cli_env_overrides_uses_existing_file_env() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set(
+                GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+                ".auth/google_workspace_cli_credentials.json",
+            ),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE"),
+        ];
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let overrides =
+            collect_google_workspace_cli_env_overrides(temp.path()).expect("collect overrides");
+        let credentials_path = overrides
+            .iter()
+            .find(|(key, _)| key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV)
+            .map(|(_, value)| PathBuf::from(value))
+            .expect("credentials path override");
+        assert_eq!(
+            credentials_path,
+            temp.path()
+                .join(".auth/google_workspace_cli_credentials.json")
+        );
+    }
+
+    #[test]
+    fn test_collect_google_workspace_cli_env_overrides_materializes_external_file_env() {
+        let _lock = env_lock();
+        let workspace = tempfile::tempdir().expect("workspace tempdir");
+        let external = tempfile::tempdir().expect("external tempdir");
+        let external_file = external.path().join("credentials.json");
+        let external_file_str = external_file.to_string_lossy().to_string();
+        fs::write(
+            &external_file,
+            "{\n  \"client_id\": \"external-client\"\n}\n",
+        )
+        .expect("write external credentials");
+
+        let _guards = vec![
+            EnvVarGuard::set(GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV, &external_file_str),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE"),
+        ];
+
+        let overrides = collect_google_workspace_cli_env_overrides(workspace.path())
+            .expect("collect overrides");
+        let credentials_path = overrides
+            .iter()
+            .find(|(key, _)| key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV)
+            .map(|(_, value)| PathBuf::from(value))
+            .expect("credentials path override");
+        assert_eq!(
+            credentials_path,
+            workspace
+                .path()
+                .join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH)
+        );
+        let content = fs::read_to_string(&credentials_path).expect("read materialized credentials");
+        assert!(content.contains("external-client"));
+    }
+
+    #[test]
+    fn test_collect_google_workspace_cli_env_overrides_external_file_falls_back_to_components() {
+        let _lock = env_lock();
+        let workspace = tempfile::tempdir().expect("workspace tempdir");
+        let missing_external = workspace.path().join("..").join("missing-credentials.json");
+        let missing_external_str = missing_external.to_string_lossy().to_string();
+        let _guards = vec![
+            EnvVarGuard::set(
+                GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV,
+                &missing_external_str,
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID",
+                "fallback-client",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET",
+                "fallback-secret",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN",
+                "fallback-refresh",
+            ),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE",
+                "authorized_user",
+            ),
+        ];
+
+        let overrides = collect_google_workspace_cli_env_overrides(workspace.path())
+            .expect("collect overrides");
+        let credentials_path = overrides
+            .iter()
+            .find(|(key, _)| key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV)
+            .map(|(_, value)| PathBuf::from(value))
+            .expect("credentials path override");
+        assert_eq!(
+            credentials_path,
+            workspace
+                .path()
+                .join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH)
+        );
+        let content = fs::read_to_string(&credentials_path).expect("read generated credentials");
+        assert!(content.contains("fallback-client"));
+        assert!(content.contains("fallback-secret"));
+        assert!(content.contains("fallback-refresh"));
+    }
+
+    #[test]
+    fn test_collect_google_workspace_cli_env_overrides_skips_when_components_incomplete() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset(GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV),
+            EnvVarGuard::set(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID",
+                "client-id-123",
+            ),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_SECRET"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_REFRESH_TOKEN"),
+            EnvVarGuard::unset("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_TYPE"),
+        ];
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let overrides =
+            collect_google_workspace_cli_env_overrides(temp.path()).expect("collect overrides");
+        assert!(overrides.is_empty());
+        assert!(!temp
+            .path()
+            .join(GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH)
+            .exists());
     }
 
     #[test]

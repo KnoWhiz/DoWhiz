@@ -65,6 +65,7 @@ impl TaskExecutor for RecordingExecutor {
                     follow_up_error: output.scheduled_tasks_error,
                     scheduler_actions: output.scheduler_actions,
                     scheduler_actions_error: output.scheduler_actions_error,
+                    skip_auto_reply: false,
                 })
             }
             TaskKind::SendReply(send) => {

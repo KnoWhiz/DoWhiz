@@ -30,6 +30,7 @@ impl TaskExecutor for FollowUpExecutor {
                     follow_up_error: None,
                     scheduler_actions: Vec::new(),
                     scheduler_actions_error: None,
+                    skip_auto_reply: false,
                 })
             }
             _ => Ok(TaskExecution::default()),
