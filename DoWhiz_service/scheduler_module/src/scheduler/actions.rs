@@ -539,7 +539,8 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
             | Channel::BlueBubbles
             | Channel::Telegram
             | Channel::WhatsApp
-            | Channel::Sms => ("cross_channel_ack.txt", "reply_attachments"),
+            | Channel::Sms
+            | Channel::Notion => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email
             | Channel::GoogleDocs
             | Channel::GoogleSheets
@@ -630,6 +631,7 @@ fn format_channel_name(channel: &Channel) -> &'static str {
         Channel::GoogleDocs => "Google Docs",
         Channel::GoogleSheets => "Google Sheets",
         Channel::GoogleSlides => "Google Slides",
+        Channel::Notion => "Notion",
     }
 }
 

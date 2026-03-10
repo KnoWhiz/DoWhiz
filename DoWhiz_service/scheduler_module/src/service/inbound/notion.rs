@@ -136,6 +136,8 @@ pub(crate) fn process_notion_message(
         channel: Channel::Notion,
         slack_team_id: None,
         employee_id: Some(config.employee_profile.id.clone()),
+        requester_identifier_type: Some("notion_user".to_string()),
+        requester_identifier: Some(user_email.clone()),
     };
 
     let run_task_for_account = run_task.clone();
