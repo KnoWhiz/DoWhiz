@@ -182,30 +182,18 @@ See `.agents/skills/google-*/SKILL.md` for detailed command references.
 
 fn build_web_auth_capabilities_section() -> &'static str {
     r#"Web Workspace Auth (Notion / Google web pages):
-- Workspace may include pre-bootstrapped browser states in `.auth/notion_state.json` and `.auth/google_state.json`.
 - For private Notion/Google pages, use browser automation (for example `playwright-cli`) instead of plain HTTP fetches.
-- Follow this login sequence:
-  1. If `.auth/bootstrap_status.json` exists, quickly check it for previous bootstrap failures.
-  2. Before opening private URLs, load available state files:
-     - `playwright-cli state-load .auth/notion_state.json`
-     - `playwright-cli state-load .auth/google_state.json`
-  3. Open the target page and verify you are already authenticated.
-  4. If browser launch fails before sign-in:
-     - If error says Chrome is missing, retry with:
-       - `export PLAYWRIGHT_MCP_EXECUTABLE_PATH=/opt/google/chrome/chrome`
-       - If that file does not exist, set it to the first hit under `/app/.cache/ms-playwright/*/chrome-linux*/chrome`.
-     - Avoid `npx playwright install ...` on mounted workspaces (can fail with symlink errors).
-       Prefer `python3 -m playwright install chromium` or `playwright install chromium`.
-       If npm must be used, set `NPM_CONFIG_CACHE=/tmp/.npm` first.
-  5. If still redirected to sign-in, use env credentials with this order:
-     - Notion email: `NOTION_ACCOUNT_EMAIL`, then `NOTION_EMAIL`
-     - Notion password: `NOTION_PASSWORD`
-     - Google email: `GOOGLE_ACCOUNT_EMAIL`, `GOOGLE_EMAIL`, `GOOGLE_EMPLOYEE_EMAIL`
-     - Google password: `GOOGLE_PASSWORD`, `GOOGLE_ACCOUNT_PASSWORD`, `GOOGLE_EMPLOYEE_PASSWORD`
-     - Also try prefixed keys (`<PREFIX>_<KEY>`) when `EMPLOYEE_WEB_AUTH_ENV_PREFIX` or `WEB_AUTH_ENV_PREFIX` is set.
-  6. After successful sign-in, refresh storage state in `.auth/` so retries are faster.
+- Complete sign-in only through the active browser session when needed.
+- Do not assume pre-bootstrapped auth state exists in the workspace.
+- If browser launch fails before sign-in:
+  - If error says Chrome is missing, retry with:
+    - `export PLAYWRIGHT_MCP_EXECUTABLE_PATH=/opt/google/chrome/chrome`
+    - If that file does not exist, set it to the first hit under `/app/.cache/ms-playwright/*/chrome-linux*/chrome`.
+  - Avoid `npx playwright install ...` on mounted workspaces (can fail with symlink errors).
+    Prefer `python3 -m playwright install chromium` or `playwright install chromium`.
+    If npm must be used, set `NPM_CONFIG_CACHE=/tmp/.npm` first.
 - Never include raw credentials in any user-facing reply, logs, or generated files.
-- Do not conclude "cannot access due to sign-in" until the sequence above has been attempted.
+- Do not conclude "cannot access due to sign-in" until browser-based sign-in has been attempted.
 
 "#
 }
