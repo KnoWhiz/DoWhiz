@@ -17,6 +17,7 @@ use crate::github_inbound::{
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
 use crate::index_store::IndexStore;
 use crate::mailbox;
+use crate::notion_email_detector::{detect_notion_email, is_notion_sender};
 use crate::raw_payload_store;
 use crate::user_store::{extract_emails, UserStore};
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
@@ -48,6 +49,32 @@ pub fn process_inbound_payload(
         info!("skipping blacklisted sender: {}", sender);
         return Ok(());
     }
+
+    // Check if this is a Notion email notification
+    // If so, route to the specialized Notion email handler
+    if is_notion_sender(sender) {
+        if let Some(notification) = detect_notion_email(
+            sender,
+            payload.subject.as_deref().unwrap_or(""),
+            payload.text_body.as_deref(),
+            payload.html_body.as_deref(),
+        ) {
+            info!(
+                "detected Notion email notification type={:?}, routing to Notion handler",
+                notification.notification_type
+            );
+            return super::inbound::process_notion_email(
+                config,
+                user_store,
+                index_store,
+                account_store,
+                payload,
+                raw_payload,
+                &notification,
+            );
+        }
+    }
+
     let requester = resolve_inbound_requester(payload, raw_payload)?;
     info!(
         "resolved inbound requester identifier_type={} identifier={}",

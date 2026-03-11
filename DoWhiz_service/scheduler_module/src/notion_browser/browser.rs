@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::process::Command;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::models::NotionReplyResult;
 use super::NotionError;
@@ -352,19 +352,48 @@ impl NotionBrowser {
         let state = self.get_state().await?;
 
         // Find the workspace switcher button (usually shows current workspace name)
-        // Look for element with "expanded=false" that contains workspace-like text
         let workspace_switcher_idx = self.find_workspace_switcher(&state.raw);
 
         if let Some(idx) = workspace_switcher_idx {
             info!("Found workspace switcher at index {}", idx);
             self.click(idx).await?;
-            sleep(Duration::from_secs(1)).await;
+
+            // Wait for dropdown to fully load (Notion dropdowns can be slow)
+            sleep(Duration::from_secs(2)).await;
 
             // Get updated state with workspace list
             let state = self.get_state().await?;
-            let workspaces = self.parse_workspace_list(&state.raw);
 
+            // Verify dropdown opened by looking for typical dropdown indicators
+            let dropdown_opened = state.raw.contains("Add another account")
+                || state.raw.contains("添加其他账户")
+                || state.raw.contains("Log out")
+                || state.raw.contains("退出登录")
+                || state.raw.contains("Invite members");
+
+            if !dropdown_opened {
+                warn!("Workspace dropdown may not have opened properly, retrying click");
+                self.click(idx).await?;
+                sleep(Duration::from_secs(2)).await;
+            }
+
+            let state = self.get_state().await?;
+
+            // Save full state for debugging
+            let debug_file = "/tmp/notion_workspace_dropdown_state.txt";
+            if let Err(e) = std::fs::write(debug_file, &state.raw) {
+                warn!("Failed to save dropdown state: {}", e);
+            } else {
+                debug!("Saved workspace dropdown state to {} ({} bytes)", debug_file, state.raw.len());
+            }
+
+            let workspaces = self.parse_workspace_list(&state.raw);
             info!("Found {} workspaces", workspaces.len());
+
+            // Close dropdown by pressing Escape
+            self.send_keys("Escape").await?;
+            sleep(Duration::from_millis(500)).await;
+
             return Ok(workspaces);
         }
 
@@ -377,11 +406,64 @@ impl NotionBrowser {
         Err(NotionError::ElementNotFound("Workspace switcher not found".to_string()))
     }
 
-    /// Switch to a specific workspace by clicking its element.
+    /// Switch to a specific workspace by name.
+    /// Opens the workspace switcher dropdown and clicks the workspace.
+    pub async fn switch_workspace_by_name(&self, workspace_name: &str) -> Result<(), NotionError> {
+        info!("Switching to workspace: {}", workspace_name);
+
+        // First ensure we're on Notion home
+        self.navigate("https://www.notion.so").await?;
+        sleep(Duration::from_secs(2)).await;
+
+        // Open workspace switcher dropdown
+        let state = self.get_state().await?;
+        let workspace_switcher_idx = self.find_workspace_switcher(&state.raw);
+
+        if let Some(idx) = workspace_switcher_idx {
+            info!("Found workspace switcher at index {}, clicking to open dropdown", idx);
+            self.click(idx).await?;
+            sleep(Duration::from_secs(1)).await;
+
+            // Get updated state with workspace list
+            let state = self.get_state().await?;
+
+            // Find the workspace by name in the dropdown
+            let workspaces = self.parse_workspace_list(&state.raw);
+            let target_ws = workspaces.iter().find(|(name, _)| name == workspace_name);
+
+            if let Some((_, ws_idx)) = target_ws {
+                info!("Found workspace '{}' at index {}, clicking", workspace_name, ws_idx);
+                self.click(*ws_idx).await?;
+                sleep(Duration::from_secs(2)).await;
+
+                // Press Escape to close any remaining menus
+                self.send_keys("Escape").await?;
+                sleep(Duration::from_secs(1)).await;
+
+                return Ok(());
+            } else {
+                // Close dropdown and return error
+                self.send_keys("Escape").await?;
+                return Err(NotionError::ElementNotFound(format!(
+                    "Workspace '{}' not found in dropdown",
+                    workspace_name
+                )));
+            }
+        }
+
+        Err(NotionError::ElementNotFound("Workspace switcher not found".to_string()))
+    }
+
+    /// Switch to a specific workspace by clicking its element (DEPRECATED - use switch_workspace_by_name).
     pub async fn switch_workspace(&self, workspace_idx: u32) -> Result<(), NotionError> {
-        info!("Switching to workspace at index {}", workspace_idx);
+        info!("Switching to workspace at index {} (deprecated method)", workspace_idx);
         self.click(workspace_idx).await?;
-        sleep(Duration::from_secs(3)).await;
+        sleep(Duration::from_secs(2)).await;
+
+        // Press Escape to close any open menus (like workspace switcher)
+        self.send_keys("Escape").await?;
+        sleep(Duration::from_secs(1)).await;
+
         Ok(())
     }
 
@@ -389,31 +471,111 @@ impl NotionBrowser {
     pub async fn open_inbox(&self) -> Result<(), NotionError> {
         info!("Opening inbox panel");
 
-        let state = self.get_state().await?;
+        // Try up to 3 times to open inbox
+        for attempt in 1..=3 {
+            let state = self.get_state().await?;
 
-        // Find Inbox button - try multiple patterns
-        let inbox_idx = self.find_element_index(&state.raw, &["Inbox", "收件箱"])
-            .or_else(|| {
-                // Also try looking for role=button with Inbox text
-                if let Ok(re) = Regex::new(r"\[(\d+)\]<div[^>]*role=button[^>]*>\s*\n\s*Inbox") {
-                    re.captures(&state.raw)
-                        .and_then(|c| c.get(1))
-                        .and_then(|m| m.as_str().parse().ok())
-                } else {
-                    None
+            // Check if inbox is already open (look for inbox-specific content)
+            if self.is_inbox_panel_open(&state.raw) {
+                info!("Inbox panel already open");
+                return Ok(());
+            }
+
+            // Find Inbox button - try multiple patterns
+            let inbox_idx = self.find_element_index(&state.raw, &["Inbox", "收件箱"])
+                .or_else(|| {
+                    // Also try looking for role=button with Inbox text
+                    if let Ok(re) = Regex::new(r"\[(\d+)\]<div[^>]*role=button[^>]*>\s*\n\s*Inbox") {
+                        re.captures(&state.raw)
+                            .and_then(|c| c.get(1))
+                            .and_then(|m| m.as_str().parse().ok())
+                    } else {
+                        None
+                    }
+                });
+
+            if let Some(idx) = inbox_idx {
+                info!("Found inbox button at index {} (attempt {})", idx, attempt);
+                self.click(idx).await?;
+                sleep(Duration::from_secs(2)).await;
+
+                // Verify inbox opened
+                let new_state = self.get_state().await?;
+                if self.is_inbox_panel_open(&new_state.raw) {
+                    info!("Inbox panel opened successfully");
+                    return Ok(());
                 }
-            })
-            .ok_or_else(|| {
+
+                // If not opened, try clicking again or with different approach
+                if attempt < 3 {
+                    warn!("Inbox panel not detected after click, retrying...");
+                    sleep(Duration::from_secs(1)).await;
+                }
+            } else {
                 info!("Available elements (first 30): {:?}",
                     state.elements.iter().take(30).collect::<Vec<_>>());
-                NotionError::ElementNotFound("Inbox button not found".to_string())
-            })?;
+                return Err(NotionError::ElementNotFound("Inbox button not found".to_string()));
+            }
+        }
 
-        info!("Found inbox button at index {}", inbox_idx);
-        self.click(inbox_idx).await?;
-        sleep(Duration::from_secs(3)).await;
-
+        // If we get here, inbox didn't open after retries
+        warn!("Failed to verify inbox panel opened after 3 attempts, proceeding anyway");
         Ok(())
+    }
+
+    /// Check if the inbox panel is currently open.
+    fn is_inbox_panel_open(&self, raw: &str) -> bool {
+        // First, exclude workspace switcher menu (common false positive)
+        // Workspace switcher has patterns like "Add workspace", "Log out", "Free Plan", "Guest"
+        let workspace_switcher_indicators = [
+            "Add workspace",
+            "Add another account",
+            "Log out",
+            "Free Plan",
+            "Plus Plan",
+            "Business Plan",
+            "Get iOS & Android",
+            "Try the new sidebar",
+        ];
+
+        let mut workspace_switcher_count = 0;
+        for indicator in &workspace_switcher_indicators {
+            if raw.contains(indicator) {
+                workspace_switcher_count += 1;
+            }
+        }
+        // If we see multiple workspace switcher indicators, this is NOT the inbox
+        if workspace_switcher_count >= 2 {
+            return false;
+        }
+
+        // Inbox panel indicators (must have at least 2 to be confident):
+        // - Section headers: "This week" / "Last week" / "Earlier"
+        // - Action verbs: "mentioned you", "commented on", "invited you"
+        let inbox_indicators = [
+            "This week",
+            "Last week",
+            "Earlier",
+            "今天",
+            "本周",
+            "上周",
+            "mentioned you",
+            "commented on",
+            "invited you",
+            "replied to your",
+            "assigned you",
+            "Email updated",
+        ];
+
+        let mut inbox_indicator_count = 0;
+        for indicator in &inbox_indicators {
+            if raw.contains(indicator) {
+                inbox_indicator_count += 1;
+            }
+        }
+
+        // Need at least one strong indicator
+        inbox_indicator_count >= 1
     }
 
     /// Find the workspace switcher button in the state.
@@ -445,21 +607,56 @@ impl NotionBrowser {
         None
     }
 
-    /// Parse workspace list from state after opening workspace switcher.
+    /// Parse workspace list from state after opening workspace switcher dropdown.
+    /// Only parses entries that follow the workspace dropdown format:
+    /// - Workspace name followed by email address
+    /// - Workspace name followed by plan type (Free, Plus, Guest, 免费, etc.)
     fn parse_workspace_list(&self, raw: &str) -> Vec<(String, u32)> {
         let mut workspaces = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
-        // Pattern 1: Workspace entries with email below (supports Unicode names)
+        // Helper to validate workspace name (filter out page content)
+        let is_valid_workspace_name = |name: &str| -> bool {
+            let trimmed = name.trim();
+            // Must be reasonably short (workspace names are typically < 50 chars)
+            if trimmed.len() > 60 || trimmed.len() < 2 {
+                return false;
+            }
+            // Should not contain sentence punctuation (page content often has these)
+            if trimmed.contains('？') || trimmed.contains('！') || trimmed.contains('。')
+                || trimmed.contains('?') || trimmed.contains('!')
+                || (trimmed.contains('.') && !trimmed.contains("'s"))
+                || trimmed.contains('：') || trimmed.contains(':')
+            {
+                return false;
+            }
+            // Should not be a common UI element or instruction
+            let blocklist = [
+                "这些是帮助", "点击", "输入", "高亮", "尝试", "探索",
+                "Click", "Enter", "Try", "Explore", "Learn", "Get started",
+                "Skip to content", "Search", "Home", "Settings", "Trash",
+                "New page", "Add new", "More", "Library", "Inbox",
+            ];
+            for blocked in &blocklist {
+                if trimmed.contains(blocked) {
+                    return false;
+                }
+            }
+            true
+        };
+
+        // Pattern 1: Workspace entries with email below (most reliable)
+        // Format with tabs:
         // [idx]<div role=button>
-        //     Workspace Name (may contain Chinese/Unicode)
-        //     email@domain.com
-        if let Ok(re) = Regex::new(r"\[(\d+)\]<div[^>]*role=button[^>]*>\s*\n\s+([^\n\[\]<>]{2,}(?:'s\s+(?:Space|Notion|Workspace)|的\s*Notion)?)\s*\n\s+[a-z0-9._%+-]+@") {
+        // \tWorkspace Name
+        // \temail@domain.com
+        if let Ok(re) = Regex::new(r"\[(\d+)\]<div[^>]*role=button[^>]*>\s*\n[\t\s]+([^\n\[\]<>]{2,60})\s*\n[\t\s]+[a-z0-9._%+-]+@[a-z0-9.-]+") {
             for caps in re.captures_iter(raw) {
                 if let (Some(idx), Some(name)) = (caps.get(1), caps.get(2)) {
                     if let Ok(n) = idx.as_str().parse::<u32>() {
                         let workspace_name = name.as_str().trim().to_string();
-                        if !seen.contains(&workspace_name) && !workspace_name.is_empty() {
+                        if !seen.contains(&workspace_name) && is_valid_workspace_name(&workspace_name) {
+                            debug!("Found workspace (email pattern): {}", workspace_name);
                             seen.insert(workspace_name.clone());
                             workspaces.push((workspace_name, n));
                         }
@@ -468,13 +665,14 @@ impl NotionBrowser {
             }
         }
 
-        // Pattern 2: Workspace entries with Notion/Space suffix (supports Unicode)
-        if let Ok(re) = Regex::new(r"\[(\d+)\]<[^>]+>\s*\n\s+([^\n\[\]<>]{3,}(?:Space|Notion|Workspace|的\s*Notion)[^\n]*)") {
+        // Pattern 2: Workspace entries with plan tier below (Free, Plus, Business, 免费, etc.)
+        if let Ok(re) = Regex::new(r"\[(\d+)\]<div[^>]*role=button[^>]*>\s*\n[\t\s]+([^\n\[\]<>]{2,60})\s*\n[\t\s]+(?:Free|Plus|Business|Enterprise|Guest|免费|付费|专业版)") {
             for caps in re.captures_iter(raw) {
                 if let (Some(idx), Some(name)) = (caps.get(1), caps.get(2)) {
                     if let Ok(n) = idx.as_str().parse::<u32>() {
                         let workspace_name = name.as_str().trim().to_string();
-                        if !seen.contains(&workspace_name) && !workspace_name.is_empty() {
+                        if !seen.contains(&workspace_name) && is_valid_workspace_name(&workspace_name) {
+                            debug!("Found workspace (plan pattern): {}", workspace_name);
                             seen.insert(workspace_name.clone());
                             workspaces.push((workspace_name, n));
                         }
@@ -483,22 +681,80 @@ impl NotionBrowser {
             }
         }
 
-        // Pattern 3: Workspace entries with "Guest" label (for workspaces you've been invited to)
-        // [idx]<...>
-        //     Workspace Name
-        //     Guest
-        if let Ok(re) = Regex::new(r"\[(\d+)\]<[^>]+>\s*\n\s+([^\n\[\]<>]{2,})\s*\n\s+Guest") {
+        // Pattern 3: Workspace entries with role=menuitem (dropdown menu context)
+        // The actual format has workspace name deeply nested:
+        // [idx]<div role=menuitem id=:xxx: />
+        //     ... (nested divs)
+        //             Workspace Name
+        //         ... (optional Guest label)
+        // We use a two-step approach: find menuitems, then extract names nearby
+        if let Ok(menuitem_re) = Regex::new(r"\[(\d+)\]<div[^>]*role=menuitem[^>]*>") {
+            for caps in menuitem_re.captures_iter(raw) {
+                if let Some(idx) = caps.get(1) {
+                    if let Ok(n) = idx.as_str().parse::<u32>() {
+                        // Find the position and look for workspace name in next ~30 lines
+                        let match_end = caps.get(0).unwrap().end();
+                        let search_area = &raw[match_end..raw.len().min(match_end + 1500)];
+
+                        // Look for workspace name pattern (Name's Notion, 的 Notion, or capitalized name)
+                        if let Ok(name_re) = Regex::new(r"[\t\s]+([A-Z][^\n\[\]<>]{2,40}(?:'s\s+(?:Space|Notion|Workspace))?|[^\n\[\]<>]{2,30}的\s*Notion(?:\s*总部)?)\s*\n") {
+                            if let Some(name_caps) = name_re.captures(search_area) {
+                                if let Some(name_match) = name_caps.get(1) {
+                                    let workspace_name = name_match.as_str().trim().to_string();
+                                    if !seen.contains(&workspace_name) && is_valid_workspace_name(&workspace_name) {
+                                        debug!("Found workspace (menuitem pattern): {} at index {}", workspace_name, n);
+                                        seen.insert(workspace_name.clone());
+                                        workspaces.push((workspace_name, n));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Pattern 4: Workspace with typical naming patterns (Name's Space/Notion, 的 Notion)
+        // Followed by email or plan to ensure it's from the dropdown
+        if let Ok(re) = Regex::new(r"\[(\d+)\]<[^>]+>\s*\n[\t\s]+([^\n\[\]<>]{2,40}(?:'s\s+(?:Space|Notion|Workspace)|的\s*Notion(?:\s*总部)?))\s*\n[\t\s]+(?:[a-z0-9._%+-]+@|Free|Plus|Guest|免费)") {
             for caps in re.captures_iter(raw) {
                 if let (Some(idx), Some(name)) = (caps.get(1), caps.get(2)) {
                     if let Ok(n) = idx.as_str().parse::<u32>() {
                         let workspace_name = name.as_str().trim().to_string();
-                        if !seen.contains(&workspace_name) && !workspace_name.is_empty() {
+                        if !seen.contains(&workspace_name) && is_valid_workspace_name(&workspace_name) {
+                            debug!("Found workspace (naming pattern): {}", workspace_name);
                             seen.insert(workspace_name.clone());
                             workspaces.push((workspace_name, n));
                         }
                     }
                 }
             }
+        }
+
+        // Pattern 5 (fallback): Any button followed by text that looks like a workspace name
+        // and then followed by an email (less strict but more reliable for varied formats)
+        if workspaces.is_empty() {
+            debug!("Trying fallback pattern for workspaces");
+            if let Ok(re) = Regex::new(r"\[(\d+)\]<[^>]*role=button[^>]*/?>\s*\n[\t\s]*([A-Za-z][^\n\[\]<>]{1,50}(?:'s\s+\w+|的\s*\w+)?)\s*\n[\t\s]*[a-z0-9._%+-]+@") {
+                for caps in re.captures_iter(raw) {
+                    if let (Some(idx), Some(name)) = (caps.get(1), caps.get(2)) {
+                        if let Ok(n) = idx.as_str().parse::<u32>() {
+                            let workspace_name = name.as_str().trim().to_string();
+                            if !seen.contains(&workspace_name) && is_valid_workspace_name(&workspace_name) {
+                                debug!("Found workspace (fallback pattern): {}", workspace_name);
+                                seen.insert(workspace_name.clone());
+                                workspaces.push((workspace_name, n));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if workspaces.is_empty() {
+            warn!("No workspaces found with any patterns. Raw state preview:\n{}", &raw[..raw.len().min(1000)]);
+        } else {
+            info!("Parsed {} workspaces from dropdown", workspaces.len());
         }
 
         workspaces

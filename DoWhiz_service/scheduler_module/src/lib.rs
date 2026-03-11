@@ -11,6 +11,7 @@ pub mod google_drive_changes;
 pub mod google_workspace_poller;
 pub mod ingestion;
 pub mod notion_browser;
+pub(crate) mod notion_email_detector;
 pub mod ingestion_queue;
 pub mod mailbox;
 pub mod message_router;

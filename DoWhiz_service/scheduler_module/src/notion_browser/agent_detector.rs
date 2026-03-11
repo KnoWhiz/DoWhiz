@@ -326,41 +326,66 @@ dismiss_action types: "none", "click", "press_escape", "refresh", "wait""#,
         )
     }
 
-    /// Call the Anthropic Vision API.
+    /// Call the Vision API (supports Azure OpenAI and Anthropic).
     async fn call_vision_api(
         &self,
         image_base64: &str,
         media_type: &str,
         prompt: &str,
     ) -> Result<String, NotionError> {
-        // Check if using Azure Foundry or direct Anthropic
-        let (api_url, headers) = self.build_api_request_config()?;
+        // Check if using Azure OpenAI or Anthropic
+        let (api_url, headers, use_openai_format) = self.build_api_request_config()?;
 
-        let request_body = serde_json::json!({
-            "model": self.config.model,
-            "max_tokens": self.config.max_tokens,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": image_base64
+        let request_body = if use_openai_format {
+            // Azure OpenAI format (GPT-4 Vision)
+            serde_json::json!({
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": format!("data:{};base64,{}", media_type, image_base64)
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": prompt
                             }
-                        },
-                        {
-                            "type": "text",
-                            "text": prompt
-                        }
-                    ]
-                }
-            ]
-        });
+                        ]
+                    }
+                ],
+                "max_tokens": self.config.max_tokens
+            })
+        } else {
+            // Anthropic format
+            serde_json::json!({
+                "model": self.config.model,
+                "max_tokens": self.config.max_tokens,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type,
+                                    "data": image_base64
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": prompt
+                            }
+                        ]
+                    }
+                ]
+            })
+        };
 
-        debug!("Calling Anthropic API at {}", api_url);
+        debug!("Calling Vision API at {}", api_url);
 
         let response = self
             .http_client
@@ -388,25 +413,72 @@ dismiss_action types: "none", "click", "press_escape", "refresh", "wait""#,
             .await
             .map_err(|e| NotionError::ParseError(format!("Failed to parse API response: {}", e)))?;
 
-        // Extract text from response
-        let text = response_json
-            .get("content")
-            .and_then(|c| c.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|item| item.get("text"))
-            .and_then(|t| t.as_str())
-            .ok_or_else(|| NotionError::ParseError("No text in API response".to_string()))?;
+        // Extract text from response (different paths for OpenAI vs Anthropic)
+        let text = if use_openai_format {
+            // OpenAI format: choices[0].message.content
+            response_json
+                .get("choices")
+                .and_then(|c| c.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|choice| choice.get("message"))
+                .and_then(|msg| msg.get("content"))
+                .and_then(|t| t.as_str())
+        } else {
+            // Anthropic format: content[0].text
+            response_json
+                .get("content")
+                .and_then(|c| c.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|item| item.get("text"))
+                .and_then(|t| t.as_str())
+        }
+        .ok_or_else(|| NotionError::ParseError("No text in API response".to_string()))?;
 
         Ok(text.to_string())
     }
 
     /// Build API request configuration based on available credentials.
+    /// Returns (api_url, headers, use_openai_format)
     fn build_api_request_config(
         &self,
-    ) -> Result<(String, reqwest::header::HeaderMap), NotionError> {
+    ) -> Result<(String, reqwest::header::HeaderMap, bool), NotionError> {
         let mut headers = reqwest::header::HeaderMap::new();
 
-        // Check for custom endpoint override first
+        // Priority 1: Azure OpenAI (if endpoint is set)
+        if let Ok(azure_endpoint) = env::var("AZURE_OPENAI_ENDPOINT") {
+            if !azure_endpoint.is_empty() {
+                // Get deployment name (default to gpt-4o for vision)
+                let deployment = env::var("AZURE_OPENAI_DEPLOYMENT")
+                    .unwrap_or_else(|_| "gpt-4o".to_string());
+
+                // Build Azure OpenAI endpoint
+                let base = azure_endpoint.trim_end_matches('/');
+                let api_url = format!(
+                    "{}/openai/deployments/{}/chat/completions?api-version=2024-02-15-preview",
+                    base, deployment
+                );
+                info!("Using Azure OpenAI endpoint: {}", api_url);
+
+                // Get API key (try AZURE_OPENAI_API_KEY first, then AZURE_OPENAI_API_KEY_BACKUP)
+                let api_key = env::var("AZURE_OPENAI_API_KEY")
+                    .or_else(|_| env::var("AZURE_OPENAI_API_KEY_BACKUP"))
+                    .map_err(|_| NotionError::ConfigError("No Azure OpenAI API key found".to_string()))?;
+
+                headers.insert(
+                    "api-key",
+                    api_key
+                        .parse()
+                        .map_err(|_| NotionError::ConfigError("Invalid API key".to_string()))?,
+                );
+                headers.insert(
+                    reqwest::header::CONTENT_TYPE,
+                    "application/json".parse().unwrap(),
+                );
+                return Ok((api_url, headers, true)); // use_openai_format = true
+            }
+        }
+
+        // Priority 2: Custom Anthropic endpoint
         if let Ok(custom_endpoint) = env::var("ANTHROPIC_API_ENDPOINT") {
             if !custom_endpoint.is_empty() {
                 info!("Using custom Anthropic endpoint: {}", custom_endpoint);
@@ -421,41 +493,17 @@ dismiss_action types: "none", "click", "press_escape", "refresh", "wait""#,
                     reqwest::header::CONTENT_TYPE,
                     "application/json".parse().unwrap(),
                 );
-                // Add anthropic-version header for compatibility
                 headers.insert(
                     "anthropic-version",
                     "2023-06-01".parse().unwrap(),
                 );
-                return Ok((custom_endpoint, headers));
+                return Ok((custom_endpoint, headers, false));
             }
         }
 
-        // Check if using Azure Foundry
-        if let Ok(foundry_resource) = env::var("ANTHROPIC_FOUNDRY_RESOURCE") {
-            if !foundry_resource.is_empty() {
-                // Azure Foundry endpoint - try the services.ai.azure.com format
-                let api_url = format!(
-                    "https://{}.services.ai.azure.com/models/chat/completions?api-version=2024-05-01-preview",
-                    foundry_resource
-                );
-                info!("Using Azure Foundry endpoint: {}", api_url);
-                headers.insert(
-                    "api-key",
-                    self.config
-                        .api_key
-                        .parse()
-                        .map_err(|_| NotionError::ConfigError("Invalid API key".to_string()))?,
-                );
-                headers.insert(
-                    reqwest::header::CONTENT_TYPE,
-                    "application/json".parse().unwrap(),
-                );
-                return Ok((api_url, headers));
-            }
-        }
-
-        // Direct Anthropic API
+        // Priority 3: Direct Anthropic API
         let api_url = "https://api.anthropic.com/v1/messages".to_string();
+        info!("Using direct Anthropic API");
         headers.insert(
             "x-api-key",
             self.config
@@ -472,13 +520,17 @@ dismiss_action types: "none", "click", "press_escape", "refresh", "wait""#,
             "application/json".parse().unwrap(),
         );
 
-        Ok((api_url, headers))
+        Ok((api_url, headers, false))
     }
 
     /// Parse the inbox analysis response from LLM.
     fn parse_inbox_analysis_response(&self, response: &str) -> Result<InboxAnalysisResult, NotionError> {
+        // Log the raw response for debugging
+        debug!("Raw LLM response:\n{}", response);
+
         // Try to extract JSON from markdown code blocks
         let json_str = extract_json_from_response(response);
+        debug!("Extracted JSON: {}", json_str);
 
         match serde_json::from_str::<InboxAnalysisResult>(&json_str) {
             Ok(result) => {

@@ -303,6 +303,23 @@ Optional:
 - `AZURE_STORAGE_CONTAINER_INGEST` + `AZURE_STORAGE_SAS_TOKEN` (and optionally `AZURE_STORAGE_ACCOUNT` or `AZURE_STORAGE_CONTAINER_SAS_URL`) - Raw payload storage when `RAW_PAYLOAD_STORAGE_BACKEND=azure`
 - `SUPABASE_JWT_SECRET` + `SUPABASE_ANON_KEY` + `SUPABASE_PROJECT_URL` - Recommended for token validation in `/auth/*` and `/billing/*`
 
+### Local Testing Setup
+
+For local development and testing, add these to `DoWhiz_service/.env`:
+
+```bash
+# Use staging MongoDB and Supabase for local development
+MONGODB_URI="<STAGING_MONGODB_URI value>"
+MONGODB_DATABASE="dowhiz_staging_little_bear"
+SUPABASE_DB_URL="<from main .env>"
+INGESTION_QUEUE_BACKEND="servicebus"
+
+# Use test queue for local testing (avoids interfering with staging/prod)
+SERVICE_BUS_QUEUE_NAME="ingestion-test"
+```
+
+The staging MongoDB URI (`STAGING_MONGODB_URI`) and Supabase URL are in the main repo `.env` file. Copy these values to `DoWhiz_service/.env` for local runs.
+
 ## Testing Expectations
 
 - Use `reference_documentation/test_plans/DoWhiz_service_tests.md` as canonical checklist.

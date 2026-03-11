@@ -1,5 +1,19 @@
 //! Standalone Notion browser poller for local testing and E2E.
 //!
+//! **DEPRECATED**: This browser-based polling approach is now a fallback option.
+//! The recommended way to detect Notion @mentions is via email notifications:
+//!
+//! 1. Configure Notion to send email notifications to your service email
+//! 2. The email handler (`notion_email_detector.rs`) will automatically detect and
+//!    process Notion notification emails
+//! 3. Tasks are created with Notion context, and agents can use the Notion API
+//!    (preferred) or browser-use (fallback) to interact with pages
+//!
+//! This poller is still useful for:
+//! - Users who haven't set up email notifications in Notion
+//! - Testing and debugging browser automation
+//! - Environments where email integration is not available
+//!
 //! This binary runs the Notion browser poller independently.
 //! If SERVICE_BUS_CONNECTION_STRING is set, it will enqueue messages for worker processing.
 //!
@@ -22,12 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .init();
     dotenvy::dotenv().ok();
 
-    tracing::info!("=== Notion Browser Poller (E2E Test Mode) ===");
-
-    // For standalone testing, run without queue (local mode)
-    // For full E2E with queue, use the inbound_gateway binary instead
-    let queue: Option<Arc<ServiceBusIngestionQueue>> = None;
-    tracing::info!("Running in local test mode (no queue). Use inbound_gateway for E2E.");
+    tracing::info!("=== Notion Browser Poller ===");
 
     // Now enter async runtime
     tokio::runtime::Builder::new_multi_thread()
@@ -37,9 +46,30 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // For standalone testing, no queue (local mode)
-    let queue: Option<Arc<ServiceBusIngestionQueue>> = None;
     info!("=== Starting Notion Browser Poller ===");
+
+    // Initialize Service Bus queue if configured
+    let queue: Option<Arc<ServiceBusIngestionQueue>> = match env::var("SERVICE_BUS_CONNECTION_STRING") {
+        Ok(conn_str) if !conn_str.is_empty() => {
+            let queue_name = env::var("SERVICE_BUS_QUEUE_NAME")
+                .unwrap_or_else(|_| "ingestion-test".to_string());
+            info!("Connecting to Service Bus queue: {}", queue_name);
+            match ServiceBusIngestionQueue::from_env() {
+                Ok(q) => {
+                    info!("Service Bus queue connected successfully");
+                    Some(Arc::new(q))
+                }
+                Err(e) => {
+                    warn!("Failed to connect to Service Bus: {}. Running without queue.", e);
+                    None
+                }
+            }
+        }
+        _ => {
+            info!("No SERVICE_BUS_CONNECTION_STRING set. Running in local test mode (no queue).");
+            None
+        }
+    };
 
     // Check required environment variables
     let notion_email = env::var("NOTION_EMPLOYEE_EMAIL")

@@ -1,6 +1,17 @@
 //! Notion browser poller for monitoring @mentions and comments.
 //!
-//! This module provides the main polling loop that:
+//! **NOTE**: This browser-based polling is now a fallback approach.
+//! The preferred method is email-based detection via `notion_email_detector.rs`.
+//!
+//! ## Recommended Architecture (Email-based)
+//!
+//! 1. Notion sends email notifications to your service address
+//! 2. `notion_email_detector.rs` parses the email and extracts Notion context
+//! 3. Agent uses Notion API (preferred) or browser-use (fallback) to interact
+//!
+//! ## Legacy Architecture (This module)
+//!
+//! This module provides browser-based polling that:
 //! 1. Navigates to the Notion notifications page
 //! 2. Parses @mentions from browser state (via LLM or regex patterns)
 //! 3. Filters out already-processed notifications
@@ -308,36 +319,44 @@ impl NotionBrowserPoller {
     }
 
     /// Collect notifications from all workspaces.
+    /// Strategy:
+    /// 1. First check the current workspace's inbox (no switching needed)
+    /// 2. Then list other workspaces and switch to each one
+    /// This ensures we always process the current workspace even if listing fails.
     async fn collect_notifications_from_all_workspaces(&mut self) -> Result<Vec<NotionNotification>, NotionError> {
         let browser = self
             .browser
             .as_ref()
             .ok_or_else(|| NotionError::BrowserError("Browser not initialized".to_string()))?;
 
-        // List all workspaces
+        let mut all_mentions = Vec::new();
+
+        // Step 1: Check current workspace first (no switching needed)
+        // This ensures we don't miss notifications even if workspace listing fails
+        info!("Checking inbox for current workspace first");
+        let current_ws_mentions = self.check_current_workspace_inbox(browser, "current").await;
+        all_mentions.extend(current_ws_mentions);
+
+        // Step 2: List all workspaces and check others
         let workspaces = match browser.list_workspaces().await {
-            Ok(ws) => ws,
+            Ok(ws) => {
+                info!("Found {} workspaces in dropdown", ws.len());
+                ws
+            }
             Err(e) => {
-                warn!("Failed to list workspaces, falling back to current: {}", e);
-                // Fallback: just check current workspace
-                vec![("current".to_string(), 0)]
+                warn!("Failed to list workspaces: {}. Only current workspace was checked.", e);
+                return Ok(all_mentions);
             }
         };
 
-        info!("Found {} workspaces to check", workspaces.len());
-
-        let mut all_mentions = Vec::new();
-
-        // Check inbox for each workspace
-        for (workspace_name, workspace_idx) in &workspaces {
+        // Check inbox for each workspace (skip if we can't switch)
+        for (workspace_name, _workspace_idx) in &workspaces {
             info!("Checking inbox for workspace: {}", workspace_name);
 
-            // Switch to this workspace (skip if it's the fallback "current")
-            if *workspace_idx != 0 {
-                if let Err(e) = browser.switch_workspace(*workspace_idx).await {
-                    warn!("Failed to switch to workspace {}: {}", workspace_name, e);
-                    continue;
-                }
+            // Switch to this workspace by name
+            if let Err(e) = browser.switch_workspace_by_name(workspace_name).await {
+                warn!("Failed to switch to workspace {}: {}", workspace_name, e);
+                continue;
             }
 
             // Open inbox for this workspace
@@ -382,21 +401,18 @@ impl NotionBrowserPoller {
             };
             info!("Detected {} notifications from {} inbox (mode: {:?})", notifications.len(), workspace_name, self.detection_mode);
 
-            // Filter to unprocessed, unread mentions
+            // Filter to unprocessed mentions
+            // NOTE: We do NOT skip based on is_read because opening the inbox panel
+            // itself can trigger Notion to mark notifications as read. We rely solely
+            // on processed_store for deduplication.
             for mut notification in notifications {
                 // Add workspace info to notification
                 notification.workspace_name = Some(workspace_name.clone());
 
-                // Skip if already processed
+                // Skip if already processed (this is our primary deduplication)
                 let full_id = format!("{}:{}", workspace_name, notification.id);
                 if self.processed_store.is_processed(&full_id).unwrap_or(false) {
                     debug!("Skipping already processed notification: {}", full_id);
-                    continue;
-                }
-
-                // Skip if already read (user may have handled manually)
-                if notification.is_read {
-                    debug!("Skipping read notification: {}", notification.id);
                     continue;
                 }
 
@@ -429,6 +445,90 @@ impl NotionBrowserPoller {
         }
 
         Ok(all_mentions)
+    }
+
+    /// Check inbox for current workspace without switching.
+    /// Returns collected notifications (empty vec on error).
+    async fn check_current_workspace_inbox(
+        &self,
+        browser: &NotionBrowser,
+        workspace_name: &str,
+    ) -> Vec<NotionNotification> {
+        // Open inbox for current workspace
+        if let Err(e) = browser.open_inbox().await {
+            warn!("Failed to open inbox for current workspace: {}", e);
+            // Try direct navigation as fallback
+            if let Err(e2) = browser.go_to_notifications().await {
+                warn!("Fallback navigation also failed: {}", e2);
+                return vec![];
+            }
+        }
+
+        // Get browser state
+        let state = match browser.get_state().await {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("Failed to get state for current workspace: {}", e);
+                return vec![];
+            }
+        };
+
+        // Debug: save state to file for analysis
+        let debug_file = format!("/tmp/notion_state_{}.txt", workspace_name.replace(' ', "_").replace("'", ""));
+        if let Err(e) = std::fs::write(&debug_file, &state.raw) {
+            warn!("Failed to save state for debug: {}", e);
+        } else {
+            debug!("Saved {} inbox state to {} ({} bytes)", workspace_name, debug_file, state.raw.len());
+        }
+
+        // Parse notifications using appropriate detection method
+        let notifications = match self.detection_mode {
+            DetectionMode::AgentDriven => {
+                self.detect_mentions_with_agent(browser, workspace_name).await
+                    .unwrap_or_else(|e| {
+                        warn!("Agent detection failed for {}, falling back to hardcoded: {}", workspace_name, e);
+                        self.parse_notifications_from_state(&state.raw)
+                    })
+            }
+            DetectionMode::Hardcoded => {
+                self.parse_notifications_from_state(&state.raw)
+            }
+        };
+        info!("Detected {} notifications from {} inbox (mode: {:?})", notifications.len(), workspace_name, self.detection_mode);
+
+        // Filter to unprocessed mentions
+        let mut result = Vec::new();
+        for mut notification in notifications {
+            notification.workspace_name = Some(workspace_name.to_string());
+
+            let full_id = format!("{}:{}", workspace_name, notification.id);
+            if self.processed_store.is_processed(&full_id).unwrap_or(false) {
+                debug!("Skipping already processed notification: {}", full_id);
+                continue;
+            }
+
+            let preview_lower = notification.preview_text.as_ref()
+                .map(|t| t.to_lowercase())
+                .unwrap_or_default();
+
+            if notification.notification_type != "mention"
+                && notification.notification_type != "comment"
+                && !preview_lower.contains("mentioned")
+                && !preview_lower.contains("commented")
+                && !preview_lower.contains("@")
+            {
+                debug!("Skipping non-mention notification: {} (type: {})",
+                    notification.id, notification.notification_type);
+                continue;
+            }
+
+            notification.id = full_id;
+            info!("Found new mention in {}: {} from {:?}",
+                workspace_name, notification.id, notification.actor_name);
+            result.push(notification);
+        }
+
+        result
     }
 
     /// Detect mentions using the agent (LLM-based analysis).
@@ -519,8 +619,9 @@ impl NotionBrowserPoller {
 
         // TODO: Handle scroll_needed - scroll down and analyze again if true
 
-        // Cleanup screenshot
-        let _ = std::fs::remove_file(&screenshot_path);
+        // Keep screenshots for debugging - comment out when done
+        // let _ = std::fs::remove_file(&screenshot_path);
+        debug!("Screenshot saved to: {}", screenshot_path);
 
         Ok(notifications)
     }
@@ -582,10 +683,11 @@ impl NotionBrowserPoller {
         //   \t\tOliver:
         //   这个任务的描述已经很清晰了！...
         //
-        // We look for: [index]<a role=link /> followed by actor, "commented in", page name, and @mention
-        // Time format can be: "2d", "5h", "Mar 2", "Yesterday", etc.
+        // We look for: [index]<a role=link /> followed by actor, "commented in" or "评论于", page name, and @mention
+        // Time format can be: "2d", "5h", "Mar 2", "Yesterday", "3小时", "1天", etc.
+        // Actor names can be Chinese or English (e.g., "Liu Xintong", "Dowhiz")
         if let Ok(inbox_re) = Regex::new(
-            r#"\*?\[(\d+)\]<a\s+role=link[^>]*>\s*\n\t*\*?\[\d+\]<[^>]+>\s*\n\t*([A-Za-z][a-z]+(?:\s+[A-Za-z][a-z]+)?)\s*\n\t*commented in\s*\n\t*([^\n]+)\s*\n\t*(?:\d+[dhm]?|[A-Z][a-z]{2}\s+\d+|Yesterday|Today)\s*\n(?:[^\n]*\n)*?\t+([A-Za-z]+):\s*\n([^\n\[*]+)"#
+            r#"\*?\[(\d+)\]<a\s+role=link[^>]*>\s*\n\t*\*?\[\d+\]<[^>]+>\s*\n\t*([^\n\t\[*]+?)\s*\n\t*(?:commented in|评论于)\s*\n\t*([^\n]+)\s*\n\t*(?:\d+[dhm小时天]?|[A-Z][a-z]{2}\s+\d+|\d+月\d+日|Yesterday|Today|今天|昨天)\s*\n(?:[^\n]*\n)*?\t+@?([A-Za-z][A-Za-z\s]+?)(?:\s+at\s+[^:]+)?:\s*\n([^\n\[*]+)"#
         ) {
             for caps in inbox_re.captures_iter(raw) {
                 if let (Some(idx), Some(actor), Some(page), Some(mentioned), Some(preview)) =
@@ -598,8 +700,11 @@ impl NotionBrowserPoller {
                     let preview_text = preview.as_str().trim().to_string();
 
                     // Only process if this mentions our employee
+                    // Match if mentioned_name contains employee_name (handles "@Oliver at DoWhiz" matching "Oliver")
                     let employee_name = &self.config.employee_name;
-                    if !mentioned_name.eq_ignore_ascii_case(employee_name) {
+                    let mentioned_lower = mentioned_name.to_lowercase();
+                    let employee_lower = employee_name.to_lowercase();
+                    if !mentioned_lower.contains(&employee_lower) && !mentioned_lower.eq(&employee_lower) {
                         debug!("Skipping notification mentioning {} (looking for {})", mentioned_name, employee_name);
                         continue;
                     }
@@ -644,19 +749,18 @@ impl NotionBrowserPoller {
         }
 
         // Pattern 0b: Inbox panel format with tabs - captures link element index
-        // Format:
+        // Format (supports both English and Chinese UI):
         //   *[index]<a role=link />   <- this index for clicking
         //   \t*[index]<div role=img ...>
-        //   \tDowhiz
-        //   \tcommented in
-        //   \tImprove website copy
-        //   \t2d OR Mar 2 OR Yesterday
+        //   \tLiu Xintong OR Dowhiz
+        //   \tcommented in OR 评论于
+        //   \tDowhiz testing OR Improve website copy
+        //   \t3小时 OR 2d OR Mar 2 OR Yesterday
         //   \t*[index]<span />
-        //   \t\tOliver:
-        //   这个任务的描述...
-        // Time format can be: "2d", "5h", "Mar 2", "Yesterday", etc.
+        //   \t\t@Oliver at DoWhiz: OR Oliver:
+        //   change this line to heading format OR 这个任务的描述...
         if let Ok(simple_re) = Regex::new(
-            r#"\*?\[(\d+)\]<a[^>]*role=link[^>]*/?>\s*\n(?:[^\n]*\n)*?\t*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*\n\t*commented in\s*\n\t*([^\n]+)\s*\n\t*(?:\d+[dhm]?|[A-Z][a-z]{2}\s+\d+|Yesterday|Today)\s*\n(?:[^\n]*\n)*?\t*([A-Za-z]+):\s*\n([^\n\[*]+)"#
+            r#"\*?\[(\d+)\]<a[^>]*role=link[^>]*/?>\s*\n(?:[^\n]*\n)*?\t*([^\n\t\[*]+?)\s*\n\t*(?:commented in|评论于)\s*\n\t*([^\n]+)\s*\n\t*(?:\d+[dhm小时天]?|[A-Z][a-z]{2}\s+\d+|\d+月\d+日|Yesterday|Today|今天|昨天)\s*\n(?:[^\n]*\n)*?\t*@?([A-Za-z][A-Za-z\s]+?)(?:\s+at\s+[^:]+)?:\s*\n([^\n\[*]+)"#
         ) {
             for caps in simple_re.captures_iter(raw) {
                 if let (Some(idx), Some(actor), Some(page), Some(mentioned), Some(preview)) =
@@ -668,8 +772,11 @@ impl NotionBrowserPoller {
                     let mentioned_name = mentioned.as_str().trim().to_string();
                     let preview_text = preview.as_str().trim().to_string();
 
+                    // Match if mentioned_name contains employee_name (handles "@Oliver at DoWhiz" matching "Oliver")
                     let employee_name = &self.config.employee_name;
-                    if !mentioned_name.eq_ignore_ascii_case(employee_name) {
+                    let mentioned_lower = mentioned_name.to_lowercase();
+                    let employee_lower = employee_name.to_lowercase();
+                    if !mentioned_lower.contains(&employee_lower) && !mentioned_lower.eq(&employee_lower) {
                         continue;
                     }
 
