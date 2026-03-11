@@ -129,7 +129,8 @@ pub(super) fn run_claude_task(
 
     // Only check for reply file if a reply was expected
     // Use cross-channel routing to determine actual expected path
-    let expected_reply_path = resolve_expected_reply_path(request.workspace_dir, reply_html_path.clone());
+    let expected_reply_path =
+        resolve_expected_reply_path(request.workspace_dir, reply_html_path.clone());
     if !request.reply_to.is_empty() && !expected_reply_path.exists() {
         return Err(RunTaskError::OutputMissing {
             path: expected_reply_path,
