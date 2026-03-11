@@ -107,36 +107,34 @@ impl MongoIndexStore {
 
         if task_ids.is_empty() {
             self.task_index
-                .delete_many(doc! { "user_id": user_id })
-                .run()?;
+                .delete_many(doc! { "user_id": user_id }, None)?;
             return Ok(());
         }
 
-        self.task_index
-            .delete_many(doc! {
+        self.task_index.delete_many(
+            doc! {
                 "user_id": user_id,
                 "task_id": { "$nin": task_ids.clone() },
-            })
-            .run()?;
+            },
+            None,
+        )?;
 
         let options = UpdateOptions::builder().upsert(Some(true)).build();
         for (task_id, next_run) in task_rows {
-            self.task_index
-                .update_one(
-                    doc! { "task_id": &task_id, "user_id": user_id },
-                    doc! {
-                        "$set": {
-                            "next_run": BsonDateTime::from_chrono(next_run),
-                            "enabled": true,
-                        },
-                        "$setOnInsert": {
-                            "task_id": &task_id,
-                            "user_id": user_id,
-                        },
+            self.task_index.update_one(
+                doc! { "task_id": &task_id, "user_id": user_id },
+                doc! {
+                    "$set": {
+                        "next_run": BsonDateTime::from_chrono(next_run),
+                        "enabled": true,
                     },
-                )
-                .with_options(options.clone())
-                .run()?;
+                    "$setOnInsert": {
+                        "task_id": &task_id,
+                        "user_id": user_id,
+                    },
+                },
+                options.clone(),
+            )?;
         }
 
         Ok(())
@@ -157,21 +155,13 @@ impl MongoIndexStore {
             .build();
         let unsorted_limit = (limit as i64).saturating_mul(8).max(limit as i64);
         let unsorted_options = FindOptions::builder().limit(unsorted_limit).build();
-        let cursor = match self
-            .task_index
-            .find(filter.clone())
-            .with_options(sorted_options)
-            .run()
-        {
+        let cursor = match self.task_index.find(filter.clone(), sorted_options) {
             Ok(cursor) => cursor,
             Err(err) if is_order_by_index_excluded(&err) => {
                 warn!(
                     "task_index next_run sort rejected by backend; falling back to unsorted due-user query"
                 );
-                self.task_index
-                    .find(filter)
-                    .with_options(unsorted_options)
-                    .run()?
+                self.task_index.find(filter, unsorted_options)?
             }
             Err(err) => return Err(err.into()),
         };
@@ -205,21 +195,13 @@ impl MongoIndexStore {
             .limit(limit as i64)
             .build();
         let unsorted_options = FindOptions::builder().limit(limit as i64).build();
-        let cursor = match self
-            .task_index
-            .find(filter.clone())
-            .with_options(sorted_options)
-            .run()
-        {
+        let cursor = match self.task_index.find(filter.clone(), sorted_options) {
             Ok(cursor) => cursor,
             Err(err) if is_order_by_index_excluded(&err) => {
                 warn!(
                     "task_index next_run sort rejected by backend; falling back to unsorted due-task query"
                 );
-                self.task_index
-                    .find(filter)
-                    .with_options(unsorted_options)
-                    .run()?
+                self.task_index.find(filter, unsorted_options)?
             }
             Err(err) => return Err(err.into()),
         };

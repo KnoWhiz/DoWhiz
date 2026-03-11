@@ -226,12 +226,14 @@ impl MongoDocsProcessedStore {
     fn is_processed(&self, document_id: &str, comment_id: &str) -> Result<bool, SchedulerError> {
         let found = self
             .processed_comments
-            .find_one(doc! {
-                "file_id": document_id,
-                "file_type": "docs",
-                "tracking_id": comment_id,
-            })
-            .run()
+            .find_one(
+                doc! {
+                    "file_id": document_id,
+                    "file_type": "docs",
+                    "tracking_id": comment_id,
+                },
+                None,
+            )
             .map_err(mongo_scheduler_err)?
             .is_some();
         Ok(found)
@@ -250,13 +252,10 @@ impl MongoDocsProcessedStore {
                         "processed_at": BsonDateTime::from_chrono(Utc::now()),
                     }
                 },
-            )
-            .with_options(
                 mongodb::options::UpdateOptions::builder()
                     .upsert(true)
                     .build(),
             )
-            .run()
             .map_err(mongo_scheduler_err)?;
         Ok(())
     }
@@ -264,8 +263,7 @@ impl MongoDocsProcessedStore {
     fn get_processed_ids(&self, document_id: &str) -> Result<HashSet<String>, SchedulerError> {
         let cursor = self
             .processed_comments
-            .find(doc! { "file_id": document_id, "file_type": "docs" })
-            .run()
+            .find(doc! { "file_id": document_id, "file_type": "docs" }, None)
             .map_err(mongo_scheduler_err)?;
         let mut ids = HashSet::new();
         for row in cursor {
@@ -297,13 +295,10 @@ impl MongoDocsProcessedStore {
                         "created_at": now,
                     }
                 },
-            )
-            .with_options(
                 mongodb::options::UpdateOptions::builder()
                     .upsert(true)
                     .build(),
             )
-            .run()
             .map_err(mongo_scheduler_err)?;
         Ok(())
     }
@@ -315,8 +310,8 @@ impl MongoDocsProcessedStore {
                 doc! {
                     "$set": { "last_checked_at": BsonDateTime::from_chrono(Utc::now()) }
                 },
+                None,
             )
-            .run()
             .map_err(mongo_scheduler_err)?;
         Ok(())
     }

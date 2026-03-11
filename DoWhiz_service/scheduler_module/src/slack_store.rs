@@ -127,58 +127,57 @@ impl MongoSlackStore {
     }
 
     fn upsert_installation(&self, installation: &SlackInstallation) -> Result<(), SlackStoreError> {
-        self.installations
-            .update_one(
-                doc! {
+        self.installations.update_one(
+            doc! {
+                "team_id": installation.team_id.as_str(),
+            },
+            doc! {
+                "$set": {
                     "team_id": installation.team_id.as_str(),
-                },
-                doc! {
-                    "$set": {
-                        "team_id": installation.team_id.as_str(),
-                        "team_name": installation.team_name.clone().map(Bson::from).unwrap_or(Bson::Null),
-                        "bot_token": installation.bot_token.as_str(),
-                        "bot_user_id": installation.bot_user_id.as_str(),
-                        "installed_at": BsonDateTime::from_chrono(installation.installed_at),
-                    }
-                },
-            )
-            .with_options(mongodb::options::UpdateOptions::builder().upsert(true).build())
-            .run()?;
+                    "team_name": installation.team_name.clone().map(Bson::from).unwrap_or(Bson::Null),
+                    "bot_token": installation.bot_token.as_str(),
+                    "bot_user_id": installation.bot_user_id.as_str(),
+                    "installed_at": BsonDateTime::from_chrono(installation.installed_at),
+                }
+            },
+            mongodb::options::UpdateOptions::builder()
+                .upsert(true)
+                .build(),
+        )?;
         Ok(())
     }
 
     fn get_installation(&self, team_id: &str) -> Result<SlackInstallation, SlackStoreError> {
         let document = self
             .installations
-            .find_one(doc! {
-                "team_id": team_id,
-            })
-            .run()?
+            .find_one(
+                doc! {
+                    "team_id": team_id,
+                },
+                None,
+            )?
             .ok_or_else(|| SlackStoreError::NotFound(team_id.to_string()))?;
         document_to_installation(document)
     }
 
     fn delete_installation(&self, team_id: &str) -> Result<bool, SlackStoreError> {
-        let result = self
-            .installations
-            .delete_one(doc! {
+        let result = self.installations.delete_one(
+            doc! {
                 "team_id": team_id,
-            })
-            .run()?;
+            },
+            None,
+        )?;
         Ok(result.deleted_count > 0)
     }
 
     fn list_installations(&self) -> Result<Vec<SlackInstallation>, SlackStoreError> {
         let mut values = Vec::new();
-        let cursor = self
-            .installations
-            .find(doc! {})
-            .with_options(
-                FindOptions::builder()
-                    .sort(doc! { "installed_at": -1 })
-                    .build(),
-            )
-            .run()?;
+        let cursor = self.installations.find(
+            doc! {},
+            FindOptions::builder()
+                .sort(doc! { "installed_at": -1 })
+                .build(),
+        )?;
         for row in cursor {
             values.push(document_to_installation(row?)?);
         }
