@@ -31,6 +31,7 @@ mvp_python/email_pipeline/state/postmark_processed_ids.txt
 /.workspace_docker_e2e_little
 /.workspace_docker_e2e_mini
 DoWhiz_service/bin/google-docs
+/.human_approval_gate/
 DoWhiz_service/.env.example
 /tmp
 /test_reports
@@ -45,9 +46,6 @@ CLAUDE.md
 *.log
 DoWhiz_service/*.log
 DoWhiz_service/**/*.log
-
-# Binary files
-DoWhiz_service/bin/
 
 # Shell scripts (local only)
 DoWhiz_service/start_all.sh
