@@ -27,6 +27,7 @@ STATE_DIR_DEFAULT = ".human_approval_gate/challenges"
 DEFAULT_TIMEOUT_MINUTES = 30
 DEFAULT_POLL_SECONDS = 15
 DEFAULT_ADMIN_RECIPIENT = "admin@dowhiz.com"
+ADMIN_RECIPIENT_ENV_KEY = "HUMAN_APPROVAL_ADMIN_RECIPIENT"
 SUBJECT_TOKEN_PREFIX = "HAG"
 MAX_REPLY_SNIPPET_CHARS = 2000
 # Postmark limits metadata key names to at most 20 characters.
@@ -140,11 +141,31 @@ def normalize_scope(scope: str) -> str:
     return normalized
 
 
+def canonical_email(value: str) -> str:
+    email = extract_email(value)
+    if email:
+        return email
+    return value.strip().lower()
+
+
+def resolve_admin_recipient() -> str:
+    return get_env_first(ADMIN_RECIPIENT_ENV_KEY) or DEFAULT_ADMIN_RECIPIENT
+
+
 def resolve_recipient(scope: str, recipient_arg: Optional[str], user_email_arg: Optional[str]) -> str:
+    if scope == "admin":
+        admin_recipient = resolve_admin_recipient()
+        if recipient_arg and recipient_arg.strip():
+            recipient = recipient_arg.strip()
+            if canonical_email(recipient) != canonical_email(admin_recipient):
+                raise CliError(
+                    "scope=admin cannot send to non-admin recipient; remove --recipient "
+                    f"or set {ADMIN_RECIPIENT_ENV_KEY} if admin address changed"
+                )
+            return recipient
+        return admin_recipient
     if recipient_arg and recipient_arg.strip():
         return recipient_arg.strip()
-    if scope == "admin":
-        return DEFAULT_ADMIN_RECIPIENT
     if user_email_arg and user_email_arg.strip():
         return user_email_arg.strip()
     raise CliError("user scope requires --recipient or --user-email")

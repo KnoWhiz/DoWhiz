@@ -12,7 +12,9 @@ Use this skill immediately when any authentication flow is blocked by human veri
 - OTP / verification code input
 - "Approve sign-in on your phone"
 - "Tap number on mobile app"
-- security challenge that requires user/admin action
+- any out-of-band challenge that requires user/admin action from another device/account
+
+Do NOT use this skill for CAPTCHA/image puzzle/text-recognition steps. Solve CAPTCHA directly in browser first.
 
 When a page offers multiple verification methods, choose SMS verification first by default.
 
@@ -30,6 +32,7 @@ Do not keep retrying login while blocked.
 
 - `scope=admin`: when agent logs in an owner/admin account (for example Oliver's own Google/Notion/X account). Send to `admin@dowhiz.com`.
 - `scope=user`: when agent logs in an end user's account. Send to that specific user email.
+- For `scope=admin`, do not pass a user recipient address.
 
 ## CLI Quick Start
 
