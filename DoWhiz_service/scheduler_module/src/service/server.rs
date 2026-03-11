@@ -42,8 +42,12 @@ pub async fn run_server(
 ) -> Result<(), BoxError> {
     let storage_backend = StorageBackend::from_env();
     if storage_backend.uses_mongo() {
-        health_check_from_env()?;
-        bootstrap_indexes_from_env()?;
+        task::spawn_blocking(health_check_from_env)
+            .await
+            .map_err(|err| -> BoxError { err.into() })??;
+        task::spawn_blocking(bootstrap_indexes_from_env)
+            .await
+            .map_err(|err| -> BoxError { err.into() })??;
         info!(
             "mongo backend enabled backend={:?} database={}",
             storage_backend,
@@ -228,7 +232,10 @@ pub async fn run_server(
     // Clean up any active ACI containers to prevent orphans
     let cleaned = run_task_module::cleanup_all_aci_containers();
     if cleaned > 0 {
-        info!("cleaned up {} orphaned ACI container(s) on shutdown", cleaned);
+        info!(
+            "cleaned up {} orphaned ACI container(s) on shutdown",
+            cleaned
+        );
     }
 
     serve_result?;

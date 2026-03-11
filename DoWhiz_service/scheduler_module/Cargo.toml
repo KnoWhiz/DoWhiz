@@ -10,7 +10,6 @@ azure_messaging_servicebus = "0.21"
 azure_storage = "0.20"
 azure_storage_blobs = "0.20"
 base64 = "0.21"
-bson = { version = "2.15", features = ["chrono-0_4"] }
 chrono = { version = "0.4", features = ["serde"] }
 crossbeam-channel = "0.5"
 cron = "0.12"
@@ -22,7 +21,7 @@ hex = "0.4"
 jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
 kuchiki = "0.8"
 md5 = "0.7"
-mongodb = { version = "3.2.5", features = ["sync"] }
+mongodb = { version = "2.8", default-features = false, features = ["sync", "bson-chrono-0_4"] }
 native-tls = "0.2"
 postgres = { version = "0.19", features = ["with-uuid-1", "with-chrono-0_4"] }
 postgres-native-tls = "0.5"

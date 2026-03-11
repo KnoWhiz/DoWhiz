@@ -27,7 +27,7 @@ pub fn create_client_from_env() -> Result<Client, MongoStoreError> {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .ok_or(MongoStoreError::MissingMongoUri)?;
-    let mut options = ClientOptions::parse(uri).run()?;
+    let mut options = ClientOptions::parse(uri)?;
     options.app_name = Some("DoWhizScheduler".to_string());
     Ok(Client::with_options(options)?)
 }
@@ -63,7 +63,7 @@ pub fn health_check_from_env() -> Result<(), MongoStoreError> {
     }
     let client = create_client_from_env()?;
     let db = database_from_env(&client);
-    db.run_command(doc! { "ping": 1 }).run()?;
+    db.run_command(doc! { "ping": 1 }, None)?;
     Ok(())
 }
 
@@ -98,7 +98,7 @@ pub fn ensure_index_compatible(
 
     let mut attempt = 0usize;
     loop {
-        match collection.create_index(model.clone()).run() {
+        match collection.create_index(model.clone(), None) {
             Ok(_) => {
                 cache.insert(cache_key.clone());
                 return Ok(());
