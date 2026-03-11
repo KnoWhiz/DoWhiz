@@ -194,7 +194,7 @@ mod tests {
             EnvVarGuard::unset("TASK_TIMEOUT_SECS"),
         ];
 
-        assert_eq!(run_task_timeout(), Duration::from_secs(570));
+        assert_eq!(run_task_timeout(), Duration::from_secs(36000));
     }
 
     #[test]
@@ -216,7 +216,7 @@ mod tests {
             EnvVarGuard::unset("TASK_TIMEOUT_SECS"),
         ];
 
-        assert_eq!(run_task_timeout(), Duration::from_secs(570));
+        assert_eq!(run_task_timeout(), Duration::from_secs(36000));
     }
 
     #[test]
@@ -249,6 +249,6 @@ mod tests {
             EnvVarGuard::set("TASK_TIMEOUT_SECS", "0"),
         ];
 
-        assert_eq!(run_task_timeout(), Duration::from_secs(570));
+        assert_eq!(run_task_timeout(), Duration::from_secs(36000));
     }
 }
