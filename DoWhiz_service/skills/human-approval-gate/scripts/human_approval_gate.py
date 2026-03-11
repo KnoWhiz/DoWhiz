@@ -29,6 +29,9 @@ DEFAULT_POLL_SECONDS = 15
 DEFAULT_ADMIN_RECIPIENT = "admin@dowhiz.com"
 SUBJECT_TOKEN_PREFIX = "HAG"
 MAX_REPLY_SNIPPET_CHARS = 2000
+# Postmark limits metadata key names to at most 20 characters.
+POSTMARK_METADATA_CHALLENGE_ID_KEY = "hag_challenge_id"
+POSTMARK_METADATA_SCOPE_KEY = "hag_scope"
 
 EMAIL_PATTERN = re.compile(r"([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
 CODE_PATTERNS = [
@@ -309,6 +312,17 @@ def send_approval_email(
     if not message_id:
         raise CliError("Postmark send response missing MessageID")
     return message_id
+
+
+def build_postmark_metadata(challenge_id: str, scope: str) -> Dict[str, str]:
+    metadata = {
+        POSTMARK_METADATA_CHALLENGE_ID_KEY: challenge_id,
+        POSTMARK_METADATA_SCOPE_KEY: scope,
+    }
+    for key in metadata:
+        if len(key) > 20:
+            raise CliError(f"metadata key exceeds Postmark 20-character limit: {key}")
+    return metadata
 
 
 def parse_reply_decision(text: str) -> Tuple[str, Optional[str], str]:
@@ -597,10 +611,7 @@ def cmd_request(args: argparse.Namespace) -> int:
     if args.dry_run:
         state["outbound_message_id"] = "DRY_RUN"
     else:
-        metadata = {
-            "human_approval_challenge_id": state["challenge_id"],
-            "human_approval_scope": state["scope"],
-        }
+        metadata = build_postmark_metadata(str(state["challenge_id"]), str(state["scope"]))
         message_id = send_approval_email(
             api_base=api_base,
             token=token,
