@@ -2098,7 +2098,7 @@
               ${task.error_message ? `
                 <span class="task-detail" style="color: #ef4444;">
                   <span class="task-detail-label">Error:</span>
-                  <span>${escapeHtml(task.error_message)}</span>
+                  <span>${escapeHtml(parseErrorMessage(task.error_message))}</span>
                 </span>
               ` : ''}
             </div>
@@ -2112,6 +2112,32 @@
         const div = document.createElement('div');
         div.textContent = str;
         return div.innerHTML;
+      }
+
+      // Parse error message to extract clean summary
+      function parseErrorMessage(errorMessage) {
+        if (!errorMessage) return '';
+
+        // Try to find JSON error messages with "message" field
+        const jsonMatches = errorMessage.match(/\{"type"\s*:\s*"error"\s*,\s*"message"\s*:\s*"([^"]+)"\}/g);
+        if (jsonMatches && jsonMatches.length > 0) {
+          try {
+            // Get the last error message (usually the root cause)
+            const lastMatch = jsonMatches[jsonMatches.length - 1];
+            const parsed = JSON.parse(lastMatch);
+            if (parsed.message) {
+              // Truncate if too long
+              const msg = parsed.message;
+              return msg.length > 200 ? msg.substring(0, 200) + '...' : msg;
+            }
+          } catch (e) {
+            // JSON parse failed, continue to fallback
+          }
+        }
+
+        // Fallback: extract first meaningful line
+        const firstLine = errorMessage.split('\n')[0];
+        return firstLine.length > 150 ? firstLine.substring(0, 150) + '...' : firstLine;
       }
 
       // Start polling for task updates
