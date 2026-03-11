@@ -14,6 +14,8 @@ Use this skill immediately when any authentication flow is blocked by human veri
 - "Tap number on mobile app"
 - security challenge that requires user/admin action
 
+When a page offers multiple verification methods, choose SMS verification first by default.
+
 Do not keep retrying login while blocked.
 
 ## Required Behavior
@@ -22,6 +24,7 @@ Do not keep retrying login while blocked.
 2. Wait on gate result.
 3. Continue only if approved.
 4. If timeout/rejected, stop login attempts and report clearly.
+5. If SMS verification is unavailable or fails, switch to another available method and keep the same gate-based wait behavior.
 
 ## Scope Rules
 
