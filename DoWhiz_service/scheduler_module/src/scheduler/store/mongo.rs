@@ -68,13 +68,12 @@ impl MongoSchedulerStore {
     pub(crate) fn load_tasks(&self) -> Result<Vec<ScheduledTask>, SchedulerError> {
         let cursor = self
             .tasks
-            .find(self.owner_filter())
-            .with_options(
+            .find(
+                self.owner_filter(),
                 FindOptions::builder()
                     .sort(doc! { "created_at": -1 })
                     .build(),
             )
-            .run()
             .map_err(mongo_err)?;
         let mut seen_task_ids = HashSet::new();
         let mut tasks = Vec::new();
@@ -118,9 +117,8 @@ impl MongoSchedulerStore {
                         "retry_count": 0i32,
                     },
                 },
+                UpdateOptions::builder().upsert(Some(true)).build(),
             )
-            .with_options(UpdateOptions::builder().upsert(Some(true)).build())
-            .run()
             .map_err(mongo_err)?;
         Ok(())
     }
@@ -139,8 +137,8 @@ impl MongoSchedulerStore {
                         "task_json": task_json,
                     }
                 },
+                None,
             )
-            .run()
             .map_err(mongo_err)?;
         Ok(())
     }
@@ -152,16 +150,18 @@ impl MongoSchedulerStore {
     ) -> Result<i64, SchedulerError> {
         let execution_id = EXECUTION_SEQ.fetch_add(1, Ordering::Relaxed);
         self.executions
-            .insert_one(doc! {
-                "owner_scope": self.owner_scope_doc(),
-                "execution_id": execution_id,
-                "task_id": task_id.to_string(),
-                "started_at": BsonDateTime::from_chrono(started_at),
-                "finished_at": Bson::Null,
-                "status": "running",
-                "error_message": Bson::Null,
-            })
-            .run()
+            .insert_one(
+                doc! {
+                    "owner_scope": self.owner_scope_doc(),
+                    "execution_id": execution_id,
+                    "task_id": task_id.to_string(),
+                    "started_at": BsonDateTime::from_chrono(started_at),
+                    "finished_at": Bson::Null,
+                    "status": "running",
+                    "error_message": Bson::Null,
+                },
+                None,
+            )
             .map_err(mongo_err)?;
         Ok(execution_id)
     }
@@ -189,8 +189,8 @@ impl MongoSchedulerStore {
                         "error_message": error_message.map(Bson::from).unwrap_or(Bson::Null),
                     }
                 },
+                None,
             )
-            .run()
             .map_err(mongo_err)?;
         Ok(())
     }
@@ -198,8 +198,7 @@ impl MongoSchedulerStore {
     pub(crate) fn get_retry_count(&self, task_id: &str) -> Result<u32, SchedulerError> {
         let document = self
             .tasks
-            .find_one(self.task_filter(task_id))
-            .run()
+            .find_one(self.task_filter(task_id), None)
             .map_err(mongo_err)?;
         Ok(document
             .as_ref()
@@ -212,8 +211,8 @@ impl MongoSchedulerStore {
             .update_one(
                 self.task_filter(task_id),
                 doc! { "$inc": { "retry_count": 1i32 } },
+                None,
             )
-            .run()
             .map_err(mongo_err)?;
         self.get_retry_count(task_id)
     }
@@ -223,8 +222,8 @@ impl MongoSchedulerStore {
             .update_one(
                 self.task_filter(task_id),
                 doc! { "$set": { "retry_count": 0i32 } },
+                None,
             )
-            .run()
             .map_err(mongo_err)?;
         Ok(())
     }
@@ -234,8 +233,8 @@ impl MongoSchedulerStore {
             .update_one(
                 self.task_filter(task_id),
                 doc! { "$set": { "enabled": false } },
+                None,
             )
-            .run()
             .map_err(mongo_err)?;
         Ok(())
     }
@@ -244,17 +243,16 @@ impl MongoSchedulerStore {
         let created_after = BsonDateTime::from_chrono(Utc::now() - ChronoDuration::hours(24));
         let cursor = self
             .tasks
-            .find(doc! {
-                "owner_scope.kind": &self.owner_kind,
-                "owner_scope.id": &self.owner_id,
-                "created_at": { "$gte": created_after },
-            })
-            .with_options(
+            .find(
+                doc! {
+                    "owner_scope.kind": &self.owner_kind,
+                    "owner_scope.id": &self.owner_id,
+                    "created_at": { "$gte": created_after },
+                },
                 FindOptions::builder()
                     .sort(doc! { "created_at": -1 })
                     .build(),
             )
-            .run()
             .map_err(mongo_err)?;
         let mut summaries = Vec::new();
         let mut seen_task_ids = HashSet::new();
@@ -269,17 +267,16 @@ impl MongoSchedulerStore {
             let schedule = task_doc.get_document("schedule").ok();
             let execution = self
                 .executions
-                .find_one(doc! {
-                    "owner_scope.kind": &self.owner_kind,
-                    "owner_scope.id": &self.owner_id,
-                    "task_id": task_id,
-                })
-                .with_options(
+                .find_one(
+                    doc! {
+                        "owner_scope.kind": &self.owner_kind,
+                        "owner_scope.id": &self.owner_id,
+                        "task_id": task_id,
+                    },
                     FindOneOptions::builder()
                         .sort(doc! { "started_at": -1 })
                         .build(),
                 )
-                .run()
                 .map_err(mongo_err)?;
             summaries.push(TaskStatusSummary {
                 id: task_id.to_string(),

@@ -369,8 +369,7 @@ impl MongoWorkspaceProcessedStore {
     fn get_processed_ids(&self, file_id: &str) -> Result<HashSet<String>, SchedulerError> {
         let cursor = self
             .processed_comments
-            .find(doc! { "file_id": file_id })
-            .run()
+            .find(doc! { "file_id": file_id }, None)
             .map_err(mongo_scheduler_err)?;
         let mut ids = HashSet::new();
         for row in cursor {
@@ -400,13 +399,10 @@ impl MongoWorkspaceProcessedStore {
                         "processed_at": BsonDateTime::from_chrono(Utc::now()),
                     }
                 },
-            )
-            .with_options(
                 mongodb::options::UpdateOptions::builder()
                     .upsert(true)
                     .build(),
             )
-            .run()
             .map_err(mongo_scheduler_err)?;
         Ok(())
     }
@@ -432,13 +428,10 @@ impl MongoWorkspaceProcessedStore {
                         "created_at": now,
                     }
                 },
-            )
-            .with_options(
                 mongodb::options::UpdateOptions::builder()
                     .upsert(true)
                     .build(),
             )
-            .run()
             .map_err(mongo_scheduler_err)?;
         Ok(())
     }
@@ -448,8 +441,8 @@ impl MongoWorkspaceProcessedStore {
             .update_one(
                 doc! { "file_id": file_id },
                 doc! { "$set": { "last_checked_at": BsonDateTime::from_chrono(Utc::now()) } },
+                None,
             )
-            .run()
             .map_err(mongo_scheduler_err)?;
         Ok(())
     }
