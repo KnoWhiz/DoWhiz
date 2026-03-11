@@ -1059,6 +1059,13 @@
         : isStaging
           ? 'https://api.staging.dowhiz.com/service'
           : 'https://api.production1.dowhiz.com/service';
+      const CN_PATH_PREFIX = '/cn';
+      const isCnPath = window.location.pathname === CN_PATH_PREFIX
+        || window.location.pathname === `${CN_PATH_PREFIX}/`
+        || window.location.pathname.startsWith(`${CN_PATH_PREFIX}/`);
+      const localizePath = (path) => `${isCnPath ? CN_PATH_PREFIX : ''}${path === '/' ? '' : path}`;
+      const authRedirectUrl = `${window.location.origin}${localizePath('/auth/index.html')}`;
+      const homeRedirectPath = localizePath('/');
 
       const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
@@ -1223,7 +1230,7 @@
           return;
         }
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: `${window.location.origin}/auth/index.html`
+          redirectTo: authRedirectUrl
         });
         if (error) {
           showMessage(normalizeAuthError(error) || error.message);
@@ -1244,7 +1251,7 @@
         const { error } = await supabase.auth.signInWithOtp({
           email,
           options: {
-            emailRedirectTo: `${window.location.origin}/auth/index.html`,
+            emailRedirectTo: authRedirectUrl,
             shouldCreateUser: false
           }
         });
@@ -1357,7 +1364,7 @@
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: `${window.location.origin}/auth/index.html` }
+          options: { emailRedirectTo: authRedirectUrl }
         });
         if (error) {
           const normalizedError = (error.message || '').toLowerCase();
@@ -1385,7 +1392,7 @@
       document.getElementById('google-signin').addEventListener('click', async () => {
         const { error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
-          options: { redirectTo: window.location.origin + '/auth/index.html' }
+          options: { redirectTo: authRedirectUrl }
         });
         if (error) showMessage(error.message);
       });
@@ -2246,7 +2253,7 @@
           }
 
           // Redirect to home page after OAuth
-          window.location.href = '/';
+          window.location.href = homeRedirectPath;
           return true;
         }
 
