@@ -206,7 +206,8 @@ fn build_web_auth_capabilities_section() -> &'static str {
 
 fn build_human_approval_gate_section() -> &'static str {
     r#"Human Approval Gate (2FA / verification challenges):
-- If login/auth flow asks for OTP/passcode/device approval/number tap, immediately use the `human-approval-gate` skill.
+- If login/auth flow asks for OTP/passcode/device approval/number tap/CAPTCHA/security challenge, immediately use the `human-approval-gate` skill.
+- If the requested login cannot proceed because required credential or challenge answer is missing (email/username/password/passcode), request it through `human_approval_gate` instead of guessing.
 - Use the `human_approval_gate` CLI and pause all unrelated work while waiting for result.
 - Primary flow:
   1) Run `human_approval_gate request ... --wait --timeout-minutes 30`
@@ -959,6 +960,8 @@ mod tests {
         assert!(prompt.contains("--scope admin"));
         assert!(prompt.contains("--scope user --recipient"));
         assert!(prompt.contains("timeout"));
+        assert!(prompt.contains("CAPTCHA/security challenge"));
+        assert!(prompt.contains("required credential"));
     }
 
     #[test]
