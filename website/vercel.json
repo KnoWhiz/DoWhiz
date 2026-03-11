@@ -1,4 +1,14 @@
 {
+  "rewrites": [
+    {
+      "source": "/cn",
+      "destination": "/"
+    },
+    {
+      "source": "/cn/:path*",
+      "destination": "/:path*"
+    }
+  ],
   "redirects": [
     {
       "source": "/agents",
@@ -19,7 +29,7 @@
           "value": "cn.dowhiz.com"
         }
       ],
-      "destination": "https://www.cn.dowhiz.com/:path*",
+      "destination": "https://www.dowhiz.com/cn/:path*",
       "statusCode": 301
     },
     {
@@ -29,14 +39,9 @@
           "type": "header",
           "key": "host",
           "value": "www.cn.dowhiz.com"
-        },
-        {
-          "type": "header",
-          "key": "x-forwarded-proto",
-          "value": "http"
         }
       ],
-      "destination": "https://www.cn.dowhiz.com/:path*",
+      "destination": "https://www.dowhiz.com/cn/:path*",
       "statusCode": 301
     },
     {

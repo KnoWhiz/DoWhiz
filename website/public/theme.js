@@ -3,8 +3,9 @@
   const NIGHT_START_HOUR = 19;
   const EN_ORIGIN = 'https://www.dowhiz.com';
   const EN_ORIGIN_ALT = 'https://dowhiz.com';
-  const CN_ORIGIN = 'https://www.cn.dowhiz.com';
-  const CN_HOSTS = new Set(['www.cn.dowhiz.com', 'cn.dowhiz.com']);
+  const CN_PATH_PREFIX = '/cn';
+  const CN_ORIGIN = EN_ORIGIN + CN_PATH_PREFIX;
+  const CN_ORIGIN_ALT = EN_ORIGIN_ALT + CN_PATH_PREFIX;
   const LOCALE_OVERRIDE_VALUES = new Set(['zh', 'zh-cn', 'cn']);
   const NAV_LABELS = {
     en: {
@@ -52,6 +53,72 @@
       .replaceAll('Open Claw', 'OpenClaw');
   }
 
+  function isCnPath(pathname) {
+    return pathname === CN_PATH_PREFIX || pathname === CN_PATH_PREFIX + '/' || pathname.startsWith(CN_PATH_PREFIX + '/');
+  }
+
+  function getContentPathname(pathname) {
+    if (!isCnPath(pathname)) {
+      return pathname;
+    }
+
+    const stripped = pathname.slice(CN_PATH_PREFIX.length) || '/';
+    return stripped === '/index.html' ? '/' : stripped;
+  }
+
+  function getLocalizedPath(pathname) {
+    const normalized = pathname === '/index.html' ? '/' : pathname || '/';
+
+    if (normalized === '/' || normalized === '') {
+      return CN_PATH_PREFIX;
+    }
+
+    return isCnPath(normalized) ? normalized : CN_PATH_PREFIX + normalized;
+  }
+
+  function isDocumentPath(pathname) {
+    if (!pathname || pathname === '/' || pathname.startsWith('/#')) {
+      return true;
+    }
+
+    return !/\.(?:avif|bmp|css|gif|ico|jpe?g|js|json|mjs|pdf|png|svg|txt|webmanifest|webp|xml)$/i.test(pathname);
+  }
+
+  function localizeHref(href) {
+    if (!href || !isChineseLocale()) {
+      return href;
+    }
+
+    if (
+      href.startsWith('#') ||
+      href.startsWith('mailto:') ||
+      href.startsWith('tel:') ||
+      href.startsWith('javascript:') ||
+      href.startsWith('data:') ||
+      href.startsWith('//')
+    ) {
+      return href;
+    }
+
+    if (href.startsWith(CN_ORIGIN) || href.startsWith(CN_ORIGIN_ALT)) {
+      return href;
+    }
+
+    if (href.startsWith(EN_ORIGIN_ALT)) {
+      return CN_ORIGIN + href.slice(EN_ORIGIN_ALT.length);
+    }
+
+    if (href.startsWith(EN_ORIGIN)) {
+      return CN_ORIGIN + href.slice(EN_ORIGIN.length);
+    }
+
+    if (href.startsWith('/')) {
+      return isDocumentPath(href) ? getLocalizedPath(href) : href;
+    }
+
+    return href;
+  }
+
   function getLocale() {
     if (typeof window === 'undefined') {
       return 'en';
@@ -62,11 +129,20 @@
       return 'zh-CN';
     }
 
-    return CN_HOSTS.has(window.location.host) ? 'zh-CN' : 'en';
+    return isCnPath(window.location.pathname) ? 'zh-CN' : 'en';
   }
 
   function isChineseLocale() {
     return getLocale() === 'zh-CN';
+  }
+
+  function getHomeHref() {
+    return isChineseLocale() ? CN_PATH_PREFIX : '/';
+  }
+
+  function getHomeSectionHref(hash) {
+    const homeHref = getHomeHref();
+    return homeHref === '/' ? '/#' + hash : homeHref + '/#' + hash;
   }
 
   function getThemeForLocalTime() {
@@ -112,13 +188,13 @@
   }
 
   function shouldMountSharedNav() {
-    const pathname = window.location.pathname;
+    const pathname = getContentPathname(window.location.pathname);
     return pathname !== '/' && pathname !== '/index.html';
   }
 
   function getActiveNavHref(pathname) {
     if (pathname.startsWith('/agents/')) {
-      return '/#roles';
+      return getHomeSectionHref('roles');
     }
 
     if (
@@ -126,27 +202,27 @@
       pathname.startsWith('/demo-videos/') ||
       pathname.startsWith('/integrations/')
     ) {
-      return '/#workflows';
+      return getHomeSectionHref('workflows');
     }
 
     if (pathname.startsWith('/trust-safety/')) {
-      return '/#safety';
+      return getHomeSectionHref('safety');
     }
 
     if (pathname.startsWith('/help-center/')) {
-      return '/#faq';
+      return getHomeSectionHref('faq');
     }
 
     if (pathname.startsWith('/agent-market/')) {
-      return '/#deployment';
+      return getHomeSectionHref('deployment');
     }
 
     if (pathname.startsWith('/blog/')) {
-      return '/#blog';
+      return getHomeSectionHref('blog');
     }
 
     if (pathname.startsWith('/user-guide/')) {
-      return '/#how-it-works';
+      return getHomeSectionHref('how-it-works');
     }
 
     if (
@@ -154,7 +230,7 @@
       pathname.startsWith('/terms/') ||
       pathname.startsWith('/auth/')
     ) {
-      return '/#features';
+      return getHomeSectionHref('features');
     }
 
     return '';
@@ -162,22 +238,23 @@
 
   function buildSharedNav() {
     const labels = isChineseLocale() ? NAV_LABELS.zh : NAV_LABELS.en;
+    const homeHref = getHomeHref();
 
     return [
       '<div class="nav-content">',
-      '  <a href="/" class="logo" aria-label="' + labels.home + '">',
+      '  <a href="' + homeHref + '" class="logo" aria-label="' + labels.home + '">',
       '    <img src="/assets/DoWhiz.jpeg" alt="" class="brand-mark" aria-hidden="true" />',
       '    <span>Do<span class="text-gradient">Whiz</span></span>',
       '  </a>',
       '  <div class="nav-links">',
-      '    <a href="/#roles" class="nav-btn">' + labels.team + '</a>',
-      '    <a href="/#how-it-works" class="nav-btn">' + labels.how + '</a>',
-      '    <a href="/#workflows" class="nav-btn">' + labels.workflows + '</a>',
-      '    <a href="/#safety" class="nav-btn">' + labels.safety + '</a>',
-      '    <a href="/#features" class="nav-btn">' + labels.features + '</a>',
-      '    <a href="/#deployment" class="nav-btn">' + labels.deployment + '</a>',
-      '    <a href="/#faq" class="nav-btn">' + labels.faq + '</a>',
-      '    <a href="/#blog" class="nav-btn">' + labels.blog + '</a>',
+      '    <a href="' + getHomeSectionHref('roles') + '" class="nav-btn">' + labels.team + '</a>',
+      '    <a href="' + getHomeSectionHref('how-it-works') + '" class="nav-btn">' + labels.how + '</a>',
+      '    <a href="' + getHomeSectionHref('workflows') + '" class="nav-btn">' + labels.workflows + '</a>',
+      '    <a href="' + getHomeSectionHref('safety') + '" class="nav-btn">' + labels.safety + '</a>',
+      '    <a href="' + getHomeSectionHref('features') + '" class="nav-btn">' + labels.features + '</a>',
+      '    <a href="' + getHomeSectionHref('deployment') + '" class="nav-btn">' + labels.deployment + '</a>',
+      '    <a href="' + getHomeSectionHref('faq') + '" class="nav-btn">' + labels.faq + '</a>',
+      '    <a href="' + getHomeSectionHref('blog') + '" class="nav-btn">' + labels.blog + '</a>',
       '  </div>',
       '  <div class="nav-actions">',
       '    <div class="social-links">',
@@ -197,7 +274,7 @@
       '          <polyline points="22,6 12,13 2,6"></polyline>',
       '        </svg>',
       '      </a>',
-      '      <a class="btn-small" href="/auth/index.html" aria-label="' + labels.signIn + '">',
+      '      <a class="btn-small" href="' + localizeHref('/auth/index.html') + '" aria-label="' + labels.signIn + '">',
       '        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">',
       '          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>',
       '          <circle cx="12" cy="7" r="4"></circle>',
@@ -231,7 +308,7 @@
       document.body.insertBefore(nav, document.body.firstChild);
     }
 
-    const activeHref = getActiveNavHref(window.location.pathname);
+    const activeHref = getActiveNavHref(getContentPathname(window.location.pathname));
     if (activeHref) {
       const activeLink = nav.querySelector('.nav-links a[href="' + activeHref + '"]');
       if (activeLink) {
@@ -315,8 +392,7 @@
       return;
     }
 
-    const origin = CN_ORIGIN;
-    const nodes = [root].concat(Array.from(root.querySelectorAll('a[href], link[href]')));
+    const nodes = [root].concat(Array.from(root.querySelectorAll('a[href]')));
 
     nodes.forEach(function (node) {
       if (!node.getAttribute) {
@@ -328,10 +404,9 @@
         return;
       }
 
-      if (href.startsWith(EN_ORIGIN_ALT)) {
-        node.setAttribute('href', origin + href.slice(EN_ORIGIN_ALT.length));
-      } else if (href.startsWith(EN_ORIGIN)) {
-        node.setAttribute('href', origin + href.slice(EN_ORIGIN.length));
+      const localizedHref = localizeHref(href);
+      if (localizedHref && localizedHref !== href) {
+        node.setAttribute('href', localizedHref);
       }
     });
   }
@@ -368,7 +443,7 @@
       try {
         const payload = JSON.parse(script.textContent);
         script.textContent = JSON.stringify(translateValue(payload));
-      } catch (error) {
+      } catch {
         // Ignore malformed inline JSON-LD blocks.
       }
     });
@@ -392,9 +467,9 @@
     document.documentElement.lang = 'zh-CN';
     document.documentElement.setAttribute('data-locale', 'zh-CN');
 
-    const pathname = window.location.pathname;
+    const pathname = getContentPathname(window.location.pathname);
     const search = window.location.search;
-    const canonicalHref = CN_ORIGIN + pathname;
+    const canonicalHref = EN_ORIGIN + getLocalizedPath(pathname);
 
     if (document.title) {
       const translatedTitle = translateString(document.title, translations);
@@ -432,7 +507,7 @@
 
     const ogUrl = document.querySelector('meta[property="og:url"]');
     if (ogUrl) {
-      ogUrl.setAttribute('content', CN_ORIGIN + pathname + search);
+      ogUrl.setAttribute('content', canonicalHref + search);
     }
 
     const ogLocale = document.querySelector('meta[property="og:locale"]');
