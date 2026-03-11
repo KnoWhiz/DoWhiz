@@ -374,8 +374,12 @@ jobs:
           worker_running=0
           for service in dw_worker dowhiz_rust_service dowhiz-rust-service; do
             if pm2 describe "$service" >/dev/null 2>&1; then
-              pm2 restart "$service" --update-env
-              worker_running=1
+              if pm2 restart "$service" --update-env; then
+                worker_running=1
+                break
+              fi
+              echo "PM2 restart failed for $service, deleting stale entry and trying next option." >&2
+              pm2 delete "$service" >/dev/null 2>&1 || true
             fi
           done
           if [ "$worker_running" -eq 0 ]; then
@@ -386,8 +390,12 @@ jobs:
           gateway_running=0
           for service in dw_gateway dowhiz_inbound_gateway dowhiz_gateway dowhiz-inbound-gateway; do
             if pm2 describe "$service" >/dev/null 2>&1; then
-              pm2 restart "$service" --update-env
-              gateway_running=1
+              if pm2 restart "$service" --update-env; then
+                gateway_running=1
+                break
+              fi
+              echo "PM2 restart failed for $service, deleting stale entry and trying next option." >&2
+              pm2 delete "$service" >/dev/null 2>&1 || true
             fi
           done
           if [ "$gateway_running" -eq 0 ]; then
