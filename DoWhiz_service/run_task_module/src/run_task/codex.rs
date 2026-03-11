@@ -9,6 +9,8 @@ use std::sync::{LazyLock, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use serde::Deserialize;
+
 use super::constants::{
     CODEX_CONFIG_BASE_URL_PLACEHOLDER, CODEX_CONFIG_BLOCK_TEMPLATE, CODEX_CONFIG_MARKER,
     CODEX_MODEL_NAME, CODEX_SANDBOX_MODE, DOCKER_CODEX_HOME_DIR, DOCKER_WORKSPACE_DIR,
@@ -55,6 +57,13 @@ const HUMAN_APPROVAL_GATE_ENV_KEYS: &[&str] = &[
     "HUMAN_APPROVAL_REPLY_TO",
     "POSTMARK_API_BASE_URL",
 ];
+const HUMAN_APPROVAL_FROM_ENV_KEY: &str = "HUMAN_APPROVAL_FROM";
+const HUMAN_APPROVAL_REPLY_TO_ENV_KEY: &str = "HUMAN_APPROVAL_REPLY_TO";
+const POSTMARK_FROM_EMAIL_ENV_KEY: &str = "POSTMARK_FROM_EMAIL";
+const EMPLOYEE_CONFIG_PATH_ENV_KEY: &str = "EMPLOYEE_CONFIG_PATH";
+const EMPLOYEE_ID_ENV_KEY: &str = "EMPLOYEE_ID";
+const DEPLOY_TARGET_ENV_KEY: &str = "DEPLOY_TARGET";
+const STAGING_DEPLOY_TARGET: &str = "staging";
 const GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV: &str = "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE";
 const GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS: &[&str] = &[
     "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID",
@@ -68,6 +77,19 @@ const GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH: &str =
 const REMOTE_OUTPUT_FILENAME: &str = ".codex_remote_output.log";
 const REMOTE_EXIT_CODE_FILENAME: &str = ".codex_remote_exit_code";
 static ACI_CONTAINER_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Deserialize)]
+struct HumanApprovalEmployeeConfigFile {
+    #[serde(default)]
+    employees: Vec<HumanApprovalEmployeeConfigEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HumanApprovalEmployeeConfigEntry {
+    id: String,
+    #[serde(default)]
+    addresses: Vec<String>,
+}
 
 /// Global registry of active ACI containers created by this process.
 /// Used for cleanup on shutdown to prevent orphaned containers.
@@ -1688,10 +1710,111 @@ fn collect_payment_env_overrides() -> Vec<(String, String)> {
 }
 
 fn collect_human_approval_gate_env_overrides() -> Vec<(String, String)> {
-    HUMAN_APPROVAL_GATE_ENV_KEYS
+    let mut overrides: Vec<(String, String)> = HUMAN_APPROVAL_GATE_ENV_KEYS
         .iter()
         .filter_map(|key| read_env_trimmed(key).map(|value| ((*key).to_string(), value)))
-        .collect()
+        .collect();
+
+    let has_human_approval_from = overrides
+        .iter()
+        .any(|(key, _)| key == HUMAN_APPROVAL_FROM_ENV_KEY);
+    let has_postmark_from_email = overrides
+        .iter()
+        .any(|(key, _)| key == POSTMARK_FROM_EMAIL_ENV_KEY);
+    let has_human_approval_reply_to = overrides
+        .iter()
+        .any(|(key, _)| key == HUMAN_APPROVAL_REPLY_TO_ENV_KEY);
+
+    if let Some(mailbox_email) = resolve_human_approval_mailbox_email_from_employee_config() {
+        if !has_human_approval_from && !has_postmark_from_email {
+            overrides.push((
+                HUMAN_APPROVAL_FROM_ENV_KEY.to_string(),
+                mailbox_email.clone(),
+            ));
+        }
+        if !has_human_approval_reply_to {
+            overrides.push((HUMAN_APPROVAL_REPLY_TO_ENV_KEY.to_string(), mailbox_email));
+        }
+    }
+
+    overrides
+}
+
+fn resolve_human_approval_mailbox_email_from_employee_config() -> Option<String> {
+    let employee_id = read_env_trimmed(EMPLOYEE_ID_ENV_KEY)?;
+    for config_path in resolve_employee_config_paths() {
+        if let Some(email) = load_employee_mailbox_email_from_config(&config_path, &employee_id) {
+            return Some(email);
+        }
+    }
+    None
+}
+
+fn resolve_employee_config_paths() -> Vec<PathBuf> {
+    if let Some(config_path_raw) = read_env_trimmed(EMPLOYEE_CONFIG_PATH_ENV_KEY) {
+        return vec![resolve_employee_config_path(&config_path_raw)];
+    }
+
+    let root = do_whiz_service_root_dir();
+    let deploy_target = read_env_trimmed(DEPLOY_TARGET_ENV_KEY)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let mut candidates = if deploy_target == STAGING_DEPLOY_TARGET {
+        vec![
+            root.join("employee.staging.toml"),
+            root.join("employee.toml"),
+        ]
+    } else {
+        vec![
+            root.join("employee.toml"),
+            root.join("employee.staging.toml"),
+        ]
+    };
+
+    candidates.retain(|path| path.exists());
+    candidates
+}
+
+fn resolve_employee_config_path(raw_path: &str) -> PathBuf {
+    let path = PathBuf::from(raw_path);
+    if path.is_absolute() {
+        path
+    } else {
+        env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    }
+}
+
+fn do_whiz_service_root_dir() -> PathBuf {
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if cwd
+        .file_name()
+        .map(|name| name == "DoWhiz_service")
+        .unwrap_or(false)
+    {
+        cwd
+    } else {
+        cwd.join("DoWhiz_service")
+    }
+}
+
+fn load_employee_mailbox_email_from_config(
+    config_path: &Path,
+    employee_id: &str,
+) -> Option<String> {
+    let content = fs::read_to_string(config_path).ok()?;
+    let parsed: HumanApprovalEmployeeConfigFile = toml::from_str(&content).ok()?;
+    let entry = parsed
+        .employees
+        .iter()
+        .find(|entry| entry.id.trim().eq_ignore_ascii_case(employee_id))?;
+    entry
+        .addresses
+        .iter()
+        .map(|address| address.trim())
+        .find(|address| !address.is_empty())
+        .map(|address| address.to_string())
 }
 
 fn collect_google_workspace_cli_env_overrides(
@@ -2520,6 +2643,8 @@ mod tests {
             EnvVarGuard::set("POSTMARK_SERVER_TOKEN", "pm-token"),
             EnvVarGuard::set("POSTMARK_TEST_FROM", "noreply@example.com"),
             EnvVarGuard::set("HUMAN_APPROVAL_REPLY_TO", "inbox@example.com"),
+            EnvVarGuard::set("EMPLOYEE_CONFIG_PATH", "/tmp/missing-employee-config.toml"),
+            EnvVarGuard::unset("EMPLOYEE_ID"),
         ];
 
         let overrides = collect_human_approval_gate_env_overrides();
@@ -2544,10 +2669,92 @@ mod tests {
             EnvVarGuard::unset("POSTMARK_TEST_FROM"),
             EnvVarGuard::unset("HUMAN_APPROVAL_REPLY_TO"),
             EnvVarGuard::unset("POSTMARK_API_BASE_URL"),
+            EnvVarGuard::unset("EMPLOYEE_ID"),
+            EnvVarGuard::set("EMPLOYEE_CONFIG_PATH", "/tmp/missing-employee-config.toml"),
         ];
 
         let overrides = collect_human_approval_gate_env_overrides();
         assert!(overrides.is_empty());
+    }
+
+    #[test]
+    fn test_collect_human_approval_gate_env_overrides_uses_employee_config_mailbox_defaults() {
+        let _lock = env_lock();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("employee.staging.toml");
+        fs::write(
+            &config_path,
+            r#"
+default_employee_id = "boiled_egg"
+
+[[employees]]
+id = "boiled_egg"
+addresses = ["dowhiz@deep-tutor.com"]
+"#,
+        )
+        .expect("write employee config");
+
+        let _guards = vec![
+            EnvVarGuard::set(
+                "EMPLOYEE_CONFIG_PATH",
+                config_path.to_string_lossy().as_ref(),
+            ),
+            EnvVarGuard::set("EMPLOYEE_ID", "boiled_egg"),
+            EnvVarGuard::unset("HUMAN_APPROVAL_FROM"),
+            EnvVarGuard::unset("POSTMARK_FROM_EMAIL"),
+            EnvVarGuard::unset("HUMAN_APPROVAL_REPLY_TO"),
+            EnvVarGuard::set("POSTMARK_TEST_FROM", "mini-mouse@deep-tutor.com"),
+        ];
+
+        let overrides = collect_human_approval_gate_env_overrides();
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "HUMAN_APPROVAL_FROM" && v == "dowhiz@deep-tutor.com"));
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "HUMAN_APPROVAL_REPLY_TO" && v == "dowhiz@deep-tutor.com"));
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "POSTMARK_TEST_FROM" && v == "mini-mouse@deep-tutor.com"));
+    }
+
+    #[test]
+    fn test_collect_human_approval_gate_env_overrides_keeps_explicit_human_approval_from() {
+        let _lock = env_lock();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("employee.toml");
+        fs::write(
+            &config_path,
+            r#"
+[[employees]]
+id = "boiled_egg"
+addresses = ["dowhiz@deep-tutor.com"]
+"#,
+        )
+        .expect("write employee config");
+
+        let _guards = vec![
+            EnvVarGuard::set(
+                "EMPLOYEE_CONFIG_PATH",
+                config_path.to_string_lossy().as_ref(),
+            ),
+            EnvVarGuard::set("EMPLOYEE_ID", "boiled_egg"),
+            EnvVarGuard::set("HUMAN_APPROVAL_FROM", "manual@dowhiz.com"),
+            EnvVarGuard::unset("POSTMARK_FROM_EMAIL"),
+            EnvVarGuard::unset("HUMAN_APPROVAL_REPLY_TO"),
+        ];
+
+        let overrides = collect_human_approval_gate_env_overrides();
+        let from_values: Vec<&String> = overrides
+            .iter()
+            .filter(|(key, _)| key == "HUMAN_APPROVAL_FROM")
+            .map(|(_, value)| value)
+            .collect();
+        assert_eq!(from_values.len(), 1);
+        assert_eq!(from_values[0], "manual@dowhiz.com");
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "HUMAN_APPROVAL_REPLY_TO" && v == "dowhiz@deep-tutor.com"));
     }
 
     #[test]
