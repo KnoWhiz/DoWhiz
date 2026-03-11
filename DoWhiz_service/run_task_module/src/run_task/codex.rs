@@ -47,6 +47,14 @@ const PAYMENT_ENV_KEYS: &[&str] = &[
     "X402_API_KEY",
     "X402_API_SECRET",
 ];
+const HUMAN_APPROVAL_GATE_ENV_KEYS: &[&str] = &[
+    "POSTMARK_SERVER_TOKEN",
+    "HUMAN_APPROVAL_FROM",
+    "POSTMARK_FROM_EMAIL",
+    "POSTMARK_TEST_FROM",
+    "HUMAN_APPROVAL_REPLY_TO",
+    "POSTMARK_API_BASE_URL",
+];
 const GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV: &str = "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE";
 const GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS: &[&str] = &[
     "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID",
@@ -291,6 +299,7 @@ pub(super) fn run_codex_task(
             .as_deref()
             .unwrap_or(request.workspace_dir),
     )?;
+    let human_approval_gate_env_overrides = collect_human_approval_gate_env_overrides();
 
     let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
     let prompt = build_prompt(
@@ -386,6 +395,9 @@ pub(super) fn run_codex_task(
             } else {
                 cmd.arg("-e").arg(format!("{}={}", key, value));
             }
+        }
+        for (key, value) in &human_approval_gate_env_overrides {
+            cmd.arg("-e").arg(format!("{}={}", key, value));
         }
         for (key, value) in &github_auth.env_overrides {
             cmd.arg("-e").arg(format!("{}={}", key, value));
@@ -493,6 +505,9 @@ pub(super) fn run_codex_task(
             cmd.env(key, value);
         }
         for (key, value) in &google_workspace_cli_env_overrides {
+            cmd.env(key, value);
+        }
+        for (key, value) in &human_approval_gate_env_overrides {
             cmd.env(key, value);
         }
         for (key, value) in github_auth.env_overrides {
@@ -677,6 +692,7 @@ fn run_codex_task_azure_aci(
     let payment_env_overrides = collect_payment_env_overrides();
     let google_workspace_cli_env_overrides =
         collect_google_workspace_cli_env_overrides(&host_workspace_dir)?;
+    let human_approval_gate_env_overrides = collect_human_approval_gate_env_overrides();
 
     let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
     let prompt = build_prompt(
@@ -763,6 +779,9 @@ fn run_codex_task_azure_aci(
         } else {
             env_overrides.push((key, value));
         }
+    }
+    for (key, value) in human_approval_gate_env_overrides {
+        env_overrides.push((key, value));
     }
     for (key, value) in github_auth.env_overrides {
         env_overrides.push((key, value));
@@ -1668,6 +1687,13 @@ fn collect_payment_env_overrides() -> Vec<(String, String)> {
         .collect()
 }
 
+fn collect_human_approval_gate_env_overrides() -> Vec<(String, String)> {
+    HUMAN_APPROVAL_GATE_ENV_KEYS
+        .iter()
+        .filter_map(|key| read_env_trimmed(key).map(|value| ((*key).to_string(), value)))
+        .collect()
+}
+
 fn collect_google_workspace_cli_env_overrides(
     workspace_dir: &Path,
 ) -> Result<Vec<(String, String)>, RunTaskError> {
@@ -2485,6 +2511,43 @@ mod tests {
         assert!(overrides
             .iter()
             .any(|(k, v)| k == "GOATX402_API_KEY" && v == "api-key-global"));
+    }
+
+    #[test]
+    fn test_collect_human_approval_gate_env_overrides_collects_expected_keys() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set("POSTMARK_SERVER_TOKEN", "pm-token"),
+            EnvVarGuard::set("POSTMARK_TEST_FROM", "noreply@example.com"),
+            EnvVarGuard::set("HUMAN_APPROVAL_REPLY_TO", "inbox@example.com"),
+        ];
+
+        let overrides = collect_human_approval_gate_env_overrides();
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "POSTMARK_SERVER_TOKEN" && v == "pm-token"));
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "POSTMARK_TEST_FROM" && v == "noreply@example.com"));
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "HUMAN_APPROVAL_REPLY_TO" && v == "inbox@example.com"));
+    }
+
+    #[test]
+    fn test_collect_human_approval_gate_env_overrides_skips_unset_or_blank_values() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset("POSTMARK_SERVER_TOKEN"),
+            EnvVarGuard::set("HUMAN_APPROVAL_FROM", "   "),
+            EnvVarGuard::unset("POSTMARK_FROM_EMAIL"),
+            EnvVarGuard::unset("POSTMARK_TEST_FROM"),
+            EnvVarGuard::unset("HUMAN_APPROVAL_REPLY_TO"),
+            EnvVarGuard::unset("POSTMARK_API_BASE_URL"),
+        ];
+
+        let overrides = collect_human_approval_gate_env_overrides();
+        assert!(overrides.is_empty());
     }
 
     #[test]
