@@ -22,6 +22,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover
+    import tomli as tomllib  # type: ignore
+
 API_BASE_DEFAULT = "https://api.postmarkapp.com"
 STATE_DIR_DEFAULT = ".human_approval_gate/challenges"
 DEFAULT_TIMEOUT_MINUTES = 30
@@ -121,12 +126,109 @@ def get_env_first(*keys: str) -> Optional[str]:
     return None
 
 
+def discover_do_whiz_service_root() -> Optional[Path]:
+    script_path = Path(__file__).resolve()
+    for parent in script_path.parents:
+        if parent.name == "DoWhiz_service":
+            return parent
+    return None
+
+
+def resolve_employee_config_candidates() -> List[Path]:
+    explicit = get_env_first("EMPLOYEE_CONFIG_PATH")
+    if explicit:
+        return [Path(explicit).expanduser()]
+
+    deploy_target = (get_env_first("DEPLOY_TARGET") or "").strip().lower()
+    if deploy_target == "staging":
+        names = ("employee.staging.toml", "employee.toml")
+    else:
+        names = ("employee.toml", "employee.staging.toml")
+
+    root_candidates: List[Path] = []
+    cwd = Path.cwd()
+    root_candidates.append(cwd)
+    if cwd.name != "DoWhiz_service":
+        root_candidates.append(cwd / "DoWhiz_service")
+
+    script_root = discover_do_whiz_service_root()
+    if script_root is not None:
+        root_candidates.append(script_root)
+
+    paths: List[Path] = []
+    seen: set[str] = set()
+    for root in root_candidates:
+        for name in names:
+            candidate = (root / name).resolve()
+            key = str(candidate)
+            if key in seen:
+                continue
+            seen.add(key)
+            if candidate.exists():
+                paths.append(candidate)
+    return paths
+
+
+def load_employee_mailbox_from_config(path: Path, employee_id: str) -> Optional[str]:
+    try:
+        with path.open("rb") as handle:
+            payload = tomllib.load(handle)
+    except Exception:
+        return None
+
+    employees = payload.get("employees")
+    if not isinstance(employees, list):
+        return None
+
+    normalized_id = employee_id.strip().lower()
+    for employee in employees:
+        if not isinstance(employee, dict):
+            continue
+        config_id = str(employee.get("id", "")).strip().lower()
+        if config_id != normalized_id:
+            continue
+        addresses = employee.get("addresses")
+        if not isinstance(addresses, list):
+            return None
+        for address in addresses:
+            if not isinstance(address, str) or not address.strip():
+                continue
+            email = extract_email(address) or address.strip().lower()
+            if email:
+                return email
+        return None
+    return None
+
+
+def resolve_employee_mailbox_email() -> Optional[str]:
+    employee_id = get_env_first("EMPLOYEE_ID")
+    for config_path in resolve_employee_config_candidates():
+        try:
+            with config_path.open("rb") as handle:
+                payload = tomllib.load(handle)
+        except Exception:
+            continue
+
+        effective_employee_id = employee_id
+        if not effective_employee_id:
+            default_id = payload.get("default_employee_id")
+            if isinstance(default_id, str) and default_id.strip():
+                effective_employee_id = default_id.strip()
+        if not effective_employee_id:
+            continue
+
+        employee_email = load_employee_mailbox_from_config(config_path, effective_employee_id)
+        if employee_email:
+            return employee_email
+    return None
+
+
 def resolve_sender(from_arg: Optional[str]) -> str:
-    sender = (from_arg or "").strip() or get_env_first(
-        "HUMAN_APPROVAL_FROM",
-        "POSTMARK_FROM_EMAIL",
-        "POSTMARK_TEST_FROM",
-    )
+    sender = (from_arg or "").strip() or get_env_first("HUMAN_APPROVAL_FROM")
+    if not sender:
+        sender = resolve_employee_mailbox_email() or ""
+    if not sender:
+        sender = get_env_first("POSTMARK_FROM_EMAIL", "POSTMARK_TEST_FROM") or ""
     if not sender:
         raise CliError(
             "missing sender address: provide --from or set HUMAN_APPROVAL_FROM / POSTMARK_FROM_EMAIL"
