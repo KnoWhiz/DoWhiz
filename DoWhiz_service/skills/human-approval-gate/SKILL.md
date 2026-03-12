@@ -97,3 +97,4 @@ The gate also parses simple natural replies (approved/denied keywords), but expl
 - Reuse the same challenge thread; do not spam multiple requests unless previous one timed out.
 - Never include raw credentials in outbound messages.
 - Sender identity priority is: `--from` > `HUMAN_APPROVAL_FROM` > employee mailbox from `employee.toml`/`employee.staging.toml` > `POSTMARK_FROM_EMAIL` > `POSTMARK_TEST_FROM`.
+- HAG reply emails (`[HAG:...]` threads) are consumed by the gate flow and are not routed into normal Email->task execution.
