@@ -2294,6 +2294,10 @@
         }
       }
 
+      // Expose modal functions globally for onclick handlers
+      window.showTaskModal = showTaskModal;
+      window.closeTaskModal = closeTaskModal;
+
       // Start polling for task updates
       function startTaskPolling() {
         // Clear any existing interval
