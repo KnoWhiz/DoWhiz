@@ -137,7 +137,24 @@ def discover_do_whiz_service_root() -> Optional[Path]:
 def resolve_employee_config_candidates() -> List[Path]:
     explicit = get_env_first("EMPLOYEE_CONFIG_PATH")
     if explicit:
-        return [Path(explicit).expanduser()]
+        raw = Path(explicit).expanduser()
+        if raw.is_absolute():
+            return [raw]
+        cwd = Path.cwd()
+        candidates: List[Path] = [cwd / raw, cwd / "DoWhiz_service" / raw]
+        script_root = discover_do_whiz_service_root()
+        if script_root is not None:
+            candidates.append(script_root / raw)
+        deduped: List[Path] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            key = str(resolved)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(resolved)
+        return deduped
 
     deploy_target = (get_env_first("DEPLOY_TARGET") or "").strip().lower()
     if deploy_target == "staging":
