@@ -28,6 +28,19 @@ key = "proto@dowhiz.com"
 employee_id = "boiled_egg"
 tenant_id = "default"
 
+[[routes]]
+channel = "email"
+key = "c9051c2176b203ca4b6da98e0a790e15@inbound.postmarkapp.com"
+employee_id = "boiled_egg"
+tenant_id = "default"
+
+# Local Testing Postmark inbound (shared for local dev)
+[[routes]]
+channel = "email"
+key = "686c1d907f186223cb465a5105aa43c8@inbound.postmarkapp.com"
+employee_id = "boiled_egg"
+tenant_id = "default"
+
 # Google Docs routing - route all docs to Oliver (little_bear)
 [[routes]]
 channel = "google_docs"
