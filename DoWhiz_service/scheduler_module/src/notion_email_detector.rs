@@ -61,10 +61,20 @@ const NOTION_SENDER_DOMAINS: &[&str] = &[
 ];
 
 /// Regex patterns for extracting Notion information from emails.
+/// Matches page URLs like:
+/// - https://notion.so/workspace/Page-Title-abc123...
+/// - https://www.notion.so/Page-Title-abc123...
+/// Page URLs are identified by having a 32-char hex UUID suffix.
 static NOTION_URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"https://(?:www\.)?notion\.so/(?:[a-zA-Z0-9_-]+/)?([a-zA-Z0-9_-]+(?:-[a-f0-9]{32})?)")
+    // Match page URLs with UUID suffix (32 hex chars)
+    // The UUID is required to distinguish pages from static assets
+    // Note: We'll filter out non-page paths in the extraction function
+    Regex::new(r"https://(?:www\.)?notion\.so/([a-zA-Z0-9_/-]+[a-f0-9]{32})")
         .expect("valid regex")
 });
+
+/// Non-page paths to filter out (static assets, API, etc.)
+const NON_PAGE_PATHS: &[&str] = &["images/", "api/", "fonts/", "assets/", "icons/", "static/"];
 
 static NOTION_SITE_URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"https://([a-zA-Z0-9_-]+)\.notion\.site/([a-zA-Z0-9_-]+(?:-[a-f0-9]{32})?)")
@@ -77,9 +87,17 @@ static NOTION_COMMENT_URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid regex")
 });
 
-/// Pattern to extract actor name from "X mentioned you" style text
+/// Pattern to extract actor name from "X mentioned you" style text (English)
 static MENTIONED_YOU_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"([A-Za-z][A-Za-z\s]+?)\s+(?:mentioned you|replied to|commented on)")
+        .expect("valid regex")
+});
+
+/// Pattern to extract actor name from Chinese subject patterns
+/// e.g., "Liu Xintong 在 Dowhiz testing 发表了评论"
+/// Note: Uses [^\s] to match any non-whitespace char (including Unicode)
+static CHINESE_ACTOR_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^([^\s]+(?:\s+[^\s]+)*?)\s+在\s+[^\s]+(?:\s+[^\s]+)*\s+(?:发表了评论|评论了|中?提及了您|@了您|回复了)")
         .expect("valid regex")
 });
 
@@ -119,26 +137,20 @@ pub fn detect_notion_email(
         html_body.unwrap_or("")
     );
 
-    // Determine notification type
-    let notification_type = if subject_lower.contains("mentioned you") {
-        if subject_lower.contains("comment") {
-            NotionNotificationType::CommentMention
-        } else {
-            NotionNotificationType::PageMention
-        }
-    } else if subject_lower.contains("replied") {
-        NotionNotificationType::CommentReply
-    } else if subject_lower.contains("commented") || subject_lower.contains("comment on") {
-        NotionNotificationType::PageComment
-    } else {
-        NotionNotificationType::Other
-    };
+    // Determine notification type (supports both English and Chinese patterns)
+    let notification_type = detect_notification_type(subject, &subject_lower);
 
-    // Extract actor name
+    // Extract actor name (try English pattern first, then Chinese)
     let actor_name = MENTIONED_YOU_PATTERN
         .captures(&combined_text)
         .and_then(|cap| cap.get(1))
-        .map(|m| m.as_str().trim().to_string());
+        .map(|m| m.as_str().trim().to_string())
+        .or_else(|| {
+            CHINESE_ACTOR_PATTERN
+                .captures(subject)
+                .and_then(|cap| cap.get(1))
+                .map(|m| m.as_str().trim().to_string())
+        });
 
     // Extract page URL and ID
     let (page_url, page_id) = extract_notion_page_info(&combined_text);
@@ -176,16 +188,23 @@ pub fn detect_notion_email(
 
 /// Extract Notion page URL and ID from text.
 fn extract_notion_page_info(text: &str) -> (Option<String>, Option<String>) {
-    // Try notion.so URLs first
-    if let Some(cap) = NOTION_URL_PATTERN.captures(text) {
-        let url = cap.get(0).map(|m| m.as_str().to_string());
-        let page_id = cap.get(1).map(|m| {
-            let id = m.as_str();
-            // Extract just the UUID part if present (last 32 chars after hyphen)
-            if id.len() > 32 && id.contains('-') {
-                id.rsplit('-').next().unwrap_or(id).to_string()
+    // Try notion.so URLs - find all matches and filter out non-page paths
+    for cap in NOTION_URL_PATTERN.captures_iter(text) {
+        let url_str = cap.get(0).map(|m| m.as_str()).unwrap_or("");
+        let path = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+
+        // Skip non-page paths (images, api, fonts, etc.)
+        if NON_PAGE_PATHS.iter().any(|p| path.starts_with(p)) {
+            continue;
+        }
+
+        let url = Some(url_str.to_string());
+        let page_id = Some({
+            // Extract just the UUID part (last 32 chars)
+            if path.len() >= 32 {
+                path[path.len() - 32..].to_string()
             } else {
-                id.to_string()
+                path.to_string()
             }
         });
         return (url, page_id);
@@ -285,6 +304,45 @@ fn extract_comment_preview(text_body: Option<&str>) -> Option<String> {
     }
 }
 
+/// Detect notification type from subject line.
+/// Supports both English and Chinese patterns.
+fn detect_notification_type(subject: &str, subject_lower: &str) -> NotionNotificationType {
+    // English patterns
+    if subject_lower.contains("mentioned you") {
+        if subject_lower.contains("comment") {
+            return NotionNotificationType::CommentMention;
+        } else {
+            return NotionNotificationType::PageMention;
+        }
+    }
+    if subject_lower.contains("replied") {
+        return NotionNotificationType::CommentReply;
+    }
+    if subject_lower.contains("commented") || subject_lower.contains("comment on") {
+        return NotionNotificationType::PageComment;
+    }
+
+    // Chinese patterns:
+    // - "X 在 Y 发表了评论" (X commented on Y)
+    // - "X 在 Y 中提及了您" (X mentioned you in Y)
+    // - "X 回复了您的评论" (X replied to your comment)
+    if subject.contains("发表了评论") || subject.contains("评论了") {
+        return NotionNotificationType::PageComment;
+    }
+    if subject.contains("提及了您") || subject.contains("@了您") || subject.contains("提到了你") {
+        // Check if it's in a comment context
+        if subject.contains("评论") {
+            return NotionNotificationType::CommentMention;
+        }
+        return NotionNotificationType::PageMention;
+    }
+    if subject.contains("回复了") {
+        return NotionNotificationType::CommentReply;
+    }
+
+    NotionNotificationType::Other
+}
+
 /// Extract workspace name from email content.
 fn extract_workspace_name(text: &str) -> Option<String> {
     // Try to extract from notion.site URL
@@ -324,7 +382,7 @@ mod tests {
         let notification = detect_notion_email(
             "notify@mail.notion.so",
             "Alice mentioned you in a comment on Project Notes",
-            Some("Alice mentioned you:\n\n@Oliver can you review this section?\n\nView in Notion: https://notion.so/workspace/Project-Notes-abc123"),
+            Some("Alice mentioned you:\n\n@Oliver can you review this section?\n\nView in Notion: https://notion.so/workspace/Project-Notes-abcdef01234567890123456789012345"),
             None,
         );
 
@@ -340,7 +398,7 @@ mod tests {
         let notification = detect_notion_email(
             "notify@mail.notion.so",
             "Bob mentioned you in Weekly Update",
-            Some("Bob mentioned you in a page.\n\nView: https://notion.so/team/Weekly-Update-def456"),
+            Some("Bob mentioned you in a page.\n\nView: https://notion.so/team/Weekly-Update-abcdef01234567890123456789012345"),
             None,
         );
 
@@ -382,5 +440,52 @@ mod tests {
         assert!(notification.is_some());
         let n = notification.unwrap();
         assert_eq!(n.notification_type, NotionNotificationType::CommentReply);
+    }
+
+    #[test]
+    fn test_chinese_comment_detection() {
+        // Test Chinese subject: "X 在 Y 发表了评论"
+        let notification = detect_notion_email(
+            "notify@mail.notion.so",
+            "Liu Xintong 在 Dowhiz testing 发表了评论",
+            Some("Liu Xintong 在 Dowhiz testing 发表了评论\n\n@proto please check this"),
+            None,
+        );
+
+        assert!(notification.is_some());
+        let n = notification.unwrap();
+        assert_eq!(n.notification_type, NotionNotificationType::PageComment);
+        assert_eq!(n.actor_name, Some("Liu Xintong".to_string()));
+    }
+
+    #[test]
+    fn test_chinese_mention_detection() {
+        // Test Chinese subject: "X 在 Y 中提及了您"
+        let notification = detect_notion_email(
+            "notify@mail.notion.so",
+            "张三 在 项目计划 中提及了您",
+            Some("张三 在 项目计划 中提及了您"),
+            None,
+        );
+
+        assert!(notification.is_some());
+        let n = notification.unwrap();
+        assert_eq!(n.notification_type, NotionNotificationType::PageMention);
+        assert_eq!(n.actor_name, Some("张三".to_string()));
+    }
+
+    #[test]
+    fn test_url_excludes_image_paths() {
+        // Test that image URLs are not extracted as page URLs
+        let text = "Check this: https://www.notion.so/images/logo-for-slack-integration.png\nReal page: https://notion.so/workspace/My-Page-abc123def456789012345678901234567890";
+        let (url, page_id) = extract_notion_page_info(text);
+
+        assert!(url.is_some());
+        let url_str = url.unwrap();
+        // Should NOT match the images path
+        assert!(!url_str.contains("/images/"));
+        // Should match the actual page URL
+        assert!(url_str.contains("My-Page"));
+        assert!(page_id.is_some());
     }
 }
