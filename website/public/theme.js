@@ -243,7 +243,7 @@
     return [
       '<div class="nav-content">',
       '  <a href="' + homeHref + '" class="logo" aria-label="' + labels.home + '">',
-      '    <img src="/assets/DoWhiz.jpeg" alt="" class="brand-mark" aria-hidden="true" />',
+      '    <img src="/assets/DoWhiz.svg" alt="" class="brand-mark" aria-hidden="true" />',
       '    <span>Do<span class="text-gradient">Whiz</span></span>',
       '  </a>',
       '  <div class="nav-links">',
