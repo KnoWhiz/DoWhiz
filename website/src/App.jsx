@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import DashboardPage from './DashboardPage';
+import {
+  getOrCreateSessionId,
+  persistAttributionFromLocation,
+  trackAnalyticsEvent
+} from './analytics';
 import oliverImg from './assets/Oliver.jpg';
 
 // Supabase client
@@ -309,7 +315,7 @@ function MouseField({ theme }) {
   return <canvas className="mouse-field" ref={canvasRef} aria-hidden="true" />;
 }
 
-function App() {
+function LandingPage() {
   const [theme, setTheme] = useState(() => getThemeForLocalTime());
   const [enableMouseField, setEnableMouseField] = useState(false);
   const [user, setUser] = useState(null);
@@ -342,6 +348,25 @@ function App() {
     if (hasTokens || hasError) {
       window.location.replace(getLocalizedAuthPath(hash, pathname));
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    persistAttributionFromLocation();
+    const sessionId = getOrCreateSessionId();
+    trackAnalyticsEvent(
+      'landing_page_view',
+      {
+        landing_page_variant: 'default',
+        language: isCnPath(window.location.pathname) ? 'zh-CN' : 'en-US'
+      },
+      {
+        eventKey: `landing_page_view:${sessionId}:${window.location.pathname}`
+      }
+    );
   }, []);
 
   useEffect(() => {
@@ -1300,6 +1325,20 @@ function App() {
     ? buildMailtoLink(oliverMember.email, oliverMember.subject, oliverMember.body)
     : 'mailto:oliver@dowhiz.com';
 
+  const handleHeroCtaClick = () => {
+    trackAnalyticsEvent('secondary_cta_click', {
+      cta_location: 'hero_primary',
+      cta_text: 'Try DoWhiz service today'
+    });
+  };
+
+  const handleSignupCtaClick = () => {
+    trackAnalyticsEvent('primary_cta_click', {
+      cta_location: 'nav_sign_in',
+      cta_text: 'Sign In'
+    });
+  };
+
   return (
     <div className="app-container">
       <script
@@ -1391,7 +1430,12 @@ function App() {
                     )}
                   </div>
                 ) : (
-                  <a className="btn-small" href={getLocalizedAuthPath()} aria-label="Sign In">
+                  <a
+                    className="btn-small"
+                    href={getLocalizedAuthPath()}
+                    aria-label="Sign In"
+                    onClick={handleSignupCtaClick}
+                  >
                     <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                       <circle cx="12" cy="7" r="4"></circle>
@@ -1419,7 +1463,13 @@ function App() {
               Collaborate with specialized digital employees across operations, delivery, coding, docs, and GTM, all connected by shared memory.
             </p>
             <div className="hero-cta">
-              <a className="btn btn-primary" href={heroPrimaryCtaHref} target="_blank" rel="noopener noreferrer">
+              <a
+                className="btn btn-primary"
+                href={heroPrimaryCtaHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={handleHeroCtaClick}
+              >
                 Try DoWhiz service today
               </a>
               <a className="btn btn-secondary" href="/demo-videos/">
@@ -2121,6 +2171,16 @@ function App() {
       </div>
     </div>
   );
+}
+
+function App() {
+  if (typeof window !== 'undefined') {
+    const path = window.location.pathname;
+    if (path === '/dashboard' || path === '/dashboard/') {
+      return <DashboardPage />;
+    }
+  }
+  return <LandingPage />;
 }
 
 export default App;

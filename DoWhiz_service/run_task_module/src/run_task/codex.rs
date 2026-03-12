@@ -52,14 +52,11 @@ const PAYMENT_ENV_KEYS: &[&str] = &[
 const HUMAN_APPROVAL_GATE_ENV_KEYS: &[&str] = &[
     "POSTMARK_SERVER_TOKEN",
     "HUMAN_APPROVAL_FROM",
-    "POSTMARK_FROM_EMAIL",
-    "POSTMARK_TEST_FROM",
     "HUMAN_APPROVAL_REPLY_TO",
     "POSTMARK_API_BASE_URL",
 ];
 const HUMAN_APPROVAL_FROM_ENV_KEY: &str = "HUMAN_APPROVAL_FROM";
 const HUMAN_APPROVAL_REPLY_TO_ENV_KEY: &str = "HUMAN_APPROVAL_REPLY_TO";
-const POSTMARK_FROM_EMAIL_ENV_KEY: &str = "POSTMARK_FROM_EMAIL";
 const EMPLOYEE_CONFIG_PATH_ENV_KEY: &str = "EMPLOYEE_CONFIG_PATH";
 const EMPLOYEE_ID_ENV_KEY: &str = "EMPLOYEE_ID";
 const DEPLOY_TARGET_ENV_KEY: &str = "DEPLOY_TARGET";
@@ -1718,15 +1715,12 @@ fn collect_human_approval_gate_env_overrides() -> Vec<(String, String)> {
     let has_human_approval_from = overrides
         .iter()
         .any(|(key, _)| key == HUMAN_APPROVAL_FROM_ENV_KEY);
-    let has_postmark_from_email = overrides
-        .iter()
-        .any(|(key, _)| key == POSTMARK_FROM_EMAIL_ENV_KEY);
     let has_human_approval_reply_to = overrides
         .iter()
         .any(|(key, _)| key == HUMAN_APPROVAL_REPLY_TO_ENV_KEY);
 
     if let Some(mailbox_email) = resolve_human_approval_mailbox_email_from_employee_config() {
-        if !has_human_approval_from && !has_postmark_from_email {
+        if !has_human_approval_from {
             overrides.push((
                 HUMAN_APPROVAL_FROM_ENV_KEY.to_string(),
                 mailbox_email.clone(),
@@ -2668,7 +2662,6 @@ mod tests {
         let _lock = env_lock();
         let _guards = vec![
             EnvVarGuard::set("POSTMARK_SERVER_TOKEN", "pm-token"),
-            EnvVarGuard::set("POSTMARK_TEST_FROM", "noreply@example.com"),
             EnvVarGuard::set("HUMAN_APPROVAL_REPLY_TO", "inbox@example.com"),
             EnvVarGuard::set("EMPLOYEE_CONFIG_PATH", "/tmp/missing-employee-config.toml"),
             EnvVarGuard::unset("EMPLOYEE_ID"),
@@ -2680,9 +2673,6 @@ mod tests {
             .any(|(k, v)| k == "POSTMARK_SERVER_TOKEN" && v == "pm-token"));
         assert!(overrides
             .iter()
-            .any(|(k, v)| k == "POSTMARK_TEST_FROM" && v == "noreply@example.com"));
-        assert!(overrides
-            .iter()
             .any(|(k, v)| k == "HUMAN_APPROVAL_REPLY_TO" && v == "inbox@example.com"));
     }
 
@@ -2692,8 +2682,6 @@ mod tests {
         let _guards = vec![
             EnvVarGuard::unset("POSTMARK_SERVER_TOKEN"),
             EnvVarGuard::set("HUMAN_APPROVAL_FROM", "   "),
-            EnvVarGuard::unset("POSTMARK_FROM_EMAIL"),
-            EnvVarGuard::unset("POSTMARK_TEST_FROM"),
             EnvVarGuard::unset("HUMAN_APPROVAL_REPLY_TO"),
             EnvVarGuard::unset("POSTMARK_API_BASE_URL"),
             EnvVarGuard::unset("EMPLOYEE_ID"),
@@ -2728,9 +2716,7 @@ addresses = ["dowhiz@deep-tutor.com"]
             ),
             EnvVarGuard::set("EMPLOYEE_ID", "boiled_egg"),
             EnvVarGuard::unset("HUMAN_APPROVAL_FROM"),
-            EnvVarGuard::unset("POSTMARK_FROM_EMAIL"),
             EnvVarGuard::unset("HUMAN_APPROVAL_REPLY_TO"),
-            EnvVarGuard::set("POSTMARK_TEST_FROM", "mini-mouse@deep-tutor.com"),
         ];
 
         let overrides = collect_human_approval_gate_env_overrides();
@@ -2740,9 +2726,6 @@ addresses = ["dowhiz@deep-tutor.com"]
         assert!(overrides
             .iter()
             .any(|(k, v)| k == "HUMAN_APPROVAL_REPLY_TO" && v == "dowhiz@deep-tutor.com"));
-        assert!(overrides
-            .iter()
-            .any(|(k, v)| k == "POSTMARK_TEST_FROM" && v == "mini-mouse@deep-tutor.com"));
     }
 
     #[test]
@@ -2770,9 +2753,7 @@ addresses = ["dowhiz@deep-tutor.com"]
             EnvVarGuard::set("EMPLOYEE_CONFIG_PATH", "employee.staging.toml"),
             EnvVarGuard::set("EMPLOYEE_ID", "boiled_egg"),
             EnvVarGuard::unset("HUMAN_APPROVAL_FROM"),
-            EnvVarGuard::unset("POSTMARK_FROM_EMAIL"),
             EnvVarGuard::unset("HUMAN_APPROVAL_REPLY_TO"),
-            EnvVarGuard::set("POSTMARK_TEST_FROM", "mini-mouse@deep-tutor.com"),
         ];
 
         let overrides = collect_human_approval_gate_env_overrides();
@@ -2806,7 +2787,6 @@ addresses = ["dowhiz@deep-tutor.com"]
             ),
             EnvVarGuard::set("EMPLOYEE_ID", "boiled_egg"),
             EnvVarGuard::set("HUMAN_APPROVAL_FROM", "manual@dowhiz.com"),
-            EnvVarGuard::unset("POSTMARK_FROM_EMAIL"),
             EnvVarGuard::unset("HUMAN_APPROVAL_REPLY_TO"),
         ];
 

@@ -4,6 +4,7 @@ use axum::response::{IntoResponse, Redirect};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use base64::Engine;
+use chrono::Utc;
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -11,7 +12,7 @@ use tokio::task;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::account_store::{AccountStore, AccountStoreError};
+use crate::account_store::{AccountStore, AccountStoreError, AnalyticsEventInsert};
 use crate::blob_store::BlobStore;
 use crate::user_store::UserStore;
 use crate::{load_tasks_with_status, TaskStatusSummary};
@@ -148,6 +149,54 @@ pub fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+fn track_auth_event(
+    store: &AccountStore,
+    event_name: &str,
+    account_id: Option<Uuid>,
+    auth_user_id: Option<Uuid>,
+    event_key: Option<String>,
+    route_path: Option<&str>,
+    properties: serde_json::Value,
+) {
+    let environment = std::env::var("DEPLOY_TARGET")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "production".to_string());
+    let insert = AnalyticsEventInsert {
+        event_name: event_name.to_string(),
+        source: "server".to_string(),
+        event_timestamp: Utc::now(),
+        account_id,
+        auth_user_id,
+        anonymous_id: None,
+        session_id: None,
+        workspace_id: account_id.map(|id| id.to_string()),
+        org_id: None,
+        plan_type: None,
+        environment: Some(environment),
+        app_version: None,
+        page_path: None,
+        route_path: route_path.map(|value| value.to_string()),
+        referrer: None,
+        utm_source: None,
+        utm_medium: None,
+        utm_campaign: None,
+        utm_term: None,
+        utm_content: None,
+        device_type: None,
+        browser: None,
+        os: None,
+        event_key,
+        properties,
+    };
+    if let Err(err) = store.record_analytics_event(&insert) {
+        warn!(
+            "failed to record auth analytics event {}: {}",
+            event_name, err
+        );
+    }
+}
+
 // ============================================================================
 // Signup
 // ============================================================================
@@ -163,6 +212,13 @@ pub struct SignupResponse {
 /// Creates a DoWhiz account for the authenticated Supabase user.
 /// Requires: Authorization: Bearer <supabase_access_token>
 pub async fn signup(State(state): State<AuthState>, headers: HeaderMap) -> impl IntoResponse {
+    let auth_method = headers
+        .get("x-dowhiz-auth-method")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+
     let token = match extract_bearer_token(&headers) {
         Some(t) => t,
         None => {
@@ -214,6 +270,42 @@ pub async fn signup(State(state): State<AuthState>, headers: HeaderMap) -> impl 
 
     if let Some(existing) = existing {
         info!("Account already exists for auth_user_id={}", auth_user_id);
+        track_auth_event(
+            &state.account_store,
+            "signup_completed",
+            Some(existing.id),
+            Some(existing.auth_user_id),
+            Some(format!("signup:{}", existing.id)),
+            Some("/auth/signup"),
+            serde_json::json!({
+                "created": false,
+                "auth_method": auth_method,
+            }),
+        );
+        track_auth_event(
+            &state.account_store,
+            "first_authenticated_session",
+            Some(existing.id),
+            Some(existing.auth_user_id),
+            Some(format!("first_authenticated_session:{}", existing.id)),
+            Some("/auth/signup"),
+            serde_json::json!({
+                "created": false,
+                "auth_method": auth_method,
+            }),
+        );
+        track_auth_event(
+            &state.account_store,
+            "workspace_created",
+            Some(existing.id),
+            Some(existing.auth_user_id),
+            Some(format!("workspace:{}", existing.id)),
+            Some("/auth/signup"),
+            serde_json::json!({
+                "workspace_type": "account_workspace",
+                "created": false,
+            }),
+        );
         return (
             StatusCode::OK,
             Json(SignupResponse {
@@ -242,6 +334,42 @@ pub async fn signup(State(state): State<AuthState>, headers: HeaderMap) -> impl 
             info!(
                 "Created account {} for auth_user_id={}",
                 account.id, auth_user_id
+            );
+            track_auth_event(
+                &state.account_store,
+                "signup_completed",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!("signup:{}", account.id)),
+                Some("/auth/signup"),
+                serde_json::json!({
+                    "created": true,
+                    "auth_method": auth_method,
+                }),
+            );
+            track_auth_event(
+                &state.account_store,
+                "first_authenticated_session",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!("first_authenticated_session:{}", account.id)),
+                Some("/auth/signup"),
+                serde_json::json!({
+                    "created": true,
+                    "auth_method": auth_method,
+                }),
+            );
+            track_auth_event(
+                &state.account_store,
+                "workspace_created",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!("workspace:{}", account.id)),
+                Some("/auth/signup"),
+                serde_json::json!({
+                    "workspace_type": "account_workspace",
+                    "created": true,
+                }),
             );
 
             // Auto-link the auth email as an identifier
@@ -501,6 +629,22 @@ pub async fn link_identifier(
         Err(resp) => return resp.into_response(),
     };
 
+    track_auth_event(
+        &state.account_store,
+        "channel_connect_started",
+        Some(account.id),
+        Some(account.auth_user_id),
+        Some(format!(
+            "channel_start:{}:{}:{}",
+            account.id, req.identifier_type, req.identifier
+        )),
+        Some("/auth/link"),
+        serde_json::json!({
+            "identifier_type": req.identifier_type.clone(),
+            "identifier": req.identifier.clone(),
+        }),
+    );
+
     // For email type, create a verification token and send email
     if req.identifier_type == "email" {
         let account_id = account.id;
@@ -556,6 +700,22 @@ pub async fn link_identifier(
             "Sent verification email to {} for account {}",
             verification_token.email, account.id
         );
+        track_auth_event(
+            &state.account_store,
+            "channel_connect_pending",
+            Some(account.id),
+            Some(account.auth_user_id),
+            Some(format!(
+                "channel_pending:{}:{}:{}",
+                account.id, req.identifier_type, req.identifier
+            )),
+            Some("/auth/link"),
+            serde_json::json!({
+                "identifier_type": req.identifier_type.clone(),
+                "identifier": req.identifier.clone(),
+                "verification_required": true,
+            }),
+        );
 
         return (
             StatusCode::OK,
@@ -592,6 +752,34 @@ pub async fn link_identifier(
                 "Linked identifier {}:{} to account {}",
                 req.identifier_type, req.identifier, account.id
             );
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_succeeded",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect:{}:{}:{}",
+                    account.id, identifier.identifier_type, identifier.identifier
+                )),
+                Some("/auth/link"),
+                serde_json::json!({
+                    "identifier_type": identifier.identifier_type.clone(),
+                    "identifier": identifier.identifier.clone(),
+                    "provider": identifier.identifier_type.clone(),
+                }),
+            );
+            track_auth_event(
+                &state.account_store,
+                "first_channel_or_tool_connected",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!("first_channel:{}", account.id)),
+                Some("/auth/link"),
+                serde_json::json!({
+                    "identifier_type": identifier.identifier_type.clone(),
+                    "provider": identifier.identifier_type.clone(),
+                }),
+            );
             (
                 StatusCode::CREATED,
                 Json(LinkResponse {
@@ -603,15 +791,49 @@ pub async fn link_identifier(
             )
                 .into_response()
         }
-        Ok(Err(AccountStoreError::IdentifierTaken)) => (
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({
-                "error": "This identifier is already linked to another account"
-            })),
-        )
-            .into_response(),
+        Ok(Err(AccountStoreError::IdentifierTaken)) => {
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_failed",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect_failed:{}:{}:{}",
+                    account.id, req.identifier_type, req.identifier
+                )),
+                Some("/auth/link"),
+                serde_json::json!({
+                    "identifier_type": req.identifier_type.clone(),
+                    "identifier": req.identifier.clone(),
+                    "error_reason": "identifier_taken",
+                }),
+            );
+            (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "This identifier is already linked to another account"
+                })),
+            )
+                .into_response()
+        }
         Ok(Err(e)) => {
             error!("Failed to link identifier: {}", e);
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_failed",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect_failed:{}:{}:{}",
+                    account.id, req.identifier_type, req.identifier
+                )),
+                Some("/auth/link"),
+                serde_json::json!({
+                    "identifier_type": req.identifier_type.clone(),
+                    "identifier": req.identifier.clone(),
+                    "error_reason": "database_error",
+                }),
+            );
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({
@@ -723,6 +945,34 @@ pub async fn verify_identifier(
                 "Verified identifier {}:{} for account {}",
                 req.identifier_type, req.identifier, account.id
             );
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_succeeded",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect:{}:{}:{}",
+                    account.id, req.identifier_type, req.identifier
+                )),
+                Some("/auth/verify"),
+                serde_json::json!({
+                    "identifier_type": req.identifier_type.clone(),
+                    "identifier": req.identifier.clone(),
+                    "verification_method": "code",
+                }),
+            );
+            track_auth_event(
+                &state.account_store,
+                "first_channel_or_tool_connected",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!("first_channel:{}", account.id)),
+                Some("/auth/verify"),
+                serde_json::json!({
+                    "identifier_type": req.identifier_type.clone(),
+                    "provider": req.identifier_type.clone(),
+                }),
+            );
             (
                 StatusCode::OK,
                 Json(serde_json::json!({
@@ -732,15 +982,49 @@ pub async fn verify_identifier(
             )
                 .into_response()
         }
-        Ok(Err(AccountStoreError::NotFound)) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({
-                "error": "Identifier not found"
-            })),
-        )
-            .into_response(),
+        Ok(Err(AccountStoreError::NotFound)) => {
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_failed",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect_failed:{}:{}:{}",
+                    account.id, req.identifier_type, req.identifier
+                )),
+                Some("/auth/verify"),
+                serde_json::json!({
+                    "identifier_type": req.identifier_type.clone(),
+                    "identifier": req.identifier.clone(),
+                    "error_reason": "identifier_not_found",
+                }),
+            );
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "error": "Identifier not found"
+                })),
+            )
+                .into_response()
+        }
         Ok(Err(e)) => {
             error!("Failed to verify identifier: {}", e);
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_failed",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect_failed:{}:{}:{}",
+                    account.id, req.identifier_type, req.identifier
+                )),
+                Some("/auth/verify"),
+                serde_json::json!({
+                    "identifier_type": req.identifier_type.clone(),
+                    "identifier": req.identifier.clone(),
+                    "error_reason": "database_error",
+                }),
+            );
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({
@@ -1442,17 +1726,93 @@ pub async fn discord_oauth_callback(
                 "Linked Discord {} to account {}",
                 discord_user.id, account.id
             );
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_succeeded",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect:{}:discord:{}",
+                    account.id, discord_user.id
+                )),
+                Some("/auth/discord/callback"),
+                serde_json::json!({
+                    "identifier_type": "discord",
+                    "identifier": discord_user.id,
+                    "provider": "discord",
+                }),
+            );
+            track_auth_event(
+                &state.account_store,
+                "first_channel_or_tool_connected",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!("first_channel:{}", account.id)),
+                Some("/auth/discord/callback"),
+                serde_json::json!({
+                    "identifier_type": "discord",
+                    "provider": "discord",
+                }),
+            );
             redirect_to("/auth/index.html?discord=success")
         }
         Ok(Err(AccountStoreError::IdentifierTaken)) => {
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_failed",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect_failed:{}:discord:{}",
+                    account.id, discord_user.id
+                )),
+                Some("/auth/discord/callback"),
+                serde_json::json!({
+                    "identifier_type": "discord",
+                    "identifier": discord_user.id,
+                    "error_reason": "identifier_taken",
+                }),
+            );
             redirect_to("/auth/index.html?discord=error&reason=already_linked")
         }
         Ok(Err(e)) => {
             error!("Failed to link Discord: {}", e);
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_failed",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect_failed:{}:discord:{}",
+                    account.id, discord_user.id
+                )),
+                Some("/auth/discord/callback"),
+                serde_json::json!({
+                    "identifier_type": "discord",
+                    "identifier": discord_user.id,
+                    "error_reason": "link_failed",
+                }),
+            );
             redirect_to("/auth/index.html?discord=error&reason=link_failed")
         }
         Err(e) => {
             error!("spawn_blocking panicked: {}", e);
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_failed",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect_failed:{}:discord:{}",
+                    account.id, discord_user.id
+                )),
+                Some("/auth/discord/callback"),
+                serde_json::json!({
+                    "identifier_type": "discord",
+                    "identifier": discord_user.id,
+                    "error_reason": "internal_error",
+                }),
+            );
             redirect_to("/auth/index.html?discord=error&reason=internal_error")
         }
     }
@@ -1670,17 +2030,93 @@ pub async fn slack_oauth_callback(
     match link_result {
         Ok(Ok(_identifier)) => {
             info!("Linked Slack {} to account {}", slack_user.id, account.id);
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_succeeded",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect:{}:slack:{}",
+                    account.id, slack_user.id
+                )),
+                Some("/auth/slack/callback"),
+                serde_json::json!({
+                    "identifier_type": "slack",
+                    "identifier": slack_user.id,
+                    "provider": "slack",
+                }),
+            );
+            track_auth_event(
+                &state.account_store,
+                "first_channel_or_tool_connected",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!("first_channel:{}", account.id)),
+                Some("/auth/slack/callback"),
+                serde_json::json!({
+                    "identifier_type": "slack",
+                    "provider": "slack",
+                }),
+            );
             redirect_to("/auth/index.html?slack=success")
         }
         Ok(Err(AccountStoreError::IdentifierTaken)) => {
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_failed",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect_failed:{}:slack:{}",
+                    account.id, slack_user.id
+                )),
+                Some("/auth/slack/callback"),
+                serde_json::json!({
+                    "identifier_type": "slack",
+                    "identifier": slack_user.id,
+                    "error_reason": "identifier_taken",
+                }),
+            );
             redirect_to("/auth/index.html?slack=error&reason=already_linked")
         }
         Ok(Err(e)) => {
             error!("Failed to link Slack: {}", e);
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_failed",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect_failed:{}:slack:{}",
+                    account.id, slack_user.id
+                )),
+                Some("/auth/slack/callback"),
+                serde_json::json!({
+                    "identifier_type": "slack",
+                    "identifier": slack_user.id,
+                    "error_reason": "link_failed",
+                }),
+            );
             redirect_to("/auth/index.html?slack=error&reason=link_failed")
         }
         Err(e) => {
             error!("spawn_blocking panicked: {}", e);
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_failed",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect_failed:{}:slack:{}",
+                    account.id, slack_user.id
+                )),
+                Some("/auth/slack/callback"),
+                serde_json::json!({
+                    "identifier_type": "slack",
+                    "identifier": slack_user.id,
+                    "error_reason": "internal_error",
+                }),
+            );
             redirect_to("/auth/index.html?slack=error&reason=internal_error")
         }
     }
@@ -1851,7 +2287,10 @@ pub async fn github_oauth_callback(
     // Get GitHub user info
     let user_res = client
         .get("https://api.github.com/user")
-        .header("Authorization", format!("Bearer {}", github_token.access_token))
+        .header(
+            "Authorization",
+            format!("Bearer {}", github_token.access_token),
+        )
         .header("User-Agent", "DoWhiz")
         .send()
         .await;
@@ -1902,9 +2341,10 @@ pub async fn github_oauth_callback(
     // Link GitHub username to account
     let store = state.account_store.clone();
     let github_username = github_user.login.clone();
-    let link_result =
-        task::spawn_blocking(move || store.create_identifier(account.id, "github", &github_username))
-            .await;
+    let link_result = task::spawn_blocking(move || {
+        store.create_identifier(account.id, "github", &github_username)
+    })
+    .await;
 
     match link_result {
         Ok(Ok(_identifier)) => {
@@ -1912,17 +2352,93 @@ pub async fn github_oauth_callback(
                 "Linked GitHub {} to account {}",
                 github_user.login, account.id
             );
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_succeeded",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect:{}:github:{}",
+                    account.id, github_user.login
+                )),
+                Some("/auth/github/callback"),
+                serde_json::json!({
+                    "identifier_type": "github",
+                    "identifier": github_user.login,
+                    "provider": "github",
+                }),
+            );
+            track_auth_event(
+                &state.account_store,
+                "first_channel_or_tool_connected",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!("first_channel:{}", account.id)),
+                Some("/auth/github/callback"),
+                serde_json::json!({
+                    "identifier_type": "github",
+                    "provider": "github",
+                }),
+            );
             redirect_to("/auth/index.html?github=success")
         }
         Ok(Err(AccountStoreError::IdentifierTaken)) => {
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_failed",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect_failed:{}:github:{}",
+                    account.id, github_user.login
+                )),
+                Some("/auth/github/callback"),
+                serde_json::json!({
+                    "identifier_type": "github",
+                    "identifier": github_user.login,
+                    "error_reason": "identifier_taken",
+                }),
+            );
             redirect_to("/auth/index.html?github=error&reason=already_linked")
         }
         Ok(Err(e)) => {
             error!("Failed to link GitHub: {}", e);
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_failed",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect_failed:{}:github:{}",
+                    account.id, github_user.login
+                )),
+                Some("/auth/github/callback"),
+                serde_json::json!({
+                    "identifier_type": "github",
+                    "identifier": github_user.login,
+                    "error_reason": "link_failed",
+                }),
+            );
             redirect_to("/auth/index.html?github=error&reason=link_failed")
         }
         Err(e) => {
             error!("spawn_blocking panicked: {}", e);
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_failed",
+                Some(account.id),
+                Some(account.auth_user_id),
+                Some(format!(
+                    "channel_connect_failed:{}:github:{}",
+                    account.id, github_user.login
+                )),
+                Some("/auth/github/callback"),
+                serde_json::json!({
+                    "identifier_type": "github",
+                    "identifier": github_user.login,
+                    "error_reason": "internal_error",
+                }),
+            );
             redirect_to("/auth/index.html?github=error&reason=internal_error")
         }
     }
@@ -2021,6 +2537,34 @@ pub async fn verify_email(
             info!(
                 "Email {} verified for account {}",
                 identifier.identifier, identifier.account_id
+            );
+            track_auth_event(
+                &state.account_store,
+                "channel_connect_succeeded",
+                Some(identifier.account_id),
+                None,
+                Some(format!(
+                    "channel_connect:{}:email:{}",
+                    identifier.account_id, identifier.identifier
+                )),
+                Some("/auth/verify-email"),
+                serde_json::json!({
+                    "identifier_type": "email",
+                    "identifier": identifier.identifier,
+                    "verification_method": "email_link",
+                }),
+            );
+            track_auth_event(
+                &state.account_store,
+                "first_channel_or_tool_connected",
+                Some(identifier.account_id),
+                None,
+                Some(format!("first_channel:{}", identifier.account_id)),
+                Some("/auth/verify-email"),
+                serde_json::json!({
+                    "identifier_type": "email",
+                    "provider": "email",
+                }),
             );
             redirect_to("/auth/index.html?email_verified=success")
         }
@@ -2361,7 +2905,8 @@ mod tests {
     #[test]
     fn github_token_response_handles_extra_fields() {
         // GitHub may return additional fields we don't care about
-        let json = r#"{"access_token":"gho_test","token_type":"bearer","scope":"","extra_field":123}"#;
+        let json =
+            r#"{"access_token":"gho_test","token_type":"bearer","scope":"","extra_field":123}"#;
         let parsed: GitHubTokenResponse = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.access_token, "gho_test");
         assert_eq!(parsed.token_type, "bearer");
@@ -2402,8 +2947,8 @@ mod tests {
         let original_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test";
 
         // Encode (as done in github_oauth_start)
-        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(original_token.as_bytes());
+        let encoded =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(original_token.as_bytes());
 
         // Decode (as done in github_oauth_callback)
         let decoded_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -2419,8 +2964,7 @@ mod tests {
         // JWT tokens may contain characters that need URL encoding
         let token = "eyJhbG+ciOi/JIUZ+I1NiIsInR5cCI6IkpXVCJ9";
 
-        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(token.as_bytes());
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(token.as_bytes());
 
         // URL_SAFE encoding should not contain +, /, or =
         assert!(!encoded.contains('+'));
@@ -2450,7 +2994,9 @@ mod tests {
 
         assert!(url.starts_with("https://github.com/login/oauth/authorize"));
         assert!(url.contains("client_id=test_client_id"));
-        assert!(url.contains("redirect_uri=https%3A%2F%2Fapi.dowhiz.com%2Fauth%2Fgithub%2Fcallback"));
+        assert!(
+            url.contains("redirect_uri=https%3A%2F%2Fapi.dowhiz.com%2Fauth%2Fgithub%2Fcallback")
+        );
         assert!(url.contains("state=encoded_state"));
     }
 

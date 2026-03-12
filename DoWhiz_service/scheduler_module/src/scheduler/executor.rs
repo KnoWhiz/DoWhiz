@@ -1,3 +1,5 @@
+use chrono::Utc;
+use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -7,7 +9,7 @@ use tracing::{info, warn};
 
 use crate::account_store::{
     get_global_account_store, lookup_account_by_channel, lookup_account_by_identifier,
-    AccountIdentifier,
+    AccountIdentifier, AnalyticsEventInsert,
 };
 use crate::blob_store::get_blob_store;
 use crate::channel::Channel;
@@ -133,6 +135,177 @@ fn resolve_account_for_run_task(
     }
 
     None
+}
+
+fn run_task_dedupe_key(task: &super::types::RunTaskTask) -> String {
+    let thread_id = task
+        .thread_id
+        .as_ref()
+        .map(|value| value.as_str())
+        .unwrap_or("none");
+    let thread_epoch = task.thread_epoch.unwrap_or(0);
+    format!(
+        "{}:{}:{}:{}",
+        task.channel,
+        task.workspace_dir.display(),
+        thread_id,
+        thread_epoch
+    )
+}
+
+fn track_scheduler_event(
+    event_name: &str,
+    account_id: Uuid,
+    event_key: Option<String>,
+    _task: &super::types::RunTaskTask,
+    properties: serde_json::Value,
+) {
+    let Some(store) = get_global_account_store() else {
+        return;
+    };
+    let environment = std::env::var("DEPLOY_TARGET")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "production".to_string());
+    let event = AnalyticsEventInsert {
+        event_name: event_name.to_string(),
+        source: "server".to_string(),
+        event_timestamp: Utc::now(),
+        account_id: Some(account_id),
+        auth_user_id: None,
+        anonymous_id: None,
+        session_id: None,
+        workspace_id: Some(account_id.to_string()),
+        org_id: None,
+        plan_type: Some("hourly_credits".to_string()),
+        environment: Some(environment),
+        app_version: None,
+        page_path: None,
+        route_path: Some("/scheduler/run_task".to_string()),
+        referrer: None,
+        utm_source: None,
+        utm_medium: None,
+        utm_campaign: None,
+        utm_term: None,
+        utm_content: None,
+        device_type: None,
+        browser: None,
+        os: None,
+        event_key,
+        properties,
+    };
+    if let Err(err) = store.record_analytics_event(&event) {
+        warn!(
+            "failed to record scheduler analytics event {} for account {}: {}",
+            event_name, account_id, err
+        );
+    }
+}
+
+fn track_task_start_markers(account_id: Uuid, task: &super::types::RunTaskTask, dedupe_key: &str) {
+    track_scheduler_event(
+        "task_started",
+        account_id,
+        Some(format!("task_started:{}", dedupe_key)),
+        task,
+        json!({
+            "task_type": "run_task",
+            "channel": task.channel.to_string(),
+            "thread_id": task.thread_id,
+            "thread_epoch": task.thread_epoch,
+        }),
+    );
+
+    let Some(store) = get_global_account_store() else {
+        return;
+    };
+    match store.count_analytics_events("task_started", Some(account_id), None) {
+        Ok(1) => {
+            track_scheduler_event(
+                "first_task_started",
+                account_id,
+                Some(format!("first_task_started:{}", account_id)),
+                task,
+                json!({
+                    "task_type": "run_task",
+                    "channel": task.channel.to_string(),
+                }),
+            );
+            track_scheduler_event(
+                "first_agent_or_workflow_created",
+                account_id,
+                Some(format!("first_agent_or_workflow_created:{}", account_id)),
+                task,
+                json!({
+                    "mapped_from": "first_task_started",
+                    "channel": task.channel.to_string(),
+                }),
+            );
+        }
+        Ok(_) => {}
+        Err(err) => {
+            warn!(
+                "failed to evaluate first task markers for account {}: {}",
+                account_id, err
+            );
+        }
+    }
+}
+
+fn track_task_success_markers(
+    account_id: Uuid,
+    task: &super::types::RunTaskTask,
+    dedupe_key: &str,
+) {
+    track_scheduler_event(
+        "task_succeeded",
+        account_id,
+        Some(format!("task_succeeded:{}", dedupe_key)),
+        task,
+        json!({
+            "task_type": "run_task",
+            "channel": task.channel.to_string(),
+            "thread_id": task.thread_id,
+            "thread_epoch": task.thread_epoch,
+        }),
+    );
+
+    let Some(store) = get_global_account_store() else {
+        return;
+    };
+    match store.count_analytics_events("task_succeeded", Some(account_id), None) {
+        Ok(1) => {
+            track_scheduler_event(
+                "first_task_succeeded",
+                account_id,
+                Some(format!("first_task_succeeded:{}", account_id)),
+                task,
+                json!({
+                    "task_type": "run_task",
+                    "channel": task.channel.to_string(),
+                }),
+            );
+        }
+        Ok(2) => {
+            track_scheduler_event(
+                "second_successful_task",
+                account_id,
+                Some(format!("second_successful_task:{}", account_id)),
+                task,
+                json!({
+                    "task_type": "run_task",
+                    "channel": task.channel.to_string(),
+                }),
+            );
+        }
+        Ok(_) => {}
+        Err(err) => {
+            warn!(
+                "failed to evaluate success markers for account {}: {}",
+                account_id, err
+            );
+        }
+    }
 }
 
 /// Fetch user identities from the account store for cross-channel routing.
@@ -905,6 +1078,7 @@ impl TaskExecutor for ModuleExecutor {
                 let github_inbound = load_github_inbound_context(task);
                 let account_id =
                     resolve_account_for_run_task(task, github_inbound.sender_login.as_deref());
+                let task_dedupe_key = run_task_dedupe_key(task);
 
                 if task.channel == Channel::Email && github_inbound.is_github_notification {
                     match github_inbound.sender_login.as_deref() {
@@ -936,6 +1110,16 @@ impl TaskExecutor for ModuleExecutor {
                                     "Account {} has insufficient balance, skipping task execution",
                                     account_id
                                 );
+                                track_scheduler_event(
+                                    "upgrade_viewed_or_paywall_seen",
+                                    account_id,
+                                    Some(format!("paywall_seen:{}", task_dedupe_key)),
+                                    task,
+                                    json!({
+                                        "trigger_reason": "insufficient_balance",
+                                        "channel": task.channel.to_string(),
+                                    }),
+                                );
                                 send_insufficient_balance_notice(task, account_id)?;
                                 let mut execution = TaskExecution::empty();
                                 execution.skip_auto_reply = true;
@@ -951,6 +1135,10 @@ impl TaskExecutor for ModuleExecutor {
                             }
                         }
                     }
+                }
+
+                if let Some(account_id) = account_id {
+                    track_task_start_markers(account_id, task, &task_dedupe_key);
                 }
 
                 let workspace_memory_dir = task.workspace_dir.join(&task.memory_dir);
@@ -1000,6 +1188,22 @@ impl TaskExecutor for ModuleExecutor {
                     if let Some(user_memory_dir) = user_memory_dir.as_ref() {
                         sync_user_memory_to_workspace(user_memory_dir, &workspace_memory_dir)
                             .map_err(|err| {
+                                if let Some(account_id) = account_id {
+                                    track_scheduler_event(
+                                        "task_failed",
+                                        account_id,
+                                        Some(format!(
+                                            "task_failed:{}:memory_sync",
+                                            task_dedupe_key
+                                        )),
+                                        task,
+                                        json!({
+                                            "error_reason": "memory_sync_failed",
+                                            "error": err.to_string(),
+                                            "channel": task.channel.to_string(),
+                                        }),
+                                    );
+                                }
                                 SchedulerError::TaskFailed(format!("memory sync failed: {}", err))
                             })?;
                     } else {
@@ -1013,6 +1217,22 @@ impl TaskExecutor for ModuleExecutor {
                 if let Some(user_secrets_path) = user_secrets_path.as_ref() {
                     sync_user_secrets_to_workspace(user_secrets_path, &task.workspace_dir)
                         .map_err(|err| {
+                            if let Some(account_id) = account_id {
+                                track_scheduler_event(
+                                    "task_failed",
+                                    account_id,
+                                    Some(format!(
+                                        "task_failed:{}:secrets_sync_to_workspace",
+                                        task_dedupe_key
+                                    )),
+                                    task,
+                                    json!({
+                                        "error_reason": "secrets_sync_to_workspace_failed",
+                                        "error": err.to_string(),
+                                        "channel": task.channel.to_string(),
+                                    }),
+                                );
+                            }
                             SchedulerError::TaskFailed(format!("secrets sync failed: {}", err))
                         })?;
                 } else {
@@ -1037,8 +1257,22 @@ impl TaskExecutor for ModuleExecutor {
                     has_unified_account: account_id.is_some(),
                     user_identities,
                 };
-                let output = run_task_module::run_task(&params)
-                    .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
+                let output = run_task_module::run_task(&params).map_err(|err| {
+                    if let Some(account_id) = account_id {
+                        track_scheduler_event(
+                            "task_failed",
+                            account_id,
+                            Some(format!("task_failed:{}:run_task", task_dedupe_key)),
+                            task,
+                            json!({
+                                "error_reason": "run_task_failed",
+                                "error": err.to_string(),
+                                "channel": task.channel.to_string(),
+                            }),
+                        );
+                    }
+                    SchedulerError::TaskFailed(err.to_string())
+                })?;
 
                 // Track token usage for accounts
                 if let Some(account_id) = account_id {
@@ -1119,8 +1353,27 @@ impl TaskExecutor for ModuleExecutor {
                 if let Some(user_secrets_path) = user_secrets_path.as_ref() {
                     sync_workspace_secrets_to_user(&task.workspace_dir, user_secrets_path)
                         .map_err(|err| {
+                            if let Some(account_id) = account_id {
+                                track_scheduler_event(
+                                    "task_failed",
+                                    account_id,
+                                    Some(format!(
+                                        "task_failed:{}:secrets_sync_to_user",
+                                        task_dedupe_key
+                                    )),
+                                    task,
+                                    json!({
+                                        "error_reason": "secrets_sync_to_user_failed",
+                                        "error": err.to_string(),
+                                        "channel": task.channel.to_string(),
+                                    }),
+                                );
+                            }
                             SchedulerError::TaskFailed(format!("secrets sync failed: {}", err))
                         })?;
+                }
+                if let Some(account_id) = account_id {
+                    track_task_success_markers(account_id, task, &task_dedupe_key);
                 }
                 Ok(TaskExecution {
                     follow_up_tasks: output.scheduled_tasks,

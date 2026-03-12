@@ -209,6 +209,7 @@ fn build_human_approval_gate_section() -> &'static str {
 - If login/auth flow asks for OTP/passcode/device approval/number tap (that requires a human on another device/account), immediately use the `human-approval-gate` skill.
 - If the page shows CAPTCHA/image puzzle/text recognition challenge, do NOT call `human_approval_gate` for that step; solve CAPTCHA directly in browser first.
 - If multiple verification methods are available on the same challenge page, prefer SMS verification first by default. If SMS is unavailable or fails, fall back to another method and keep using `human_approval_gate` for human input.
+- Before calling `human_approval_gate`, first use the website itself to initiate the challenge: click the button that sends the code / starts the approval / selects the method, and wait until the page is explicitly waiting for the human response.
 - If login identifier (email/username) is missing for owner/admin account login, try known admin identifiers first (`dowhiz@deep-tutor.com` on staging, `oliver@dowhiz.com` on production) before requesting help through `human_approval_gate`.
 - For owner/admin account login, do NOT trigger `human_approval_gate` only to ask for account email/username when a known identifier is already available.
 - If the requested login still cannot proceed because required credential/challenge input is missing after trying known safe identifiers, request it through `human_approval_gate` instead of guessing.
@@ -216,8 +217,9 @@ fn build_human_approval_gate_section() -> &'static str {
 - If `human_approval_gate` is not found on PATH, retry using `/app/bin/human_approval_gate` or `python3 .agents/skills/human-approval-gate/scripts/human_approval_gate.py`.
 - Primary flow:
   1) Run `human_approval_gate request ... --wait --timeout-minutes 30`
-  2) Continue only if status is `approved`
-  3) If status is `timeout` or `rejected`, stop login attempts and report clearly
+  2) Continue only if status is `replied`
+  3) Inspect the returned `reply` payload yourself and decide what to type/click next
+  4) If status is `timeout`, stop login attempts and report clearly
 - Scope and recipient rules:
   - Agent logging into owner/admin account (for example Oliver's own Google/Notion/X, `dowhiz@deep-tutor.com`, `oliver@dowhiz.com`): always use `--scope admin` (sends to `admin@dowhiz.com`)
   - Agent logging into user's account: `--scope user --recipient <that user email>`
@@ -968,6 +970,9 @@ mod tests {
         assert!(prompt.contains("do NOT call `human_approval_gate`"));
         assert!(prompt.contains("required credential"));
         assert!(prompt.contains("prefer SMS verification first by default"));
+        assert!(prompt.contains("click the button that sends the code"));
+        assert!(prompt.contains("status is `replied`"));
+        assert!(prompt.contains("returned `reply` payload"));
         assert!(prompt.contains("dowhiz@deep-tutor.com"));
         assert!(prompt.contains("oliver@dowhiz.com"));
         assert!(prompt.contains("/app/bin/human_approval_gate"));

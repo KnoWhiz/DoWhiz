@@ -2,7 +2,7 @@
 """Human approval gate for 2FA flows.
 
 This CLI sends an approval email and optionally blocks while polling Postmark inbound
-messages for a reply in the same challenge thread.
+messages for the first reply in the same challenge thread.
 """
 
 from __future__ import annotations
@@ -34,37 +34,11 @@ DEFAULT_POLL_SECONDS = 15
 DEFAULT_ADMIN_RECIPIENT = "admin@dowhiz.com"
 ADMIN_RECIPIENT_ENV_KEY = "HUMAN_APPROVAL_ADMIN_RECIPIENT"
 SUBJECT_TOKEN_PREFIX = "HAG"
-MAX_REPLY_SNIPPET_CHARS = 2000
 # Postmark limits metadata key names to at most 20 characters.
 POSTMARK_METADATA_CHALLENGE_ID_KEY = "hag_challenge_id"
 POSTMARK_METADATA_SCOPE_KEY = "hag_scope"
 
 EMAIL_PATTERN = re.compile(r"([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
-CODE_PATTERNS = [
-    re.compile(
-        r"(?:code|otp|passcode|verification(?:\s+code)?)\D{0,12}([A-Za-z0-9-]{4,12})",
-        re.IGNORECASE,
-    ),
-    re.compile(r"\b(\d{4,10})\b"),
-]
-APPROVAL_KEYWORDS = (
-    "approved",
-    "approve",
-    "yes",
-    "done",
-    "clicked",
-    "confirmed",
-    "confirm",
-)
-REJECTION_KEYWORDS = (
-    "rejected",
-    "reject",
-    "denied",
-    "deny",
-    "cancel",
-    "cannot",
-    "can't",
-)
 
 
 class CliError(RuntimeError):
@@ -74,7 +48,7 @@ class CliError(RuntimeError):
 @dataclass
 class WaitResult:
     state: Dict[str, Any]
-    approved: bool
+    replied: bool
 
 
 def utc_now() -> datetime:
@@ -245,11 +219,7 @@ def resolve_sender(from_arg: Optional[str]) -> str:
     if not sender:
         sender = resolve_employee_mailbox_email() or ""
     if not sender:
-        sender = get_env_first("POSTMARK_FROM_EMAIL", "POSTMARK_TEST_FROM") or ""
-    if not sender:
-        raise CliError(
-            "missing sender address: provide --from or set HUMAN_APPROVAL_FROM / POSTMARK_FROM_EMAIL"
-        )
+        raise CliError("missing sender address: provide --from, set HUMAN_APPROVAL_FROM, or ensure employee config has a mailbox")
     return sender
 
 
@@ -395,13 +365,11 @@ def build_text_body(
     lines.extend(
         [
             "",
-            "Please reply in this same email thread with one of:",
-            "- CODE: <verification-code>",
-            "- APPROVED (if no code is needed and you approved on your device)",
-            "- DENIED (if you reject this login)",
+            "Please reply in this same email thread with the verification code,",
+            "approval result, or any information the agent needs to continue.",
             "",
             f"The agent will wait for up to {timeout_minutes} minutes.",
-            "It will not continue until a valid reply is received.",
+            "It will not continue until a reply is received.",
         ]
     )
     return "\n".join(lines)
@@ -465,24 +433,6 @@ def build_postmark_metadata(challenge_id: str, scope: str) -> Dict[str, str]:
     return metadata
 
 
-def parse_reply_decision(text: str) -> Tuple[str, Optional[str], str]:
-    body = (text or "").strip()
-    if not body:
-        return ("unknown", None, "empty body")
-
-    for pattern in CODE_PATTERNS:
-        match = pattern.search(body)
-        if match:
-            return ("approved", match.group(1), "verification code found")
-
-    lowered = body.lower()
-    if any(keyword in lowered for keyword in REJECTION_KEYWORDS):
-        return ("rejected", None, "rejection keyword found")
-    if any(keyword in lowered for keyword in APPROVAL_KEYWORDS):
-        return ("approved", None, "approval keyword found")
-    return ("unknown", None, "no decision keyword found")
-
-
 def safe_get_str(payload: Dict[str, Any], *keys: str) -> str:
     for key in keys:
         value = payload.get(key)
@@ -516,7 +466,32 @@ def parse_message_date(payload: Dict[str, Any]) -> Optional[datetime]:
     return None
 
 
-def poll_for_approval_once(
+def build_reply_payload(details: Dict[str, Any], message_id: str, received_at: Optional[datetime]) -> Dict[str, Any]:
+    from_header = safe_get_str(details, "From")
+    from_email = extract_from_email(details)
+    subject = safe_get_str(details, "Subject")
+    stripped_text_reply = safe_get_str(details, "StrippedTextReply")
+    text_body = safe_get_str(details, "TextBody", "Text")
+    html_body = safe_get_str(details, "HtmlBody", "Html")
+    headers = details.get("Headers")
+    attachments = details.get("Attachments")
+
+    return {
+        "inbound_message_id": message_id,
+        "received_at": isoformat_utc(received_at) if received_at else isoformat_utc(utc_now()),
+        "reply_from": from_email or from_header,
+        "from_email": from_email,
+        "reply_subject": subject,
+        "stripped_text_reply": stripped_text_reply,
+        "text_body": text_body,
+        "html_body": html_body,
+        "headers": headers if isinstance(headers, list) else None,
+        "attachments": attachments if isinstance(attachments, list) else None,
+        "message": details,
+    }
+
+
+def poll_for_reply_once(
     *,
     api_base: str,
     token: str,
@@ -563,7 +538,6 @@ def poll_for_approval_once(
         details_path = f"/messages/inbound/{urllib.parse.quote(message_id, safe='')}/details"
         details = http_json_request("GET", api_base, token, details_path)
 
-        from_header = safe_get_str(details, "From")
         from_email = extract_from_email(details)
         if expected_reply_from and from_email != expected_reply_from:
             new_seen.append(message_id)
@@ -579,24 +553,8 @@ def poll_for_approval_once(
             new_seen.append(message_id)
             continue
 
-        reply_text = safe_get_str(details, "StrippedTextReply", "TextBody", "Text")
-        decision, code, reason = parse_reply_decision(reply_text)
         new_seen.append(message_id)
-
-        if decision == "unknown":
-            continue
-
-        resolution = {
-            "decision": decision,
-            "code": code,
-            "reason": reason,
-            "inbound_message_id": message_id,
-            "received_at": isoformat_utc(received_at) if received_at else isoformat_utc(utc_now()),
-            "reply_from": from_email or from_header,
-            "reply_subject": subject,
-            "reply_excerpt": truncate(reply_text.strip(), MAX_REPLY_SNIPPET_CHARS),
-        }
-        return (resolution, new_seen)
+        return (build_reply_payload(details, message_id, received_at), new_seen)
 
     return (None, new_seen)
 
@@ -604,23 +562,16 @@ def poll_for_approval_once(
 def mark_timeout(state: Dict[str, Any]) -> Dict[str, Any]:
     updated = dict(state)
     updated["status"] = "timeout"
-    updated["resolution"] = {
-        "decision": "timeout",
-        "reason": "no valid approval reply received before timeout",
+    updated["reply"] = {
+        "reason": "no reply received before timeout",
     }
     return updated
 
 
-def mark_resolution(state: Dict[str, Any], resolution: Dict[str, Any]) -> Dict[str, Any]:
+def mark_reply_received(state: Dict[str, Any], reply: Dict[str, Any]) -> Dict[str, Any]:
     updated = dict(state)
-    decision = str(resolution.get("decision", "")).lower()
-    if decision == "approved":
-        updated["status"] = "approved"
-    elif decision == "rejected":
-        updated["status"] = "rejected"
-    else:
-        updated["status"] = "pending"
-    updated["resolution"] = resolution
+    updated["status"] = "replied"
+    updated["reply"] = reply
     return updated
 
 
@@ -634,8 +585,8 @@ def wait_for_resolution(
     poll_interval_seconds: int,
 ) -> WaitResult:
     state = load_state(state_dir, challenge_id)
-    if state.get("status") in ("approved", "rejected", "timeout"):
-        return WaitResult(state=state, approved=state.get("status") == "approved")
+    if state.get("status") in ("replied", "timeout"):
+        return WaitResult(state=state, replied=state.get("status") == "replied")
 
     created_at = parse_iso8601(str(state["created_at"]))
     default_deadline = created_at + timedelta(minutes=int(state.get("timeout_minutes", DEFAULT_TIMEOUT_MINUTES)))
@@ -646,10 +597,10 @@ def wait_for_resolution(
 
     while utc_now() <= deadline:
         state = load_state(state_dir, challenge_id)
-        if state.get("status") in ("approved", "rejected", "timeout"):
-            return WaitResult(state=state, approved=state.get("status") == "approved")
+        if state.get("status") in ("replied", "timeout"):
+            return WaitResult(state=state, replied=state.get("status") == "replied")
 
-        resolution, new_seen = poll_for_approval_once(
+        reply, new_seen = poll_for_reply_once(
             api_base=api_base,
             token=token,
             challenge=state,
@@ -659,10 +610,10 @@ def wait_for_resolution(
             seen = list(dict.fromkeys(list(state.get("seen_inbound_message_ids", [])) + new_seen))
             state["seen_inbound_message_ids"] = seen
 
-        if resolution:
-            state = mark_resolution(state, resolution)
+        if reply:
+            state = mark_reply_received(state, reply)
             save_state(state_dir, state)
-            return WaitResult(state=state, approved=state.get("status") == "approved")
+            return WaitResult(state=state, replied=True)
 
         if new_seen:
             save_state(state_dir, state)
@@ -671,7 +622,7 @@ def wait_for_resolution(
 
     timed_out = mark_timeout(load_state(state_dir, challenge_id))
     save_state(state_dir, timed_out)
-    return WaitResult(state=timed_out, approved=False)
+    return WaitResult(state=timed_out, replied=False)
 
 
 def emit_json(payload: Dict[str, Any]) -> None:
@@ -726,7 +677,7 @@ def build_request_state(args: argparse.Namespace) -> Dict[str, Any]:
         "timeout_minutes": timeout_minutes,
         "created_at": isoformat_utc(created_at),
         "expires_at": isoformat_utc(created_at + timedelta(minutes=timeout_minutes)),
-        "resolution": None,
+        "reply": None,
         "seen_inbound_message_ids": [],
         "outbound_message_id": None,
         "outbound_dry_run": bool(args.dry_run),
@@ -777,7 +728,7 @@ def cmd_request(args: argparse.Namespace) -> int:
             poll_interval_seconds=args.poll_interval_seconds,
         )
         emit_json(result.state)
-        return 0 if result.approved else 4
+        return 0 if result.replied else 4
 
     emit_json(state)
     return 0
@@ -789,7 +740,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     if args.refresh and state.get("status") == "pending":
         token = ensure_token(args.token, False)
-        resolution, new_seen = poll_for_approval_once(
+        reply, new_seen = poll_for_reply_once(
             api_base=args.api_base,
             token=token,
             challenge=state,
@@ -797,8 +748,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         if new_seen:
             seen = list(dict.fromkeys(list(state.get("seen_inbound_message_ids", [])) + new_seen))
             state["seen_inbound_message_ids"] = seen
-        if resolution:
-            state = mark_resolution(state, resolution)
+        if reply:
+            state = mark_reply_received(state, reply)
         save_state(state_dir, state)
 
     emit_json(state)
@@ -817,13 +768,13 @@ def cmd_wait(args: argparse.Namespace) -> int:
         poll_interval_seconds=args.poll_interval_seconds,
     )
     emit_json(result.state)
-    return 0 if result.approved else 4
+    return 0 if result.replied else 4
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="human_approval_gate",
-        description="Send human approval request emails and wait for 2FA replies.",
+        description="Send human approval request emails and wait for the first same-thread reply.",
     )
     parser.add_argument(
         "--api-base",
@@ -884,7 +835,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status_parser.set_defaults(func=cmd_status)
 
-    wait_parser = subparsers.add_parser("wait", help="wait for challenge resolution")
+    wait_parser = subparsers.add_parser("wait", help="wait for the first reply in the challenge thread")
     wait_parser.add_argument("--challenge-id", required=True)
     wait_parser.add_argument("--timeout-minutes", type=int, default=None)
     wait_parser.add_argument(
