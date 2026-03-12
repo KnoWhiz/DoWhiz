@@ -1177,6 +1177,164 @@
         }
       });
 
+      const ANALYTICS_ANON_KEY = 'dowhiz_analytics_anonymous_id';
+      const ANALYTICS_SESSION_KEY = 'dowhiz_analytics_session_id';
+      const ANALYTICS_ATTRIBUTION_KEY = 'dowhiz_analytics_attribution';
+
+      function analyticsGenerateId(prefix) {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+          return `${prefix}_${crypto.randomUUID()}`;
+        }
+        return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 11)}`;
+      }
+
+      function getOrCreateAnonymousId() {
+        const existing = localStorage.getItem(ANALYTICS_ANON_KEY);
+        if (existing) {
+          return existing;
+        }
+        const created = analyticsGenerateId('anon');
+        localStorage.setItem(ANALYTICS_ANON_KEY, created);
+        return created;
+      }
+
+      function getOrCreateSessionId() {
+        const existing = sessionStorage.getItem(ANALYTICS_SESSION_KEY);
+        if (existing) {
+          return existing;
+        }
+        const created = analyticsGenerateId('sess');
+        sessionStorage.setItem(ANALYTICS_SESSION_KEY, created);
+        return created;
+      }
+
+      function normalizeOptional(value) {
+        if (value === undefined || value === null) return null;
+        const trimmed = String(value).trim();
+        return trimmed.length ? trimmed : null;
+      }
+
+      function inferDeviceType(userAgent) {
+        if (!userAgent) return 'unknown';
+        if (/mobile|iphone|ipod|android.*mobile|windows phone/i.test(userAgent)) return 'mobile';
+        if (/ipad|tablet|android(?!.*mobile)/i.test(userAgent)) return 'tablet';
+        return 'desktop';
+      }
+
+      function inferBrowser(userAgent) {
+        if (!userAgent) return 'unknown';
+        if (/edg\//i.test(userAgent)) return 'edge';
+        if (/chrome\//i.test(userAgent) && !/edg\//i.test(userAgent)) return 'chrome';
+        if (/safari\//i.test(userAgent) && !/chrome\//i.test(userAgent)) return 'safari';
+        if (/firefox\//i.test(userAgent)) return 'firefox';
+        if (/opr\//i.test(userAgent) || /opera\//i.test(userAgent)) return 'opera';
+        return 'unknown';
+      }
+
+      function inferOs(userAgent) {
+        if (!userAgent) return 'unknown';
+        if (/windows/i.test(userAgent)) return 'windows';
+        if (/macintosh|mac os x/i.test(userAgent)) return 'macos';
+        if (/android/i.test(userAgent)) return 'android';
+        if (/iphone|ipad|ios/i.test(userAgent)) return 'ios';
+        if (/linux/i.test(userAgent)) return 'linux';
+        return 'unknown';
+      }
+
+      function parseUtmAttribution() {
+        const params = new URLSearchParams(window.location.search);
+        const parsed = {
+          utm_source: normalizeOptional(params.get('utm_source')),
+          utm_medium: normalizeOptional(params.get('utm_medium')),
+          utm_campaign: normalizeOptional(params.get('utm_campaign')),
+          utm_term: normalizeOptional(params.get('utm_term')),
+          utm_content: normalizeOptional(params.get('utm_content'))
+        };
+        const hasAny = parsed.utm_source || parsed.utm_medium || parsed.utm_campaign || parsed.utm_term || parsed.utm_content;
+        return hasAny ? parsed : null;
+      }
+
+      function getStoredAttribution() {
+        const raw = localStorage.getItem(ANALYTICS_ATTRIBUTION_KEY);
+        if (!raw) return null;
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return null;
+        }
+      }
+
+      function persistAttributionFromLocation() {
+        const parsed = parseUtmAttribution();
+        if (!parsed) {
+          return getStoredAttribution();
+        }
+        const existing = getStoredAttribution();
+        const merged = {
+          utm_source: parsed.utm_source ?? existing?.utm_source ?? null,
+          utm_medium: parsed.utm_medium ?? existing?.utm_medium ?? null,
+          utm_campaign: parsed.utm_campaign ?? existing?.utm_campaign ?? null,
+          utm_term: parsed.utm_term ?? existing?.utm_term ?? null,
+          utm_content: parsed.utm_content ?? existing?.utm_content ?? null,
+          captured_at: new Date().toISOString()
+        };
+        localStorage.setItem(ANALYTICS_ATTRIBUTION_KEY, JSON.stringify(merged));
+        return merged;
+      }
+
+      function analyticsContext() {
+        const attribution = persistAttributionFromLocation() || getStoredAttribution() || {};
+        const ua = navigator.userAgent || '';
+        return {
+          anonymous_id: getOrCreateAnonymousId(),
+          session_id: getOrCreateSessionId(),
+          page_path: `${window.location.pathname}${window.location.search}`,
+          route_path: window.location.pathname,
+          referrer: document.referrer || null,
+          utm_source: attribution.utm_source || null,
+          utm_medium: attribution.utm_medium || null,
+          utm_campaign: attribution.utm_campaign || null,
+          utm_term: attribution.utm_term || null,
+          utm_content: attribution.utm_content || null,
+          device_type: inferDeviceType(ua),
+          browser: inferBrowser(ua),
+          os: inferOs(ua),
+          app_version: 'auth-dashboard-analytics-v1',
+          environment: isStaging ? 'staging' : window.location.hostname === 'localhost' ? 'local' : 'production'
+        };
+      }
+
+      async function trackAnalyticsEvent(eventName, properties = {}, options = {}) {
+        if (!eventName) return false;
+
+        const headers = { 'Content-Type': 'application/json' };
+        if (options.accessToken) {
+          headers.Authorization = `Bearer ${options.accessToken}`;
+        }
+
+        const payload = {
+          event_name: eventName,
+          event_timestamp: new Date().toISOString(),
+          source: options.source || 'client',
+          ...analyticsContext(),
+          event_key: normalizeOptional(options.eventKey),
+          properties
+        };
+
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/analytics/track`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload),
+            keepalive: true
+          });
+          return res.ok;
+        } catch (err) {
+          console.warn(`analytics track failed for ${eventName}:`, err);
+          return false;
+        }
+      }
+
       // DOM elements
       const signinFormContainer = document.getElementById('signin-form-container');
       const signupFormContainer = document.getElementById('signup-form-container');
@@ -1213,6 +1371,17 @@
         setDashboardMode(false);
         signinFormContainer.classList.remove('hidden');
       }
+
+      persistAttributionFromLocation();
+      trackAnalyticsEvent(
+        'signup_page_view',
+        {
+          entry_mode: expectingDashboard ? 'logged_in_redirect' : 'direct'
+        },
+        {
+          eventKey: `signup_page_view:${getOrCreateSessionId()}:${window.location.pathname}`
+        }
+      );
 
       // Show message
       function showMessage(message, type = 'error') {
@@ -1448,11 +1617,23 @@
         const email = document.getElementById('signin-email').value;
         const password = document.getElementById('signin-password').value;
 
+        trackAnalyticsEvent('login_started', {
+          auth_method: 'email_password',
+          flow: 'signin',
+          email_domain: email.includes('@') ? email.split('@').pop() : null
+        });
+
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
+          trackAnalyticsEvent('auth_error', {
+            auth_method: 'email_password',
+            flow: 'signin',
+            error_type: 'signin_failed',
+            error: error.message
+          });
           showMessage(normalizeAuthError(error) || error.message);
         } else {
-          await handleAuthSuccess(data.session);
+          await handleAuthSuccess(data.session, { authMethod: 'email_password', flow: 'signin' });
         }
       });
 
@@ -1464,12 +1645,24 @@
         const email = document.getElementById('signup-email').value;
         const password = document.getElementById('signup-password').value;
 
+        trackAnalyticsEvent('signup_started', {
+          auth_method: 'email_password',
+          flow: 'signup',
+          email_domain: email.includes('@') ? email.split('@').pop() : null
+        });
+
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: { emailRedirectTo: authRedirectUrl }
         });
         if (error) {
+          trackAnalyticsEvent('auth_error', {
+            auth_method: 'email_password',
+            flow: 'signup',
+            error_type: 'signup_failed',
+            error: error.message
+          });
           const normalizedError = (error.message || '').toLowerCase();
           if (normalizedError.includes('already registered') || normalizedError.includes('already exists')) {
             showExistingAccountOptions(email);
@@ -1487,17 +1680,29 @@
           }
           showMessage('Check your email for a confirmation link!', 'success');
         } else if (data.session) {
-          await handleAuthSuccess(data.session);
+          await handleAuthSuccess(data.session, { authMethod: 'email_password', flow: 'signup' });
         }
       });
 
       // Google OAuth
       document.getElementById('google-signin').addEventListener('click', async () => {
+        trackAnalyticsEvent('login_started', {
+          auth_method: 'oauth_google',
+          flow: 'oauth_redirect'
+        });
         const { error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
           options: { redirectTo: authRedirectUrl }
         });
-        if (error) showMessage(error.message);
+        if (error) {
+          trackAnalyticsEvent('auth_error', {
+            auth_method: 'oauth_google',
+            flow: 'oauth_redirect',
+            error_type: 'oauth_redirect_failed',
+            error: error.message
+          });
+          showMessage(error.message);
+        }
       });
 
       // Sign out
@@ -1524,6 +1729,14 @@
         // Fetch balance from billing endpoint
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
+          trackAnalyticsEvent(
+            'upgrade_viewed_or_paywall_seen',
+            {
+              trigger_reason: 'settings_modal_opened',
+              entry_point: 'auth_dashboard_settings'
+            },
+            { accessToken: session.access_token }
+          );
           try {
             const res = await fetch(`${DOWHIZ_API_URL}/billing/balance`, {
               headers: { 'Authorization': `Bearer ${session.access_token}` }
@@ -1560,16 +1773,31 @@
 
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
+          trackAnalyticsEvent('checkout_error', {
+            error_reason: 'unauthenticated',
+            checkout_entry_point: 'settings_modal_buy_hours',
+            hours
+          });
           statusEl.textContent = 'Please sign in first.';
           statusEl.style.color = '#ef4444';
           return;
         }
+
+        trackAnalyticsEvent(
+          'upgrade_clicked',
+          {
+            checkout_entry_point: 'settings_modal_buy_hours',
+            hours
+          },
+          { accessToken: session.access_token }
+        );
 
         try {
           const res = await fetch(`${DOWHIZ_API_URL}/billing/checkout`, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${session.access_token}`,
+              'x-dowhiz-checkout-entry': 'settings_modal_buy_hours',
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({ hours })
@@ -1581,11 +1809,31 @@
             window.location.href = data.checkout_url;
           } else {
             const error = await res.text();
+            trackAnalyticsEvent(
+              'checkout_error',
+              {
+                error_reason: 'checkout_create_failed',
+                error: error || 'Failed to create checkout session',
+                checkout_entry_point: 'settings_modal_buy_hours',
+                hours
+              },
+              { accessToken: session.access_token }
+            );
             statusEl.textContent = error || 'Failed to create checkout session.';
             statusEl.style.color = '#ef4444';
           }
         } catch (err) {
           console.error('Checkout error:', err);
+          trackAnalyticsEvent(
+            'checkout_error',
+            {
+              error_reason: 'network_error',
+              error: err.message,
+              checkout_entry_point: 'settings_modal_buy_hours',
+              hours
+            },
+            { accessToken: session.access_token }
+          );
           statusEl.textContent = 'Network error. Please try again.';
           statusEl.style.color = '#ef4444';
         }
@@ -1627,7 +1875,7 @@
 
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
-          await handleAuthSuccess(session);
+          await handleAuthSuccess(session, { authMethod: 'password_reset', flow: 'password_reset' });
         } else {
           signinFormContainer.classList.remove('hidden');
           passwordResetContainer.classList.add('hidden');
@@ -1635,12 +1883,15 @@
       });
 
       // Handle successful auth
-      async function handleAuthSuccess(session) {
+      async function handleAuthSuccess(session, context = {}) {
         try {
           // Create/get DoWhiz account
           const signupRes = await fetch(`${DOWHIZ_API_URL}/auth/signup`, {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${session.access_token}` }
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'x-dowhiz-auth-method': context.authMethod || 'unknown'
+            }
           });
 
           if (!signupRes.ok) {
@@ -1649,11 +1900,40 @@
           }
 
           const accountData = await signupRes.json();
+          trackAnalyticsEvent(
+            'login_completed',
+            {
+              auth_method: context.authMethod || 'unknown',
+              flow: context.flow || 'auth_success',
+              account_created: Boolean(accountData.created)
+            },
+            {
+              accessToken: session.access_token
+            }
+          );
+          trackAnalyticsEvent(
+            'first_authenticated_session',
+            {
+              auth_method: context.authMethod || 'unknown',
+              flow: context.flow || 'auth_success',
+              workspace_id: accountData.account_id
+            },
+            {
+              accessToken: session.access_token,
+              eventKey: `first_authenticated_session:${accountData.account_id}`
+            }
+          );
           showDashboard(session, accountData);
         } catch (err) {
           // On error, show sign-in form with error message
           setDashboardMode(false);
           signinFormContainer.classList.remove('hidden');
+          trackAnalyticsEvent('auth_error', {
+            auth_method: context.authMethod || 'unknown',
+            flow: context.flow || 'auth_success',
+            error_type: 'post_auth_signup_failed',
+            error: err.message
+          });
           showMessage(err.message);
         }
       }
@@ -1892,6 +2172,16 @@
         } else if (paymentResult === 'cancelled') {
           statusEl.textContent = 'Payment was cancelled.';
           statusEl.style.color = '#ef4444';
+          supabase.auth.getSession().then(({ data: { session } }) => {
+            trackAnalyticsEvent(
+              'checkout_abandoned',
+              {
+                checkout_entry_point: 'settings_modal_buy_hours',
+                reason_for_paywall_trigger: 'user_cancelled_on_stripe'
+              },
+              session ? { accessToken: session.access_token } : {}
+            );
+          });
         }
         // Refresh balance display for both success and cancelled
         document.getElementById('info-btn').click();
@@ -2387,7 +2677,10 @@
           }
 
           if (flowType === 'magiclink' || flowType === 'signup') {
-            await handleAuthSuccess(data.session);
+            await handleAuthSuccess(data.session, {
+              authMethod: flowType === 'magiclink' ? 'magic_link' : 'email_confirmation',
+              flow: flowType
+            });
             window.history.replaceState({}, document.title, window.location.pathname);
             return true;
           }
@@ -2396,11 +2689,46 @@
           try {
             const res = await fetch(`${DOWHIZ_API_URL}/auth/signup`, {
               method: 'POST',
-              headers: { 'Authorization': `Bearer ${data.session.access_token}` }
+              headers: {
+                'Authorization': `Bearer ${data.session.access_token}`,
+                'x-dowhiz-auth-method': 'oauth_google'
+              }
             });
             console.log('DoWhiz signup response:', res.status);
+            if (res.ok) {
+              const accountData = await res.json();
+              trackAnalyticsEvent(
+                'login_completed',
+                {
+                  auth_method: 'oauth_google',
+                  flow: 'oauth_callback',
+                  account_created: Boolean(accountData.created)
+                },
+                {
+                  accessToken: data.session.access_token
+                }
+              );
+              trackAnalyticsEvent(
+                'first_authenticated_session',
+                {
+                  auth_method: 'oauth_google',
+                  flow: 'oauth_callback',
+                  workspace_id: accountData.account_id
+                },
+                {
+                  accessToken: data.session.access_token,
+                  eventKey: `first_authenticated_session:${accountData.account_id}`
+                }
+              );
+            }
           } catch (err) {
             console.error('Failed to create DoWhiz account:', err);
+            trackAnalyticsEvent('auth_error', {
+              auth_method: 'oauth_google',
+              flow: 'oauth_callback',
+              error_type: 'post_auth_signup_failed',
+              error: err.message
+            });
           }
 
           // Redirect to home page after OAuth
@@ -2428,7 +2756,10 @@
 
         if (session) {
           // User is already logged in - show the dashboard
-          await handleAuthSuccess(session);
+          await handleAuthSuccess(session, {
+            authMethod: 'existing_session',
+            flow: expectingDashboard ? 'existing_session_dashboard' : 'existing_session'
+          });
         } else {
           // No session - show sign-in form
           setDashboardMode(false);

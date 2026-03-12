@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/dashboard",
+      "destination": "/"
+    },
+    {
+      "source": "/dashboard/",
+      "destination": "/"
+    },
+    {
       "source": "/cn",
       "destination": "/"
     },
