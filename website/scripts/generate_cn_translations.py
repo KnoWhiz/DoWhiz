@@ -97,7 +97,7 @@ MANUAL_OVERRIDES = {
     "TBD": "待定",
     "TPM": "TPM",
     "Team": "团队",
-    "try DoWhiz service today": "立即体验 DoWhiz 服务",
+    "Try DoWhiz service today": "立即体验 DoWhiz 服务",
     "Workflow Specialist": "工作流专家",
     "Workflows": "工作流",
 }
