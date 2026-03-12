@@ -1,0 +1,86 @@
+:root,
+[data-theme='light'],
+[data-theme='dark'] {
+  /* Brand primitives */
+  --dw-brand-primary: #2c2c2e;
+  --dw-brand-primary-hover: #1c1c1e;
+  --dw-brand-secondary: #3a3a3c;
+
+  /* Text */
+  --dw-text-primary: #1c1c1e;
+  --dw-text-secondary: #636366;
+  --dw-text-tertiary: #8e8e93;
+  --dw-text-on-brand: #ffffff;
+
+  /* Surfaces */
+  --dw-surface-primary: #ffffff;
+  --dw-surface-secondary: #f2f2f7;
+  --dw-surface-tertiary: #e5e5ea;
+  --dw-surface-overlay: rgba(255, 255, 255, 0.92);
+
+  /* Borders */
+  --dw-border-subtle: #e5e5ea;
+  --dw-border-default: #d1d1d6;
+
+  /* States */
+  --dw-focus-ring: rgba(44, 44, 46, 0.28);
+  --dw-shadow-color: rgba(28, 28, 30, 0.08);
+  --dw-shadow-strong: rgba(28, 28, 30, 0.16);
+  --dw-success-color: #237a44;
+  --dw-warning-color: #8a650f;
+  --dw-danger-color: #b4232c;
+
+  /* Semantic aliases */
+  --brand-primary: var(--dw-brand-primary);
+  --brand-primary-hover: var(--dw-brand-primary-hover);
+  --brand-secondary: var(--dw-brand-secondary);
+
+  --text-primary: var(--dw-text-primary);
+  --text-secondary: var(--dw-text-secondary);
+  --text-tertiary: var(--dw-text-tertiary);
+  --text-on-brand: var(--dw-text-on-brand);
+
+  --surface-primary: var(--dw-surface-primary);
+  --surface-secondary: var(--dw-surface-secondary);
+  --surface-tertiary: var(--dw-surface-tertiary);
+
+  --border-subtle: var(--dw-border-subtle);
+  --border-default: var(--dw-border-default);
+  --focus-ring: var(--dw-focus-ring);
+  --shadow-color: var(--dw-shadow-color);
+
+  /* Legacy compatibility aliases used by existing pages */
+  --bg-color: var(--dw-surface-primary);
+  --color-muted: var(--dw-surface-secondary);
+  --color-muted-foreground: var(--dw-text-secondary);
+  --color-border: var(--dw-border-subtle);
+  --color-ring: var(--dw-border-default);
+  --color-secondary: var(--dw-surface-secondary);
+  --color-secondary-foreground: var(--dw-text-primary);
+
+  --accent-color: var(--dw-brand-primary);
+  --accent-gradient: linear-gradient(
+    135deg,
+    var(--dw-brand-secondary) 0%,
+    var(--dw-brand-primary) 100%
+  );
+  --success-color: var(--dw-success-color);
+  --warning-color: var(--dw-warning-color);
+  --danger-color: var(--dw-danger-color);
+
+  --glass-bg: var(--dw-surface-primary);
+  --glass-border: var(--dw-border-subtle);
+  --card-hover-border: var(--dw-border-default);
+  --navbar-bg: var(--dw-surface-overlay);
+
+  --bg: var(--dw-surface-primary);
+  --card: var(--dw-surface-primary);
+  --border: var(--dw-border-subtle);
+  --border-hover: var(--dw-border-default);
+  --text: var(--dw-text-primary);
+  --muted: var(--dw-text-secondary);
+  --muted-bg: var(--dw-surface-secondary);
+  --accent: var(--dw-brand-primary);
+
+  color-scheme: light;
+}

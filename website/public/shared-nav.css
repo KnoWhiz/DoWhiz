@@ -1,17 +1,15 @@
+@import url('/brand-theme.css');
+
 body.dw-shared-nav {
-  --dw-nav-bg: var(--navbar-bg, oklch(0.145 0 0 / 0.85));
-  --dw-nav-border: var(--glass-border, var(--border-color, var(--border, oklch(0.3 0 0))));
-  --dw-nav-border-hover: var(--card-hover-border, var(--border-hover, oklch(0.45 0 0)));
-  --dw-nav-text: var(--text-primary, var(--text, oklch(0.985 0 0)));
-  --dw-nav-muted: var(--text-secondary, var(--muted, oklch(0.708 0 0)));
-  --dw-nav-muted-bg: var(--color-muted, var(--muted-bg, oklch(0.269 0 0)));
+  --dw-nav-bg: var(--navbar-bg, var(--dw-surface-overlay));
+  --dw-nav-border: var(--glass-border, var(--border-color, var(--border, var(--dw-border-subtle))));
+  --dw-nav-border-hover: var(--card-hover-border, var(--border-hover, var(--dw-border-default)));
+  --dw-nav-text: var(--text-primary, var(--text, var(--dw-text-primary)));
+  --dw-nav-muted: var(--text-secondary, var(--muted, var(--dw-text-secondary)));
+  --dw-nav-muted-bg: var(--color-muted, var(--muted-bg, var(--dw-surface-secondary)));
   --dw-nav-radius-full: var(--radius-full, 9999px);
   --dw-nav-radius-2xl: var(--radius-2xl, 1.5rem);
   --dw-nav-blur: var(--glass-blur, blur(12px));
-}
-
-[data-theme='light'] body.dw-shared-nav {
-  --dw-nav-bg: var(--navbar-bg, oklch(0.98 0.001 286.375 / 0.85));
 }
 
 body.dw-shared-nav .navbar {
@@ -75,6 +73,9 @@ body.dw-shared-nav .navbar .logo .text-gradient {
   display: inline;
   padding-bottom: 0;
   line-height: 1;
+  color: var(--dw-nav-text);
+  background: none;
+  -webkit-text-fill-color: currentColor;
 }
 
 body.dw-shared-nav .navbar .nav-links {
@@ -142,6 +143,13 @@ body.dw-shared-nav .navbar .btn-small:hover {
   color: var(--dw-nav-text);
   background: var(--dw-nav-muted-bg);
   border-color: var(--dw-nav-border-hover);
+}
+
+body.dw-shared-nav .navbar .logo:focus-visible,
+body.dw-shared-nav .navbar .nav-btn:focus-visible,
+body.dw-shared-nav .navbar .btn-small:focus-visible {
+  outline: 3px solid var(--focus-ring, var(--dw-focus-ring));
+  outline-offset: 2px;
 }
 
 body.dw-shared-nav .navbar .social-links .btn-small {

@@ -1,6 +1,4 @@
 (function () {
-  const DAY_START_HOUR = 7;
-  const NIGHT_START_HOUR = 19;
   const EN_ORIGIN = 'https://www.dowhiz.com';
   const EN_ORIGIN_ALT = 'https://dowhiz.com';
   const CN_PATH_PREFIX = '/cn';
@@ -146,8 +144,7 @@
   }
 
   function getThemeForLocalTime() {
-    const hour = new Date().getHours();
-    return hour >= DAY_START_HOUR && hour < NIGHT_START_HOUR ? 'light' : 'dark';
+    return 'light';
   }
 
   function applyTheme() {
@@ -156,17 +153,8 @@
 
   function scheduleNextThemeSwitch() {
     const now = new Date();
-    const hour = now.getHours();
     const next = new Date(now);
-
-    if (hour >= DAY_START_HOUR && hour < NIGHT_START_HOUR) {
-      next.setHours(NIGHT_START_HOUR, 0, 0, 0);
-    } else {
-      next.setHours(DAY_START_HOUR, 0, 0, 0);
-      if (hour >= NIGHT_START_HOUR) {
-        next.setDate(next.getDate() + 1);
-      }
-    }
+    next.setHours(next.getHours() + 24, 0, 0, 0);
 
     const delay = Math.max(next.getTime() - now.getTime(), 0);
     setTimeout(function () {
