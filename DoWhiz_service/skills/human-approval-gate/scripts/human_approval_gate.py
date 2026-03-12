@@ -22,13 +22,22 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover
+    import tomli as tomllib  # type: ignore
+
 API_BASE_DEFAULT = "https://api.postmarkapp.com"
 STATE_DIR_DEFAULT = ".human_approval_gate/challenges"
 DEFAULT_TIMEOUT_MINUTES = 30
 DEFAULT_POLL_SECONDS = 15
 DEFAULT_ADMIN_RECIPIENT = "admin@dowhiz.com"
+ADMIN_RECIPIENT_ENV_KEY = "HUMAN_APPROVAL_ADMIN_RECIPIENT"
 SUBJECT_TOKEN_PREFIX = "HAG"
 MAX_REPLY_SNIPPET_CHARS = 2000
+# Postmark limits metadata key names to at most 20 characters.
+POSTMARK_METADATA_CHALLENGE_ID_KEY = "hag_challenge_id"
+POSTMARK_METADATA_SCOPE_KEY = "hag_scope"
 
 EMAIL_PATTERN = re.compile(r"([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
 CODE_PATTERNS = [
@@ -117,12 +126,126 @@ def get_env_first(*keys: str) -> Optional[str]:
     return None
 
 
+def discover_do_whiz_service_root() -> Optional[Path]:
+    script_path = Path(__file__).resolve()
+    for parent in script_path.parents:
+        if parent.name == "DoWhiz_service":
+            return parent
+    return None
+
+
+def resolve_employee_config_candidates() -> List[Path]:
+    explicit = get_env_first("EMPLOYEE_CONFIG_PATH")
+    if explicit:
+        raw = Path(explicit).expanduser()
+        if raw.is_absolute():
+            return [raw]
+        cwd = Path.cwd()
+        candidates: List[Path] = [cwd / raw, cwd / "DoWhiz_service" / raw]
+        script_root = discover_do_whiz_service_root()
+        if script_root is not None:
+            candidates.append(script_root / raw)
+        deduped: List[Path] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            key = str(resolved)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(resolved)
+        return deduped
+
+    deploy_target = (get_env_first("DEPLOY_TARGET") or "").strip().lower()
+    if deploy_target == "staging":
+        names = ("employee.staging.toml", "employee.toml")
+    else:
+        names = ("employee.toml", "employee.staging.toml")
+
+    root_candidates: List[Path] = []
+    cwd = Path.cwd()
+    root_candidates.append(cwd)
+    if cwd.name != "DoWhiz_service":
+        root_candidates.append(cwd / "DoWhiz_service")
+
+    script_root = discover_do_whiz_service_root()
+    if script_root is not None:
+        root_candidates.append(script_root)
+
+    paths: List[Path] = []
+    seen: set[str] = set()
+    for root in root_candidates:
+        for name in names:
+            candidate = (root / name).resolve()
+            key = str(candidate)
+            if key in seen:
+                continue
+            seen.add(key)
+            if candidate.exists():
+                paths.append(candidate)
+    return paths
+
+
+def load_employee_mailbox_from_config(path: Path, employee_id: str) -> Optional[str]:
+    try:
+        with path.open("rb") as handle:
+            payload = tomllib.load(handle)
+    except Exception:
+        return None
+
+    employees = payload.get("employees")
+    if not isinstance(employees, list):
+        return None
+
+    normalized_id = employee_id.strip().lower()
+    for employee in employees:
+        if not isinstance(employee, dict):
+            continue
+        config_id = str(employee.get("id", "")).strip().lower()
+        if config_id != normalized_id:
+            continue
+        addresses = employee.get("addresses")
+        if not isinstance(addresses, list):
+            return None
+        for address in addresses:
+            if not isinstance(address, str) or not address.strip():
+                continue
+            email = extract_email(address) or address.strip().lower()
+            if email:
+                return email
+        return None
+    return None
+
+
+def resolve_employee_mailbox_email() -> Optional[str]:
+    employee_id = get_env_first("EMPLOYEE_ID")
+    for config_path in resolve_employee_config_candidates():
+        try:
+            with config_path.open("rb") as handle:
+                payload = tomllib.load(handle)
+        except Exception:
+            continue
+
+        effective_employee_id = employee_id
+        if not effective_employee_id:
+            default_id = payload.get("default_employee_id")
+            if isinstance(default_id, str) and default_id.strip():
+                effective_employee_id = default_id.strip()
+        if not effective_employee_id:
+            continue
+
+        employee_email = load_employee_mailbox_from_config(config_path, effective_employee_id)
+        if employee_email:
+            return employee_email
+    return None
+
+
 def resolve_sender(from_arg: Optional[str]) -> str:
-    sender = (from_arg or "").strip() or get_env_first(
-        "HUMAN_APPROVAL_FROM",
-        "POSTMARK_FROM_EMAIL",
-        "POSTMARK_TEST_FROM",
-    )
+    sender = (from_arg or "").strip() or get_env_first("HUMAN_APPROVAL_FROM")
+    if not sender:
+        sender = resolve_employee_mailbox_email() or ""
+    if not sender:
+        sender = get_env_first("POSTMARK_FROM_EMAIL", "POSTMARK_TEST_FROM") or ""
     if not sender:
         raise CliError(
             "missing sender address: provide --from or set HUMAN_APPROVAL_FROM / POSTMARK_FROM_EMAIL"
@@ -137,11 +260,31 @@ def normalize_scope(scope: str) -> str:
     return normalized
 
 
+def canonical_email(value: str) -> str:
+    email = extract_email(value)
+    if email:
+        return email
+    return value.strip().lower()
+
+
+def resolve_admin_recipient() -> str:
+    return get_env_first(ADMIN_RECIPIENT_ENV_KEY) or DEFAULT_ADMIN_RECIPIENT
+
+
 def resolve_recipient(scope: str, recipient_arg: Optional[str], user_email_arg: Optional[str]) -> str:
+    if scope == "admin":
+        admin_recipient = resolve_admin_recipient()
+        if recipient_arg and recipient_arg.strip():
+            recipient = recipient_arg.strip()
+            if canonical_email(recipient) != canonical_email(admin_recipient):
+                raise CliError(
+                    "scope=admin cannot send to non-admin recipient; remove --recipient "
+                    f"or set {ADMIN_RECIPIENT_ENV_KEY} if admin address changed"
+                )
+            return recipient
+        return admin_recipient
     if recipient_arg and recipient_arg.strip():
         return recipient_arg.strip()
-    if scope == "admin":
-        return DEFAULT_ADMIN_RECIPIENT
     if user_email_arg and user_email_arg.strip():
         return user_email_arg.strip()
     raise CliError("user scope requires --recipient or --user-email")
@@ -309,6 +452,17 @@ def send_approval_email(
     if not message_id:
         raise CliError("Postmark send response missing MessageID")
     return message_id
+
+
+def build_postmark_metadata(challenge_id: str, scope: str) -> Dict[str, str]:
+    metadata = {
+        POSTMARK_METADATA_CHALLENGE_ID_KEY: challenge_id,
+        POSTMARK_METADATA_SCOPE_KEY: scope,
+    }
+    for key in metadata:
+        if len(key) > 20:
+            raise CliError(f"metadata key exceeds Postmark 20-character limit: {key}")
+    return metadata
 
 
 def parse_reply_decision(text: str) -> Tuple[str, Optional[str], str]:
@@ -597,10 +751,7 @@ def cmd_request(args: argparse.Namespace) -> int:
     if args.dry_run:
         state["outbound_message_id"] = "DRY_RUN"
     else:
-        metadata = {
-            "human_approval_challenge_id": state["challenge_id"],
-            "human_approval_scope": state["scope"],
-        }
+        metadata = build_postmark_metadata(str(state["challenge_id"]), str(state["scope"]))
         message_id = send_approval_email(
             api_base=api_base,
             token=token,

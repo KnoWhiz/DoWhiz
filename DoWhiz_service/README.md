@@ -207,7 +207,10 @@ Azure ACI execution path (required vars):
 - `human_approval_gate` (via skill `human-approval-gate`) provides a blocking
   approval flow for login OTP/device-approval steps. It sends an email request
   and waits for same-thread reply (`approved`, `denied`, or `CODE: <value>`),
-  typically with a 30-minute timeout.
+  typically with a 30-minute timeout. Sender resolution priority is `--from` >
+  `HUMAN_APPROVAL_FROM` > employee mailbox from employee config >
+  `POSTMARK_FROM_EMAIL` > `POSTMARK_TEST_FROM`. HAG-thread replies (`[HAG:...]`)
+  are ignored by normal inbound task routing to prevent recursive Email->task loops.
 - ACI run_task sets Playwright/NPM runtime defaults for mounted workspaces:
   `PLAYWRIGHT_MCP_EXECUTABLE_PATH` auto-discovery (`chrome-linux` / `chrome-linux64`),
   `PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright`,

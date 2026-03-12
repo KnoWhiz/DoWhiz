@@ -12,7 +12,11 @@ Use this skill immediately when any authentication flow is blocked by human veri
 - OTP / verification code input
 - "Approve sign-in on your phone"
 - "Tap number on mobile app"
-- security challenge that requires user/admin action
+- any out-of-band challenge that requires user/admin action from another device/account
+
+Do NOT use this skill for CAPTCHA/image puzzle/text-recognition steps. Solve CAPTCHA directly in browser first.
+
+When a page offers multiple verification methods, choose SMS verification first by default.
 
 Do not keep retrying login while blocked.
 
@@ -22,11 +26,13 @@ Do not keep retrying login while blocked.
 2. Wait on gate result.
 3. Continue only if approved.
 4. If timeout/rejected, stop login attempts and report clearly.
+5. If SMS verification is unavailable or fails, switch to another available method and keep the same gate-based wait behavior.
 
 ## Scope Rules
 
 - `scope=admin`: when agent logs in an owner/admin account (for example Oliver's own Google/Notion/X account). Send to `admin@dowhiz.com`.
 - `scope=user`: when agent logs in an end user's account. Send to that specific user email.
+- For `scope=admin`, do not pass a user recipient address.
 
 ## CLI Quick Start
 
@@ -90,3 +96,5 @@ The gate also parses simple natural replies (approved/denied keywords), but expl
 - Keep waiting in this command; do not run unrelated steps while waiting.
 - Reuse the same challenge thread; do not spam multiple requests unless previous one timed out.
 - Never include raw credentials in outbound messages.
+- Sender identity priority is: `--from` > `HUMAN_APPROVAL_FROM` > employee mailbox from `employee.toml`/`employee.staging.toml` > `POSTMARK_FROM_EMAIL` > `POSTMARK_TEST_FROM`.
+- HAG reply emails (`[HAG:...]` threads) are consumed by the gate flow and are not routed into normal Email->task execution.

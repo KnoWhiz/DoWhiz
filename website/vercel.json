@@ -1,4 +1,14 @@
 {
+  "rewrites": [
+    {
+      "source": "/cn",
+      "destination": "/"
+    },
+    {
+      "source": "/cn/:path*",
+      "destination": "/:path*"
+    }
+  ],
   "redirects": [
     {
       "source": "/agents",
@@ -8,6 +18,30 @@
     {
       "source": "/agents/",
       "destination": "/",
+      "statusCode": 301
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "header",
+          "key": "host",
+          "value": "cn.dowhiz.com"
+        }
+      ],
+      "destination": "https://www.dowhiz.com/cn/:path*",
+      "statusCode": 301
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "header",
+          "key": "host",
+          "value": "www.cn.dowhiz.com"
+        }
+      ],
+      "destination": "https://www.dowhiz.com/cn/:path*",
       "statusCode": 301
     },
     {

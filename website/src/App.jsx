@@ -23,6 +23,7 @@ const ORG_NAME = 'DoWhiz';
 const DAY_START_HOUR = 7;
 const NIGHT_START_HOUR = 19;
 const MAX_TOTAL_UPLOAD_BYTES = 10 * 1024 * 1024;
+const CN_PATH_PREFIX = '/cn';
 const DEPLOYMENT_FORM_DEFAULTS = {
   full_name: '',
   work_email: '',
@@ -87,6 +88,12 @@ const getNextThemeSwitch = (date = new Date()) => {
   }
   return next;
 };
+
+const isCnPath = (pathname = '/') =>
+  pathname === CN_PATH_PREFIX || pathname === `${CN_PATH_PREFIX}/` || pathname.startsWith(`${CN_PATH_PREFIX}/`);
+
+const getLocalizedAuthPath = (suffix = '', pathname = typeof window !== 'undefined' ? window.location.pathname : '/') =>
+  `${isCnPath(pathname) ? CN_PATH_PREFIX : ''}/auth/index.html${suffix}`;
 
 const shouldEnableMouseField = () => {
   if (typeof window === 'undefined') {
@@ -334,7 +341,7 @@ function App() {
     const hasTokens = params.get('access_token') && params.get('refresh_token');
     const hasError = params.get('error') || params.get('error_description');
     if (hasTokens || hasError) {
-      window.location.replace(`/auth/index.html${hash}`);
+      window.location.replace(getLocalizedAuthPath(hash, pathname));
     }
   }, []);
 
@@ -1349,12 +1356,14 @@ function App() {
                     {showUserMenu && (
                       <div className="user-dropdown">
                         <a
-                          href="/auth/index.html?loggedIn=true"
+                          href={getLocalizedAuthPath('?loggedIn=true')}
                           className="dropdown-item"
                           onClick={async (e) => {
                             e.preventDefault();
                             const { data: { session } } = await supabase.auth.getSession();
-                            window.location.href = session ? '/auth/index.html?loggedIn=true' : '/auth/index.html';
+                            window.location.href = session
+                              ? getLocalizedAuthPath('?loggedIn=true')
+                              : getLocalizedAuthPath();
                           }}
                         >
                           <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" strokeWidth="2" fill="none">
@@ -1378,7 +1387,7 @@ function App() {
                     )}
                   </div>
                 ) : (
-                  <a className="btn-small" href="/auth/index.html" aria-label="Sign In">
+                  <a className="btn-small" href={getLocalizedAuthPath()} aria-label="Sign In">
                     <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                       <circle cx="12" cy="7" r="4"></circle>

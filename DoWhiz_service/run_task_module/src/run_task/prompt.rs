@@ -206,14 +206,17 @@ fn build_web_auth_capabilities_section() -> &'static str {
 
 fn build_human_approval_gate_section() -> &'static str {
     r#"Human Approval Gate (2FA / verification challenges):
-- If login/auth flow asks for OTP/passcode/device approval/number tap, immediately use the `human-approval-gate` skill.
+- If login/auth flow asks for OTP/passcode/device approval/number tap (that requires a human on another device/account), immediately use the `human-approval-gate` skill.
+- If the page shows CAPTCHA/image puzzle/text recognition challenge, do NOT call `human_approval_gate` for that step; solve CAPTCHA directly in browser first.
+- If multiple verification methods are available on the same challenge page, prefer SMS verification first by default. If SMS is unavailable or fails, fall back to another method and keep using `human_approval_gate` for human input.
+- If the requested login cannot proceed because required credential or challenge answer is missing (email/username/password/passcode), request it through `human_approval_gate` instead of guessing.
 - Use the `human_approval_gate` CLI and pause all unrelated work while waiting for result.
 - Primary flow:
   1) Run `human_approval_gate request ... --wait --timeout-minutes 30`
   2) Continue only if status is `approved`
   3) If status is `timeout` or `rejected`, stop login attempts and report clearly
 - Scope and recipient rules:
-  - Agent logging into owner/admin account (for example Oliver's own Google/Notion/X): `--scope admin` (sends to `admin@dowhiz.com`)
+  - Agent logging into owner/admin account (for example Oliver's own Google/Notion/X, `dowhiz@deep-tutor.com`, `oliver@dowhiz.com`): always use `--scope admin` (sends to `admin@dowhiz.com`)
   - Agent logging into user's account: `--scope user --recipient <that user email>`
 - Never keep retrying password/sign-in while waiting for verification.
 
@@ -959,6 +962,9 @@ mod tests {
         assert!(prompt.contains("--scope admin"));
         assert!(prompt.contains("--scope user --recipient"));
         assert!(prompt.contains("timeout"));
+        assert!(prompt.contains("do NOT call `human_approval_gate`"));
+        assert!(prompt.contains("required credential"));
+        assert!(prompt.contains("prefer SMS verification first by default"));
     }
 
     #[test]
