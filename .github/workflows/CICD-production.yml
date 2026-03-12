@@ -227,10 +227,27 @@ jobs:
             pm2 start "$APP_DIR/target/release/inbound_gateway" --name dw_gateway --cwd "$APP_DIR"
           fi
 
-          worker_health="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 "http://127.0.0.1:${RUST_SERVICE_PORT:-9001}/health" || true)"
-          gateway_health="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 "http://127.0.0.1:${GATEWAY_PORT:-9100}/health" || true)"
-          [[ "$worker_health" == "200" ]] || { echo "Early worker health check failed (HTTP $worker_health)" >&2; exit 1; }
-          [[ "$gateway_health" == "200" ]] || { echo "Early gateway health check failed (HTTP $gateway_health)" >&2; exit 1; }
+          wait_for_health() {
+            local label="$1"
+            local url="$2"
+            local http_code=""
+            local attempt
+            for attempt in $(seq 1 12); do
+              http_code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 "$url" || true)"
+              if [[ "$http_code" == "200" ]]; then
+                printf '%s' "$http_code"
+                return 0
+              fi
+              echo "Waiting for $label health endpoint (${attempt}/12), last HTTP ${http_code:-000}..."
+              sleep 5
+            done
+            echo "Early $label health check failed after retries (HTTP ${http_code:-000})" >&2
+            return 1
+          }
+
+          worker_health="$(wait_for_health worker "http://127.0.0.1:${RUST_SERVICE_PORT:-9001}/health")"
+          gateway_health="$(wait_for_health gateway "http://127.0.0.1:${GATEWAY_PORT:-9100}/health")"
+          echo "Early health check passed: worker=$worker_health gateway=$gateway_health"
           EOF
 
       - name: Build and push ACI image on Azure VM
