@@ -2,6 +2,12 @@
 
 This skill enables digital employees (Oliver, Maggie, etc.) to interact with Notion as real team members - receiving @mentions, replying to comments, and editing pages.
 
+## Trigger Detection
+
+**Email-triggered tasks:** Check for `.notion_email_context.json` in your workspace root. If present, this task was triggered by a Notion email notification - follow the "Email-Triggered Workflow" section below.
+
+**Browser-polled tasks:** For tasks from the Notion inbox poller, follow the standard "Replying to Comments" flow.
+
 ## Employee Accounts
 
 | Employee | Email | Notion Display Name |
@@ -184,6 +190,88 @@ The Notion poller runs as part of the inbound gateway:
 2. **Deduplication**: MongoDB stores processed notification IDs
 3. **Task Queue**: New mentions create RunTask entries
 4. **Outbound**: Agent responses sent via browser automation
+
+## Email-Triggered Workflow
+
+When a task is triggered by a Notion email notification:
+
+### Step 1: Read the Context
+```bash
+# Check for Notion email context
+cat .notion_email_context.json
+```
+
+The context contains:
+- `page_url`: Direct URL to the Notion page
+- `page_id`: 32-char UUID for API access
+- `actor_name`: Who mentioned you
+- `comment_preview`: Preview of the comment/mention
+- `notification_type`: Type of notification (comment_mention, page_mention, etc.)
+
+### Step 2: Read the Page Content
+
+**Option A: Use browser-use (recommended for complex pages)**
+```bash
+# Import saved cookies first
+IN_DOCKER=true browser-use --session notion cookies import ~/.dowhiz/notion/cookies.json
+
+# Navigate to the page
+IN_DOCKER=true browser-use --session notion open "PAGE_URL_FROM_CONTEXT"
+
+# Read the page state
+IN_DOCKER=true browser-use --session notion state
+
+# Take a screenshot if needed
+IN_DOCKER=true browser-use --session notion screenshot page.png
+```
+
+**Option B: Use Notion API CLI (faster, but requires OAuth setup)**
+```bash
+# Read page content
+notion_api_cli read-page --page-id PAGE_ID
+
+# Get comments on the page
+notion_api_cli get-comments --page-id PAGE_ID
+```
+
+### Step 3: Complete the Task
+Based on the comment/mention request, perform the necessary actions:
+- Research information
+- Create documents
+- Update content
+- etc.
+
+### Step 4: Reply to the Comment
+
+**Option A: Via browser-use**
+```bash
+# Make sure we're on the page with the comment
+IN_DOCKER=true browser-use --session notion state
+
+# Find the comment input and reply
+# Look for "Reply" button or input field in the state output
+IN_DOCKER=true browser-use --session notion click <reply_button_index>
+IN_DOCKER=true browser-use --session notion type "Your reply message here"
+IN_DOCKER=true browser-use --session notion keys "Enter"
+```
+
+**Option B: Via Notion API CLI**
+```bash
+# First get the discussion_id from comments
+notion_api_cli get-comments --page-id PAGE_ID
+
+# Reply to the comment thread
+notion_api_cli reply --discussion-id DISCUSSION_ID --content "Your reply message"
+
+# Or create a new comment
+notion_api_cli create-comment --page-id PAGE_ID --content "Your reply message"
+```
+
+### Step 5: Write reply_message.txt
+Even if you replied via Notion, write your response to `reply_message.txt` for the task system:
+```bash
+echo "I've replied to the Notion comment with: [summary of your reply]" > reply_message.txt
+```
 
 ## Configuration
 
