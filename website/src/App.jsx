@@ -25,8 +25,6 @@ const SITE_URL = 'https://dowhiz.com';
 const LOGO_URL = `${SITE_URL}/assets/DoWhiz.svg`;
 const SUPPORT_EMAIL = 'admin@dowhiz.com';
 const ORG_NAME = 'DoWhiz';
-const DAY_START_HOUR = 7;
-const NIGHT_START_HOUR = 19;
 const MAX_TOTAL_UPLOAD_BYTES = 10 * 1024 * 1024;
 const CN_PATH_PREFIX = '/cn';
 const DEPLOYMENT_FORM_DEFAULTS = {
@@ -48,14 +46,14 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const palettes = {
   dark: [
-    { r: 56, g: 189, b: 248 },
-    { r: 99, g: 102, b: 241 },
-    { r: 20, g: 184, b: 166 }
+    { r: 58, g: 58, b: 60 },
+    { r: 99, g: 99, b: 102 },
+    { r: 142, g: 142, b: 147 }
   ],
   light: [
-    { r: 14, g: 116, b: 144 },
-    { r: 56, g: 189, b: 248 },
-    { r: 245, g: 158, b: 11 }
+    { r: 58, g: 58, b: 60 },
+    { r: 99, g: 99, b: 102 },
+    { r: 142, g: 142, b: 147 }
   ]
 };
 
@@ -73,24 +71,11 @@ const pickColor = (t, palette) => {
   return blendColor(palette[1], palette[2], (scaled - 0.5) * 2);
 };
 
-const getThemeForLocalTime = (date = new Date()) => {
-  const hour = date.getHours();
-  return hour >= DAY_START_HOUR && hour < NIGHT_START_HOUR ? 'light' : 'dark';
-};
+const getThemeForLocalTime = () => 'light';
 
 const getNextThemeSwitch = (date = new Date()) => {
-  const next = new Date(date);
-  const hour = date.getHours();
-
-  if (hour >= DAY_START_HOUR && hour < NIGHT_START_HOUR) {
-    next.setHours(NIGHT_START_HOUR, 0, 0, 0);
-    return next;
-  }
-
-  next.setHours(DAY_START_HOUR, 0, 0, 0);
-  if (hour >= NIGHT_START_HOUR) {
-    next.setDate(next.getDate() + 1);
-  }
+  const next = new Date(date.getTime());
+  next.setHours(next.getHours() + 24, 0, 0, 0);
   return next;
 };
 
