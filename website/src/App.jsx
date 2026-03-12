@@ -16,7 +16,7 @@ import fluffyElephantImg from './assets/Fluffy-Elephant.jpg';
 import plushAxolotlImg from './assets/Plush-Axolotl.jpg';
 
 const SITE_URL = 'https://dowhiz.com';
-const LOGO_URL = `${SITE_URL}/assets/DoWhiz.jpeg`;
+const LOGO_URL = `${SITE_URL}/assets/DoWhiz.svg`;
 const SUPPORT_EMAIL = 'admin@dowhiz.com';
 const ORG_NAME = 'DoWhiz';
 const DAY_START_HOUR = 7;
@@ -1311,7 +1311,7 @@ function App() {
         <nav className={`navbar${navHidden ? ' nav-hidden' : ''}`}>
           <div className="nav-content">
             <a href="/" className="logo">
-              <img src="/assets/DoWhiz.jpeg" alt="" className="brand-mark" aria-hidden="true" />
+              <img src="/assets/DoWhiz.svg" alt="" className="brand-mark" aria-hidden="true" />
               <span>Do<span className="text-gradient">Whiz</span></span>
             </a>
             <div className="nav-links">
@@ -2086,7 +2086,7 @@ function App() {
           <div className="container footer-content">
             <div className="footer-brand">
               <a href="#" className="footer-logo">
-                <img src="/assets/DoWhiz.jpeg" alt="" className="footer-brand-mark" aria-hidden="true" />
+                <img src="/assets/DoWhiz.svg" alt="" className="footer-brand-mark" aria-hidden="true" />
                 <span>Do<span className="text-gradient">Whiz</span></span>
               </a>
               <p className="footer-tagline">
