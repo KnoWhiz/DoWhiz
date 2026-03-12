@@ -207,7 +207,8 @@ fn build_web_auth_capabilities_section() -> &'static str {
 fn build_human_approval_gate_section() -> &'static str {
     r#"Human Approval Gate (2FA / verification challenges):
 - If login/auth flow asks for OTP/passcode/device approval/number tap (that requires a human on another device/account), immediately use the `human-approval-gate` skill.
-- If the page shows CAPTCHA/image puzzle/text recognition challenge, do NOT call `human_approval_gate` for that step; solve CAPTCHA directly in browser first.
+- If the page shows CAPTCHA/image puzzle/text recognition challenge, do NOT call `human_approval_gate` for that step; first use your own multimodal/vision abilities and browser tools to inspect the challenge, solve it directly in the page, and continue the login flow yourself.
+- Only use `human_approval_gate` for steps that genuinely require human access outside the browser session, such as SMS codes, email codes sent to someone else, approval taps on another device, or information only the human can retrieve.
 - If multiple verification methods are available on the same challenge page, prefer SMS verification first by default. If SMS is unavailable or fails, fall back to another method and keep using `human_approval_gate` for human input.
 - Before calling `human_approval_gate`, first use the website itself to initiate the challenge: click the button that sends the code / starts the approval / selects the method, and wait until the page is explicitly waiting for the human response.
 - If login identifier (email/username) is missing for owner/admin account login, try known admin identifiers first (`dowhiz@deep-tutor.com` on staging, `oliver@dowhiz.com` on production) before requesting help through `human_approval_gate`.
@@ -968,6 +969,7 @@ mod tests {
         assert!(prompt.contains("--scope user --recipient"));
         assert!(prompt.contains("timeout"));
         assert!(prompt.contains("do NOT call `human_approval_gate`"));
+        assert!(prompt.contains("multimodal/vision abilities"));
         assert!(prompt.contains("required credential"));
         assert!(prompt.contains("prefer SMS verification first by default"));
         assert!(prompt.contains("click the button that sends the code"));

@@ -14,7 +14,13 @@ Use this skill immediately when any authentication flow is blocked by human veri
 - "Tap number on mobile app"
 - any out-of-band challenge that requires user/admin action from another device/account
 
-Do NOT use this skill for CAPTCHA/image puzzle/text-recognition steps. Solve CAPTCHA directly in browser first.
+Do NOT use this skill for CAPTCHA/image puzzle/text-recognition steps. First use your own multimodal/vision abilities plus browser tooling to inspect the challenge, solve it directly in the page, and continue yourself.
+
+Only use this skill when the blocker genuinely requires a human outside the current browser session, for example:
+- SMS code sent to a phone you cannot access
+- email code sent to another person's mailbox
+- approval tap / number match on another device
+- recovery detail or one-time code that only the user/admin can retrieve
 
 When a page offers multiple verification methods, choose SMS verification first by default.
 
@@ -29,11 +35,12 @@ Do not keep retrying login while blocked.
 
 ## Required Behavior
 
-1. Trigger gate request right away.
-2. Wait on gate result.
-3. Continue only after the first reply is received and inspect that reply yourself.
-4. If timeout, stop login attempts and report clearly.
-5. If SMS verification is unavailable or fails, switch to another available method and keep the same gate-based wait behavior.
+1. If the blocker is CAPTCHA/image/text recognition, solve it yourself in-browser first instead of opening the gate.
+2. Trigger gate request right away once the page is explicitly waiting for human-only input.
+3. Wait on gate result.
+4. Continue only after the first reply is received and inspect that reply yourself.
+5. If timeout, stop login attempts and report clearly.
+6. If SMS verification is unavailable or fails, switch to another available method and keep the same gate-based wait behavior.
 
 ## Scope Rules
 
