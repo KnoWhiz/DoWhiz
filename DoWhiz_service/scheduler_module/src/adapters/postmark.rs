@@ -450,7 +450,13 @@ fn contains_replyable_address(value: &str) -> bool {
     emails.iter().any(|address| !is_no_reply_address(address))
 }
 
-const NO_REPLY_LOCAL_PARTS: [&str; 3] = ["noreply", "no-reply", "do-not-reply"];
+const NO_REPLY_LOCAL_PARTS: [&str; 5] = [
+    "noreply",
+    "no-reply",
+    "do-not-reply",
+    "mailer-daemon",
+    "postmaster",
+];
 
 fn is_no_reply_address(address: &str) -> bool {
     let normalized = address.trim().to_ascii_lowercase();
@@ -507,6 +513,12 @@ mod tests {
     #[test]
     fn replyable_recipients_filters_noreply() {
         let result = replyable_recipients("noreply@example.com, user@example.com");
+        assert_eq!(result, vec!["user@example.com"]);
+    }
+
+    #[test]
+    fn replyable_recipients_filters_mailer_daemon() {
+        let result = replyable_recipients("mailer-daemon@googlemail.com, user@example.com");
         assert_eq!(result, vec!["user@example.com"]);
     }
 }
