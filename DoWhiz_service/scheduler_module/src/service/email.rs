@@ -43,6 +43,15 @@ pub fn process_inbound_payload(
 ) -> Result<(), BoxError> {
     info!("processing inbound payload into workspace");
 
+    if is_human_approval_gate_reply(payload) {
+        let subject = payload.subject.as_deref().unwrap_or("");
+        info!(
+            "skipping human approval gate reply from normal inbound workflow: subject={}",
+            subject
+        );
+        return Ok(());
+    }
+
     let sender = payload.from.as_deref().unwrap_or("").trim();
     if is_blacklisted_sender(sender, &config.employee_directory.service_addresses) {
         info!("skipping blacklisted sender: {}", sender);
@@ -392,6 +401,28 @@ fn resolve_inbound_requester(
         identifier_type: "email",
         identifier: user_email,
     })
+}
+
+fn is_human_approval_gate_reply(payload: &PostmarkInbound) -> bool {
+    let subject = payload.subject.as_deref().unwrap_or("");
+    is_human_approval_gate_subject(subject)
+}
+
+fn is_human_approval_gate_subject(subject: &str) -> bool {
+    let normalized = subject.trim();
+    if normalized.is_empty() {
+        return false;
+    }
+    let lowered = normalized.to_ascii_lowercase();
+    if lowered.starts_with("[hag:") {
+        return true;
+    }
+    if let Some(rest) = lowered.strip_prefix("re:") {
+        if rest.trim_start().starts_with("[hag:") {
+            return true;
+        }
+    }
+    false
 }
 
 fn thread_key(payload: &PostmarkInbound, raw_payload: &[u8]) -> String {
@@ -818,5 +849,34 @@ mod tests {
         // Account lookup should use "email" identifier type
         assert_eq!(requester.identifier_type, "email");
         assert_eq!(requester.identifier, "alice@example.com");
+    }
+
+    #[test]
+    fn human_approval_gate_subject_detection_matches_hag_threads() {
+        assert!(is_human_approval_gate_subject(
+            "[HAG:49d7368d-95a6-4c6c-91cc-8c30a4583c35] 2FA approval needed"
+        ));
+        assert!(is_human_approval_gate_subject(
+            "Re: [HAG:49d7368d-95a6-4c6c-91cc-8c30a4583c35] 2FA approval needed"
+        ));
+        assert!(is_human_approval_gate_subject(
+            "re:    [hag:49d7368d-95a6-4c6c-91cc-8c30a4583c35] 2fa approval needed"
+        ));
+        assert!(!is_human_approval_gate_subject("Re: Project update"));
+        assert!(!is_human_approval_gate_subject(""));
+    }
+
+    #[test]
+    fn is_human_approval_gate_reply_uses_subject_field() {
+        let payload: PostmarkInbound = serde_json::from_str(
+            r#"{
+  "From": "Admin <admin@dowhiz.com>",
+  "To": "DoWhiz <dowhiz@deep-tutor.com>",
+  "Subject": "Re: [HAG:abc-123] 2FA approval needed for account",
+  "TextBody": "APPROVED"
+}"#,
+        )
+        .expect("payload");
+        assert!(is_human_approval_gate_reply(&payload));
     }
 }

@@ -85,6 +85,7 @@ pub(super) fn build_prompt(
     let filesystem_security_section =
         build_allowed_paths_section(&user_identities.allowed_user_ids);
     let web_auth_capabilities_section = build_web_auth_capabilities_section();
+    let human_approval_gate_section = build_human_approval_gate_section();
 
     // Build registration prompt section if user doesn't have a unified account
     // and we haven't prompted them yet in this thread
@@ -142,6 +143,7 @@ Scheduling:
 
 {cross_channel_capabilities}
 {web_auth_capabilities_section}
+{human_approval_gate_section}
 {user_identities_section}
 Rules:
 - Each workspace includes a `.env` file at the workspace root. You may edit it to manage per-user secrets; updates are synced back after the task completes.
@@ -162,6 +164,7 @@ Rules:
         github_coauthor_section = github_coauthor_section,
         cross_channel_capabilities = build_cross_channel_capabilities_section(),
         web_auth_capabilities_section = web_auth_capabilities_section,
+        human_approval_gate_section = human_approval_gate_section,
         user_identities_section = user_identities_section,
         filesystem_security_section = filesystem_security_section,
         registration_section = registration_section,
@@ -197,6 +200,25 @@ fn build_web_auth_capabilities_section() -> &'static str {
     If npm must be used, set `NPM_CONFIG_CACHE=/tmp/.npm` first.
 - Never include raw credentials in any user-facing reply, logs, or generated files.
 - Do not conclude "cannot access due to sign-in" until browser-based sign-in has been attempted.
+
+"#
+}
+
+fn build_human_approval_gate_section() -> &'static str {
+    r#"Human Approval Gate (2FA / verification challenges):
+- If login/auth flow asks for OTP/passcode/device approval/number tap (that requires a human on another device/account), immediately use the `human-approval-gate` skill.
+- If the page shows CAPTCHA/image puzzle/text recognition challenge, do NOT call `human_approval_gate` for that step; solve CAPTCHA directly in browser first.
+- If multiple verification methods are available on the same challenge page, prefer SMS verification first by default. If SMS is unavailable or fails, fall back to another method and keep using `human_approval_gate` for human input.
+- If the requested login cannot proceed because required credential or challenge answer is missing (email/username/password/passcode), request it through `human_approval_gate` instead of guessing.
+- Use the `human_approval_gate` CLI and pause all unrelated work while waiting for result.
+- Primary flow:
+  1) Run `human_approval_gate request ... --wait --timeout-minutes 30`
+  2) Continue only if status is `approved`
+  3) If status is `timeout` or `rejected`, stop login attempts and report clearly
+- Scope and recipient rules:
+  - Agent logging into owner/admin account (for example Oliver's own Google/Notion/X, `dowhiz@deep-tutor.com`, `oliver@dowhiz.com`): always use `--scope admin` (sends to `admin@dowhiz.com`)
+  - Agent logging into user's account: `--scope user --recipient <that user email>`
+- Never keep retrying password/sign-in while waiting for verification.
 
 "#
 }
@@ -915,6 +937,34 @@ mod tests {
         assert!(prompt.contains("SKILL.md"));
         assert!(prompt.contains("/app/.cache/ms-playwright/*/chrome-linux*/chrome"));
         assert!(prompt.contains("Never include raw credentials"));
+    }
+
+    #[test]
+    fn build_prompt_includes_human_approval_gate_instructions() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            true,
+            &UserIdentities::default(),
+        );
+
+        assert!(prompt.contains("Human Approval Gate"));
+        assert!(prompt.contains("human_approval_gate request"));
+        assert!(prompt.contains("--scope admin"));
+        assert!(prompt.contains("--scope user --recipient"));
+        assert!(prompt.contains("timeout"));
+        assert!(prompt.contains("do NOT call `human_approval_gate`"));
+        assert!(prompt.contains("required credential"));
+        assert!(prompt.contains("prefer SMS verification first by default"));
     }
 
     #[test]

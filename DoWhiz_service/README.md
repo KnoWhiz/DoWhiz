@@ -65,6 +65,7 @@ Key binaries (from `scheduler_module/src/bin`):
 | `set_postmark_inbound_hook` | Utility to update Postmark inbound webhook |
 | `inbound_fanout` | Legacy fanout ingress helper |
 | `google-docs` / `google-sheets` / `google-slides` | Workspace integration CLI tools |
+| `human_approval_gate` | CLI for OTP/2FA approval requests (email + wait for reply) |
 
 Key scripts:
 
@@ -203,6 +204,13 @@ Azure ACI execution path (required vars):
 - Google Drive push: `GOOGLE_DRIVE_PUSH_ENABLED`, `GOOGLE_DRIVE_WEBHOOK_URL`
 - Browser-based web auth for private Notion/Google pages is agent-driven at task runtime
   (no service-side bootstrap step).
+- `human_approval_gate` (via skill `human-approval-gate`) provides a blocking
+  approval flow for login OTP/device-approval steps. It sends an email request
+  and waits for same-thread reply (`approved`, `denied`, or `CODE: <value>`),
+  typically with a 30-minute timeout. Sender resolution priority is `--from` >
+  `HUMAN_APPROVAL_FROM` > employee mailbox from employee config >
+  `POSTMARK_FROM_EMAIL` > `POSTMARK_TEST_FROM`. HAG-thread replies (`[HAG:...]`)
+  are ignored by normal inbound task routing to prevent recursive Email->task loops.
 - ACI run_task sets Playwright/NPM runtime defaults for mounted workspaces:
   `PLAYWRIGHT_MCP_EXECUTABLE_PATH` auto-discovery (`chrome-linux` / `chrome-linux64`),
   `PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright`,

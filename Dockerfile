@@ -117,6 +117,7 @@ COPY --from=builder /app/DoWhiz_service/target/release/rust_service /app/rust_se
 COPY --from=builder /app/DoWhiz_service/target/release/inbound_fanout /app/inbound_fanout
 COPY --from=builder /app/DoWhiz_service/target/release/inbound_gateway /app/inbound_gateway
 COPY --from=builder /app/DoWhiz_service/target/release/google-docs /app/bin/google-docs
+COPY DoWhiz_service/bin/ /app/bin/
 
 # Copy employee configuration and personas
 COPY DoWhiz_service/employee.toml /app/DoWhiz_service/employee.toml
@@ -125,6 +126,7 @@ COPY DoWhiz_service/employees/ /app/DoWhiz_service/employees/
 # Copy skills directory for Codex
 COPY DoWhiz_service/skills/ /app/DoWhiz_service/skills/
 
+RUN chmod +x /app/bin/human_approval_gate || true
 RUN chown -R app:nogroup /app/DoWhiz_service /app/bin
 
 USER app
