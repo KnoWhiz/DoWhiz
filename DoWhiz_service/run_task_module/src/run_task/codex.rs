@@ -1780,9 +1780,18 @@ fn resolve_employee_config_path(raw_path: &str) -> PathBuf {
     if path.is_absolute() {
         path
     } else {
-        env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(path)
+        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let cwd_candidate = cwd.join(&path);
+        if cwd_candidate.exists() {
+            return cwd_candidate;
+        }
+
+        let service_root_candidate = do_whiz_service_root_dir().join(path);
+        if service_root_candidate.exists() {
+            return service_root_candidate;
+        }
+
+        cwd_candidate
     }
 }
 
@@ -2426,6 +2435,24 @@ mod tests {
         }
     }
 
+    struct CurrentDirGuard {
+        previous: PathBuf,
+    }
+
+    impl CurrentDirGuard {
+        fn set(path: &Path) -> Self {
+            let previous = env::current_dir().expect("read current dir");
+            env::set_current_dir(path).expect("set current dir");
+            Self { previous }
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            let _ = env::set_current_dir(&self.previous);
+        }
+    }
+
     #[test]
     fn test_extract_token_usage_success() {
         let output = r#"{"type":"thread.started","thread_id":"abc123"}
@@ -2716,6 +2743,45 @@ addresses = ["dowhiz@deep-tutor.com"]
         assert!(overrides
             .iter()
             .any(|(k, v)| k == "POSTMARK_TEST_FROM" && v == "mini-mouse@deep-tutor.com"));
+    }
+
+    #[test]
+    fn test_collect_human_approval_gate_env_overrides_resolves_relative_employee_config_path() {
+        let _lock = env_lock();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let service_root = temp.path().join("DoWhiz_service");
+        fs::create_dir_all(&service_root).expect("create service root");
+
+        let config_path = service_root.join("employee.staging.toml");
+        fs::write(
+            &config_path,
+            r#"
+default_employee_id = "boiled_egg"
+
+[[employees]]
+id = "boiled_egg"
+addresses = ["dowhiz@deep-tutor.com"]
+"#,
+        )
+        .expect("write employee config");
+
+        let _cwd_guard = CurrentDirGuard::set(temp.path());
+        let _guards = vec![
+            EnvVarGuard::set("EMPLOYEE_CONFIG_PATH", "employee.staging.toml"),
+            EnvVarGuard::set("EMPLOYEE_ID", "boiled_egg"),
+            EnvVarGuard::unset("HUMAN_APPROVAL_FROM"),
+            EnvVarGuard::unset("POSTMARK_FROM_EMAIL"),
+            EnvVarGuard::unset("HUMAN_APPROVAL_REPLY_TO"),
+            EnvVarGuard::set("POSTMARK_TEST_FROM", "mini-mouse@deep-tutor.com"),
+        ];
+
+        let overrides = collect_human_approval_gate_env_overrides();
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "HUMAN_APPROVAL_FROM" && v == "dowhiz@deep-tutor.com"));
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "HUMAN_APPROVAL_REPLY_TO" && v == "dowhiz@deep-tutor.com"));
     }
 
     #[test]
