@@ -96,3 +96,4 @@ The gate also parses simple natural replies (approved/denied keywords), but expl
 - Keep waiting in this command; do not run unrelated steps while waiting.
 - Reuse the same challenge thread; do not spam multiple requests unless previous one timed out.
 - Never include raw credentials in outbound messages.
+- Sender identity priority is: `--from` > `HUMAN_APPROVAL_FROM` > employee mailbox from `employee.toml`/`employee.staging.toml` > `POSTMARK_FROM_EMAIL` > `POSTMARK_TEST_FROM`.
