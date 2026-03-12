@@ -202,6 +202,37 @@ jobs:
           chmod 600 "$APP_DIR/.env"
           EOF
 
+      - name: Restart DoWhiz services before ACI build
+        run: |
+          ssh -F ~/.ssh/config azureproduction << 'EOF'
+          set -e
+          if [ -s /home/${{ secrets.PROD_AZURE_VM_USER }}/.nvm/nvm.sh ]; then
+            source /home/${{ secrets.PROD_AZURE_VM_USER }}/.nvm/nvm.sh
+          fi
+          APP_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
+          ENV_FILE="$APP_DIR/.env"
+          set -a
+          source "$ENV_FILE"
+          set +a
+
+          if pm2 describe dw_worker >/dev/null 2>&1; then
+            pm2 restart dw_worker --update-env
+          else
+            pm2 start "$APP_DIR/target/release/rust_service" --name dw_worker --cwd "$APP_DIR" -- --host 0.0.0.0 --port "${RUST_SERVICE_PORT:-9001}"
+          fi
+
+          if pm2 describe dw_gateway >/dev/null 2>&1; then
+            pm2 restart dw_gateway --update-env
+          else
+            pm2 start "$APP_DIR/target/release/inbound_gateway" --name dw_gateway --cwd "$APP_DIR"
+          fi
+
+          worker_health="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 "http://127.0.0.1:${RUST_SERVICE_PORT:-9001}/health" || true)"
+          gateway_health="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 "http://127.0.0.1:${GATEWAY_PORT:-9100}/health" || true)"
+          [[ "$worker_health" == "200" ]] || { echo "Early worker health check failed (HTTP $worker_health)" >&2; exit 1; }
+          [[ "$gateway_health" == "200" ]] || { echo "Early gateway health check failed (HTTP $gateway_health)" >&2; exit 1; }
+          EOF
+
       - name: Build and push ACI image on Azure VM
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'

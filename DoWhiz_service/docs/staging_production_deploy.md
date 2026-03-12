@@ -82,8 +82,9 @@ Deployment workflows should:
 1. Write `.env` from `ENV_COMMON + ENV_STAGING/ENV_PROD`.
 2. Fail if `.env` contains keys matching `^(STAGING_|PROD_)`.
 3. Validate `GATEWAY_CONFIG_PATH` and `EMPLOYEE_CONFIG_PATH` exist and match expected target files.
-4. If Azure ACI backend is enabled (`RUN_TASK_EXECUTION_BACKEND=azure_aci` or `auto` with `DEPLOY_TARGET in {staging,production}`), trim `DoWhiz_service/target` on the VM before `az acr build` (drop debug/intermediate artifacts, keep required release binaries), then rebuild and push `RUN_TASK_AZURE_ACI_IMAGE` before restarting services.
-5. Source `.env` before PM2 restarts and use `pm2 restart --update-env` so runtime env changes (for example `EMPLOYEE_ID`) are applied to existing processes.
+4. After release binaries and `.env` are installed, source `.env` and restart PM2-managed services immediately so live traffic moves onto the new worker/gateway before any long-running follow-up work.
+5. If Azure ACI backend is enabled (`RUN_TASK_EXECUTION_BACKEND=azure_aci` or `auto` with `DEPLOY_TARGET in {staging,production}`), trim `DoWhiz_service/target` on the VM before `az acr build` (drop debug/intermediate artifacts, keep required release binaries), then rebuild and push `RUN_TASK_AZURE_ACI_IMAGE`.
+6. Use `pm2 restart --update-env` so runtime env changes (for example `EMPLOYEE_ID`) are applied to existing processes, and finish with local health checks.
 
 ## 5) Health Checks
 
