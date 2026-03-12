@@ -367,6 +367,99 @@
         color: var(--text-muted, #888);
       }
 
+      .task-info-btn {
+        background: transparent;
+        border: 1px solid var(--text-muted, #888);
+        color: var(--text-muted, #888);
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        font-size: 12px;
+        font-weight: bold;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-left: 0.5rem;
+        transition: all 0.2s;
+      }
+
+      .task-info-btn:hover {
+        background: var(--text-muted, #888);
+        color: var(--bg-primary, #1a1a2e);
+      }
+
+
+      .task-modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+      }
+      .task-modal-overlay.active {
+        display: flex;
+      }
+      .task-modal {
+        background: var(--bg-secondary, #16213e);
+        border-radius: 12px;
+        padding: 1.5rem;
+        max-width: 500px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      }
+      .task-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid var(--border-color, #333);
+      }
+      .task-modal-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--text-primary, #fff);
+      }
+      .task-modal-close {
+        background: transparent;
+        border: none;
+        color: var(--text-muted, #888);
+        font-size: 1.5rem;
+        cursor: pointer;
+        line-height: 1;
+      }
+      .task-modal-close:hover {
+        color: var(--text-primary, #fff);
+      }
+      .task-modal-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid var(--border-color, #333);
+      }
+      .task-modal-row:last-child {
+        border-bottom: none;
+      }
+      .task-modal-label {
+        color: var(--text-muted, #888);
+        font-size: 0.9rem;
+      }
+      .task-modal-value {
+        color: var(--text-primary, #fff);
+        font-size: 0.9rem;
+        text-align: right;
+        word-break: break-all;
+        max-width: 60%;
+      }
+
       #refresh-tasks-btn {
         padding: 0.5rem 1rem;
         font-size: 0.85rem;
@@ -736,6 +829,16 @@
     <script src="/theme.js"></script>
   </head>
   <body>
+    <div id="task-modal-overlay" class="task-modal-overlay" onclick="closeTaskModal(event)">
+      <div class="task-modal" onclick="event.stopPropagation()">
+        <div class="task-modal-header">
+          <span class="task-modal-title">Task Details</span>
+          <button class="task-modal-close" onclick="closeTaskModal()">&times;</button>
+        </div>
+        <div id="task-modal-content"></div>
+      </div>
+    </div>
+
     <div class="page">
       <header class="page-header">
         <a class="brand" href="/">Do<span class="accent">Whiz</span></a>
@@ -2063,7 +2166,7 @@
 
       // Render a single task item
       function renderTask(task) {
-        const status = task.execution_status || 'pending';
+        const status = task.execution_status || 'running';
         const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
 
         // Format dates
@@ -2080,6 +2183,9 @@
         } else if (task.schedule_type === 'cron' && task.next_run) {
           scheduleDisplay = `Next: ${formatDate(task.next_run)}`;
         }
+
+        // Encode task data for modal
+        const taskData = encodeURIComponent(JSON.stringify(task));
 
         return `
           <li class="task-item">
@@ -2108,6 +2214,7 @@
                   <span>${escapeHtml(parseErrorMessage(task.error_message))}</span>
                 </span>
               ` : ''}
+              <button class="task-info-btn" onclick="showTaskModal('${taskData}')" title="View details" style="margin-left: auto;">i</button>
             </div>
           </li>
         `;
@@ -2145,6 +2252,46 @@
         // Fallback: extract first meaningful line
         const firstLine = errorMessage.split('\n')[0];
         return firstLine.length > 150 ? firstLine.substring(0, 150) + '...' : firstLine;
+      }
+
+      // Show task details modal
+      function showTaskModal(encodedTask) {
+        const task = JSON.parse(decodeURIComponent(encodedTask));
+        const modalContent = document.getElementById('task-modal-content');
+
+        const formatModalDate = (dateStr) => {
+          if (!dateStr) return 'N/A';
+          const date = new Date(dateStr);
+          return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+        };
+
+        // Build modal content
+        const rows = [
+          { label: 'Task ID', value: task.id || 'N/A' },
+          { label: 'Channel', value: task.channel || 'N/A' },
+          { label: 'Status', value: task.execution_status || 'running' },
+          { label: 'Enabled', value: task.enabled ? 'Yes' : 'No' },
+          { label: 'Schedule Type', value: task.schedule_type || 'N/A' },
+          { label: 'Created At', value: formatModalDate(task.created_at) },
+          { label: 'Next Run', value: formatModalDate(task.next_run) },
+          { label: 'Last Run', value: formatModalDate(task.last_run) },
+        ];
+
+        modalContent.innerHTML = rows.map(row => `
+          <div class="task-modal-row">
+            <span class="task-modal-label">${row.label}</span>
+            <span class="task-modal-value">${escapeHtml(String(row.value))}</span>
+          </div>
+        `).join('');
+
+        document.getElementById('task-modal-overlay').classList.add('active');
+      }
+
+      // Close task details modal
+      function closeTaskModal(event) {
+        if (!event || event.target.id === 'task-modal-overlay') {
+          document.getElementById('task-modal-overlay').classList.remove('active');
+        }
       }
 
       // Start polling for task updates
