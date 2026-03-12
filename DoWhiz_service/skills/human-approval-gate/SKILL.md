@@ -1,6 +1,6 @@
 ---
 name: human-approval-gate
-description: Use when browser/login flow asks for OTP, passcode, approval tap, or any user/admin verification step. Sends a request email and blocks until reply or timeout using the human_approval_gate CLI.
+description: Use when browser/login flow asks for OTP, passcode, approval tap, or any user/admin verification step. Sends a request email and blocks until the first reply or timeout using the human_approval_gate CLI.
 allowed-tools: Bash(human_approval_gate:*), Bash(python3:*), Bash(cat:*), Bash(test:*), Bash(date:*)
 ---
 
@@ -18,6 +18,11 @@ Do NOT use this skill for CAPTCHA/image puzzle/text-recognition steps. Solve CAP
 
 When a page offers multiple verification methods, choose SMS verification first by default.
 
+Trigger this skill only after the website has already initiated the challenge. For example:
+- click "send code", "text me a code", "email me a code", or similar first
+- choose the verification method first if the site asks
+- wait until the page is explicitly waiting for the code / tap / approval, then send the human approval email
+
 For owner/admin login flows, if account email/username is missing, try known admin identifiers first (`dowhiz@deep-tutor.com` on staging, `oliver@dowhiz.com` on production). Do not use the approval gate only to ask for identifier when these known values are available.
 
 Do not keep retrying login while blocked.
@@ -26,8 +31,8 @@ Do not keep retrying login while blocked.
 
 1. Trigger gate request right away.
 2. Wait on gate result.
-3. Continue only if approved.
-4. If timeout/rejected, stop login attempts and report clearly.
+3. Continue only after the first reply is received and inspect that reply yourself.
+4. If timeout, stop login attempts and report clearly.
 5. If SMS verification is unavailable or fails, switch to another available method and keep the same gate-based wait behavior.
 
 ## Scope Rules
@@ -56,7 +61,7 @@ fi
 $HAG_CMD request \
   --scope admin \
   --account-label "Oliver Google account" \
-  --action-text "Please approve Google sign-in and send the OTP code if shown" \
+  --action-text "Please reply in this thread with the verification code or approval result shown by Google" \
   --context "Agent is on Google verification page" \
   --timeout-minutes 30 \
   --wait
@@ -69,7 +74,7 @@ $HAG_CMD request \
   --scope user \
   --recipient "user@example.com" \
   --account-label "User X account" \
-  --action-text "Please reply CODE: <code>" \
+  --action-text "Please reply in this thread with the code or any instructions shown during login" \
   --timeout-minutes 30 \
   --wait
 ```
@@ -90,25 +95,19 @@ $HAG_CMD status --challenge-id "<challenge_id>" --refresh
 ## Return States
 
 The command returns JSON with `status`:
-- `approved`: continue login flow (use `resolution.code` when present)
-- `rejected`: stop login flow
+- `replied`: inspect `reply` and continue only if the reply contains what the page needs
 - `timeout`: stop login flow and tell user/admin to restart verification
 - `pending`: still waiting
 - `error`: command/runtime issue
 
-## Reply Format Expected in Email
+## Reply Handling
 
-Tell recipient to reply in the same thread with one of:
-- `CODE: 123456`
-- `APPROVED`
-- `DENIED`
-
-The gate also parses simple natural replies (approved/denied keywords), but explicit format is preferred.
+No rigid reply format is required. Ask the recipient to reply in the same thread with the verification code, approval result, or other information shown by the site. The CLI returns the full reply details to the agent, and the agent decides how to interpret them.
 
 ## Important Notes
 
 - Keep waiting in this command; do not run unrelated steps while waiting.
 - Reuse the same challenge thread; do not spam multiple requests unless previous one timed out.
 - Never include raw credentials in outbound messages.
-- Sender identity priority is: `--from` > `HUMAN_APPROVAL_FROM` > employee mailbox from `employee.toml`/`employee.staging.toml` > `POSTMARK_FROM_EMAIL` > `POSTMARK_TEST_FROM`.
+- Sender identity priority is: `--from` > `HUMAN_APPROVAL_FROM` > employee mailbox from `employee.toml`/`employee.staging.toml`.
 - HAG reply emails (`[HAG:...]` threads) are consumed by the gate flow and are not routed into normal Email->task execution.
