@@ -27,6 +27,7 @@ use crate::{ModuleExecutor, Scheduler};
 use tokio::task;
 
 use super::agent_market::{agent_market_router, AgentMarketState};
+use super::analytics::{analytics_router, AnalyticsState};
 use super::auth::{auth_router, AuthState};
 use super::billing::{billing_router, BillingState};
 
@@ -197,6 +198,7 @@ pub async fn run_server(
         user_store: Some(user_store.clone()),
         users_root: Some(config.users_root.clone()),
     };
+    let analytics_state = AnalyticsState::from_env(auth_state.account_store.clone());
     let agent_market_state = AgentMarketState::from_env();
 
     let mut app = Router::new()
@@ -206,6 +208,7 @@ pub async fn run_server(
         .route("/slack/oauth/callback", get(slack_oauth_callback))
         .with_state(state)
         .merge(auth_router(auth_state))
+        .merge(analytics_router(analytics_state))
         .merge(agent_market_router(agent_market_state));
 
     // Add billing routes if Stripe is configured

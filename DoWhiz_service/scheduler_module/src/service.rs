@@ -1,4 +1,5 @@
 pub mod agent_market;
+pub mod analytics;
 pub mod auth;
 pub mod billing;
 mod config;
