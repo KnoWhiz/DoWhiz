@@ -15,7 +15,6 @@ import struttonPigeonImg from './assets/Strutton-Pigeon.jpg';
 import fluffyElephantImg from './assets/Fluffy-Elephant.jpg';
 import plushAxolotlImg from './assets/Plush-Axolotl.jpg';
 
-const WAITLIST_FORM_URL = 'https://docs.google.com/forms/d/1UgZpFgYxq0uSjmVdai1mpjbfj2GxcWakFt3YKL8by34/viewform';
 const SITE_URL = 'https://dowhiz.com';
 const LOGO_URL = `${SITE_URL}/assets/DoWhiz.jpeg`;
 const SUPPORT_EMAIL = 'admin@dowhiz.com';
@@ -1296,6 +1295,11 @@ function App() {
     }
   ];
 
+  const oliverMember = teamMembers.find((member) => member.name === 'Oliver');
+  const heroPrimaryCtaHref = oliverMember
+    ? buildMailtoLink(oliverMember.email, oliverMember.subject, oliverMember.body)
+    : 'mailto:oliver@dowhiz.com';
+
   return (
     <div className="app-container">
       <script
@@ -1415,8 +1419,8 @@ function App() {
               Collaborate with specialized digital employees across operations, delivery, coding, docs, and GTM, all connected by shared memory.
             </p>
             <div className="hero-cta">
-              <a className="btn btn-primary" href={WAITLIST_FORM_URL} target="_blank" rel="noopener noreferrer">
-                Join waitlist
+              <a className="btn btn-primary" href={heroPrimaryCtaHref} target="_blank" rel="noopener noreferrer">
+                try DoWhiz service today
               </a>
               <a className="btn btn-secondary" href="/demo-videos/">
                 Watch demo videos
