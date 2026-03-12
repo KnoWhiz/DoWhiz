@@ -367,7 +367,16 @@ pub(super) fn is_blacklisted_sender(sender: &str, service_addresses: &HashSet<St
 }
 
 fn is_blacklisted_address(address: &str, service_addresses: &HashSet<String>) -> bool {
-    mailbox::is_service_address(address, service_addresses)
+    mailbox::is_service_address(address, service_addresses) || is_auto_reply_address(address)
+}
+
+fn is_auto_reply_address(address: &str) -> bool {
+    let normalized = address.trim().to_ascii_lowercase();
+    let local = normalized.split('@').next().unwrap_or("");
+    matches!(
+        local,
+        "noreply" | "no-reply" | "do-not-reply" | "mailer-daemon" | "postmaster"
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -878,5 +887,18 @@ mod tests {
         )
         .expect("payload");
         assert!(is_human_approval_gate_reply(&payload));
+    }
+
+    #[test]
+    fn blacklisted_sender_detects_mailer_daemon() {
+        let service_addresses = HashSet::new();
+        assert!(is_blacklisted_sender(
+            "Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
+            &service_addresses
+        ));
+        assert!(is_blacklisted_sender(
+            "postmaster@example.com",
+            &service_addresses
+        ));
     }
 }

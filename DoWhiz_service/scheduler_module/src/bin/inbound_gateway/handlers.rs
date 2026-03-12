@@ -598,24 +598,17 @@ pub(super) async fn ingest_wechat(
     };
 
     let external_message_id = message.message_id.clone();
-    let envelope = match build_envelope(
-        route,
-        Channel::WeChat,
-        external_message_id,
-        &message,
-        &body,
-    )
-    .await
-    {
-        Ok(envelope) => envelope,
-        Err(err) => {
-            error!("gateway failed to store raw payload: {}", err);
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({"status": "payload_store_failed"})),
-            );
-        }
-    };
+    let envelope =
+        match build_envelope(route, Channel::WeChat, external_message_id, &message, &body).await {
+            Ok(envelope) => envelope,
+            Err(err) => {
+                error!("gateway failed to store raw payload: {}", err);
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({"status": "payload_store_failed"})),
+                );
+            }
+        };
     enqueue_envelope(state.queue.clone(), envelope).await
 }
 
@@ -649,7 +642,13 @@ pub(super) async fn enqueue_envelope(
     }
 }
 
-const NO_REPLY_MARKERS: [&str; 3] = ["noreply", "no-reply", "do-not-reply"];
+const NO_REPLY_MARKERS: [&str; 5] = [
+    "noreply",
+    "no-reply",
+    "do-not-reply",
+    "mailer-daemon",
+    "postmaster",
+];
 
 fn payload_contains_no_reply_marker(payload: &PostmarkInboundPayload) -> bool {
     let candidates = [payload.from.as_deref(), payload.reply_to.as_deref()];
@@ -950,6 +949,13 @@ mod tests {
         let payload: PostmarkInboundPayload =
             serde_json::from_str(r#"{"From":"user@example.com"}"#).expect("payload");
         assert!(!payload_contains_no_reply_marker(&payload));
+    }
+
+    #[test]
+    fn payload_contains_no_reply_marker_detects_mailer_daemon() {
+        let payload: PostmarkInboundPayload =
+            serde_json::from_str(r#"{"From":"mailer-daemon@googlemail.com"}"#).expect("payload");
+        assert!(payload_contains_no_reply_marker(&payload));
     }
 
     #[test]
