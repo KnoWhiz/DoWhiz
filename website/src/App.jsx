@@ -1420,7 +1420,7 @@ function App() {
             </p>
             <div className="hero-cta">
               <a className="btn btn-primary" href={heroPrimaryCtaHref} target="_blank" rel="noopener noreferrer">
-                try DoWhiz service today
+                Try DoWhiz service today
               </a>
               <a className="btn btn-secondary" href="/demo-videos/">
                 Watch demo videos
