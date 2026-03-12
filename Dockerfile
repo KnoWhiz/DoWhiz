@@ -127,6 +127,7 @@ COPY DoWhiz_service/employees/ /app/DoWhiz_service/employees/
 COPY DoWhiz_service/skills/ /app/DoWhiz_service/skills/
 
 RUN chmod +x /app/bin/human_approval_gate || true
+RUN ln -sf /app/bin/human_approval_gate /usr/local/bin/human_approval_gate
 RUN chown -R app:nogroup /app/DoWhiz_service /app/bin
 
 USER app

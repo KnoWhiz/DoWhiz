@@ -209,8 +209,11 @@ fn build_human_approval_gate_section() -> &'static str {
 - If login/auth flow asks for OTP/passcode/device approval/number tap (that requires a human on another device/account), immediately use the `human-approval-gate` skill.
 - If the page shows CAPTCHA/image puzzle/text recognition challenge, do NOT call `human_approval_gate` for that step; solve CAPTCHA directly in browser first.
 - If multiple verification methods are available on the same challenge page, prefer SMS verification first by default. If SMS is unavailable or fails, fall back to another method and keep using `human_approval_gate` for human input.
-- If the requested login cannot proceed because required credential or challenge answer is missing (email/username/password/passcode), request it through `human_approval_gate` instead of guessing.
+- If login identifier (email/username) is missing for owner/admin account login, try known admin identifiers first (`dowhiz@deep-tutor.com` on staging, `oliver@dowhiz.com` on production) before requesting help through `human_approval_gate`.
+- For owner/admin account login, do NOT trigger `human_approval_gate` only to ask for account email/username when a known identifier is already available.
+- If the requested login still cannot proceed because required credential/challenge input is missing after trying known safe identifiers, request it through `human_approval_gate` instead of guessing.
 - Use the `human_approval_gate` CLI and pause all unrelated work while waiting for result.
+- If `human_approval_gate` is not found on PATH, retry using `/app/bin/human_approval_gate` or `python3 .agents/skills/human-approval-gate/scripts/human_approval_gate.py`.
 - Primary flow:
   1) Run `human_approval_gate request ... --wait --timeout-minutes 30`
   2) Continue only if status is `approved`
@@ -965,6 +968,9 @@ mod tests {
         assert!(prompt.contains("do NOT call `human_approval_gate`"));
         assert!(prompt.contains("required credential"));
         assert!(prompt.contains("prefer SMS verification first by default"));
+        assert!(prompt.contains("dowhiz@deep-tutor.com"));
+        assert!(prompt.contains("oliver@dowhiz.com"));
+        assert!(prompt.contains("/app/bin/human_approval_gate"));
     }
 
     #[test]
