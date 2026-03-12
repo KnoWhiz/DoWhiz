@@ -176,6 +176,21 @@ pub struct AccountStore {
     prefer_fallback: Arc<AtomicBool>,
 }
 
+fn log_record_analytics_event_error(
+    context: &str,
+    event: &AnalyticsEventInsert,
+    err: &AccountStoreError,
+) {
+    let account_suffix = event
+        .account_id
+        .map(|id| format!(" for account {}", id))
+        .unwrap_or_default();
+    warn!(
+        "{}: failed to record analytics event {}{}: {}",
+        context, event.event_name, account_suffix, err
+    );
+}
+
 impl AccountStore {
     pub fn from_env() -> Result<Self, AccountStoreError> {
         let primary_db_url = env::var("SUPABASE_DB_URL")
@@ -779,6 +794,29 @@ impl AccountStore {
         Ok(inserted > 0)
     }
 
+    pub fn record_analytics_event_detached(
+        self: &Arc<Self>,
+        event: AnalyticsEventInsert,
+        context: &'static str,
+    ) {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let store = Arc::clone(self);
+            std::mem::drop(handle.spawn_blocking(move || {
+                if let Err(err) = store.record_analytics_event(&event) {
+                    log_record_analytics_event_error(context, &event, &err);
+                }
+            }));
+            return;
+        }
+
+        let store = Arc::clone(self);
+        std::mem::drop(std::thread::spawn(move || {
+            if let Err(err) = store.record_analytics_event(&event) {
+                log_record_analytics_event_error(context, &event, &err);
+            }
+        }));
+    }
+
     pub fn count_analytics_events(
         &self,
         event_name: &str,
@@ -1128,9 +1166,12 @@ pub fn lookup_account_by_channel(
 
 #[cfg(test)]
 mod tests {
-    use super::account_store_allow_invalid_certs;
+    use super::{account_store_allow_invalid_certs, AccountStore, AnalyticsEventInsert};
+    use chrono::Utc;
+    use serde_json::json;
     use std::env;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex, OnceLock};
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -1173,5 +1214,47 @@ mod tests {
         env::set_var("ACCOUNT_STORE_TLS_ALLOW_INVALID_CERTS", "1");
         assert!(account_store_allow_invalid_certs());
         reset_tls_env();
+    }
+
+    #[test]
+    fn detached_analytics_recording_can_be_called_inside_tokio_runtime() {
+        let store = Arc::new(AccountStore {
+            primary_pool: None,
+            fallback_pool: None,
+            prefer_fallback: Arc::new(AtomicBool::new(false)),
+        });
+        let event = AnalyticsEventInsert {
+            event_name: "auth_smoke".to_string(),
+            source: "server".to_string(),
+            event_timestamp: Utc::now(),
+            account_id: None,
+            auth_user_id: None,
+            anonymous_id: None,
+            session_id: None,
+            workspace_id: None,
+            org_id: None,
+            plan_type: None,
+            environment: Some("test".to_string()),
+            app_version: None,
+            page_path: None,
+            route_path: Some("/auth/signup".to_string()),
+            referrer: None,
+            utm_source: None,
+            utm_medium: None,
+            utm_campaign: None,
+            utm_term: None,
+            utm_content: None,
+            device_type: None,
+            browser: None,
+            os: None,
+            event_key: Some("auth_smoke".to_string()),
+            properties: json!({}),
+        };
+
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        runtime.block_on(async move {
+            store.record_analytics_event_detached(event, "test");
+            tokio::task::yield_now().await;
+        });
     }
 }

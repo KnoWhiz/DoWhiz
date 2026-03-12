@@ -92,12 +92,9 @@ fn track_billing_event(
         event_key,
         properties,
     };
-    if let Err(err) = state.account_store.record_analytics_event(&event) {
-        warn!(
-            "failed to record billing analytics event {}: {}",
-            event_name, err
-        );
-    }
+    state
+        .account_store
+        .record_analytics_event_detached(event, "billing");
 }
 
 // ============================================================================
