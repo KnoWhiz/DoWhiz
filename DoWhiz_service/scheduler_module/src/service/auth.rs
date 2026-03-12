@@ -150,7 +150,7 @@ pub fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
 }
 
 fn track_auth_event(
-    store: &AccountStore,
+    store: &Arc<AccountStore>,
     event_name: &str,
     account_id: Option<Uuid>,
     auth_user_id: Option<Uuid>,
@@ -189,12 +189,7 @@ fn track_auth_event(
         event_key,
         properties,
     };
-    if let Err(err) = store.record_analytics_event(&insert) {
-        warn!(
-            "failed to record auth analytics event {}: {}",
-            event_name, err
-        );
-    }
+    store.record_analytics_event_detached(insert, "auth");
 }
 
 // ============================================================================

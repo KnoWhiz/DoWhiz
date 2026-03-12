@@ -57,7 +57,13 @@ fn contains_replyable_address(value: &str) -> bool {
 }
 
 // Only local-part markers; avoid domain-based filtering.
-const NO_REPLY_LOCAL_PARTS: [&str; 3] = ["noreply", "no-reply", "do-not-reply"];
+const NO_REPLY_LOCAL_PARTS: [&str; 5] = [
+    "noreply",
+    "no-reply",
+    "do-not-reply",
+    "mailer-daemon",
+    "postmaster",
+];
 
 fn is_no_reply_address(address: &str) -> bool {
     let normalized = address.trim().to_ascii_lowercase();
@@ -105,6 +111,8 @@ mod tests {
         assert!(is_no_reply_address("noreply@example.com"));
         assert!(is_no_reply_address("no-reply@example.com"));
         assert!(is_no_reply_address("do-not-reply@example.com"));
+        assert!(is_no_reply_address("mailer-daemon@googlemail.com"));
+        assert!(is_no_reply_address("postmaster@example.com"));
         assert!(!is_no_reply_address("reply@example.com"));
     }
 

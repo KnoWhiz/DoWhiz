@@ -194,12 +194,7 @@ fn track_scheduler_event(
         event_key,
         properties,
     };
-    if let Err(err) = store.record_analytics_event(&event) {
-        warn!(
-            "failed to record scheduler analytics event {} for account {}: {}",
-            event_name, account_id, err
-        );
-    }
+    store.record_analytics_event_detached(event, "scheduler");
 }
 
 fn track_task_start_markers(account_id: Uuid, task: &super::types::RunTaskTask, dedupe_key: &str) {
