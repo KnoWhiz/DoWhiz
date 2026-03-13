@@ -205,12 +205,19 @@ Azure ACI execution path (required vars):
 - Browser-based web auth for private Notion/Google pages is agent-driven at task runtime
   (no service-side bootstrap step).
 - `human_approval_gate` (via skill `human-approval-gate`) provides a blocking
-  approval flow for login OTP/device-approval steps. It sends an email request
-  and waits for the first same-thread reply, typically with a 30-minute timeout.
-  The CLI returns the full reply payload to the agent for interpretation. Sender
-  resolution priority is `--from` > `HUMAN_APPROVAL_FROM` > employee mailbox from
-  employee config. HAG-thread replies (`[HAG:...]`) are ignored by normal inbound
-  task routing to prevent recursive Email->task loops.
+  approval flow for login CAPTCHA/password/OTP/device-approval steps. It sends an
+  email request with the current browser screenshot(s), models the blocker as
+  `captcha`, `password`, or `two_factor`, and waits for the first same-thread
+  reply, typically with a 30-minute timeout. For `two_factor`, callers should
+  only invoke it after the site is explicitly waiting for a code or device
+  approval, and they should include the concrete method details (SMS/email/auth
+  app/device tap). The CLI returns the full reply payload to the agent for
+  interpretation. Each send also writes `.human_approval_gate/events.jsonl` and
+  emits a `HAG_EVENT ...` stderr line containing challenge type plus attachment
+  filenames and sizes, so prod/staging task logs can prove exactly what was
+  sent. Sender resolution priority is `--from` > `HUMAN_APPROVAL_FROM` >
+  employee mailbox from employee config. HAG-thread replies (`[HAG:...]`) are
+  ignored by normal inbound task routing to prevent recursive Email->task loops.
 - ACI run_task sets Playwright/NPM runtime defaults for mounted workspaces:
   `PLAYWRIGHT_MCP_EXECUTABLE_PATH` auto-discovery (`chrome-linux` / `chrome-linux64`),
   `PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright`,

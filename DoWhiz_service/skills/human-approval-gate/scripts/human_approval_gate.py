@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Human approval gate for 2FA flows.
+"""Human approval gate for auth blockers that need a human.
 
 This CLI sends an approval email and optionally blocks while polling Postmark inbound
 messages for the first reply in the same challenge thread.
@@ -8,7 +8,9 @@ messages for the first reply in the same challenge thread.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
+import mimetypes
 import os
 import re
 import sys
@@ -18,6 +20,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from html import escape
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
@@ -37,6 +40,17 @@ SUBJECT_TOKEN_PREFIX = "HAG"
 # Postmark limits metadata key names to at most 20 characters.
 POSTMARK_METADATA_CHALLENGE_ID_KEY = "hag_challenge_id"
 POSTMARK_METADATA_SCOPE_KEY = "hag_scope"
+POSTMARK_METADATA_TYPE_KEY = "hag_type"
+MAX_TOTAL_ATTACHMENT_BYTES = 10 * 1024 * 1024
+DEFAULT_PASSWORD_ENV_KEY = "GOOGLE_PASSWORD"
+CHALLENGE_TYPES = ("captcha", "password", "two_factor")
+TWO_FACTOR_METHODS = ("sms", "email", "auth_app", "device_tap", "other")
+EVENTS_LOG_FILENAME = "events.jsonl"
+PAGE_STATES_BY_TYPE = {
+    "captcha": {"captcha_blocked"},
+    "password": {"waiting_for_password"},
+    "two_factor": {"waiting_for_code_input", "waiting_for_device_approval"},
+}
 
 EMAIL_PATTERN = re.compile(r"([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
 
@@ -90,6 +104,13 @@ def write_json(path: Path, payload: Dict[str, Any]) -> None:
     temp_path = path.with_suffix(".tmp")
     temp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     temp_path.replace(path)
+
+
+def append_jsonl(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=True, sort_keys=True))
+        handle.write("\n")
 
 
 def get_env_first(*keys: str) -> Optional[str]:
@@ -230,6 +251,40 @@ def normalize_scope(scope: str) -> str:
     return normalized
 
 
+def normalize_challenge_type(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in CHALLENGE_TYPES:
+        raise CliError(f"challenge type must be one of: {', '.join(CHALLENGE_TYPES)}")
+    return normalized
+
+
+def normalize_two_factor_method(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in TWO_FACTOR_METHODS:
+        raise CliError(f"two-factor method must be one of: {', '.join(TWO_FACTOR_METHODS)}")
+    return normalized
+
+
+def normalize_page_state(challenge_type: str, value: str) -> str:
+    normalized = value.strip().lower()
+    allowed_states = PAGE_STATES_BY_TYPE[challenge_type]
+    if not normalized:
+        if challenge_type == "captcha":
+            return "captcha_blocked"
+        if challenge_type == "password":
+            return "waiting_for_password"
+        raise CliError(
+            "--page-state is required for two_factor challenges "
+            f"({', '.join(sorted(allowed_states))})"
+        )
+    if normalized not in allowed_states:
+        raise CliError(
+            f"page state {normalized!r} is invalid for {challenge_type}; "
+            f"expected one of: {', '.join(sorted(allowed_states))}"
+        )
+    return normalized
+
+
 def canonical_email(value: str) -> str:
     email = extract_email(value)
     if email:
@@ -264,6 +319,10 @@ def get_state_path(state_dir: Path, challenge_id: str) -> Path:
     return state_dir / f"{challenge_id}.json"
 
 
+def get_events_log_path(state_dir: Path) -> Path:
+    return state_dir.parent / EVENTS_LOG_FILENAME
+
+
 def load_state(state_dir: Path, challenge_id: str) -> Dict[str, Any]:
     path = get_state_path(state_dir, challenge_id)
     if not path.exists():
@@ -288,6 +347,57 @@ def ensure_token(token_arg: Optional[str], dry_run: bool) -> str:
     if not token:
         raise CliError("missing Postmark token: provide --token or set POSTMARK_SERVER_TOKEN")
     return token
+
+
+def ensure_file_paths(paths: List[str]) -> List[Path]:
+    resolved: List[Path] = []
+    for raw_path in paths:
+        path_text = raw_path.strip()
+        if not path_text:
+            continue
+        path = Path(path_text).expanduser()
+        if not path.is_absolute():
+            path = (Path.cwd() / path).resolve()
+        else:
+            path = path.resolve()
+        if not path.exists():
+            raise CliError(f"screenshot file not found: {path}")
+        if not path.is_file():
+            raise CliError(f"screenshot path is not a file: {path}")
+        resolved.append(path)
+    if not resolved:
+        raise CliError("at least one --screenshot file is required")
+    return resolved
+
+
+def build_postmark_attachments(paths: List[Path]) -> Tuple[List[Dict[str, str]], List[Dict[str, Any]]]:
+    total_bytes = 0
+    postmark_attachments: List[Dict[str, str]] = []
+    attachment_summaries: List[Dict[str, Any]] = []
+
+    for path in paths:
+        raw = path.read_bytes()
+        total_bytes += len(raw)
+        if total_bytes > MAX_TOTAL_ATTACHMENT_BYTES:
+            raise CliError("total attachment size exceeds Postmark 10 MB limit")
+        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        postmark_attachments.append(
+            {
+                "Name": path.name,
+                "Content": base64.b64encode(raw).decode("ascii"),
+                "ContentType": content_type,
+            }
+        )
+        attachment_summaries.append(
+            {
+                "name": path.name,
+                "path": str(path),
+                "content_type": content_type,
+                "size_bytes": len(raw),
+            }
+        )
+
+    return postmark_attachments, attachment_summaries
 
 
 def http_json_request(
@@ -335,29 +445,120 @@ def http_json_request(
     return parsed
 
 
-def build_subject(challenge_id: str, account_label: str) -> str:
+def build_subject(challenge_id: str, account_label: str, challenge_type: str) -> str:
     token = f"[{SUBJECT_TOKEN_PREFIX}:{challenge_id}]"
+    subject_prefix = {
+        "captcha": "CAPTCHA help needed",
+        "password": "Password needed",
+        "two_factor": "2FA approval needed",
+    }[challenge_type]
     if account_label.strip():
-        return f"{token} 2FA approval needed for {account_label.strip()}"
-    return f"{token} 2FA approval needed"
+        return f"{token} {subject_prefix} for {account_label.strip()}"
+    return f"{token} {subject_prefix}"
 
 
-def build_text_body(
-    challenge_id: str,
+def humanize_challenge_type(challenge_type: str) -> str:
+    return {
+        "captcha": "CAPTCHA",
+        "password": "Password",
+        "two_factor": "2FA",
+    }[challenge_type]
+
+
+def humanize_page_state(page_state: str) -> str:
+    return {
+        "captcha_blocked": "Still blocked on CAPTCHA after one built-in solve attempt",
+        "waiting_for_password": "Browser is waiting for the password field",
+        "waiting_for_code_input": "Browser is waiting for a verification code to be typed",
+        "waiting_for_device_approval": "Browser is waiting for an approval action on another device",
+    }[page_state]
+
+
+def describe_two_factor_method(method: str, destination: str) -> str:
+    destination = destination.strip()
+    if method == "sms":
+        return f"SMS code to {destination}" if destination else "SMS code"
+    if method == "email":
+        return f"Email code sent to {destination}" if destination else "Email code"
+    if method == "auth_app":
+        return "Authenticator app code"
+    if method == "device_tap":
+        return f"Device approval / number tap on {destination}" if destination else "Device approval / number tap"
+    return destination or "Other verification method"
+
+
+def build_default_action_text(
+    challenge_type: str,
     account_label: str,
-    timeout_minutes: int,
-    action_text: str,
-    context: str,
-    scope: str,
+    two_factor_method: str,
+    verification_destination: str,
+    page_state: str,
 ) -> str:
+    label = account_label.strip() or "the target account"
+    if challenge_type == "captcha":
+        return (
+            f"Please inspect the attached browser screenshot for {label} and reply "
+            "with the CAPTCHA text or instructions I should enter."
+        )
+    if challenge_type == "password":
+        return (
+            f"Please reply with the password for {label}, or tell me if I should use another account."
+        )
+    method_description = describe_two_factor_method(two_factor_method, verification_destination)
+    if page_state == "waiting_for_device_approval":
+        return (
+            f"Please complete the pending {method_description} and reply with the approval result "
+            "or any number shown on the approval screen."
+        )
+    return f"Please reply with the {method_description} that is currently required on the attached screen."
+
+
+def build_text_body(state: Dict[str, Any]) -> str:
+    challenge_id = str(state["challenge_id"])
+    account_label = str(state.get("account_label", ""))
+    timeout_minutes = int(state.get("timeout_minutes", DEFAULT_TIMEOUT_MINUTES))
+    action_text = str(state.get("action_text", ""))
+    context = str(state.get("context", ""))
+    scope = str(state.get("scope", ""))
+    challenge_type = str(state.get("challenge_type", ""))
+    page_state = str(state.get("page_state", ""))
+    two_factor_method = str(state.get("two_factor_method", ""))
+    verification_destination = str(state.get("verification_destination", ""))
+    password_env_key = str(state.get("password_env_key", ""))
+    password_lookup_status = str(state.get("password_lookup_status", ""))
+    screenshots = state.get("request_attachments") or []
+
     lines = [
         "DoWhiz agent needs your help to continue a blocked authentication step.",
         "",
         f"Challenge ID: {challenge_id}",
+        f"Challenge type: {humanize_challenge_type(challenge_type)}",
         f"Scope: {scope}",
     ]
     if account_label.strip():
         lines.append(f"Account context: {account_label.strip()}")
+    if page_state:
+        lines.append(f"Current browser state: {humanize_page_state(page_state)}")
+    if challenge_type == "two_factor":
+        lines.append(
+            f"Verification method: {describe_two_factor_method(two_factor_method, verification_destination)}"
+        )
+    if challenge_type == "password":
+        if password_env_key:
+            lines.append(f"Password env key checked: {password_env_key}")
+        if password_lookup_status:
+            lines.append(f"Password lookup status: {password_lookup_status}")
+    if challenge_type == "captcha":
+        lines.append("Agent attempted one built-in visual solve before asking for help.")
+    if screenshots:
+        screenshot_names = ", ".join(
+            str(item.get("name", "")).strip()
+            for item in screenshots
+            if str(item.get("name", "")).strip()
+        )
+        lines.append(
+            f"Attached screenshot(s): {screenshot_names or f'{len(screenshots)} file(s)'}"
+        )
     if action_text.strip():
         lines.append(f"Action needed: {action_text.strip()}")
     if context.strip():
@@ -365,8 +566,8 @@ def build_text_body(
     lines.extend(
         [
             "",
-            "Please reply in this same email thread with the verification code,",
-            "approval result, or any information the agent needs to continue.",
+            "Please reply in this same email thread with the exact information",
+            "the current browser screen needs so the agent can continue.",
             "",
             f"The agent will wait for up to {timeout_minutes} minutes.",
             "It will not continue until a reply is received.",
@@ -376,12 +577,7 @@ def build_text_body(
 
 
 def build_html_body(text_body: str) -> str:
-    escaped = (
-        text_body.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("\n", "<br>")
-    )
+    escaped = escape(text_body).replace("\n", "<br>")
     return f"<html><body><p>{escaped}</p></body></html>"
 
 
@@ -396,6 +592,7 @@ def send_approval_email(
     text_body: str,
     html_body: str,
     metadata: Dict[str, str],
+    attachments: List[Dict[str, str]],
 ) -> str:
     payload: Dict[str, Any] = {
         "From": from_address,
@@ -406,6 +603,7 @@ def send_approval_email(
         "MessageStream": "outbound",
         "Tag": "human-approval-gate",
         "Metadata": metadata,
+        "Attachments": attachments,
     }
     if reply_to:
         payload["ReplyTo"] = reply_to
@@ -422,10 +620,11 @@ def send_approval_email(
     return message_id
 
 
-def build_postmark_metadata(challenge_id: str, scope: str) -> Dict[str, str]:
+def build_postmark_metadata(challenge_id: str, scope: str, challenge_type: str) -> Dict[str, str]:
     metadata = {
         POSTMARK_METADATA_CHALLENGE_ID_KEY: challenge_id,
         POSTMARK_METADATA_SCOPE_KEY: scope,
+        POSTMARK_METADATA_TYPE_KEY: challenge_type,
     }
     for key in metadata:
         if len(key) > 20:
@@ -629,6 +828,39 @@ def emit_json(payload: Dict[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
 
 
+def build_send_event_payload(state: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "event": "hag_request_sent",
+        "challenge_id": state.get("challenge_id"),
+        "challenge_type": state.get("challenge_type"),
+        "scope": state.get("scope"),
+        "page_state": state.get("page_state"),
+        "account_label": state.get("account_label"),
+        "recipient": state.get("recipient"),
+        "expected_reply_from": state.get("expected_reply_from"),
+        "two_factor_method": state.get("two_factor_method"),
+        "verification_destination": state.get("verification_destination"),
+        "password_env_key": state.get("password_env_key"),
+        "password_lookup_status": state.get("password_lookup_status"),
+        "attachment_count": len(state.get("request_attachments") or []),
+        "attachments": state.get("request_attachments") or [],
+        "outbound_message_id": state.get("outbound_message_id"),
+        "outbound_dry_run": state.get("outbound_dry_run"),
+        "created_at": state.get("created_at"),
+        "expires_at": state.get("expires_at"),
+    }
+
+
+def record_send_event(state_dir: Path, state: Dict[str, Any]) -> None:
+    event_payload = build_send_event_payload(state)
+    append_jsonl(get_events_log_path(state_dir), event_payload)
+    print(
+        f"HAG_EVENT {json.dumps(event_payload, ensure_ascii=True, sort_keys=True)}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def build_request_state(args: argparse.Namespace) -> Dict[str, Any]:
     if args.timeout_minutes <= 0:
         raise CliError("--timeout-minutes must be greater than zero")
@@ -638,6 +870,8 @@ def build_request_state(args: argparse.Namespace) -> Dict[str, Any]:
         raise CliError("--poll-interval-seconds must be greater than zero")
 
     scope = normalize_scope(args.scope)
+    challenge_type = normalize_challenge_type(args.challenge_type)
+    page_state = normalize_page_state(challenge_type, args.page_state)
     recipient = resolve_recipient(scope, args.recipient, args.user_email)
     challenge_id = (args.challenge_id or "").strip() or str(uuid4())
     sender = resolve_sender(args.from_address)
@@ -646,34 +880,58 @@ def build_request_state(args: argparse.Namespace) -> Dict[str, Any]:
     timeout_minutes = args.timeout_minutes
 
     account_label = (args.account_label or "").strip()
-    action_text = (args.action_text or "").strip()
     context = (args.context or "").strip()
+    two_factor_method = ""
+    verification_destination = (args.verification_destination or "").strip()
+    if challenge_type == "two_factor":
+        two_factor_method = normalize_two_factor_method(args.two_factor_method)
+        if two_factor_method in {"sms", "email"} and not verification_destination:
+            raise CliError(
+                f"--verification-destination is required for {two_factor_method} two_factor challenges"
+            )
+    elif args.two_factor_method.strip():
+        raise CliError("--two-factor-method is only valid for two_factor challenges")
+    elif verification_destination:
+        raise CliError("--verification-destination is only valid for two_factor challenges")
 
-    subject = build_subject(challenge_id, account_label)
-    text_body = build_text_body(
-        challenge_id=challenge_id,
+    password_env_key = (args.password_env_key or "").strip() or DEFAULT_PASSWORD_ENV_KEY
+    password_lookup_status = (args.password_lookup_status or "").strip()
+    if challenge_type != "password":
+        password_env_key = ""
+        password_lookup_status = ""
+
+    screenshot_paths = ensure_file_paths(args.screenshot)
+    postmark_attachments, attachment_summaries = build_postmark_attachments(screenshot_paths)
+
+    action_text = (args.action_text or "").strip() or build_default_action_text(
+        challenge_type=challenge_type,
         account_label=account_label,
-        timeout_minutes=timeout_minutes,
-        action_text=action_text,
-        context=context,
-        scope=scope,
+        two_factor_method=two_factor_method,
+        verification_destination=verification_destination,
+        page_state=page_state,
     )
-    html_body = build_html_body(text_body)
 
     created_at = utc_now()
     state: Dict[str, Any] = {
         "challenge_id": challenge_id,
         "status": "pending",
         "scope": scope,
+        "challenge_type": challenge_type,
+        "page_state": page_state,
         "recipient": recipient,
         "expected_reply_from": expected_reply_from,
         "from_address": sender,
         "reply_to": reply_to,
-        "subject": subject,
+        "subject": build_subject(challenge_id, account_label, challenge_type),
         "subject_token": f"[{SUBJECT_TOKEN_PREFIX}:{challenge_id}]",
         "account_label": account_label,
         "action_text": action_text,
         "context": context,
+        "two_factor_method": two_factor_method,
+        "verification_destination": verification_destination,
+        "password_env_key": password_env_key,
+        "password_lookup_status": password_lookup_status,
+        "request_attachments": attachment_summaries,
         "timeout_minutes": timeout_minutes,
         "created_at": isoformat_utc(created_at),
         "expires_at": isoformat_utc(created_at + timedelta(minutes=timeout_minutes)),
@@ -683,10 +941,12 @@ def build_request_state(args: argparse.Namespace) -> Dict[str, Any]:
         "outbound_dry_run": bool(args.dry_run),
         "message_stream": "outbound",
     }
+    text_body = build_text_body(state)
     state["_rendered_email"] = {
-        "subject": subject,
+        "subject": state["subject"],
         "text_body": text_body,
-        "html_body": html_body,
+        "html_body": build_html_body(text_body),
+        "attachments": postmark_attachments,
     }
     return state
 
@@ -702,7 +962,11 @@ def cmd_request(args: argparse.Namespace) -> int:
     if args.dry_run:
         state["outbound_message_id"] = "DRY_RUN"
     else:
-        metadata = build_postmark_metadata(str(state["challenge_id"]), str(state["scope"]))
+        metadata = build_postmark_metadata(
+            str(state["challenge_id"]),
+            str(state["scope"]),
+            str(state["challenge_type"]),
+        )
         message_id = send_approval_email(
             api_base=api_base,
             token=token,
@@ -713,10 +977,12 @@ def cmd_request(args: argparse.Namespace) -> int:
             text_body=rendered["text_body"],
             html_body=rendered["html_body"],
             metadata=metadata,
+            attachments=rendered["attachments"],
         )
         state["outbound_message_id"] = message_id
 
     save_state(state_dir, state)
+    record_send_event(state_dir, state)
 
     if args.wait:
         result = wait_for_resolution(
@@ -796,6 +1062,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     request_parser = subparsers.add_parser("request", help="create a challenge and send email")
     request_parser.add_argument("--scope", default="user", choices=["admin", "user"])
+    request_parser.add_argument(
+        "--challenge-type",
+        default="two_factor",
+        choices=list(CHALLENGE_TYPES),
+        help="auth blocker type being escalated",
+    )
     request_parser.add_argument("--challenge-id", default="")
     request_parser.add_argument("--recipient", default="")
     request_parser.add_argument("--user-email", default="")
@@ -805,6 +1077,38 @@ def build_parser() -> argparse.ArgumentParser:
     request_parser.add_argument("--account-label", default="")
     request_parser.add_argument("--action-text", default="")
     request_parser.add_argument("--context", default="")
+    request_parser.add_argument(
+        "--page-state",
+        default="",
+        help="explicit browser state, required for two_factor challenges",
+    )
+    request_parser.add_argument(
+        "--two-factor-method",
+        default="",
+        metavar="{sms,email,auth_app,device_tap,other}",
+        help="specific 2FA method in use",
+    )
+    request_parser.add_argument(
+        "--verification-destination",
+        default="",
+        help="where the code/approval was sent (masked phone/email/device label)",
+    )
+    request_parser.add_argument(
+        "--password-env-key",
+        default=DEFAULT_PASSWORD_ENV_KEY,
+        help="workspace env key checked before asking for password help",
+    )
+    request_parser.add_argument(
+        "--password-lookup-status",
+        default="",
+        help="honest note about what password sources were already checked",
+    )
+    request_parser.add_argument(
+        "--screenshot",
+        action="append",
+        default=[],
+        help="current browser screenshot to attach; repeatable and required",
+    )
     request_parser.add_argument(
         "--timeout-minutes",
         type=int,

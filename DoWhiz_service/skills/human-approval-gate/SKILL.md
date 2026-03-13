@@ -1,6 +1,6 @@
 ---
 name: human-approval-gate
-description: Use when browser/login flow asks for OTP, passcode, approval tap, or any user/admin verification step. Sends a request email and blocks until the first reply or timeout using the human_approval_gate CLI.
+description: Use when browser/login flow is blocked by CAPTCHA, missing password, OTP, passcode, approval tap, or another user/admin verification step. Sends a request email with browser screenshots and blocks until the first reply or timeout using the human_approval_gate CLI.
 allowed-tools: Bash(human_approval_gate:*), Bash(python3:*), Bash(cat:*), Bash(test:*), Bash(date:*)
 ---
 
@@ -8,19 +8,25 @@ allowed-tools: Bash(human_approval_gate:*), Bash(python3:*), Bash(cat:*), Bash(t
 
 ## When to Use
 
-Use this skill immediately when any authentication flow is blocked by human verification, for example:
+Use this skill when any authentication flow is blocked by something the agent genuinely cannot finish alone, for example:
+- CAPTCHA after one failed built-in solve attempt
+- missing password after checking the workspace `.env`
 - OTP / verification code input
 - "Approve sign-in on your phone"
 - "Tap number on mobile app"
 - any out-of-band challenge that requires user/admin action from another device/account
 
-Do NOT use this skill for CAPTCHA/image puzzle/text-recognition steps. First use your own multimodal/vision abilities plus browser tooling to inspect the challenge, solve it directly in the page, and continue yourself.
+For CAPTCHA/image puzzle/text-recognition steps:
+- first use your own multimodal/vision abilities plus browser tooling to inspect the challenge and attempt one direct solve in the page
+- if that first attempt fails and you are still blocked on CAPTCHA, open the gate with `--challenge-type captcha`
+- always attach the current browser screenshot so the human can see exactly what blocked you
 
 Only use this skill when the blocker genuinely requires a human outside the current browser session, for example:
 - SMS code sent to a phone you cannot access
 - email code sent to another person's mailbox
 - approval tap / number match on another device
 - recovery detail or one-time code that only the user/admin can retrieve
+- password not present in the workspace `.env`
 
 When a page offers multiple verification methods, choose SMS verification first by default.
 
@@ -28,19 +34,25 @@ Trigger this skill only after the website has already initiated the challenge. F
 - click "send code", "text me a code", "email me a code", or similar first
 - choose the verification method first if the site asks
 - wait until the page is explicitly waiting for the code / tap / approval, then send the human approval email
+- for 2FA requests, describe exactly which method is active: SMS, email, authenticator app, or device tap / number match
+- for every request type, attach the current browser screenshot(s)
 
 For owner/admin login flows, if account email/username is missing, try known admin identifiers first (`dowhiz@deep-tutor.com` on staging, `oliver@dowhiz.com` on production). Do not use the approval gate only to ask for identifier when these known values are available.
+
+For password requests, check the workspace `.env` first. For Google login, prefer checking `GOOGLE_PASSWORD` before asking a human.
 
 Do not keep retrying login while blocked.
 
 ## Required Behavior
 
-1. If the blocker is CAPTCHA/image/text recognition, solve it yourself in-browser first instead of opening the gate.
-2. Trigger gate request right away once the page is explicitly waiting for human-only input.
-3. Wait on gate result.
-4. Continue only after the first reply is received and inspect that reply yourself.
-5. If timeout, stop login attempts and report clearly.
-6. If SMS verification is unavailable or fails, switch to another available method and keep the same gate-based wait behavior.
+1. If the blocker is CAPTCHA/image/text recognition, attempt one built-in solve first. If still blocked, use `--challenge-type captcha`.
+2. If the blocker is a missing password, check the workspace `.env` first. If still missing, use `--challenge-type password`.
+3. If the blocker is 2FA, trigger the website challenge first and only then use `--challenge-type two_factor`.
+4. Always attach the current browser screenshot(s) with `--screenshot ...`.
+5. Wait on gate result.
+6. Continue only after the first reply is received and inspect that reply yourself.
+7. If timeout, stop login attempts and report clearly.
+8. If SMS verification is unavailable or fails, switch to another available method and keep the same gate-based wait behavior.
 
 ## Scope Rules
 
@@ -67,9 +79,41 @@ fi
 ```bash
 $HAG_CMD request \
   --scope admin \
+  --challenge-type two_factor \
+  --page-state waiting_for_code_input \
+  --two-factor-method sms \
+  --verification-destination "phone ending in 9315" \
   --account-label "Oliver Google account" \
-  --action-text "Please reply in this thread with the verification code or approval result shown by Google" \
-  --context "Agent is on Google verification page" \
+  --context "Google has already sent the code and the page is waiting for it." \
+  --screenshot work/google-verify.png \
+  --timeout-minutes 30 \
+  --wait
+```
+
+For CAPTCHA after one failed solve attempt:
+
+```bash
+$HAG_CMD request \
+  --scope admin \
+  --challenge-type captcha \
+  --account-label "Oliver Google account" \
+  --context "I already tried one built-in CAPTCHA solve and the page still did not advance." \
+  --screenshot work/google-captcha.png \
+  --timeout-minutes 30 \
+  --wait
+```
+
+For password help:
+
+```bash
+$HAG_CMD request \
+  --scope admin \
+  --challenge-type password \
+  --page-state waiting_for_password \
+  --account-label "Oliver Google account" \
+  --password-env-key GOOGLE_PASSWORD \
+  --password-lookup-status "Checked workspace .env for GOOGLE_PASSWORD; no value was present." \
+  --screenshot work/google-password.png \
   --timeout-minutes 30 \
   --wait
 ```
@@ -80,8 +124,12 @@ For user-owned account:
 $HAG_CMD request \
   --scope user \
   --recipient "user@example.com" \
+  --challenge-type two_factor \
+  --page-state waiting_for_code_input \
+  --two-factor-method email \
+  --verification-destination "user@example.com" \
   --account-label "User X account" \
-  --action-text "Please reply in this thread with the code or any instructions shown during login" \
+  --screenshot work/user-login.png \
   --timeout-minutes 30 \
   --wait
 ```
@@ -116,5 +164,7 @@ No rigid reply format is required. Ask the recipient to reply in the same thread
 - Keep waiting in this command; do not run unrelated steps while waiting.
 - Reuse the same challenge thread; do not spam multiple requests unless previous one timed out.
 - Never include raw credentials in outbound messages.
+- Every outbound request should honestly describe the current browser state and include at least one screenshot attachment.
+- Every outbound request now also writes a structured send record to `.human_approval_gate/events.jsonl` and emits a `HAG_EVENT ...` line to stderr so prod/staging task logs show attachment filenames and sizes.
 - Sender identity priority is: `--from` > `HUMAN_APPROVAL_FROM` > employee mailbox from `employee.toml`/`employee.staging.toml`.
 - HAG reply emails (`[HAG:...]` threads) are consumed by the gate flow and are not routed into normal Email->task execution.
