@@ -208,28 +208,28 @@ fn build_human_approval_gate_section() -> &'static str {
     r#"Human Approval Gate (2FA / verification challenges):
 - If login/auth flow asks for OTP/passcode/device approval/number tap, or you are blocked on CAPTCHA/password after the required local checks below, use the `human-approval-gate` skill with an honest challenge type and browser screenshot.
 - If the page shows CAPTCHA/image puzzle/text recognition challenge, first use your own built-in multimodal/vision abilities and browser tools to inspect the challenge, attempt one direct solve in the page, and continue the login flow yourself.
-- If that first CAPTCHA solve attempt fails and the page is still blocked, call `human_approval_gate request --challenge-type captcha ... --screenshot <current-browser-shot>`.
-- If login is waiting for a password, first check the workspace `.env` for the relevant secret (for Google login, check `GOOGLE_PASSWORD` first). Only if the needed password is still missing should you call `human_approval_gate request --challenge-type password ... --screenshot <current-browser-shot>`.
+- If that first CAPTCHA solve attempt fails and the page is still blocked, use the MCP tool `dowhiz_human_approval_gate_request_and_wait` with `challenge_type="captcha"` and the current browser screenshot path(s).
+- If login is waiting for a password, first check the workspace `.env` for the relevant secret (for Google login, check `GOOGLE_PASSWORD` first). Only if the needed password is still missing should you use `dowhiz_human_approval_gate_request_and_wait` with `challenge_type="password"` and the current browser screenshot path(s).
 - Only use `human_approval_gate` for steps that genuinely require human access outside the browser session, such as SMS codes, email codes sent to someone else, approval taps on another device, or information only the human can retrieve.
-- If multiple verification methods are available on the same challenge page, prefer SMS verification first by default. If SMS is unavailable or fails, fall back to another method and keep using `human_approval_gate` for human input.
-- Before calling `human_approval_gate` for 2FA, first use the website itself to initiate the challenge: click the button that sends the code / starts the approval / selects the method, and wait until the page is explicitly waiting for the human response.
-- For `--challenge-type two_factor`, do not send the email unless you can truthfully identify the current page state as either `waiting_for_code_input` or `waiting_for_device_approval`.
-- For `--challenge-type two_factor`, always describe the exact method in use: SMS, email, authenticator app, or device tap / number match, plus the masked destination if visible.
+- If multiple verification methods are available on the same challenge page, prefer SMS verification first by default. If SMS is unavailable or fails, fall back to another method and keep using `dowhiz_human_approval_gate_request_and_wait` for human input.
+- Before calling `dowhiz_human_approval_gate_request_and_wait` for 2FA, first use the website itself to initiate the challenge: click the button that sends the code / starts the approval / selects the method, and wait until the page is explicitly waiting for the human response.
+- For `challenge_type="two_factor"`, do not send the email unless you can truthfully identify the current page state as either `waiting_for_code_input` or `waiting_for_device_approval`.
+- For `challenge_type="two_factor"`, always describe the exact method in use: SMS, email, authenticator app, or device tap / number match, plus the masked destination if visible.
 - If login identifier (email/username) is missing for owner/admin account login, try known admin identifiers first (`dowhiz@deep-tutor.com` on staging, `oliver@dowhiz.com` on production) before requesting help through `human_approval_gate`.
 - For owner/admin account login, do NOT trigger `human_approval_gate` only to ask for account email/username when a known identifier is already available.
 - If the requested login still cannot proceed because required credential/challenge input is missing after trying known safe identifiers, request it through `human_approval_gate` instead of guessing.
-- Use the `human_approval_gate` CLI and pause all unrelated work while waiting for result.
-- If `human_approval_gate` is not found on PATH, retry using `/app/bin/human_approval_gate` or `python3 .agents/skills/human-approval-gate/scripts/human_approval_gate.py`.
-- Every `human_approval_gate` request must attach the current browser screenshot with `--screenshot ...` and must describe the current state honestly. Never claim a code was sent unless the page actually shows that it was sent and is waiting.
-- `human_approval_gate` now writes a structured send record to `.human_approval_gate/events.jsonl` and emits a `HAG_EVENT ...` stderr line that includes challenge type plus attachment filenames and sizes. Use those records for debugging instead of guessing.
+- Inside run_task/Codex environments, do NOT use the shell CLI `human_approval_gate` or split request/wait steps yourself. Use only the MCP tool `dowhiz_human_approval_gate_request_and_wait`, which blocks this Codex turn until reply or timeout.
+- Every `dowhiz_human_approval_gate_request_and_wait` call must attach the current browser screenshot path(s) and must describe the current state honestly. Never claim a code was sent unless the page actually shows that it was sent and is waiting.
+- HAG sends still write `.human_approval_gate/events.jsonl` and emit a `HAG_EVENT ...` stderr line that includes challenge type plus attachment filenames and sizes. Use those records for debugging instead of guessing.
 - Primary flow:
-  1) Run `human_approval_gate request ... --wait --timeout-minutes 30`
-  2) Continue only if status is `replied`
-  3) Inspect the returned `reply` payload yourself and decide what to type/click next
-  4) If status is `timeout`, stop login attempts and report clearly
+  1) Take the current browser screenshot(s)
+  2) Call `dowhiz_human_approval_gate_request_and_wait`
+  3) Continue only if the returned status is `replied`
+  4) Inspect the returned `reply` payload yourself and decide what to type/click next
+  5) If status is `timeout`, stop login attempts and report clearly
 - Scope and recipient rules:
-  - Agent logging into owner/admin account (for example Oliver's own Google/Notion/X, `dowhiz@deep-tutor.com`, `oliver@dowhiz.com`): always use `--scope admin` (sends to `admin@dowhiz.com`)
-  - Agent logging into user's account: `--scope user --recipient <that user email>`
+  - Agent logging into owner/admin account (for example Oliver's own Google/Notion/X, `dowhiz@deep-tutor.com`, `oliver@dowhiz.com`): use `scope="admin"` (sends to `admin@dowhiz.com`)
+  - Agent logging into user's account: use `scope="user"` plus that user's recipient email
 - Never keep retrying password/sign-in while waiting for verification.
 
 "#
@@ -970,13 +970,13 @@ mod tests {
         );
 
         assert!(prompt.contains("Human Approval Gate"));
-        assert!(prompt.contains("human_approval_gate request"));
-        assert!(prompt.contains("--scope admin"));
-        assert!(prompt.contains("--scope user --recipient"));
-        assert!(prompt.contains("--challenge-type captcha"));
-        assert!(prompt.contains("--challenge-type password"));
-        assert!(prompt.contains("--challenge-type two_factor"));
-        assert!(prompt.contains("--screenshot"));
+        assert!(prompt.contains("dowhiz_human_approval_gate_request_and_wait"));
+        assert!(prompt.contains("scope=\"admin\""));
+        assert!(prompt.contains("scope=\"user\""));
+        assert!(prompt.contains("challenge_type=\"captcha\""));
+        assert!(prompt.contains("challenge_type=\"password\""));
+        assert!(prompt.contains("challenge_type=\"two_factor\""));
+        assert!(prompt.contains("screenshot path(s)"));
         assert!(prompt.contains("GOOGLE_PASSWORD"));
         assert!(prompt.contains("timeout"));
         assert!(prompt.contains("built-in multimodal/vision abilities"));
@@ -994,7 +994,7 @@ mod tests {
         assert!(prompt.contains("returned `reply` payload"));
         assert!(prompt.contains("dowhiz@deep-tutor.com"));
         assert!(prompt.contains("oliver@dowhiz.com"));
-        assert!(prompt.contains("/app/bin/human_approval_gate"));
+        assert!(prompt.contains("do NOT use the shell CLI `human_approval_gate`"));
     }
 
     #[test]

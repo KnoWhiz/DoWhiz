@@ -41,6 +41,8 @@ SUBJECT_TOKEN_PREFIX = "HAG"
 POSTMARK_METADATA_CHALLENGE_ID_KEY = "hag_challenge_id"
 POSTMARK_METADATA_SCOPE_KEY = "hag_scope"
 POSTMARK_METADATA_TYPE_KEY = "hag_type"
+HAG_REQUIRE_MCP_ENV_KEY = "HUMAN_APPROVAL_GATE_REQUIRE_MCP"
+HAG_BLOCKING_MCP_TOOL_NAME = "dowhiz_human_approval_gate_request_and_wait"
 MAX_TOTAL_ATTACHMENT_BYTES = 10 * 1024 * 1024
 DEFAULT_PASSWORD_ENV_KEY = "GOOGLE_PASSWORD"
 CHALLENGE_TYPES = ("captcha", "password", "two_factor")
@@ -951,7 +953,7 @@ def build_request_state(args: argparse.Namespace) -> Dict[str, Any]:
     return state
 
 
-def cmd_request(args: argparse.Namespace) -> int:
+def submit_request(args: argparse.Namespace) -> Tuple[Path, str, str, Dict[str, Any]]:
     state_dir = Path(args.state_dir)
     api_base = args.api_base
     token = ensure_token(args.token, args.dry_run)
@@ -983,6 +985,14 @@ def cmd_request(args: argparse.Namespace) -> int:
 
     save_state(state_dir, state)
     record_send_event(state_dir, state)
+    return state_dir, api_base, token, state
+
+
+def execute_request(args: argparse.Namespace) -> Tuple[Dict[str, Any], int]:
+    state_dir, api_base, token, state = submit_request(args)
+
+    if args.wait and args.dry_run:
+        return state, 0
 
     if args.wait:
         result = wait_for_resolution(
@@ -993,11 +1003,27 @@ def cmd_request(args: argparse.Namespace) -> int:
             timeout_minutes=args.wait_timeout_minutes,
             poll_interval_seconds=args.poll_interval_seconds,
         )
-        emit_json(result.state)
-        return 0 if result.replied else 4
+        return result.state, 0 if result.replied else 4
 
+    return state, 0
+
+
+def cmd_request(args: argparse.Namespace) -> int:
+    state, exit_code = execute_request(args)
     emit_json(state)
-    return 0
+    return exit_code
+
+
+def shell_cli_requires_mcp_tool() -> bool:
+    return get_env_first(HAG_REQUIRE_MCP_ENV_KEY, "RUN_TASK_HUMAN_APPROVAL_GATE_REQUIRE_MCP") in {
+        "1",
+        "true",
+        "TRUE",
+        "yes",
+        "YES",
+        "on",
+        "ON",
+    }
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -1155,6 +1181,18 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: List[str]) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if shell_cli_requires_mcp_tool():
+        emit_json(
+            {
+                "status": "error",
+                "error": (
+                    "human_approval_gate shell CLI is disabled in Codex runtime; "
+                    f"use the MCP tool {HAG_BLOCKING_MCP_TOOL_NAME} instead"
+                ),
+            }
+        )
+        return 2
 
     try:
         result = args.func(args)
