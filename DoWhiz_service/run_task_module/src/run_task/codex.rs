@@ -55,6 +55,8 @@ const HUMAN_APPROVAL_GATE_ENV_KEYS: &[&str] = &[
     "HUMAN_APPROVAL_REPLY_TO",
     "POSTMARK_API_BASE_URL",
 ];
+const HUMAN_APPROVAL_GATE_REQUIRE_MCP_ENV_KEY: &str = "HUMAN_APPROVAL_GATE_REQUIRE_MCP";
+const HUMAN_APPROVAL_GATE_MCP_SERVER_NAME: &str = "human-approval-gate";
 const HUMAN_APPROVAL_FROM_ENV_KEY: &str = "HUMAN_APPROVAL_FROM";
 const HUMAN_APPROVAL_REPLY_TO_ENV_KEY: &str = "HUMAN_APPROVAL_REPLY_TO";
 const EMPLOYEE_CONFIG_PATH_ENV_KEY: &str = "EMPLOYEE_CONFIG_PATH";
@@ -73,6 +75,8 @@ const GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH: &str =
 
 const REMOTE_OUTPUT_FILENAME: &str = ".codex_remote_output.log";
 const REMOTE_EXIT_CODE_FILENAME: &str = ".codex_remote_exit_code";
+const HAG_MCP_CONFIG_START_MARKER: &str = "# BEGIN DOWHIZ HUMAN APPROVAL GATE MCP";
+const HAG_MCP_CONFIG_END_MARKER: &str = "# END DOWHIZ HUMAN APPROVAL GATE MCP";
 static ACI_CONTAINER_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Deserialize)]
@@ -418,6 +422,8 @@ pub(super) fn run_codex_task(
         for (key, value) in &human_approval_gate_env_overrides {
             cmd.arg("-e").arg(format!("{}={}", key, value));
         }
+        cmd.arg("-e")
+            .arg(format!("{}=1", HUMAN_APPROVAL_GATE_REQUIRE_MCP_ENV_KEY));
         for (key, value) in &github_auth.env_overrides {
             cmd.arg("-e").arg(format!("{}={}", key, value));
         }
@@ -529,6 +535,7 @@ pub(super) fn run_codex_task(
         for (key, value) in &human_approval_gate_env_overrides {
             cmd.env(key, value);
         }
+        cmd.env(HUMAN_APPROVAL_GATE_REQUIRE_MCP_ENV_KEY, "1");
         for (key, value) in github_auth.env_overrides {
             cmd.env(key, value);
         }
@@ -802,6 +809,10 @@ fn run_codex_task_azure_aci(
     for (key, value) in human_approval_gate_env_overrides {
         env_overrides.push((key, value));
     }
+    env_overrides.push((
+        HUMAN_APPROVAL_GATE_REQUIRE_MCP_ENV_KEY.to_string(),
+        "1".to_string(),
+    ));
     for (key, value) in github_auth.env_overrides {
         env_overrides.push((key, value));
     }
@@ -1613,6 +1624,7 @@ fn ensure_codex_config_at(
     fs::create_dir_all(config_dir)?;
 
     let block = build_codex_config_block(azure_endpoint);
+    let hag_mcp_block = build_human_approval_gate_mcp_block();
 
     let existing = if config_path.exists() {
         fs::read_to_string(&config_path)?
@@ -1621,6 +1633,12 @@ fn ensure_codex_config_at(
     };
 
     let updated = update_config_block(&existing, &block);
+    let updated = update_managed_config_block(
+        &updated,
+        HAG_MCP_CONFIG_START_MARKER,
+        HAG_MCP_CONFIG_END_MARKER,
+        &hag_mcp_block,
+    );
     let updated = ensure_project_trust(&updated, trust_workspace_dir);
     fs::write(config_path, updated)?;
     Ok(())
@@ -2001,6 +2019,16 @@ fn build_codex_config_block(azure_endpoint: &str) -> String {
     CODEX_CONFIG_BLOCK_TEMPLATE.replace(CODEX_CONFIG_BASE_URL_PLACEHOLDER, azure_endpoint)
 }
 
+fn build_human_approval_gate_mcp_block() -> String {
+    format!(
+        r#"{HAG_MCP_CONFIG_START_MARKER}
+[mcp_servers.{HUMAN_APPROVAL_GATE_MCP_SERVER_NAME}]
+command = "human_approval_gate_mcp"
+
+{HAG_MCP_CONFIG_END_MARKER}"#
+    )
+}
+
 fn normalize_azure_endpoint(endpoint: &str) -> String {
     let trimmed = endpoint.trim();
     if trimmed.ends_with("/openai/v1") {
@@ -2026,6 +2054,40 @@ fn update_config_block(existing: &str, block: &str) -> String {
             updated.push_str(block.trim_end());
             updated.push('\n');
             updated.push_str(existing[end_line_index..].trim_start());
+            return updated;
+        }
+    }
+
+    let mut updated = existing.trim_end().to_string();
+    if !updated.is_empty() {
+        updated.push_str("\n\n");
+    }
+    updated.push_str(block.trim_end());
+    updated.push('\n');
+    updated
+}
+
+fn update_managed_config_block(
+    existing: &str,
+    start_marker: &str,
+    end_marker: &str,
+    block: &str,
+) -> String {
+    if let Some(start_index) = existing.find(start_marker) {
+        if let Some(end_relative_index) = existing[start_index..].find(end_marker) {
+            let end_marker_index = start_index + end_relative_index + end_marker.len();
+            let trailing_newline_index = existing[end_marker_index..]
+                .find('\n')
+                .map(|idx| end_marker_index + idx + 1)
+                .unwrap_or(existing.len());
+            let mut updated = String::new();
+            updated.push_str(existing[..start_index].trim_end());
+            if !updated.is_empty() {
+                updated.push_str("\n\n");
+            }
+            updated.push_str(block.trim_end());
+            updated.push('\n');
+            updated.push_str(existing[trailing_newline_index..].trim_start());
             return updated;
         }
     }
