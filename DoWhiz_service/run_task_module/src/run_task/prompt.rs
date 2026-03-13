@@ -206,16 +206,22 @@ fn build_web_auth_capabilities_section() -> &'static str {
 
 fn build_human_approval_gate_section() -> &'static str {
     r#"Human Approval Gate (2FA / verification challenges):
-- If login/auth flow asks for OTP/passcode/device approval/number tap (that requires a human on another device/account), immediately use the `human-approval-gate` skill.
-- If the page shows CAPTCHA/image puzzle/text recognition challenge, do NOT call `human_approval_gate` for that step; first use your own multimodal/vision abilities and browser tools to inspect the challenge, solve it directly in the page, and continue the login flow yourself.
+- If login/auth flow asks for OTP/passcode/device approval/number tap, or you are blocked on CAPTCHA/password after the required local checks below, use the `human-approval-gate` skill with an honest challenge type and browser screenshot.
+- If the page shows CAPTCHA/image puzzle/text recognition challenge, first use your own built-in multimodal/vision abilities and browser tools to inspect the challenge, attempt one direct solve in the page, and continue the login flow yourself.
+- If that first CAPTCHA solve attempt fails and the page is still blocked, call `human_approval_gate request --challenge-type captcha ... --screenshot <current-browser-shot>`.
+- If login is waiting for a password, first check the workspace `.env` for the relevant secret (for Google login, check `GOOGLE_PASSWORD` first). Only if the needed password is still missing should you call `human_approval_gate request --challenge-type password ... --screenshot <current-browser-shot>`.
 - Only use `human_approval_gate` for steps that genuinely require human access outside the browser session, such as SMS codes, email codes sent to someone else, approval taps on another device, or information only the human can retrieve.
 - If multiple verification methods are available on the same challenge page, prefer SMS verification first by default. If SMS is unavailable or fails, fall back to another method and keep using `human_approval_gate` for human input.
-- Before calling `human_approval_gate`, first use the website itself to initiate the challenge: click the button that sends the code / starts the approval / selects the method, and wait until the page is explicitly waiting for the human response.
+- Before calling `human_approval_gate` for 2FA, first use the website itself to initiate the challenge: click the button that sends the code / starts the approval / selects the method, and wait until the page is explicitly waiting for the human response.
+- For `--challenge-type two_factor`, do not send the email unless you can truthfully identify the current page state as either `waiting_for_code_input` or `waiting_for_device_approval`.
+- For `--challenge-type two_factor`, always describe the exact method in use: SMS, email, authenticator app, or device tap / number match, plus the masked destination if visible.
 - If login identifier (email/username) is missing for owner/admin account login, try known admin identifiers first (`dowhiz@deep-tutor.com` on staging, `oliver@dowhiz.com` on production) before requesting help through `human_approval_gate`.
 - For owner/admin account login, do NOT trigger `human_approval_gate` only to ask for account email/username when a known identifier is already available.
 - If the requested login still cannot proceed because required credential/challenge input is missing after trying known safe identifiers, request it through `human_approval_gate` instead of guessing.
 - Use the `human_approval_gate` CLI and pause all unrelated work while waiting for result.
 - If `human_approval_gate` is not found on PATH, retry using `/app/bin/human_approval_gate` or `python3 .agents/skills/human-approval-gate/scripts/human_approval_gate.py`.
+- Every `human_approval_gate` request must attach the current browser screenshot with `--screenshot ...` and must describe the current state honestly. Never claim a code was sent unless the page actually shows that it was sent and is waiting.
+- `human_approval_gate` now writes a structured send record to `.human_approval_gate/events.jsonl` and emits a `HAG_EVENT ...` stderr line that includes challenge type plus attachment filenames and sizes. Use those records for debugging instead of guessing.
 - Primary flow:
   1) Run `human_approval_gate request ... --wait --timeout-minutes 30`
   2) Continue only if status is `replied`
@@ -967,12 +973,23 @@ mod tests {
         assert!(prompt.contains("human_approval_gate request"));
         assert!(prompt.contains("--scope admin"));
         assert!(prompt.contains("--scope user --recipient"));
+        assert!(prompt.contains("--challenge-type captcha"));
+        assert!(prompt.contains("--challenge-type password"));
+        assert!(prompt.contains("--challenge-type two_factor"));
+        assert!(prompt.contains("--screenshot"));
+        assert!(prompt.contains("GOOGLE_PASSWORD"));
         assert!(prompt.contains("timeout"));
-        assert!(prompt.contains("do NOT call `human_approval_gate`"));
+        assert!(prompt.contains("built-in multimodal/vision abilities"));
+        assert!(prompt.contains("attempt one direct solve"));
         assert!(prompt.contains("multimodal/vision abilities"));
         assert!(prompt.contains("required credential"));
         assert!(prompt.contains("prefer SMS verification first by default"));
         assert!(prompt.contains("click the button that sends the code"));
+        assert!(prompt.contains("waiting_for_code_input"));
+        assert!(prompt.contains("waiting_for_device_approval"));
+        assert!(prompt.contains("Never claim a code was sent"));
+        assert!(prompt.contains(".human_approval_gate/events.jsonl"));
+        assert!(prompt.contains("HAG_EVENT"));
         assert!(prompt.contains("status is `replied`"));
         assert!(prompt.contains("returned `reply` payload"));
         assert!(prompt.contains("dowhiz@deep-tutor.com"));
