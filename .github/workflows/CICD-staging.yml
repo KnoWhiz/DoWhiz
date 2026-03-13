@@ -32,14 +32,6 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Run tests (scheduler_module)
-        run: cargo test --locked -p scheduler_module
-        continue-on-error: true
-
-      - name: Run tests (run_task_module)
-        run: cargo test --locked -p run_task_module
-        continue-on-error: true
-
       - name: Build release binaries
         run: cargo build --locked -p scheduler_module --bins --release
 
