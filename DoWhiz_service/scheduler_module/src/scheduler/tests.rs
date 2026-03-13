@@ -173,9 +173,44 @@ fn build_scheduler_snapshot_limits_to_window() {
     };
 
     let snapshot = build_scheduler_snapshot(&[in_window, out_window], now);
+    assert!(snapshot.due.is_empty());
     assert_eq!(snapshot.upcoming.len(), 1);
     assert_eq!(snapshot.omitted_after_window, 1);
     assert_eq!(snapshot.total_enabled, 2);
+}
+
+#[test]
+fn build_scheduler_snapshot_surfaces_due_tasks_with_ids() {
+    let now = Utc::now();
+    let due_cron = ScheduledTask {
+        id: Uuid::new_v4(),
+        kind: TaskKind::Noop,
+        schedule: Schedule::Cron {
+            expression: "0 0 16 * * *".to_string(),
+            next_run: now - chrono::Duration::minutes(3),
+        },
+        enabled: true,
+        created_at: now,
+        last_run: Some(now - chrono::Duration::days(1)),
+    };
+    let future_one_shot = ScheduledTask {
+        id: Uuid::new_v4(),
+        kind: TaskKind::Noop,
+        schedule: Schedule::OneShot {
+            run_at: now + chrono::Duration::hours(2),
+        },
+        enabled: true,
+        created_at: now,
+        last_run: None,
+    };
+
+    let snapshot = build_scheduler_snapshot(&[due_cron.clone(), future_one_shot], now);
+    assert_eq!(snapshot.total_enabled, 2);
+    assert_eq!(snapshot.due.len(), 1);
+    assert_eq!(snapshot.due[0].id, due_cron.id.to_string());
+    assert_eq!(snapshot.due[0].status, "due");
+    assert_eq!(snapshot.omitted_past_due, 0);
+    assert_eq!(snapshot.upcoming.len(), 1);
 }
 
 #[test]
