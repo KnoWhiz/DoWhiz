@@ -192,6 +192,10 @@ jobs:
           source "$ENV_FILE"
           set +a
 
+          if systemctl list-unit-files 'dowhiz-oliver.service' --no-legend 2>/dev/null | grep -q '^dowhiz-oliver\.service'; then
+            sudo systemctl disable --now dowhiz-oliver.service || true
+          fi
+
           if pm2 describe dw_worker >/dev/null 2>&1; then
             pm2 restart dw_worker --update-env
           else
