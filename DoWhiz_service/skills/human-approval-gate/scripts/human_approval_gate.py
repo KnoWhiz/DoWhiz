@@ -469,7 +469,7 @@ def humanize_challenge_type(challenge_type: str) -> str:
 
 def humanize_page_state(page_state: str) -> str:
     return {
-        "captcha_blocked": "Still blocked on CAPTCHA after one built-in solve attempt",
+        "captcha_blocked": "Browser is currently blocked on a CAPTCHA challenge",
         "waiting_for_password": "Browser is waiting for the password field",
         "waiting_for_code_input": "Browser is waiting for a verification code to be typed",
         "waiting_for_device_approval": "Browser is waiting for an approval action on another device",
@@ -550,8 +550,6 @@ def build_text_body(state: Dict[str, Any]) -> str:
             lines.append(f"Password env key checked: {password_env_key}")
         if password_lookup_status:
             lines.append(f"Password lookup status: {password_lookup_status}")
-    if challenge_type == "captcha":
-        lines.append("Agent attempted one built-in visual solve before asking for help.")
     if screenshots:
         screenshot_names = ", ".join(
             str(item.get("name", "")).strip()
