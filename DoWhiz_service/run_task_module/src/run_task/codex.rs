@@ -2020,10 +2020,16 @@ fn build_codex_config_block(azure_endpoint: &str) -> String {
 }
 
 fn build_human_approval_gate_mcp_block() -> String {
+    let env_vars = HUMAN_APPROVAL_GATE_ENV_KEYS
+        .iter()
+        .map(|key| format!(r#""{key}""#))
+        .collect::<Vec<_>>()
+        .join(", ");
     format!(
         r#"{HAG_MCP_CONFIG_START_MARKER}
 [mcp_servers.{HUMAN_APPROVAL_GATE_MCP_SERVER_NAME}]
 command = "human_approval_gate_mcp"
+env_vars = [{env_vars}]
 
 {HAG_MCP_CONFIG_END_MARKER}"#
     )
