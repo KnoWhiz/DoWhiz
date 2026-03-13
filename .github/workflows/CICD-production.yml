@@ -41,7 +41,7 @@ jobs:
         continue-on-error: true
 
       - name: Build release binaries
-        run: cargo build --locked -p scheduler_module --bin rust_service --bin inbound_gateway --bin inbound_fanout --bin google-docs --bin set_postmark_inbound_hook --release
+        run: cargo build --locked -p scheduler_module --bins --release
 
       - name: Archive rust binaries
         uses: actions/upload-artifact@v4
@@ -51,8 +51,6 @@ jobs:
           path: |
             DoWhiz_service/target/release/rust_service
             DoWhiz_service/target/release/inbound_gateway
-            DoWhiz_service/target/release/inbound_fanout
-            DoWhiz_service/target/release/google-docs
             DoWhiz_service/target/release/set_postmark_inbound_hook
           if-no-files-found: error
 
@@ -122,8 +120,6 @@ jobs:
           RELEASE_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
           install -m 755 /tmp/dowhiz-release/rust_service "$RELEASE_DIR/rust_service"
           install -m 755 /tmp/dowhiz-release/inbound_gateway "$RELEASE_DIR/inbound_gateway"
-          install -m 755 /tmp/dowhiz-release/inbound_fanout "$RELEASE_DIR/inbound_fanout"
-          install -m 755 /tmp/dowhiz-release/google-docs "$RELEASE_DIR/google-docs"
           install -m 755 /tmp/dowhiz-release/set_postmark_inbound_hook "$RELEASE_DIR/set_postmark_inbound_hook"
           rm -rf /tmp/dowhiz-release
           EOF

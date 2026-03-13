@@ -6,11 +6,5 @@ DoWhiz_service/.workspace
 DoWhiz_service/.workspace/**
 DoWhiz_service/target
 DoWhiz_service/target/**
-!DoWhiz_service/target/
-!DoWhiz_service/target/release/
-!DoWhiz_service/target/release/rust_service
-!DoWhiz_service/target/release/inbound_gateway
-!DoWhiz_service/target/release/inbound_fanout
-!DoWhiz_service/target/release/google-docs
 DoWhiz_service/**/.env
 DoWhiz_service/**/.env.*
