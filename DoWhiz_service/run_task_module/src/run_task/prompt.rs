@@ -575,9 +575,15 @@ fn format_guidance_block(label: &str, content: &str) -> String {
 
 fn build_discord_context_section(workspace_dir: &Path) -> String {
     let path = workspace_dir
+        .join("discord_context")
+        .join("context_for_agent.md");
+    let fallback_path = workspace_dir
         .join("incoming_email")
         .join("discord_context_for_agent.md");
-    let Ok(content) = fs::read_to_string(path) else {
+    let content = fs::read_to_string(&path)
+        .or_else(|_| fs::read_to_string(&fallback_path))
+        .ok();
+    let Some(content) = content else {
         return String::new();
     };
     let trimmed = content.trim();
@@ -587,7 +593,7 @@ fn build_discord_context_section(workspace_dir: &Path) -> String {
     let max_chars = 12_000usize;
     let mut clipped: String = trimmed.chars().take(max_chars).collect();
     if trimmed.chars().count() > max_chars {
-        clipped.push_str("\n\n(Truncated. Use incoming_email/discord_thread_context_full.json and incoming_email/discord_channel_last_24h.json for complete context.)");
+        clipped.push_str("\n\n(Truncated. Use discord_context/thread_full.json, discord_context/thread_full.txt, discord_context/channel_history_full.json, and discord_context/channel_history_full.txt for complete context.)");
     }
     format!(
         "Discord context snapshot (auto-generated; full history is stored in local files):\n```markdown\n{}\n```\n",
@@ -741,10 +747,10 @@ mod tests {
     fn build_prompt_includes_discord_context_snapshot_when_available() {
         let temp = TempDir::new().expect("tempdir");
         let workspace = temp.path();
-        let incoming_dir = workspace.join("incoming_email");
-        fs::create_dir_all(&incoming_dir).expect("incoming_email");
+        let context_dir = workspace.join("discord_context");
+        fs::create_dir_all(&context_dir).expect("discord_context");
         fs::write(
-            incoming_dir.join("discord_context_for_agent.md"),
+            context_dir.join("context_for_agent.md"),
             "# Discord Context Snapshot\nQuoted + thread context",
         )
         .expect("context file");
