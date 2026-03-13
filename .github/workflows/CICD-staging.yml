@@ -29,27 +29,25 @@ jobs:
         with:
           ref: ${{ github.ref }}
 
-      - name: Build
-        run: cargo build
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Run tests (scheduler_module)
-        run: cargo test -p scheduler_module
+        run: cargo test --locked -p scheduler_module
         continue-on-error: true
 
       - name: Run tests (run_task_module)
-        run: cargo test -p run_task_module
+        run: cargo test --locked -p run_task_module
         continue-on-error: true
 
-      - name: Clean target before release build
-        run: cargo clean
-
       - name: Build release binaries
-        run: cargo build -p scheduler_module --bins --release
+        run: cargo build --locked -p scheduler_module --bins --release
 
       - name: Archive rust binaries
         uses: actions/upload-artifact@v4
         with:
           name: rust-binaries
+          compression-level: 0
           path: |
             DoWhiz_service/target/release/rust_service
             DoWhiz_service/target/release/inbound_gateway
@@ -63,9 +61,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Download rust binaries
         uses: actions/download-artifact@v4
         with:
@@ -94,7 +89,7 @@ jobs:
           echo "  Port 22" >> ~/.ssh/config
           echo "  IdentityFile ~/.ssh/private_key.pem" >> ~/.ssh/config
 
-      - name: Update repo and build on Azure VM
+      - name: Update repo on Azure VM
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'
           cd /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz
@@ -111,24 +106,6 @@ jobs:
           RELEASE_DIR=/home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
           mkdir -p "$RELEASE_DIR"
           chmod u+rwx "$RELEASE_DIR"
-          EOF
-
-      - name: Inspect release directory (debug)
-        run: |
-          ssh -F ~/.ssh/config azureproduction << 'EOF'
-          RELEASE_DIR=/home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
-          echo "== whoami =="
-          whoami
-          echo "== id =="
-          id
-          echo "== ls -ald =="
-          ls -ald "$RELEASE_DIR"
-          echo "== ls -al =="
-          ls -al "$RELEASE_DIR"
-          echo "== stat =="
-          stat "$RELEASE_DIR" || true
-          echo "== df -h =="
-          df -h "$RELEASE_DIR" || true
           EOF
 
       - name: Upload rust binaries to Azure VM (tmp)
