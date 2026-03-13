@@ -8,10 +8,10 @@ allowed-tools: None
 
 ## Context
 - Scheduler snapshot (if available): `scheduler_snapshot.json` in workspace root.
-- Snapshot includes enabled tasks scheduled between `window_start` and `window_end` (UTC, 7-day window), plus counts outside the window.
+- Snapshot includes enabled tasks that are already `due`, enabled tasks still `upcoming` between `window_start` and `window_end` (UTC, 7-day window), plus counts outside the visible window.
 
 ## Listing tasks
-- Read and summarize `upcoming` tasks (id, kind, next_run/run_at, status, label).
+- Read and summarize `due` tasks first, then `upcoming` tasks (id, kind, next_run/run_at, status, label).
 - If the snapshot is missing, state that scheduler state is unavailable.
 
 ## Scheduling outputs
@@ -47,4 +47,7 @@ SCHEDULER_ACTIONS_JSON_END
 - Cron uses 6 fields: `sec min hour day month weekday`.
 - Do not include workspace paths; `create_run_task` always targets the current workspace.
 - Output only JSON inside blocks; no commentary inside blocks.
+- Treat any enabled task shown under `due` as an existing active schedule/task, not as evidence that scheduling is missing.
+- Never create a duplicate recurring `run_task` solely because `upcoming` is empty while `due` is non-empty or `total_enabled` is already positive.
+- If scheduler repair is needed, prefer cancelling or rescheduling the existing task IDs from the snapshot over blindly creating a fresh cron.
 - If no changes are requested, omit the relevant block.
