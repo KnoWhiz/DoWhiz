@@ -548,7 +548,9 @@ pub(super) async fn ingest_whatsapp(
 /// Query parameters for WeChat webhook verification
 #[derive(Debug, Deserialize)]
 pub(super) struct WeChatVerifyParams {
-    pub msg_signature: Option<String>,
+    /// WeChat sends "signature" for URL verification, "msg_signature" for encrypted messages
+    #[serde(alias = "msg_signature")]
+    pub signature: Option<String>,
     pub timestamp: Option<String>,
     pub nonce: Option<String>,
     pub echostr: Option<String>,
@@ -559,7 +561,7 @@ pub(super) async fn verify_wechat_webhook(
     Query(params): Query<WeChatVerifyParams>,
 ) -> impl IntoResponse {
     match verify_wechat(
-        params.msg_signature.as_deref(),
+        params.signature.as_deref(),
         params.timestamp.as_deref(),
         params.nonce.as_deref(),
         params.echostr.as_deref(),

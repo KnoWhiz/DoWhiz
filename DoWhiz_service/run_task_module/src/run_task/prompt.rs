@@ -207,8 +207,7 @@ fn build_web_auth_capabilities_section() -> &'static str {
 fn build_human_approval_gate_section() -> &'static str {
     r#"Human Approval Gate (2FA / verification challenges):
 - If login/auth flow asks for OTP/passcode/device approval/number tap, or you are blocked on CAPTCHA/password after the required local checks below, use the `human-approval-gate` skill with an honest challenge type and browser screenshot.
-- If the page shows CAPTCHA/image puzzle/text recognition challenge, first use your own built-in multimodal/vision abilities and browser tools to inspect the challenge, attempt one direct solve in the page, and continue the login flow yourself.
-- If that first CAPTCHA solve attempt fails and the page is still blocked, use the MCP tool `dowhiz_human_approval_gate_request_and_wait` with `challenge_type="captcha"` and the current browser screenshot path(s).
+- If the page shows CAPTCHA/image puzzle/text recognition challenge, do NOT attempt to solve it yourself. Immediately take the current browser screenshot(s) and use the MCP tool `dowhiz_human_approval_gate_request_and_wait` with `challenge_type="captcha"`.
 - If login is waiting for a password, first check the workspace `.env` for the relevant secret (for Google login, check `GOOGLE_PASSWORD` first). Only if the needed password is still missing should you use `dowhiz_human_approval_gate_request_and_wait` with `challenge_type="password"` and the current browser screenshot path(s).
 - Only use `human_approval_gate` for steps that genuinely require human access outside the browser session, such as SMS codes, email codes sent to someone else, approval taps on another device, or information only the human can retrieve.
 - If multiple verification methods are available on the same challenge page, prefer SMS verification first by default. If SMS is unavailable or fails, fall back to another method and keep using `dowhiz_human_approval_gate_request_and_wait` for human input.
@@ -575,9 +574,15 @@ fn format_guidance_block(label: &str, content: &str) -> String {
 
 fn build_discord_context_section(workspace_dir: &Path) -> String {
     let path = workspace_dir
+        .join("discord_context")
+        .join("context_for_agent.md");
+    let fallback_path = workspace_dir
         .join("incoming_email")
         .join("discord_context_for_agent.md");
-    let Ok(content) = fs::read_to_string(path) else {
+    let content = fs::read_to_string(&path)
+        .or_else(|_| fs::read_to_string(&fallback_path))
+        .ok();
+    let Some(content) = content else {
         return String::new();
     };
     let trimmed = content.trim();
@@ -587,7 +592,7 @@ fn build_discord_context_section(workspace_dir: &Path) -> String {
     let max_chars = 12_000usize;
     let mut clipped: String = trimmed.chars().take(max_chars).collect();
     if trimmed.chars().count() > max_chars {
-        clipped.push_str("\n\n(Truncated. Use incoming_email/discord_thread_context_full.json and incoming_email/discord_channel_last_24h.json for complete context.)");
+        clipped.push_str("\n\n(Truncated. Use discord_context/thread_full.json, discord_context/thread_full.txt, discord_context/channel_history_full.json, and discord_context/channel_history_full.txt for complete context.)");
     }
     format!(
         "Discord context snapshot (auto-generated; full history is stored in local files):\n```markdown\n{}\n```\n",
@@ -741,10 +746,10 @@ mod tests {
     fn build_prompt_includes_discord_context_snapshot_when_available() {
         let temp = TempDir::new().expect("tempdir");
         let workspace = temp.path();
-        let incoming_dir = workspace.join("incoming_email");
-        fs::create_dir_all(&incoming_dir).expect("incoming_email");
+        let context_dir = workspace.join("discord_context");
+        fs::create_dir_all(&context_dir).expect("discord_context");
         fs::write(
-            incoming_dir.join("discord_context_for_agent.md"),
+            context_dir.join("context_for_agent.md"),
             "# Discord Context Snapshot\nQuoted + thread context",
         )
         .expect("context file");
@@ -979,9 +984,7 @@ mod tests {
         assert!(prompt.contains("screenshot path(s)"));
         assert!(prompt.contains("GOOGLE_PASSWORD"));
         assert!(prompt.contains("timeout"));
-        assert!(prompt.contains("built-in multimodal/vision abilities"));
-        assert!(prompt.contains("attempt one direct solve"));
-        assert!(prompt.contains("multimodal/vision abilities"));
+        assert!(prompt.contains("do NOT attempt to solve it yourself"));
         assert!(prompt.contains("required credential"));
         assert!(prompt.contains("prefer SMS verification first by default"));
         assert!(prompt.contains("click the button that sends the code"));

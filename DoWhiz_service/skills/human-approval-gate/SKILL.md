@@ -9,7 +9,7 @@ allowed-tools: Bash(human_approval_gate:*), Bash(python3:*), Bash(cat:*), Bash(t
 ## When to Use
 
 Use this skill when any authentication flow is blocked by something the agent genuinely cannot finish alone, for example:
-- CAPTCHA after one failed built-in solve attempt
+- CAPTCHA shown in the browser
 - missing password after checking the workspace `.env`
 - OTP / verification code input
 - "Approve sign-in on your phone"
@@ -17,8 +17,8 @@ Use this skill when any authentication flow is blocked by something the agent ge
 - any out-of-band challenge that requires user/admin action from another device/account
 
 For CAPTCHA/image puzzle/text-recognition steps:
-- first use your own multimodal/vision abilities plus browser tooling to inspect the challenge and attempt one direct solve in the page
-- if that first attempt fails and you are still blocked on CAPTCHA, open the gate with challenge type `captcha`
+- do not attempt to solve the CAPTCHA yourself
+- immediately open the gate with challenge type `captcha`
 - always attach the current browser screenshot so the human can see exactly what blocked you
 
 Only use this skill when the blocker genuinely requires a human outside the current browser session, for example:
@@ -45,7 +45,7 @@ Do not keep retrying login while blocked.
 
 ## Required Behavior
 
-1. If the blocker is CAPTCHA/image/text recognition, attempt one built-in solve first. If still blocked, use `--challenge-type captcha`.
+1. If the blocker is CAPTCHA/image/text recognition, do not attempt to solve it yourself. Immediately use `--challenge-type captcha`.
 2. If the blocker is a missing password, check the workspace `.env` first. If still missing, use `--challenge-type password`.
 3. If the blocker is 2FA, trigger the website challenge first and only then use `--challenge-type two_factor`.
 4. In run_task/Codex environments, call the MCP tool `dowhiz_human_approval_gate_request_and_wait`. Do not use the shell CLI there.
@@ -68,6 +68,7 @@ Preferred in run_task/Codex environments:
 - Take the current browser screenshot(s) first.
 - Call `dowhiz_human_approval_gate_request_and_wait`.
 - That single tool call sends the email, waits for the first same-thread reply or timeout, and returns the full challenge state.
+- In run_task/Codex environments, the injected MCP server config sets `tool_timeout_sec = 1860`, so the tool can stay blocked for the default 30-minute wait window plus a small buffer.
 - While that tool call is pending, do not do any other browser or shell actions.
 
 Example parameter shape:
@@ -118,14 +119,14 @@ $HAG_CMD request \
   --wait
 ```
 
-For CAPTCHA after one failed solve attempt:
+For CAPTCHA that is currently blocking the browser:
 
 ```bash
 $HAG_CMD request \
   --scope admin \
   --challenge-type captcha \
   --account-label "Oliver Google account" \
-  --context "I already tried one built-in CAPTCHA solve and the page still did not advance." \
+  --context "Google sign-in is blocked on a CAPTCHA and I need human help reading the current screenshot." \
   --screenshot work/google-captcha.png \
   --timeout-minutes 30 \
   --wait
