@@ -284,24 +284,22 @@ jobs:
             exit 1
           }
 
-          # Prior VM builds can leave a very large Rust target directory that bloats Docker context.
-          # Keep release binaries required by PM2 restarts, trim everything else.
-          if [[ -d "$APP_DIR/target" ]]; then
-            echo "Trimming $APP_DIR/target before az acr build to keep context small"
-            if [[ -d "$APP_DIR/target/release" ]]; then
-              find "$APP_DIR/target/release" -mindepth 1 -maxdepth 1 \
-                ! -name rust_service \
-                ! -name inbound_gateway \
-                ! -name set_postmark_inbound_hook \
-                ! -name inbound_fanout \
-                ! -name google-docs \
-                -exec rm -rf {} +
-            fi
-            find "$APP_DIR/target" -mindepth 1 -maxdepth 1 ! -name release -exec rm -rf {} +
-          fi
+          build_context_root="$(mktemp -d)"
+          cleanup_build_context() {
+            rm -rf "$build_context_root"
+          }
+          trap cleanup_build_context EXIT
+
+          echo "Preparing clean ACR build context at $build_context_root"
+          tar -C "$APP_ROOT" \
+            --exclude='DoWhiz_service/target' \
+            --exclude='DoWhiz_service/.workspace' \
+            --exclude='DoWhiz_service/.env' \
+            --exclude='DoWhiz_service/.env.*' \
+            -cf - Dockerfile .dockerignore DoWhiz_service | tar -C "$build_context_root" -xf -
 
           echo "Building ACI image via az acr build: $run_task_image"
-          cd "$APP_ROOT"
+          cd "$build_context_root"
           az acr build \
             --registry "$registry_name" \
             --image "$image_name" \
