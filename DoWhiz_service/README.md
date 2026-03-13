@@ -210,7 +210,9 @@ Azure ACI execution path (required vars):
   `dowhiz_human_approval_gate_request_and_wait`, which sends the email with the
   current browser screenshot(s) and blocks the same Codex turn until the first
   same-thread reply or timeout, preserving the current browser session while it
-  waits. The blocker must be modeled as `captcha`, `password`, or
+  waits. run_task injects `tool_timeout_sec = 1860` for that MCP server so the
+  Codex-side tool call can remain blocked for the default 30-minute HAG wait
+  window plus a small buffer. The blocker must be modeled as `captcha`, `password`, or
   `two_factor`. For `two_factor`, callers should only invoke it after the site
   is explicitly waiting for a code or device approval, and they should include
   the concrete method details (SMS/email/auth app/device tap). The manual CLI

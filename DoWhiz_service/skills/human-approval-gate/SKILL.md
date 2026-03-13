@@ -68,6 +68,7 @@ Preferred in run_task/Codex environments:
 - Take the current browser screenshot(s) first.
 - Call `dowhiz_human_approval_gate_request_and_wait`.
 - That single tool call sends the email, waits for the first same-thread reply or timeout, and returns the full challenge state.
+- In run_task/Codex environments, the injected MCP server config sets `tool_timeout_sec = 1860`, so the tool can stay blocked for the default 30-minute wait window plus a small buffer.
 - While that tool call is pending, do not do any other browser or shell actions.
 
 Example parameter shape:

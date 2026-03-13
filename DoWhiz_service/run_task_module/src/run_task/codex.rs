@@ -57,6 +57,7 @@ const HUMAN_APPROVAL_GATE_ENV_KEYS: &[&str] = &[
 ];
 const HUMAN_APPROVAL_GATE_REQUIRE_MCP_ENV_KEY: &str = "HUMAN_APPROVAL_GATE_REQUIRE_MCP";
 const HUMAN_APPROVAL_GATE_MCP_SERVER_NAME: &str = "human-approval-gate";
+const HUMAN_APPROVAL_GATE_MCP_TOOL_TIMEOUT_SECONDS: u32 = 31 * 60;
 const HUMAN_APPROVAL_FROM_ENV_KEY: &str = "HUMAN_APPROVAL_FROM";
 const HUMAN_APPROVAL_REPLY_TO_ENV_KEY: &str = "HUMAN_APPROVAL_REPLY_TO";
 const EMPLOYEE_CONFIG_PATH_ENV_KEY: &str = "EMPLOYEE_CONFIG_PATH";
@@ -2030,6 +2031,7 @@ fn build_human_approval_gate_mcp_block() -> String {
 [mcp_servers.{HUMAN_APPROVAL_GATE_MCP_SERVER_NAME}]
 command = "human_approval_gate_mcp"
 env_vars = [{env_vars}]
+tool_timeout_sec = {HUMAN_APPROVAL_GATE_MCP_TOOL_TIMEOUT_SECONDS}
 
 {HAG_MCP_CONFIG_END_MARKER}"#
     )
