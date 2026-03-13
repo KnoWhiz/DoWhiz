@@ -1,6 +1,6 @@
 ---
 name: human-approval-gate
-description: Use when browser/login flow is blocked by CAPTCHA, missing password, OTP, passcode, approval tap, or another user/admin verification step. Sends a request email with browser screenshots and blocks until the first reply or timeout using the human_approval_gate CLI.
+description: Use when browser/login flow is blocked by CAPTCHA, missing password, OTP, passcode, approval tap, or another user/admin verification step. In run_task/Codex environments, use the blocking MCP tool so the current browser session stays paused on the same page until the human replies.
 allowed-tools: Bash(human_approval_gate:*), Bash(python3:*), Bash(cat:*), Bash(test:*), Bash(date:*)
 ---
 
@@ -18,7 +18,7 @@ Use this skill when any authentication flow is blocked by something the agent ge
 
 For CAPTCHA/image puzzle/text-recognition steps:
 - first use your own multimodal/vision abilities plus browser tooling to inspect the challenge and attempt one direct solve in the page
-- if that first attempt fails and you are still blocked on CAPTCHA, open the gate with `--challenge-type captcha`
+- if that first attempt fails and you are still blocked on CAPTCHA, open the gate with challenge type `captcha`
 - always attach the current browser screenshot so the human can see exactly what blocked you
 
 Only use this skill when the blocker genuinely requires a human outside the current browser session, for example:
@@ -48,11 +48,12 @@ Do not keep retrying login while blocked.
 1. If the blocker is CAPTCHA/image/text recognition, attempt one built-in solve first. If still blocked, use `--challenge-type captcha`.
 2. If the blocker is a missing password, check the workspace `.env` first. If still missing, use `--challenge-type password`.
 3. If the blocker is 2FA, trigger the website challenge first and only then use `--challenge-type two_factor`.
-4. Always attach the current browser screenshot(s) with `--screenshot ...`.
-5. Wait on gate result.
-6. Continue only after the first reply is received and inspect that reply yourself.
-7. If timeout, stop login attempts and report clearly.
-8. If SMS verification is unavailable or fails, switch to another available method and keep the same gate-based wait behavior.
+4. In run_task/Codex environments, call the MCP tool `dowhiz_human_approval_gate_request_and_wait`. Do not use the shell CLI there.
+5. Always attach the current browser screenshot(s).
+6. Wait on gate result.
+7. Continue only after the first reply is received and inspect that reply yourself.
+8. If timeout, stop login attempts and report clearly.
+9. If SMS verification is unavailable or fails, switch to another available method and keep the same gate-based wait behavior.
 
 ## Scope Rules
 
@@ -60,7 +61,34 @@ Do not keep retrying login while blocked.
 - `scope=user`: when agent logs in an end user's account. Send to that specific user email.
 - For `scope=admin`, do not pass a user recipient address.
 
+## Blocking MCP Tool
+
+Preferred in run_task/Codex environments:
+
+- Take the current browser screenshot(s) first.
+- Call `dowhiz_human_approval_gate_request_and_wait`.
+- That single tool call sends the email, waits for the first same-thread reply or timeout, and returns the full challenge state.
+- While that tool call is pending, do not do any other browser or shell actions.
+
+Example parameter shape:
+
+```json
+{
+  "scope": "admin",
+  "challenge_type": "two_factor",
+  "page_state": "waiting_for_code_input",
+  "two_factor_method": "sms",
+  "verification_destination": "phone ending in 9315",
+  "account_label": "Oliver Google account",
+  "context": "Google has already sent the code and the page is waiting for it.",
+  "screenshot": ["work/google-verify.png"],
+  "timeout_minutes": 30
+}
+```
+
 ## CLI Quick Start
+
+Manual fallback only. Do not use this shell CLI inside run_task/Codex environments because it bypasses the enforced blocking MCP path.
 
 CLI fallback (if command not found on PATH):
 
@@ -161,6 +189,7 @@ No rigid reply format is required. Ask the recipient to reply in the same thread
 
 ## Important Notes
 
+- In run_task/Codex environments, the shell CLI is intentionally disabled and the MCP tool is the only supported path.
 - Keep waiting in this command; do not run unrelated steps while waiting.
 - Reuse the same challenge thread; do not spam multiple requests unless previous one timed out.
 - Never include raw credentials in outbound messages.
