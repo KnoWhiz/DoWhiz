@@ -147,6 +147,25 @@ class HumanApprovalGateTests(unittest.TestCase):
             self.assertEqual(payload["attachments"][0]["name"], "screen.png")
             self.assertGreater(payload["attachments"][0]["size_bytes"], 0)
 
+    def test_captcha_body_reports_blocked_state_without_solve_attempt_claim(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            screenshot = self.create_screenshot(temp_dir)
+            args = self.parse_request(
+                "--challenge-type",
+                "captcha",
+                "--scope",
+                "admin",
+                "--account-label",
+                "Oliver Google account",
+                "--screenshot",
+                screenshot,
+            )
+            state = MODULE.build_request_state(args)
+            rendered = state["_rendered_email"]
+
+            self.assertIn("Current browser state: Browser is currently blocked on a CAPTCHA challenge", rendered["text_body"])
+            self.assertNotIn("attempted one built-in visual solve", rendered["text_body"])
+
     def test_cli_rejects_shell_usage_when_mcp_required(self):
         previous = os.environ.get(MODULE.HAG_REQUIRE_MCP_ENV_KEY)
         os.environ[MODULE.HAG_REQUIRE_MCP_ENV_KEY] = "1"
