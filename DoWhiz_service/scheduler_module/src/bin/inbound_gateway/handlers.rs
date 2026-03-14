@@ -560,15 +560,26 @@ pub(super) struct WeChatVerifyParams {
 pub(super) async fn verify_wechat_webhook(
     Query(params): Query<WeChatVerifyParams>,
 ) -> impl IntoResponse {
+    info!(
+        "wechat verification request: signature={:?} timestamp={:?} nonce={:?} echostr_len={:?}",
+        params.signature.as_deref(),
+        params.timestamp.as_deref(),
+        params.nonce.as_deref(),
+        params.echostr.as_ref().map(|s| s.len())
+    );
+
     match verify_wechat(
         params.signature.as_deref(),
         params.timestamp.as_deref(),
         params.nonce.as_deref(),
         params.echostr.as_deref(),
     ) {
-        Ok(echostr) => (StatusCode::OK, echostr),
+        Ok(echostr) => {
+            info!("wechat verification succeeded, returning echostr len={}", echostr.len());
+            (StatusCode::OK, echostr)
+        }
         Err(reason) => {
-            info!("wechat webhook verification failed: {}", reason);
+            warn!("wechat webhook verification failed: {}", reason);
             (StatusCode::FORBIDDEN, reason.to_string())
         }
     }
