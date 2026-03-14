@@ -151,8 +151,9 @@ pub(super) fn verify_wechat(
     let nonce = nonce.ok_or("missing_nonce")?;
     let echostr = echostr.ok_or("missing_echostr")?;
 
-    // WeChat signature: SHA1(sort([token, timestamp, nonce]))
-    let mut parts = vec![token.as_str(), timestamp, nonce];
+    // WeChat signature: SHA1(sort([token, timestamp, nonce, echostr]))
+    // When encryption is enabled (EncodingAESKey configured), echostr is included
+    let mut parts = vec![token.as_str(), timestamp, nonce, echostr];
     parts.sort();
     let data = parts.join("");
 
@@ -211,8 +212,8 @@ mod tests {
         let nonce = "random_nonce";
         let echostr = "challenge_string";
 
-        // Calculate the expected signature: SHA1(sort([token, timestamp, nonce]))
-        let mut parts = vec![token, timestamp, nonce];
+        // Calculate the expected signature: SHA1(sort([token, timestamp, nonce, echostr]))
+        let mut parts = vec![token, timestamp, nonce, echostr];
         parts.sort();
         let data = parts.join("");
         let mut hasher = Sha1::new();
@@ -319,17 +320,18 @@ mod tests {
     #[test]
     fn verify_wechat_signature_sort_order() {
         // Test that the signature algorithm sorts parts correctly
-        // This is critical: WeChat sorts [token, timestamp, nonce] alphabetically
+        // This is critical: WeChat sorts [token, timestamp, nonce, echostr] alphabetically
         let token = "zzz_token";
         let timestamp = "aaa_timestamp";
         let nonce = "mmm_nonce";
+        let echostr = "bbb_echo";
 
         std::env::set_var("WECHAT_TOKEN", token);
 
-        // Sorted: ["aaa_timestamp", "mmm_nonce", "zzz_token"]
-        let mut parts = vec![token, timestamp, nonce];
+        // Sorted: ["aaa_timestamp", "bbb_echo", "mmm_nonce", "zzz_token"]
+        let mut parts = vec![token, timestamp, nonce, echostr];
         parts.sort();
-        assert_eq!(parts, vec!["aaa_timestamp", "mmm_nonce", "zzz_token"]);
+        assert_eq!(parts, vec!["aaa_timestamp", "bbb_echo", "mmm_nonce", "zzz_token"]);
 
         let data = parts.join("");
         let mut hasher = Sha1::new();
@@ -340,7 +342,7 @@ mod tests {
             Some(&valid_signature),
             Some(timestamp),
             Some(nonce),
-            Some("echo"),
+            Some(echostr),
         );
 
         std::env::remove_var("WECHAT_TOKEN");
