@@ -227,6 +227,21 @@ export function buildStarterResourceObjects(blueprint) {
   return resources;
 }
 
+export function applyProviderRuntimeState(resources, runtimeStateEnvelope) {
+  if (!runtimeStateEnvelope?.runtime) {
+    return resources;
+  }
+
+  const runtime = runtimeStateEnvelope.runtime;
+  const capabilities = runtime.capabilities || {};
+  const connected = runtime.connected || {};
+  const identifiers = runtimeStateEnvelope.identifiers || [];
+
+  return resources.map((resource) =>
+    applyRuntimeStateToResource(resource, capabilities, connected, identifiers)
+  );
+}
+
 function addResource(resources, category, providerKey, partial) {
   if (
     resources.some(
@@ -267,4 +282,139 @@ function channelRequested(blueprint, needle) {
   const needleLower = String(needle).toLowerCase();
 
   return requested.some((channel) => String(channel || '').toLowerCase().includes(needleLower));
+}
+
+function applyRuntimeStateToResource(resource, capabilities, connected, identifiers) {
+  const next = {
+    ...resource,
+    provider: { ...resource.provider }
+  };
+
+  if (resource.category === RESOURCE_CATEGORY.BUILD_SYSTEM) {
+    if (connected.github) {
+      next.provider = getProviderMetadata('github');
+      next.state = RESOURCE_PROVISIONING_STATE.CONNECTED;
+      next.note = buildConnectedNote('GitHub', findIdentifier(identifiers, 'github'));
+      next.manual_next_step = null;
+      return next;
+    }
+    if (capabilities.github) {
+      next.provider = getProviderMetadata('github');
+      next.state = RESOURCE_PROVISIONING_STATE.AVAILABLE_NOT_CONFIGURED;
+      next.note = 'GitHub runtime is available but not yet linked for this account.';
+      next.manual_next_step = 'Connect GitHub in account integrations to enable build workflows.';
+      return next;
+    }
+
+    next.provider = getProviderMetadata('github');
+    next.state = RESOURCE_PROVISIONING_STATE.PLANNED_MANUAL;
+    next.note = 'GitHub automation is not configured in this runtime environment.';
+    next.manual_next_step = 'Ask an admin to enable GitHub OAuth in this environment.';
+    return next;
+  }
+
+  if (resource.category === RESOURCE_CATEGORY.FORMAL_DOCS) {
+    if (connected.google_docs) {
+      next.provider = getProviderMetadata('google_docs');
+      next.state = RESOURCE_PROVISIONING_STATE.CONNECTED;
+      next.note = buildConnectedNote(
+        'Google Docs',
+        findIdentifier(identifiers, 'google_docs', 'google_workspace', 'google')
+      );
+      next.manual_next_step = null;
+      return next;
+    }
+    if (capabilities.google_docs) {
+      next.provider = getProviderMetadata('google_docs');
+      next.state = RESOURCE_PROVISIONING_STATE.AVAILABLE_NOT_CONFIGURED;
+      next.note = 'Google Docs artifact runtime is ready, but account linkage is still required.';
+      next.manual_next_step =
+        'Link Google Docs workspace access before generating formal document artifacts.';
+      return next;
+    }
+
+    next.provider = getProviderMetadata('google_docs');
+    next.state = RESOURCE_PROVISIONING_STATE.PLANNED_MANUAL;
+    next.note = 'Google Docs runtime is not configured in this environment yet.';
+    next.manual_next_step = 'Enable Google Docs runtime credentials to automate formal docs.';
+    return next;
+  }
+
+  if (resource.category === RESOURCE_CATEGORY.EXTERNAL_EXECUTION) {
+    if (connected.email) {
+      next.provider = getProviderMetadata('email');
+      next.state = RESOURCE_PROVISIONING_STATE.CONNECTED;
+      next.note = buildConnectedNote('Email', findIdentifier(identifiers, 'email'));
+      next.manual_next_step = null;
+      return next;
+    }
+    if (capabilities.email) {
+      next.provider = getProviderMetadata('email');
+      next.state = RESOURCE_PROVISIONING_STATE.AVAILABLE_NOT_CONFIGURED;
+      next.note = 'Outbound email runtime is available, but account email is not linked.';
+      next.manual_next_step = 'Verify and link an email address for external execution.';
+      return next;
+    }
+
+    next.provider = getProviderMetadata('email');
+    next.state = RESOURCE_PROVISIONING_STATE.PLANNED_MANUAL;
+    next.note = 'Outbound email runtime is not configured in this environment.';
+    next.manual_next_step = 'Enable Postmark credentials to unlock external email execution.';
+    return next;
+  }
+
+  if (
+    resource.category === RESOURCE_CATEGORY.COORDINATION_LAYER ||
+    resource.category === RESOURCE_CATEGORY.APPROVAL_POLICY
+  ) {
+    const connectedProviderKey = connected.slack ? 'slack' : connected.discord ? 'discord' : null;
+
+    if (connectedProviderKey) {
+      next.provider = getProviderMetadata(connectedProviderKey);
+      next.state = RESOURCE_PROVISIONING_STATE.CONNECTED;
+      next.note =
+        resource.category === RESOURCE_CATEGORY.APPROVAL_POLICY
+          ? `Approval policy is enforced in ${next.provider.display_name} with human review checkpoints.`
+          : buildConnectedNote(
+              next.provider.display_name,
+              findIdentifier(identifiers, connectedProviderKey)
+            );
+      next.manual_next_step = null;
+      return next;
+    }
+
+    if (capabilities.slack || capabilities.discord) {
+      const preferredProvider = capabilities.slack ? 'slack' : 'discord';
+      next.provider = getProviderMetadata(preferredProvider);
+      next.state = RESOURCE_PROVISIONING_STATE.PLANNED_MANUAL;
+      next.note = `${next.provider.display_name} coordination runtime is available but not linked to this account.`;
+      next.manual_next_step =
+        resource.category === RESOURCE_CATEGORY.APPROVAL_POLICY
+          ? 'Link Slack or Discord and define explicit approval handoffs.'
+          : 'Link Slack or Discord to activate coordination loops.';
+      return next;
+    }
+
+    next.state = RESOURCE_PROVISIONING_STATE.PLANNED_MANUAL;
+    next.note = 'Slack/Discord runtime is not configured in this environment.';
+    next.manual_next_step = 'Enable Slack or Discord integration before channel-native coordination.';
+    return next;
+  }
+
+  return next;
+}
+
+function findIdentifier(identifiers, ...types) {
+  return identifiers.find(
+    (item) =>
+      item.verified &&
+      types.some((type) => String(item.identifier_type || '').toLowerCase() === type)
+  );
+}
+
+function buildConnectedNote(providerLabel, identifier) {
+  if (!identifier?.identifier) {
+    return `${providerLabel} is connected and ready for execution.`;
+  }
+  return `${providerLabel} is connected via linked identifier: ${identifier.identifier}.`;
 }

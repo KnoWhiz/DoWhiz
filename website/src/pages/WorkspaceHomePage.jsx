@@ -1,16 +1,50 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import WorkspaceSectionCard from '../components/workspace/WorkspaceSectionCard';
 import WorkspaceStatusPill from '../components/workspace/WorkspaceStatusPill';
 import { demoWorkspace } from '../data/demoWorkspace';
 import { getProvisioningLabel } from '../domain/resourceModel';
+import { loadProviderRuntimeState } from '../domain/providerRuntimeState';
 import { loadWorkspaceBlueprint } from '../domain/workspaceBlueprint';
 import { createWorkspaceHomeModel } from '../domain/workspaceHomeModel';
 
 function WorkspaceHomePage() {
+  const [providerRuntimeState, setProviderRuntimeState] = useState(null);
+  const [providerRuntimeStatus, setProviderRuntimeStatus] = useState('loading');
+
   const savedBlueprint = loadWorkspaceBlueprint();
   const isUsingDemo = !savedBlueprint;
   const blueprint = savedBlueprint || demoWorkspace.blueprint;
-  const model = createWorkspaceHomeModel(blueprint, { demoMode: isUsingDemo });
+  const model = createWorkspaceHomeModel(blueprint, {
+    demoMode: isUsingDemo,
+    providerRuntimeState
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateProviderState() {
+      try {
+        const result = await loadProviderRuntimeState();
+        if (cancelled) {
+          return;
+        }
+        setProviderRuntimeState(result.runtimeState);
+        setProviderRuntimeStatus(result.reason || 'unavailable');
+      } catch {
+        if (!cancelled) {
+          setProviderRuntimeState(null);
+          setProviderRuntimeStatus('unavailable');
+        }
+      }
+    }
+
+    hydrateProviderState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <main className="route-shell route-shell-workspace">
@@ -22,6 +56,16 @@ function WorkspaceHomePage() {
         {isUsingDemo ? (
           <p className="workspace-inline-note">
             Showing demo workspace data. Complete founder intake to generate your own canonical workspace blueprint.
+          </p>
+        ) : null}
+        {providerRuntimeStatus === 'ok' ? (
+          <p className="workspace-inline-note">
+            Live provider status loaded from linked account integrations and runtime capability checks.
+          </p>
+        ) : null}
+        {providerRuntimeStatus === 'not_authenticated' ? (
+          <p className="workspace-inline-note">
+            Sign in to load live GitHub, Google Docs, email, Slack, and Discord connection status.
           </p>
         ) : null}
 
@@ -145,6 +189,15 @@ function WorkspaceHomePage() {
           </WorkspaceSectionCard>
 
           <WorkspaceSectionCard title="Approval Queue" subtitle="Human decisions required before sensitive actions">
+            {model.approvalPolicy ? (
+              <p className="workspace-inline-note">
+                Approval policy: {model.approvalPolicy.provider.display_name} (
+                {getProvisioningLabel(model.approvalPolicy.state)}).
+                {model.approvalPolicy.manual_next_step
+                  ? ` ${model.approvalPolicy.manual_next_step}`
+                  : ' Human review stays explicit before outbound actions.'}
+              </p>
+            ) : null}
             <ul className="workspace-list">
               {model.approvalQueue.map((approval) => (
                 <li key={approval.id} className="workspace-list-row">

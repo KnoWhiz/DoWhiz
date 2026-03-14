@@ -1,5 +1,7 @@
 import {
+  RESOURCE_CATEGORY,
   RESOURCE_PROVISIONING_STATE,
+  applyProviderRuntimeState,
   buildStarterResourceObjects
 } from './resourceModel';
 
@@ -8,12 +10,18 @@ export function createWorkspaceHomeModel(blueprint, options = {}) {
   const startupName = blueprint.venture.name || 'Founder Workspace';
   const founderName = blueprint.founder.name || 'Founder';
 
-  const resources = buildStarterResourceObjects(blueprint);
+  const resources = applyProviderRuntimeState(
+    buildStarterResourceObjects(blueprint),
+    options.providerRuntimeState
+  );
   const starterTasks = deriveStarterTasks(blueprint);
   const recentArtifacts = deriveRecentArtifacts(blueprint, demoMode);
   const approvalQueue = deriveApprovalQueue(blueprint);
   const nextActions = deriveNextActions(resources, approvalQueue, starterTasks);
   const agentRoster = deriveAgentRoster(blueprint, demoMode);
+  const approvalPolicy = resources.find(
+    (resource) => resource.category === RESOURCE_CATEGORY.APPROVAL_POLICY
+  ) || null;
 
   return {
     title: startupName,
@@ -27,11 +35,13 @@ export function createWorkspaceHomeModel(blueprint, options = {}) {
     stack: blueprint.stack,
     agentRoster,
     resources,
+    approvalPolicy,
     starterTasks,
     recentArtifacts,
     approvalQueue,
     nextActions,
-    workspaceHealth: summarizeHealth(resources)
+    workspaceHealth: summarizeHealth(resources),
+    providerRuntime: options.providerRuntimeState?.runtime || null
   };
 }
 
