@@ -244,6 +244,10 @@ jobs:
           source "$ENV_FILE"
           set +a
 
+          if systemctl list-unit-files 'dowhiz-oliver.service' --no-legend 2>/dev/null | grep -q '^dowhiz-oliver\.service'; then
+            sudo systemctl disable --now dowhiz-oliver.service || true
+          fi
+
           if pm2 describe dw_worker >/dev/null 2>&1; then
             pm2 restart dw_worker --update-env
           else
@@ -361,7 +365,21 @@ jobs:
           base_image_name="${base_repo}:${base_tag}"
           base_image_full="${login_server}/${base_image_name}"
 
-          cd "$APP_ROOT"
+          build_context_root="$(mktemp -d)"
+          cleanup_build_context() {
+            rm -rf "$build_context_root"
+          }
+          trap cleanup_build_context EXIT
+
+          echo "Preparing clean ACR build context at $build_context_root"
+          tar -C "$APP_ROOT" \
+            --exclude='DoWhiz_service/target' \
+            --exclude='DoWhiz_service/.workspace' \
+            --exclude='DoWhiz_service/.env' \
+            --exclude='DoWhiz_service/.env.*' \
+            -cf - Dockerfile Dockerfile.base .dockerignore DoWhiz_service | tar -C "$build_context_root" -xf -
+
+          cd "$build_context_root"
           if az acr repository show --name "$registry_name" --image "$base_image_name" --only-show-errors >/dev/null 2>&1; then
             echo "Reusing base image: $base_image_full"
           else

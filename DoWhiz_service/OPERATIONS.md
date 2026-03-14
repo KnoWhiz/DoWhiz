@@ -52,6 +52,10 @@ PM2 logs (if PM2-managed):
 
 ## 4) Start / Restart Patterns
 
+On staging/production VMs, PM2 is the canonical runtime manager. Treat any leftover `systemd`
+unit such as `dowhiz-oliver.service` as legacy and disable it so it cannot compete with PM2 or
+confuse incident response.
+
 ### 4.1 Script-based (foreground/local style)
 
 ```bash
@@ -80,6 +84,12 @@ pm2 restart dw_gateway --update-env || \
 
 pm2 save
 pm2 list
+```
+
+If a legacy worker unit exists on a VM, disable it once:
+
+```bash
+sudo systemctl disable --now dowhiz-oliver.service || true
 ```
 
 ## 5) Health Checks

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="python3"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+else
+  echo "python interpreter not found for human_approval_gate_mcp" >&2
+  exit 1
+fi
+
+candidates=(
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../skills/human-approval-gate/scripts/human_approval_gate_mcp.py"
+  "${PWD}/DoWhiz_service/skills/human-approval-gate/scripts/human_approval_gate_mcp.py"
+  "./.agents/skills/human-approval-gate/scripts/human_approval_gate_mcp.py"
+  "${PWD}/.agents/skills/human-approval-gate/scripts/human_approval_gate_mcp.py"
+  "/app/DoWhiz_service/skills/human-approval-gate/scripts/human_approval_gate_mcp.py"
+  "${HOME:-}/.dowhiz/DoWhiz/skills/human-approval-gate/scripts/human_approval_gate_mcp.py"
+)
+
+for script_path in "${candidates[@]}"; do
+  if [[ -n "${script_path}" && -f "${script_path}" ]]; then
+    exec "${PYTHON_BIN}" "${script_path}" "$@"
+  fi
+done
+
+echo "human_approval_gate_mcp.py not found in expected locations" >&2
+exit 1

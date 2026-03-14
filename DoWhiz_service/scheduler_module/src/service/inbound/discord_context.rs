@@ -8,13 +8,24 @@ use tracing::{info, warn};
 use super::super::config::ServiceConfig;
 use super::super::BoxError;
 
-const HISTORY_WINDOW_HOURS: i64 = 24;
+const HISTORY_WINDOW_HOURS: i64 = 24 * 14;
+const HISTORY_WINDOW_DAYS: i64 = HISTORY_WINDOW_HOURS / 24;
 const MAX_HISTORY_PAGES: usize = 20;
 const INLINE_THREAD_CHAR_LIMIT: usize = 6000;
 const INLINE_THREAD_RECENT_COUNT: usize = 8;
 const INLINE_CHANNEL_CHAR_LIMIT: usize = 4000;
 const INLINE_CHANNEL_RECENT_COUNT: usize = 12;
 const ROUTER_CONTEXT_CHAR_LIMIT: usize = 4000;
+
+const CONTEXT_DIR_NAME: &str = "discord_context";
+const CHANNEL_HISTORY_JSON: &str = "channel_history_full.json";
+const CHANNEL_HISTORY_TEXT: &str = "channel_history_full.txt";
+const CHANNEL_RECENT_TEXT: &str = "channel_recent.txt";
+const THREAD_HISTORY_JSON: &str = "thread_full.json";
+const THREAD_HISTORY_TEXT: &str = "thread_full.txt";
+const THREAD_RECENT_TEXT: &str = "thread_recent.txt";
+const QUOTED_MESSAGE_JSON: &str = "quoted_message.json";
+const CONTEXT_MARKDOWN: &str = "context_for_agent.md";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct DiscordMessageEntry {
@@ -75,16 +86,13 @@ pub(crate) fn hydrate_discord_context_files(
     raw_payload: &[u8],
     seq: u64,
 ) -> Result<(), BoxError> {
-    let incoming_dir = workspace.join("incoming_email");
-    std::fs::create_dir_all(&incoming_dir)?;
-
     let snapshot = collect_discord_context_snapshot(config, message, raw_payload)?;
-    write_discord_context_files(&incoming_dir, seq, &snapshot)?;
+    write_discord_context_files(workspace, seq, &snapshot)?;
 
     info!(
         "discord context files updated for channel {} at {}",
         snapshot.channel_id,
-        incoming_dir.display()
+        workspace.join(CONTEXT_DIR_NAME).display()
     );
 
     Ok(())
@@ -95,13 +103,11 @@ pub(crate) fn hydrate_discord_context_files_from_snapshot(
     seq: u64,
     snapshot: &DiscordContextSnapshot,
 ) -> Result<(), BoxError> {
-    let incoming_dir = workspace.join("incoming_email");
-    std::fs::create_dir_all(&incoming_dir)?;
-    write_discord_context_files(&incoming_dir, seq, snapshot)?;
+    write_discord_context_files(workspace, seq, snapshot)?;
     info!(
         "discord context files updated for channel {} at {}",
         snapshot.channel_id,
-        incoming_dir.display()
+        workspace.join(CONTEXT_DIR_NAME).display()
     );
     Ok(())
 }
@@ -129,8 +135,9 @@ pub(crate) fn build_discord_router_context(
     };
 
     let mut context = format!(
-        "Thread window (recent replies in this thread):\n{thread}\n\nChannel window (recent in last {hours}h):\n{channel}",
+        "Thread window (recent replies in this thread):\n{thread}\n\nChannel window (recent in last {days} days / {hours}h):\n{channel}",
         thread = thread_block,
+        days = HISTORY_WINDOW_DAYS,
         hours = HISTORY_WINDOW_HOURS,
         channel = channel_block
     );
@@ -174,7 +181,7 @@ fn collect_discord_context_snapshot(
 
     let mut channel_messages = Vec::new();
     if let Some(bot_token) = resolve_discord_bot_token(config) {
-        match fetch_channel_messages_last_day(&bot_token, channel_id, cutoff) {
+        match fetch_channel_messages_in_window(&bot_token, channel_id, cutoff) {
             Ok(messages) => {
                 channel_messages = messages;
             }
@@ -275,11 +282,16 @@ fn collect_discord_context_snapshot(
 }
 
 fn write_discord_context_files(
-    incoming_dir: &Path,
+    workspace: &Path,
     seq: u64,
     snapshot: &DiscordContextSnapshot,
 ) -> Result<(), BoxError> {
-    let channel_history_path = incoming_dir.join("discord_channel_last_24h.json");
+    let incoming_dir = workspace.join("incoming_email");
+    let context_dir = workspace.join(CONTEXT_DIR_NAME);
+    std::fs::create_dir_all(&incoming_dir)?;
+    std::fs::create_dir_all(&context_dir)?;
+
+    let channel_history_path = incoming_dir.join("discord_channel_history_full.json");
     let thread_full_path = incoming_dir.join("discord_thread_context_full.json");
     let thread_recent_path = incoming_dir.join("discord_thread_context_recent.txt");
     let channel_recent_path = incoming_dir.join("discord_channel_context_recent.txt");
@@ -298,9 +310,11 @@ fn write_discord_context_files(
         "message_count": snapshot.channel_messages.len(),
         "messages": &snapshot.channel_messages,
     });
+    let channel_payload_json = serde_json::to_string_pretty(&channel_payload)?;
+    std::fs::write(&channel_history_path, &channel_payload_json)?;
     std::fs::write(
-        &channel_history_path,
-        serde_json::to_string_pretty(&channel_payload)?,
+        context_dir.join(CHANNEL_HISTORY_JSON),
+        &channel_payload_json,
     )?;
 
     let thread_payload = serde_json::json!({
@@ -309,10 +323,9 @@ fn write_discord_context_files(
         "message_count": snapshot.thread_messages.len(),
         "messages": &snapshot.thread_messages,
     });
-    std::fs::write(
-        &thread_full_path,
-        serde_json::to_string_pretty(&thread_payload)?,
-    )?;
+    let thread_payload_json = serde_json::to_string_pretty(&thread_payload)?;
+    std::fs::write(&thread_full_path, &thread_payload_json)?;
+    std::fs::write(context_dir.join(THREAD_HISTORY_JSON), &thread_payload_json)?;
 
     if let Some(quoted) = &snapshot.quoted_message {
         let quoted_path = incoming_dir.join("discord_quoted_message.json");
@@ -320,15 +333,23 @@ fn write_discord_context_files(
             "generated_at": snapshot.generated_at.to_rfc3339(),
             "message": quoted,
         });
-        std::fs::write(quoted_path, serde_json::to_string_pretty(&quoted_payload)?)?;
+        let quoted_payload_json = serde_json::to_string_pretty(&quoted_payload)?;
+        std::fs::write(quoted_path, &quoted_payload_json)?;
+        std::fs::write(context_dir.join(QUOTED_MESSAGE_JSON), &quoted_payload_json)?;
     }
 
+    let thread_full_text = render_entries(&snapshot.thread_messages);
     let thread_recent_text = render_entries(&snapshot.inline_thread_messages);
+    let channel_full_text = render_entries(&snapshot.channel_messages);
     let channel_recent_text = render_entries(&snapshot.inline_channel_messages);
     std::fs::write(&thread_recent_path, &thread_recent_text)?;
     std::fs::write(&seq_recent_path, &thread_recent_text)?;
     std::fs::write(&channel_recent_path, &channel_recent_text)?;
     std::fs::write(&seq_channel_recent_path, &channel_recent_text)?;
+    std::fs::write(context_dir.join(THREAD_HISTORY_TEXT), &thread_full_text)?;
+    std::fs::write(context_dir.join(THREAD_RECENT_TEXT), &thread_recent_text)?;
+    std::fs::write(context_dir.join(CHANNEL_HISTORY_TEXT), &channel_full_text)?;
+    std::fs::write(context_dir.join(CHANNEL_RECENT_TEXT), &channel_recent_text)?;
 
     let quoted_block = if let Some(quoted) = snapshot.quoted_message.as_ref() {
         format!(
@@ -341,8 +362,11 @@ fn write_discord_context_files(
 
     let thread_note = if snapshot.thread_truncated {
         format!(
-            "Thread context is large; inline section keeps the most recent {} messages. Older thread messages are stored in `incoming_email/discord_thread_context_full.json`.\n\n",
+            "Thread context is large; inline section keeps the most recent {} messages. The full thread history is stored in `discord_context/{}` and `discord_context/{}`.\n\n",
             INLINE_THREAD_RECENT_COUNT
+            ,
+            THREAD_HISTORY_JSON,
+            THREAD_HISTORY_TEXT
         )
     } else {
         String::new()
@@ -350,8 +374,12 @@ fn write_discord_context_files(
 
     let channel_note = if snapshot.channel_truncated {
         format!(
-            "Channel context is large; inline section keeps the most recent {} messages. Older channel messages are stored in `incoming_email/discord_channel_last_24h.json`.\n\n",
-            INLINE_CHANNEL_RECENT_COUNT
+            "Channel context is large; inline section keeps the most recent {} messages. The full last {} days / {}h channel history is stored in `discord_context/{}` and `discord_context/{}`.\n\n",
+            INLINE_CHANNEL_RECENT_COUNT,
+            HISTORY_WINDOW_DAYS,
+            HISTORY_WINDOW_HOURS,
+            CHANNEL_HISTORY_JSON,
+            CHANNEL_HISTORY_TEXT
         )
     } else {
         String::new()
@@ -367,18 +395,24 @@ Guild ID: `{guild_id}`\n\n\
 ## Thread Context (Inline)\n\
 {inline_thread}\n\n\
 {thread_note}\
-## Channel Context (Inline, last 24h window)\n\
+## Channel Context (Inline, last {history_days} days / {history_hours}h window)\n\
 {inline_channel}\n\n\
 {channel_note}\
-## Local Context Files\n\
-- `incoming_email/discord_channel_last_24h.json`: full channel history from the last 24 hours.\n\
-- `incoming_email/discord_channel_context_recent.txt`: recent channel context used inline.\n\
-- `incoming_email/discord_thread_context_full.json`: full thread context.\n\
-- `incoming_email/discord_thread_context_recent.txt`: recent thread context used inline.\n\
-- `incoming_email/discord_quoted_message.json`: quoted message payload when available.\n",
+## Discord Context Folder\n\
+- `discord_context/{channel_history_json}`: full channel history from the last {history_days} days / {history_hours} hours in JSON.\n\
+- `discord_context/{channel_history_text}`: full channel history from the last {history_days} days / {history_hours} hours as rendered text.\n\
+- `discord_context/{channel_recent_text}`: recent channel context used inline.\n\
+- `discord_context/{thread_history_json}`: full thread context in JSON.\n\
+- `discord_context/{thread_history_text}`: full thread context as rendered text.\n\
+- `discord_context/{thread_recent_text}`: recent thread context used inline.\n\
+- `discord_context/{quoted_message_json}`: quoted message payload when available.\n\
+\n\
+When the task is to summarize what was discussed in Discord, inspect the full files under `discord_context/` instead of relying only on the inline snapshot.\n",
         generated_at = snapshot.generated_at.to_rfc3339(),
         current_id = snapshot.current_message_id,
         channel_id = snapshot.channel_id,
+        history_days = HISTORY_WINDOW_DAYS,
+        history_hours = HISTORY_WINDOW_HOURS,
         guild_id = snapshot
             .guild_id
             .map(|id| id.to_string())
@@ -396,9 +430,17 @@ Guild ID: `{guild_id}`\n\n\
             channel_recent_text
         },
         channel_note = channel_note,
+        channel_history_json = CHANNEL_HISTORY_JSON,
+        channel_history_text = CHANNEL_HISTORY_TEXT,
+        channel_recent_text = CHANNEL_RECENT_TEXT,
+        thread_history_json = THREAD_HISTORY_JSON,
+        thread_history_text = THREAD_HISTORY_TEXT,
+        thread_recent_text = THREAD_RECENT_TEXT,
+        quoted_message_json = QUOTED_MESSAGE_JSON,
     );
     std::fs::write(&context_md_path, &context_markdown)?;
     std::fs::write(&seq_context_md_path, &context_markdown)?;
+    std::fs::write(context_dir.join(CONTEXT_MARKDOWN), &context_markdown)?;
 
     Ok(())
 }
@@ -434,7 +476,7 @@ fn resolve_discord_bot_token(config: &ServiceConfig) -> Option<String> {
     config.discord_bot_token.clone()
 }
 
-fn fetch_channel_messages_last_day(
+fn fetch_channel_messages_in_window(
     bot_token: &str,
     channel_id: u64,
     cutoff: DateTime<Utc>,
@@ -744,5 +786,74 @@ fn render_single_entry(message: &DiscordMessageEntry) -> String {
             "- [{}] {} ({}): {}",
             timestamp, message.author_name, message.author_id, content
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn entry(id: &str, author: &str, content: &str) -> DiscordMessageEntry {
+        DiscordMessageEntry {
+            id: id.to_string(),
+            timestamp: "2026-03-13T18:26:04.476000+00:00".to_string(),
+            author_id: format!("author-{id}"),
+            author_name: author.to_string(),
+            content: content.to_string(),
+            reference_message_id: None,
+            attachments: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn write_discord_context_files_populates_dedicated_context_dir() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace = temp.path();
+        let snapshot = DiscordContextSnapshot {
+            generated_at: Utc::now(),
+            channel_id: 123,
+            guild_id: Some(456),
+            current_message_id: "msg-2".to_string(),
+            channel_messages: vec![
+                entry("msg-1", "Zoe", "Earlier message"),
+                entry("msg-2", "Zoe", "Current request"),
+            ],
+            thread_messages: vec![entry("msg-2", "Zoe", "Current request")],
+            inline_thread_messages: vec![entry("msg-2", "Zoe", "Current request")],
+            inline_channel_messages: vec![
+                entry("msg-1", "Zoe", "Earlier message"),
+                entry("msg-2", "Zoe", "Current request"),
+            ],
+            quoted_message: None,
+            thread_truncated: false,
+            channel_truncated: false,
+        };
+
+        write_discord_context_files(workspace, 2, &snapshot).expect("write context");
+
+        let context_dir = workspace.join(CONTEXT_DIR_NAME);
+        assert!(context_dir.join(CHANNEL_HISTORY_JSON).exists());
+        assert!(context_dir.join(CHANNEL_HISTORY_TEXT).exists());
+        assert!(context_dir.join(CHANNEL_RECENT_TEXT).exists());
+        assert!(context_dir.join(THREAD_HISTORY_JSON).exists());
+        assert!(context_dir.join(THREAD_HISTORY_TEXT).exists());
+        assert!(context_dir.join(THREAD_RECENT_TEXT).exists());
+        assert!(context_dir.join(CONTEXT_MARKDOWN).exists());
+
+        let context_md =
+            std::fs::read_to_string(context_dir.join(CONTEXT_MARKDOWN)).expect("context md");
+        assert!(context_md.contains("last 14 days / 336h window"));
+        assert!(context_md.contains("discord_context/channel_history_full.json"));
+
+        let full_history =
+            std::fs::read_to_string(context_dir.join(CHANNEL_HISTORY_TEXT)).expect("history txt");
+        assert!(full_history.contains("Earlier message"));
+        assert!(full_history.contains("Current request"));
+
+        assert!(workspace
+            .join("incoming_email")
+            .join("discord_context_for_agent.md")
+            .exists());
     }
 }

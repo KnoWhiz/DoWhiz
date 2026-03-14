@@ -50,6 +50,7 @@ pub(crate) struct SchedulerSnapshot {
     pub(crate) window_start: DateTime<Utc>,
     pub(crate) window_end: DateTime<Utc>,
     pub(crate) total_enabled: usize,
+    pub(crate) due: Vec<SchedulerSnapshotTask>,
     pub(crate) upcoming: Vec<SchedulerSnapshotTask>,
     pub(crate) omitted_past_due: usize,
     pub(crate) omitted_after_window: usize,
@@ -96,8 +97,9 @@ pub(crate) fn build_scheduler_snapshot(
     now: DateTime<Utc>,
 ) -> SchedulerSnapshot {
     let window_end = now + chrono::Duration::days(SCHEDULER_SNAPSHOT_WINDOW_DAYS);
+    let mut due = Vec::new();
     let mut upcoming = Vec::new();
-    let mut omitted_past_due = 0usize;
+    let omitted_past_due = 0usize;
     let mut omitted_after_window = 0usize;
     let mut total_enabled = 0usize;
 
@@ -107,8 +109,16 @@ pub(crate) fn build_scheduler_snapshot(
         }
         total_enabled += 1;
         let next_run = schedule_next_run_at(&task.schedule);
-        if next_run < now {
-            omitted_past_due += 1;
+        if task.is_due(now) {
+            due.push(SchedulerSnapshotTask {
+                id: task.id.to_string(),
+                kind: task_kind_label(&task.kind).to_string(),
+                schedule: snapshot_schedule(&task.schedule),
+                next_run,
+                last_run: task.last_run,
+                status: task_status_label(task, now),
+                label: task_label(&task.kind),
+            });
             continue;
         }
         if next_run > window_end {
@@ -126,6 +136,7 @@ pub(crate) fn build_scheduler_snapshot(
         });
     }
 
+    due.sort_by_key(|task| task.next_run);
     upcoming.sort_by_key(|task| task.next_run);
 
     SchedulerSnapshot {
@@ -133,6 +144,7 @@ pub(crate) fn build_scheduler_snapshot(
         window_start: now,
         window_end,
         total_enabled,
+        due,
         upcoming,
         omitted_past_due,
         omitted_after_window,

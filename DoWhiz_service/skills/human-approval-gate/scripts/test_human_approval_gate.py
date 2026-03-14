@@ -1,5 +1,8 @@
+import contextlib
 import importlib.util
+import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -12,6 +15,13 @@ MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
+
+MCP_SCRIPT_PATH = Path(__file__).with_name("human_approval_gate_mcp.py")
+MCP_SPEC = importlib.util.spec_from_file_location("human_approval_gate_mcp", MCP_SCRIPT_PATH)
+MCP_MODULE = importlib.util.module_from_spec(MCP_SPEC)
+assert MCP_SPEC.loader is not None
+sys.modules[MCP_SPEC.name] = MCP_MODULE
+MCP_SPEC.loader.exec_module(MCP_MODULE)
 
 
 class HumanApprovalGateTests(unittest.TestCase):
@@ -136,6 +146,62 @@ class HumanApprovalGateTests(unittest.TestCase):
             self.assertEqual(payload["attachment_count"], 1)
             self.assertEqual(payload["attachments"][0]["name"], "screen.png")
             self.assertGreater(payload["attachments"][0]["size_bytes"], 0)
+
+    def test_captcha_body_reports_blocked_state_without_solve_attempt_claim(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            screenshot = self.create_screenshot(temp_dir)
+            args = self.parse_request(
+                "--challenge-type",
+                "captcha",
+                "--scope",
+                "admin",
+                "--account-label",
+                "Oliver Google account",
+                "--screenshot",
+                screenshot,
+            )
+            state = MODULE.build_request_state(args)
+            rendered = state["_rendered_email"]
+
+            self.assertIn("Current browser state: Browser is currently blocked on a CAPTCHA challenge", rendered["text_body"])
+            self.assertNotIn("attempted one built-in visual solve", rendered["text_body"])
+
+    def test_cli_rejects_shell_usage_when_mcp_required(self):
+        previous = os.environ.get(MODULE.HAG_REQUIRE_MCP_ENV_KEY)
+        os.environ[MODULE.HAG_REQUIRE_MCP_ENV_KEY] = "1"
+        stdout = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(stdout):
+                exit_code = MODULE.main(["status", "--challenge-id", "missing"])
+        finally:
+            if previous is None:
+                os.environ.pop(MODULE.HAG_REQUIRE_MCP_ENV_KEY, None)
+            else:
+                os.environ[MODULE.HAG_REQUIRE_MCP_ENV_KEY] = previous
+
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "error")
+        self.assertIn(MODULE.HAG_BLOCKING_MCP_TOOL_NAME, payload["error"])
+
+    def test_mcp_wrapper_reuses_blocking_request_flow(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            screenshot = self.create_screenshot(temp_dir)
+            params = MCP_MODULE.BlockingHumanApprovalGateInput(
+                scope="admin",
+                challenge_type="captcha",
+                screenshot=[screenshot],
+                account_label="Oliver Google account",
+                state_dir=str(Path(temp_dir) / ".human_approval_gate" / "challenges"),
+                dry_run=True,
+            )
+
+            state = MCP_MODULE.execute_blocking_hag_request(params)
+
+            self.assertEqual(state["status"], "pending")
+            self.assertEqual(state["challenge_type"], "captcha")
+            self.assertEqual(state["outbound_message_id"], "DRY_RUN")
+            self.assertEqual(state["request_attachments"][0]["name"], "screen.png")
 
 
 if __name__ == "__main__":

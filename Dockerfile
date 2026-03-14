@@ -32,8 +32,9 @@ COPY DoWhiz_service/employees/ /app/DoWhiz_service/employees/
 # Copy skills directory for Codex
 COPY DoWhiz_service/skills/ /app/DoWhiz_service/skills/
 
-RUN chmod +x /app/bin/human_approval_gate || true
+RUN chmod +x /app/bin/human_approval_gate /app/bin/human_approval_gate_mcp || true
 RUN ln -sf /app/bin/human_approval_gate /usr/local/bin/human_approval_gate
+RUN ln -sf /app/bin/human_approval_gate_mcp /usr/local/bin/human_approval_gate_mcp
 RUN chown -R app:nogroup /app/DoWhiz_service /app/bin /app/rust_service /app/inbound_fanout /app/inbound_gateway
 
 USER app

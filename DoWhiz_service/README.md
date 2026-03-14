@@ -65,7 +65,7 @@ Key binaries (from `scheduler_module/src/bin`):
 | `set_postmark_inbound_hook` | Utility to update Postmark inbound webhook |
 | `inbound_fanout` | Legacy fanout ingress helper |
 | `google-docs` / `google-sheets` / `google-slides` | Workspace integration CLI tools |
-| `human_approval_gate` | CLI for OTP/2FA approval requests (email + wait for reply) |
+| `human_approval_gate` / `human_approval_gate_mcp` | Human approval gate for CAPTCHA/password/2FA blockers; CLI for manual use and MCP server for blocking Codex runs |
 
 Key scripts:
 
@@ -115,6 +115,7 @@ Route model (`channel + key -> employee_id + tenant_id`):
 
 Notes:
 - Discord message routing uses bot-token-to-employee mapping for selected client; route table is mainly used to enable channel defaults/tenant defaults.
+- Discord inbound requests prepare a transient `discord_context/` folder inside the task workspace with thread context plus a large recent channel-history window for agent summarization; this context is not persisted outside the workspace.
 
 ## 4) Environment Variables
 
@@ -205,19 +206,26 @@ Azure ACI execution path (required vars):
 - Browser-based web auth for private Notion/Google pages is agent-driven at task runtime
   (no service-side bootstrap step).
 - `human_approval_gate` (via skill `human-approval-gate`) provides a blocking
-  approval flow for login CAPTCHA/password/OTP/device-approval steps. It sends an
-  email request with the current browser screenshot(s), models the blocker as
-  `captcha`, `password`, or `two_factor`, and waits for the first same-thread
-  reply, typically with a 30-minute timeout. For `two_factor`, callers should
-  only invoke it after the site is explicitly waiting for a code or device
-  approval, and they should include the concrete method details (SMS/email/auth
-  app/device tap). The CLI returns the full reply payload to the agent for
-  interpretation. Each send also writes `.human_approval_gate/events.jsonl` and
-  emits a `HAG_EVENT ...` stderr line containing challenge type plus attachment
-  filenames and sizes, so prod/staging task logs can prove exactly what was
-  sent. Sender resolution priority is `--from` > `HUMAN_APPROVAL_FROM` >
-  employee mailbox from employee config. HAG-thread replies (`[HAG:...]`) are
-  ignored by normal inbound task routing to prevent recursive Email->task loops.
+  approval flow for login CAPTCHA/password/OTP/device-approval steps. In
+  run_task/Codex environments, the preferred path is the injected MCP tool
+  `dowhiz_human_approval_gate_request_and_wait`, which sends the email with the
+  current browser screenshot(s) and blocks the same Codex turn until the first
+  same-thread reply or timeout, preserving the current browser session while it
+  waits. run_task injects `tool_timeout_sec = 1860` for that MCP server so the
+  Codex-side tool call can remain blocked for the default 30-minute HAG wait
+  window plus a small buffer. The blocker must be modeled as `captcha`, `password`, or
+  `two_factor`. For `two_factor`, callers should only invoke it after the site
+  is explicitly waiting for a code or device approval, and they should include
+  the concrete method details (SMS/email/auth app/device tap). The manual CLI
+  remains available outside Codex runtime, but run_task sets
+  `HUMAN_APPROVAL_GATE_REQUIRE_MCP=1` so shell-side HAG calls are rejected and
+  the blocking MCP path is enforced. Each send also writes
+  `.human_approval_gate/events.jsonl` and emits a `HAG_EVENT ...` stderr line
+  containing challenge type plus attachment filenames and sizes, so
+  prod/staging task logs can prove exactly what was sent. Sender resolution
+  priority is `--from` > `HUMAN_APPROVAL_FROM` > employee mailbox from employee
+  config. HAG-thread replies (`[HAG:...]`) are ignored by normal inbound task
+  routing to prevent recursive Email->task loops.
 - ACI run_task sets Playwright/NPM runtime defaults for mounted workspaces:
   `PLAYWRIGHT_MCP_EXECUTABLE_PATH` auto-discovery (`chrome-linux` / `chrome-linux64`),
   `PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright`,

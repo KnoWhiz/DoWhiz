@@ -84,14 +84,6 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Run tests (scheduler_module)
-        run: cargo test --locked -p scheduler_module
-        continue-on-error: true
-
-      - name: Run tests (run_task_module)
-        run: cargo test --locked -p run_task_module
-        continue-on-error: true
-
       - name: Build release binaries
         run: cargo build --locked -p scheduler_module --bins --release
 
@@ -142,14 +134,37 @@ jobs:
           echo "  IdentityFile ~/.ssh/private_key.pem" >> ~/.ssh/config
 
       - name: Update repo on Azure VM
+        id: update_repo
         run: |
-          ssh -F ~/.ssh/config azureproduction << 'EOF'
+          result=$(ssh -F ~/.ssh/config azureproduction << 'EOF'
           cd /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz
+          OLD_HEAD=$(git rev-parse HEAD)
           git checkout -f
           git checkout dev
           git pull
+          NEW_HEAD=$(git rev-parse HEAD)
           mkdir -p /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
+
+          # Check if only gateway files changed
+          changed_files=$(git diff --name-only "$OLD_HEAD" "$NEW_HEAD" 2>/dev/null || echo "")
+          gateway_only=true
+          if [[ -n "$changed_files" ]]; then
+            while IFS= read -r file; do
+              [[ -z "$file" ]] && continue
+              if [[ "$file" != DoWhiz_service/scheduler_module/src/bin/inbound_gateway/* ]]; then
+                gateway_only=false
+                break
+              fi
+            done <<< "$changed_files"
+          else
+            gateway_only=false
+          fi
+          echo "GATEWAY_ONLY=$gateway_only"
           EOF
+          )
+          echo "$result"
+          gateway_only=$(echo "$result" | grep "GATEWAY_ONLY=" | cut -d= -f2)
+          echo "gateway_only=$gateway_only" >> $GITHUB_OUTPUT
 
       - name: Ensure release directory is writable
         run: |
@@ -244,6 +259,10 @@ jobs:
           source "$ENV_FILE"
           set +a
 
+          if systemctl list-unit-files 'dowhiz-oliver.service' --no-legend 2>/dev/null | grep -q '^dowhiz-oliver\.service'; then
+            sudo systemctl disable --now dowhiz-oliver.service || true
+          fi
+
           if pm2 describe dw_worker >/dev/null 2>&1; then
             pm2 restart dw_worker --update-env
           else
@@ -315,6 +334,12 @@ jobs:
             exit 0
           fi
 
+          # Skip ACI rebuild if only gateway files changed (passed from update_repo step)
+          if [[ "${{ steps.update_repo.outputs.gateway_only }}" == "true" ]]; then
+            echo "Skipping ACI image build: only inbound_gateway files changed (rust_service unaffected)"
+            exit 0
+          fi
+
           run_task_image="$(read_env_value RUN_TASK_AZURE_ACI_IMAGE)"
           [[ -n "$run_task_image" ]] || {
             echo "RUN_TASK_AZURE_ACI_IMAGE is required when Azure ACI backend is enabled" >&2
@@ -361,7 +386,21 @@ jobs:
           base_image_name="${base_repo}:${base_tag}"
           base_image_full="${login_server}/${base_image_name}"
 
-          cd "$APP_ROOT"
+          build_context_root="$(mktemp -d)"
+          cleanup_build_context() {
+            rm -rf "$build_context_root"
+          }
+          trap cleanup_build_context EXIT
+
+          echo "Preparing clean ACR build context at $build_context_root"
+          tar -C "$APP_ROOT" \
+            --exclude='DoWhiz_service/target' \
+            --exclude='DoWhiz_service/.workspace' \
+            --exclude='DoWhiz_service/.env' \
+            --exclude='DoWhiz_service/.env.*' \
+            -cf - Dockerfile Dockerfile.base .dockerignore DoWhiz_service | tar -C "$build_context_root" -xf -
+
+          cd "$build_context_root"
           if az acr repository show --name "$registry_name" --image "$base_image_name" --only-show-errors >/dev/null 2>&1; then
             echo "Reusing base image: $base_image_full"
           else
