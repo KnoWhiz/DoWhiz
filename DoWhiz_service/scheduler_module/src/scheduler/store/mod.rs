@@ -48,8 +48,13 @@ impl SchedulerStore {
         status: &str,
         error_message: Option<&str>,
     ) -> Result<(), SchedulerError> {
-        self.mongo
-            .record_execution_finish(task_id, execution_id, finished_at, status, error_message)
+        self.mongo.record_execution_finish(
+            task_id,
+            execution_id,
+            finished_at,
+            status,
+            error_message,
+        )
     }
 
     pub(crate) fn get_retry_count(&self, task_id: &str) -> Result<u32, SchedulerError> {
@@ -80,6 +85,8 @@ pub struct TaskStatusSummary {
     pub id: String,
     pub kind: String,
     pub channel: String,
+    /// Short, user-facing summary derived from the original request content when available.
+    pub request_summary: Option<String>,
     pub enabled: bool,
     pub created_at: String,
     pub last_run: Option<String>,

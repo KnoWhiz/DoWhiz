@@ -2444,14 +2444,46 @@
         }
       }
 
-      // Map task kind to user-friendly display name
-      function formatTaskKind(kind) {
-        const kindMap = {
-          'send_email': 'Send Reply',
-          'run_task': 'Run Task',
-          'noop': 'No-op'
+      // Build concise task titles that describe what each item is doing
+      function humanizeTaskToken(value) {
+        if (!value || typeof value !== 'string') return '';
+        return value
+          .split(/[_\-\s]+/)
+          .filter(Boolean)
+          .map(part => part.length <= 3
+            ? part.toUpperCase()
+            : part.charAt(0).toUpperCase() + part.slice(1))
+          .join(' ');
+      }
+
+      function formatTaskTitle(task) {
+        const kind = (task.kind || '').toLowerCase();
+        const channel = (task.channel || task.source || '').toLowerCase();
+        const requestSummary = (task.request_summary || '').trim();
+
+        const channelMap = {
+          'email': 'Email',
+          'slack': 'Slack',
+          'discord': 'Discord',
+          'sms': 'SMS',
+          'telegram': 'Telegram',
+          'whatsapp': 'WhatsApp',
+          'google_docs': 'Google Docs',
+          'google_sheets': 'Google Sheets',
+          'google_slides': 'Google Slides',
+          'bluebubbles': 'iMessage',
+          'wechat': 'WeChat'
         };
-        return kindMap[kind] || kind || 'Task';
+
+        if (requestSummary) return requestSummary;
+        if (kind === 'send_email') return 'Send Reply';
+        if (kind === 'noop') return 'No-op';
+        if (kind === 'run_task') {
+          const channelLabel = channelMap[channel] || humanizeTaskToken(channel);
+          return channelLabel ? `Handle ${channelLabel}` : 'Handle Task';
+        }
+
+        return humanizeTaskToken(kind) || 'Task';
       }
 
       // Render a single task item
@@ -2480,7 +2512,7 @@
         return `
           <li class="task-item">
             <div class="task-header">
-              <span class="task-name">${escapeHtml(formatTaskKind(task.kind))}</span>
+              <span class="task-name">${escapeHtml(formatTaskTitle(task))}</span>
               <span class="task-badge ${status}">${statusLabel}</span>
             </div>
             <div class="task-details">
