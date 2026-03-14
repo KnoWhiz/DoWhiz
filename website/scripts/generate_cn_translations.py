@@ -90,7 +90,6 @@ MANUAL_OVERRIDES = {
     "GTM Specialist": "市场增长专家",
     "Generalist": "通才助理",
     "How it works": "工作方式",
-    "OpenClaw": "OpenClaw",
     "Role Design": "角色设计",
     "Safety": "安全",
     "Sign In": "登录",
@@ -111,7 +110,6 @@ def normalize_text(value: str) -> str:
 def sanitize_translation(value: str) -> str:
     return (
         value.replace("Do Whiz", "DoWhiz")
-        .replace("Open Claw", "OpenClaw")
         .replace("多威兹", "DoWhiz")
         .replace("多惠兹", "DoWhiz")
         .replace("多维兹", "DoWhiz")

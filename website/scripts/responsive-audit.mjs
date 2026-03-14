@@ -5,7 +5,7 @@ const root = process.cwd();
 const publicDir = path.join(root, 'public');
 
 const cssFiles = [
-  path.join(root, 'src', 'index.css'),
+  path.join(root, 'src', 'styles', 'responsive.css'),
   path.join(root, 'public', 'agent.css'),
   path.join(root, 'public', 'legal.css'),
   path.join(root, 'public', 'blog', 'blog.css')
