@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1.6
 
+ARG BASE_IMAGE
+
 FROM rust:1.93-bookworm AS builder
 WORKDIR /app
 
@@ -14,7 +16,6 @@ COPY DoWhiz_service/ DoWhiz_service/
 RUN cargo build --locked -p scheduler_module --bin rust_service --bin inbound_fanout --bin inbound_gateway --bin google-docs --release \
   --manifest-path DoWhiz_service/Cargo.toml
 
-ARG BASE_IMAGE
 FROM ${BASE_IMAGE} AS runtime
 
 WORKDIR /app
