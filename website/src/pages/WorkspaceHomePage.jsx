@@ -1,124 +1,188 @@
 import { Link } from 'react-router-dom';
+import WorkspaceSectionCard from '../components/workspace/WorkspaceSectionCard';
+import WorkspaceStatusPill from '../components/workspace/WorkspaceStatusPill';
 import { demoWorkspace } from '../data/demoWorkspace';
 import { loadWorkspaceBlueprint } from '../domain/workspaceBlueprint';
+import {
+  createWorkspaceHomeModel,
+  getProvisioningLabel,
+  getResourceCategoryLabel
+} from '../domain/workspaceHomeModel';
 
 function WorkspaceHomePage() {
-  const blueprint = loadWorkspaceBlueprint();
-
-  if (!blueprint) {
-    return (
-      <main className="route-shell route-shell-workspace">
-        <div className="route-card">
-          <p className="route-kicker">Workspace Home</p>
-          <h1>{demoWorkspace.name}</h1>
-          <p>{demoWorkspace.summary}</p>
-          <section className="route-section">
-            <h2>Connected Surfaces</h2>
-            <ul>
-              {demoWorkspace.channels.map((channel) => (
-                <li key={channel}>{channel}</li>
-              ))}
-            </ul>
-          </section>
-          <section className="route-section">
-            <h2>Next Actions</h2>
-            <ul>
-              {demoWorkspace.nextActions.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </section>
-          <div className="route-actions">
-            <Link className="btn btn-primary" to="/start">
-              Continue to Intake
-            </Link>
-            <Link className="btn btn-secondary" to="/dashboard">
-              Open Internal Dashboard
-            </Link>
-          </div>
-        </div>
-      </main>
-    );
-  }
+  const savedBlueprint = loadWorkspaceBlueprint();
+  const isUsingDemo = !savedBlueprint;
+  const blueprint = savedBlueprint || demoWorkspace.blueprint;
+  const model = createWorkspaceHomeModel(blueprint, { demoMode: isUsingDemo });
 
   return (
     <main className="route-shell route-shell-workspace">
-      <div className="route-card">
+      <div className="route-card route-card-workspace">
         <p className="route-kicker">Workspace Home</p>
-        <h1>{blueprint.venture.name || 'Founder Workspace'}</h1>
-        <p>{blueprint.venture.thesis}</p>
+        <h1>{model.title}</h1>
+        <p>{model.subtitle}</p>
 
-        <section className="route-section">
-          <h2>Startup Brief</h2>
-          <ul>
-            <li>Founder: {blueprint.founder.name}</li>
-            <li>Stage: {blueprint.venture.stage || 'Not set'}</li>
-            <li>Planning horizon: {blueprint.plan_horizon_days} days</li>
-          </ul>
+        {isUsingDemo ? (
+          <p className="workspace-inline-note">
+            Showing demo workspace data. Complete founder intake to generate your own canonical workspace blueprint.
+          </p>
+        ) : null}
+
+        <section className="workspace-health-row" aria-label="Workspace readiness">
+          <article className="workspace-health-item">
+            <span>Connected resources</span>
+            <strong>{model.workspaceHealth.connected}</strong>
+          </article>
+          <article className="workspace-health-item">
+            <span>Pending setup</span>
+            <strong>{model.workspaceHealth.nonConnected}</strong>
+          </article>
+          <article className="workspace-health-item">
+            <span>Readiness</span>
+            <strong>{model.workspaceHealth.readinessLabel}</strong>
+          </article>
         </section>
 
-        <section className="route-section">
-          <h2>Goals (30-90 Days)</h2>
-          <ul>
-            {blueprint.goals_30_90_days.map((goal) => (
-              <li key={goal}>{goal}</li>
-            ))}
-          </ul>
-        </section>
+        <section className="workspace-grid" aria-label="Workspace sections">
+          <WorkspaceSectionCard
+            title="Startup Brief"
+            subtitle="Founder context and execution window"
+          >
+            <ul className="workspace-list">
+              <li>
+                <strong>Founder:</strong> {model.founderName}
+              </li>
+              <li>
+                <strong>Stage:</strong> {model.stage}
+              </li>
+              <li>
+                <strong>Planning horizon:</strong> {model.planHorizonDays} days
+              </li>
+            </ul>
+            <h3>Goals (30-90 days)</h3>
+            <ul className="workspace-list">
+              {model.goals.map((goal) => (
+                <li key={goal}>{goal}</li>
+              ))}
+            </ul>
+          </WorkspaceSectionCard>
 
-        <section className="route-section">
-          <h2>Agent Roster Request</h2>
-          <ul>
-            {blueprint.requested_agents.length ? (
-              blueprint.requested_agents.map((agent) => (
-                <li key={`${agent.role}-${agent.owner || 'unassigned'}`}>
-                  {agent.role}
-                  {agent.owner ? ` (owner: ${agent.owner})` : ''}
+          <WorkspaceSectionCard title="Agent Roster" subtitle="Digital founding team ownership">
+            <ul className="workspace-list">
+              {model.agentRoster.map((agent) => (
+                <li key={`${agent.role}-${agent.name}`} className="workspace-list-row">
+                  <div>
+                    <strong>{agent.role}</strong>
+                    <p>{agent.focus}</p>
+                  </div>
+                  <div className="workspace-row-right">
+                    <span>{agent.name}</span>
+                    <WorkspaceStatusPill status={agent.status} label={agent.status} />
+                  </div>
                 </li>
-              ))
-            ) : (
-              <li>No specific agents requested yet.</li>
-            )}
-          </ul>
-        </section>
+              ))}
+            </ul>
+          </WorkspaceSectionCard>
 
-        <section className="route-section">
-          <h2>Preferred Channels</h2>
-          <ul>
-            {blueprint.preferred_channels.length ? (
-              blueprint.preferred_channels.map((channel) => <li key={channel}>{channel}</li>)
-            ) : (
-              <li>No channel preferences selected yet.</li>
-            )}
-          </ul>
-        </section>
+          <WorkspaceSectionCard title="Resource Status" subtitle="Product objects mapped to providers">
+            <ul className="workspace-list">
+              {model.resources.map((resource) => (
+                <li key={`${resource.category}-${resource.provider}`} className="workspace-list-row">
+                  <div>
+                    <strong>{getResourceCategoryLabel(resource.category)}</strong>
+                    <p>
+                      Provider: {resource.provider}
+                      {resource.note ? ` - ${resource.note}` : ''}
+                    </p>
+                  </div>
+                  <WorkspaceStatusPill
+                    status={resource.state}
+                    label={getProvisioningLabel(resource.state)}
+                  />
+                </li>
+              ))}
+            </ul>
+          </WorkspaceSectionCard>
 
-        <section className="route-section">
-          <h2>Stack Snapshot</h2>
-          <ul>
-            <li>Existing repo: {blueprint.stack.has_existing_repo ? 'Yes' : 'No'}</li>
-            <li>Repo provider: {blueprint.stack.primary_repo_provider || 'Not connected'}</li>
-            <li>Docs workspace: {blueprint.stack.has_docs_workspace ? 'Yes' : 'No'}</li>
-          </ul>
-        </section>
+          <WorkspaceSectionCard title="Starter Task Board" subtitle="Blueprint-derived execution graph">
+            <ul className="workspace-list">
+              {model.starterTasks.map((task) => (
+                <li key={task.id} className="workspace-list-row">
+                  <div>
+                    <strong>{task.title}</strong>
+                    <p>
+                      Owner: {task.ownerRole}
+                      {task.dependsOn.length ? ` | Depends on: ${task.dependsOn.join(', ')}` : ''}
+                    </p>
+                    <p>{task.rationale}</p>
+                  </div>
+                  <WorkspaceStatusPill status={task.status} label={task.status.replace('_', ' ')} />
+                </li>
+              ))}
+            </ul>
+          </WorkspaceSectionCard>
 
-        <section className="route-section">
-          <h2>Current Assets</h2>
-          <ul>
-            {blueprint.current_assets.length ? (
-              blueprint.current_assets.map((asset) => <li key={asset}>{asset}</li>)
-            ) : (
-              <li>No assets listed yet.</li>
-            )}
-          </ul>
+          <WorkspaceSectionCard title="Recent Artifacts" subtitle="Reviewable outputs">
+            <ul className="workspace-list">
+              {model.recentArtifacts.map((artifact) => (
+                <li key={artifact.id} className="workspace-list-row">
+                  <div>
+                    <strong>{artifact.title}</strong>
+                    <p>
+                      Surface: {artifact.surface} | Updated: {artifact.updatedAtLabel}
+                    </p>
+                  </div>
+                  <WorkspaceStatusPill status={artifact.status} label={artifact.status} />
+                </li>
+              ))}
+            </ul>
+          </WorkspaceSectionCard>
+
+          <WorkspaceSectionCard title="Approval Queue" subtitle="Human decisions required before sensitive actions">
+            <ul className="workspace-list">
+              {model.approvalQueue.map((approval) => (
+                <li key={approval.id} className="workspace-list-row">
+                  <div>
+                    <strong>{approval.title}</strong>
+                    <p>
+                      Owner: {approval.owner} | {approval.reason}
+                    </p>
+                  </div>
+                  <WorkspaceStatusPill
+                    status={approval.status}
+                    label={approval.status.replace('_', ' ')}
+                  />
+                </li>
+              ))}
+            </ul>
+          </WorkspaceSectionCard>
+
+          <WorkspaceSectionCard title="Next Recommended Actions" subtitle="What to do next">
+            <ol className="workspace-list workspace-list-ordered">
+              {model.nextActions.map((action) => (
+                <li key={action}>{action}</li>
+              ))}
+            </ol>
+            <h3>Current assets</h3>
+            <ul className="workspace-list">
+              {model.currentAssets.length ? (
+                model.currentAssets.map((asset) => <li key={asset}>{asset}</li>)
+              ) : (
+                <li>No assets listed yet.</li>
+              )}
+            </ul>
+          </WorkspaceSectionCard>
         </section>
 
         <div className="route-actions">
           <Link className="btn btn-primary" to="/start">
-            Edit intake
+            {isUsingDemo ? 'Create your blueprint' : 'Edit founder intake'}
+          </Link>
+          <Link className="btn btn-secondary" to="/">
+            Back to landing
           </Link>
           <Link className="btn btn-secondary" to="/dashboard">
-            Open internal dashboard
+            Internal analytics dashboard
           </Link>
         </div>
       </div>
