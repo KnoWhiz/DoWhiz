@@ -1,0 +1,67 @@
+.route-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: clamp(2rem, 5vw, 4rem) 1.25rem;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(138, 180, 255, 0.12), transparent 55%),
+    radial-gradient(circle at 85% 85%, rgba(127, 255, 212, 0.12), transparent 45%),
+    var(--bg-color);
+}
+
+.route-card {
+  width: min(880px, 100%);
+  border: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--glass-bg) 94%, #f9fbff 6%);
+  border-radius: 20px;
+  padding: clamp(1.25rem, 2vw, 2rem);
+  box-shadow: 0 18px 40px rgba(16, 42, 67, 0.1);
+  display: grid;
+  gap: 1rem;
+}
+
+.route-kicker {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  background: var(--color-muted);
+}
+
+.route-card h1 {
+  margin: 0;
+}
+
+.route-card p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.route-section {
+  border-top: 1px solid var(--color-border);
+  padding-top: 1rem;
+}
+
+.route-section h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.route-section ul {
+  margin-top: 0.65rem;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.route-actions {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
