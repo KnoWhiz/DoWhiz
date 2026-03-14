@@ -34,6 +34,10 @@ pub struct AuthState {
     pub github_client_id: Option<String>,
     pub github_client_secret: Option<String>,
     pub github_redirect_uri: Option<String>,
+    // Notion OAuth config
+    pub notion_client_id: Option<String>,
+    pub notion_client_secret: Option<String>,
+    pub notion_redirect_uri: Option<String>,
     // Frontend URL for redirects after OAuth
     pub frontend_url: String,
     // User store and paths for task lookups
@@ -1929,6 +1933,271 @@ pub async fn github_oauth_callback(
 }
 
 // ============================================================================
+// Notion OAuth
+// ============================================================================
+
+/// Query params for Notion OAuth callback
+#[derive(Debug, Deserialize)]
+pub struct NotionCallbackQuery {
+    pub code: String,
+    pub state: String,
+}
+
+/// Notion OAuth token response
+#[derive(Debug, Deserialize)]
+struct NotionTokenResponse {
+    access_token: String,
+    token_type: String,
+    bot_id: String,
+    workspace_id: String,
+    workspace_name: Option<String>,
+    workspace_icon: Option<String>,
+    owner: NotionOwner,
+}
+
+#[derive(Debug, Deserialize)]
+struct NotionOwner {
+    #[serde(rename = "type")]
+    owner_type: String,
+    user: Option<NotionUser>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NotionUser {
+    id: String,
+    name: Option<String>,
+    avatar_url: Option<String>,
+    #[serde(rename = "type")]
+    user_type: Option<String>,
+    person: Option<NotionPerson>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NotionPerson {
+    email: Option<String>,
+}
+
+/// GET /auth/notion
+/// Initiates Notion OAuth flow - returns URL for frontend to redirect to.
+pub async fn notion_oauth_start(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    // Check if Notion OAuth is configured
+    let (client_id, redirect_uri) = match (&state.notion_client_id, &state.notion_redirect_uri) {
+        (Some(id), Some(uri)) => (id.clone(), uri.clone()),
+        _ => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Notion OAuth not configured"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Extract and validate Supabase token
+    let token = match extract_bearer_token(&headers) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Validate the token to ensure user is authenticated
+    if let Err((status, msg)) = validate_supabase_token(&state.supabase_url, &token).await {
+        return (status, Json(serde_json::json!({ "error": msg }))).into_response();
+    }
+
+    // Encode the Supabase token in state so we can identify the user on callback
+    let encoded_state = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(token.as_bytes());
+
+    // Build Notion OAuth URL
+    // Notion uses owner=user for user-level access (vs owner=workspace for workspace integration)
+    let notion_auth_url = format!(
+        "https://api.notion.com/v1/oauth/authorize?client_id={}&response_type=code&owner=user&redirect_uri={}&state={}",
+        client_id,
+        urlencoding::encode(&redirect_uri),
+        encoded_state
+    );
+
+    // Return the URL for the frontend to redirect to
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "redirect_url": notion_auth_url
+        })),
+    )
+        .into_response()
+}
+
+/// GET /auth/notion/callback
+/// Handles Notion OAuth callback - exchanges code for token, gets user info, links account.
+pub async fn notion_oauth_callback(
+    State(state): State<AuthState>,
+    Query(params): Query<NotionCallbackQuery>,
+) -> impl IntoResponse {
+    // Helper to build redirect URLs to the frontend
+    let frontend_url = state.frontend_url.clone();
+    let redirect_to = |path: &str| -> axum::response::Response {
+        Redirect::to(&format!("{}{}", frontend_url, path)).into_response()
+    };
+
+    // Check if Notion OAuth is configured
+    let (client_id, client_secret, redirect_uri) = match (
+        &state.notion_client_id,
+        &state.notion_client_secret,
+        &state.notion_redirect_uri,
+    ) {
+        (Some(id), Some(secret), Some(uri)) => (id.clone(), secret.clone(), uri.clone()),
+        _ => {
+            return redirect_to("/auth/index.html?notion=error&reason=not_configured");
+        }
+    };
+
+    // Decode state to get the Supabase token
+    let token = match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&params.state) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(t) => t,
+            Err(_) => {
+                return redirect_to("/auth/index.html?notion=error&reason=invalid_state");
+            }
+        },
+        Err(_) => {
+            return redirect_to("/auth/index.html?notion=error&reason=invalid_state");
+        }
+    };
+
+    // Validate Supabase token and get user
+    let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(user) => user.id,
+        Err(_) => {
+            return redirect_to("/auth/index.html?notion=error&reason=invalid_token");
+        }
+    };
+
+    // Exchange code for Notion access token
+    // Notion uses Basic Auth with client_id:client_secret
+    let client = reqwest::Client::new();
+    let auth_header = base64::engine::general_purpose::STANDARD
+        .encode(format!("{}:{}", client_id, client_secret));
+
+    let token_res = client
+        .post("https://api.notion.com/v1/oauth/token")
+        .header("Authorization", format!("Basic {}", auth_header))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "grant_type": "authorization_code",
+            "code": params.code,
+            "redirect_uri": redirect_uri
+        }))
+        .send()
+        .await;
+
+    let notion_token = match token_res {
+        Ok(res) if res.status().is_success() => match res.json::<NotionTokenResponse>().await {
+            Ok(t) => t,
+            Err(e) => {
+                error!("Failed to parse Notion token response: {}", e);
+                return redirect_to("/auth/index.html?notion=error&reason=token_parse_error");
+            }
+        },
+        Ok(res) => {
+            let status = res.status();
+            let body = res.text().await.unwrap_or_default();
+            error!("Notion token exchange failed: {} - {}", status, body);
+            return redirect_to("/auth/index.html?notion=error&reason=token_exchange_failed");
+        }
+        Err(e) => {
+            error!("Notion token request failed: {}", e);
+            return redirect_to("/auth/index.html?notion=error&reason=token_request_failed");
+        }
+    };
+
+    // Extract user info from the token response
+    let notion_user_id = notion_token.owner.user.as_ref().map(|u| u.id.clone());
+    let notion_user_email = notion_token
+        .owner
+        .user
+        .as_ref()
+        .and_then(|u| u.person.as_ref())
+        .and_then(|p| p.email.clone());
+
+    info!(
+        "Notion OAuth successful for user {} (Notion workspace: {} / user: {:?})",
+        auth_user_id, notion_token.workspace_name.as_deref().unwrap_or("unknown"), notion_user_id
+    );
+
+    // Get user's account
+    let store = state.account_store.clone();
+    let account_result =
+        task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id)).await;
+
+    let account = match account_result {
+        Ok(Ok(Some(acc))) => acc,
+        Ok(Ok(None)) => {
+            return redirect_to("/auth/index.html?notion=error&reason=account_not_found");
+        }
+        Ok(Err(e)) => {
+            error!("Failed to get account: {}", e);
+            return redirect_to("/auth/index.html?notion=error&reason=db_error");
+        }
+        Err(e) => {
+            error!("spawn_blocking panicked: {}", e);
+            return redirect_to("/auth/index.html?notion=error&reason=internal_error");
+        }
+    };
+
+    // Create a unique identifier for this Notion connection
+    // We use workspace_id to allow users to connect multiple workspaces
+    let notion_identifier = format!("{}:{}", notion_token.workspace_id, notion_user_id.as_deref().unwrap_or("bot"));
+
+    // Link Notion to account
+    let store = state.account_store.clone();
+    let link_result =
+        task::spawn_blocking(move || store.create_identifier(account.id, "notion", &notion_identifier))
+            .await;
+
+    match link_result {
+        Ok(Ok(_identifier)) => {
+            info!(
+                "Linked Notion workspace {} to account {}",
+                notion_token.workspace_id, account.id
+            );
+
+            // TODO: Store the access_token securely for API calls
+            // For now, we could store it in a separate table or encrypted field
+            // The token is needed for future Notion API calls
+            info!(
+                "Notion access token obtained for workspace {} (token starts with: {}...)",
+                notion_token.workspace_id,
+                &notion_token.access_token[..8.min(notion_token.access_token.len())]
+            );
+
+            redirect_to("/auth/index.html?notion=success")
+        }
+        Ok(Err(AccountStoreError::IdentifierTaken)) => {
+            redirect_to("/auth/index.html?notion=error&reason=already_linked")
+        }
+        Ok(Err(e)) => {
+            error!("Failed to link Notion: {}", e);
+            redirect_to("/auth/index.html?notion=error&reason=link_failed")
+        }
+        Err(e) => {
+            error!("spawn_blocking panicked: {}", e);
+            redirect_to("/auth/index.html?notion=error&reason=internal_error")
+        }
+    }
+}
+
+// ============================================================================
 // Email Verification
 // ============================================================================
 
@@ -2318,6 +2587,8 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/auth/slack/callback", get(slack_oauth_callback))
         .route("/auth/github", get(github_oauth_start))
         .route("/auth/github/callback", get(github_oauth_callback))
+        .route("/auth/notion", get(notion_oauth_start))
+        .route("/auth/notion/callback", get(notion_oauth_callback))
         .route("/api/tasks", get(get_tasks))
         .route("/api/account/tasks", get(get_account_tasks))
         .with_state(state)

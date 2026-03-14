@@ -166,6 +166,11 @@ pub async fn run_server(
     let github_client_secret = std::env::var("GITHUB_CLIENT_SECRET").ok();
     let github_redirect_uri = std::env::var("GITHUB_REDIRECT_URI").ok();
 
+    // Notion OAuth config (optional)
+    let notion_client_id = std::env::var("NOTION_CLIENT_ID").ok();
+    let notion_client_secret = std::env::var("NOTION_CLIENT_SECRET").ok();
+    let notion_redirect_uri = std::env::var("NOTION_REDIRECT_URI").ok();
+
     // Frontend URL for OAuth redirects
     let frontend_url =
         std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:5173".to_string());
@@ -189,6 +194,9 @@ pub async fn run_server(
         github_client_id,
         github_client_secret,
         github_redirect_uri,
+        notion_client_id,
+        notion_client_secret,
+        notion_redirect_uri,
         frontend_url,
         user_store: Some(user_store.clone()),
         users_root: Some(config.users_root.clone()),
