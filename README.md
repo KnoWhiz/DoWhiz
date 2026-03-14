@@ -102,7 +102,3 @@ Inbound message
 
 - Staging deploy branch: `dev`
 - Production deploy branch: `main`
-
-## License
-
-Apache-2.0. See [`LICENSE`](LICENSE).
