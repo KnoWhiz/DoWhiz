@@ -190,10 +190,15 @@ fn decrypt_wechat_echostr(echostr: &str, encoding_aes_key: &str) -> Result<Strin
     type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 
     // Derive AESKey: Base64_Decode(EncodingAESKey + "=")
-    let aes_key_b64 = format!("{}=", encoding_aes_key.trim());
+    let trimmed_key = encoding_aes_key.trim();
+    let aes_key_b64 = format!("{}=", trimmed_key);
+    tracing::info!("wechat decrypt: key={}", trimmed_key);
     let aes_key = base64::engine::general_purpose::STANDARD
         .decode(&aes_key_b64)
-        .map_err(|_| "invalid_encoding_aes_key")?;
+        .map_err(|e| {
+            tracing::error!("base64 decode error: {:?}", e);
+            "invalid_encoding_aes_key"
+        })?;
 
     if aes_key.len() != 32 {
         return Err("invalid_aes_key_length");
