@@ -1,4 +1,5 @@
 use crate::domain::resource_model::WorkspaceResourcePlan;
+use crate::domain::starter_tasks::{build_starter_task_plan, StarterTaskPlan};
 use crate::domain::workspace_blueprint::{BlueprintValidationError, StartupWorkspaceBlueprint};
 
 use super::intake::normalize_and_validate_blueprint;
@@ -9,6 +10,7 @@ use super::resource_mapping::build_starter_resource_plan;
 pub struct StartupWorkspaceBootstrapPlan {
     pub blueprint: StartupWorkspaceBlueprint,
     pub resources: WorkspaceResourcePlan,
+    pub starter_tasks: StarterTaskPlan,
     pub provisioning: StartupProvisioningSnapshot,
 }
 
@@ -17,11 +19,13 @@ pub fn bootstrap_workspace_plan(
 ) -> Result<StartupWorkspaceBootstrapPlan, BlueprintValidationError> {
     let validated_blueprint = normalize_and_validate_blueprint(blueprint)?;
     let resources = build_starter_resource_plan(&validated_blueprint);
+    let starter_tasks = build_starter_task_plan(&validated_blueprint);
     let provisioning = derive_provisioning_snapshot(&resources);
 
     Ok(StartupWorkspaceBootstrapPlan {
         blueprint: validated_blueprint,
         resources,
+        starter_tasks,
         provisioning,
     })
 }
@@ -40,6 +44,7 @@ mod tests {
         let plan = bootstrap_workspace_plan(blueprint).expect("bootstrap should succeed");
 
         assert!(!plan.resources.resources.is_empty());
+        assert!(!plan.starter_tasks.tasks.is_empty());
         assert!(plan.provisioning.generated_at.timestamp() > 0);
         assert_eq!(plan.blueprint.plan_horizon_days, 30);
     }
