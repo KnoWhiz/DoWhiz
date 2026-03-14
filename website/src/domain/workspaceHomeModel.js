@@ -1,11 +1,14 @@
-import { RESOURCE_CATEGORY, RESOURCE_PROVISIONING_STATE } from './resourceModel';
+import {
+  RESOURCE_PROVISIONING_STATE,
+  buildStarterResourceObjects
+} from './resourceModel';
 
 export function createWorkspaceHomeModel(blueprint, options = {}) {
   const demoMode = Boolean(options.demoMode);
   const startupName = blueprint.venture.name || 'Founder Workspace';
   const founderName = blueprint.founder.name || 'Founder';
 
-  const resources = deriveResources(blueprint);
+  const resources = buildStarterResourceObjects(blueprint);
   const starterTasks = deriveStarterTasks(blueprint);
   const recentArtifacts = deriveRecentArtifacts(blueprint, demoMode);
   const approvalQueue = deriveApprovalQueue(blueprint);
@@ -30,35 +33,6 @@ export function createWorkspaceHomeModel(blueprint, options = {}) {
     nextActions,
     workspaceHealth: summarizeHealth(resources)
   };
-}
-
-export function getResourceCategoryLabel(category) {
-  const labels = {
-    [RESOURCE_CATEGORY.WORKSPACE_HOME]: 'Workspace Home',
-    [RESOURCE_CATEGORY.KNOWLEDGE_HUB_STRUCTURED]: 'Knowledge Hub (Structured)',
-    [RESOURCE_CATEGORY.FORMAL_DOCS]: 'Formal Docs',
-    [RESOURCE_CATEGORY.BUILD_SYSTEM]: 'Build System',
-    [RESOURCE_CATEGORY.EXTERNAL_EXECUTION]: 'External Execution',
-    [RESOURCE_CATEGORY.COORDINATION_LAYER]: 'Coordination Layer',
-    [RESOURCE_CATEGORY.PUBLISH_PRESENCE]: 'Publish Presence',
-    [RESOURCE_CATEGORY.AGENT_ROSTER]: 'Agent Roster',
-    [RESOURCE_CATEGORY.TASK_BOARD]: 'Task Board',
-    [RESOURCE_CATEGORY.ARTIFACT_QUEUE]: 'Artifact Queue',
-    [RESOURCE_CATEGORY.APPROVAL_POLICY]: 'Approval Policy'
-  };
-
-  return labels[category] || category;
-}
-
-export function getProvisioningLabel(state) {
-  const labels = {
-    [RESOURCE_PROVISIONING_STATE.CONNECTED]: 'Connected',
-    [RESOURCE_PROVISIONING_STATE.AVAILABLE_NOT_CONFIGURED]: 'Available, not configured',
-    [RESOURCE_PROVISIONING_STATE.PLANNED_MANUAL]: 'Planned / manual',
-    [RESOURCE_PROVISIONING_STATE.BLOCKED]: 'Blocked'
-  };
-
-  return labels[state] || state;
 }
 
 function deriveAgentRoster(blueprint, demoMode) {
@@ -93,106 +67,6 @@ function deriveAgentRoster(blueprint, demoMode) {
       focus: 'Drive distribution loops and launch readiness.'
     }
   ];
-}
-
-function deriveResources(blueprint) {
-  const resources = [
-    {
-      category: RESOURCE_CATEGORY.WORKSPACE_HOME,
-      provider: 'dowhiz_workspace',
-      state: RESOURCE_PROVISIONING_STATE.CONNECTED,
-      note: 'Primary startup operating surface.'
-    },
-    {
-      category: RESOURCE_CATEGORY.AGENT_ROSTER,
-      provider: 'dowhiz_agents',
-      state: RESOURCE_PROVISIONING_STATE.CONNECTED,
-      note: 'Digital team assignments and ownership.'
-    },
-    {
-      category: RESOURCE_CATEGORY.TASK_BOARD,
-      provider: 'dowhiz_task_board',
-      state: RESOURCE_PROVISIONING_STATE.AVAILABLE_NOT_CONFIGURED,
-      note: 'Starter task board is generated from blueprint.'
-    },
-    {
-      category: RESOURCE_CATEGORY.ARTIFACT_QUEUE,
-      provider: 'dowhiz_artifacts',
-      state: RESOURCE_PROVISIONING_STATE.AVAILABLE_NOT_CONFIGURED,
-      note: 'Reviewable artifact queue before delivery.'
-    },
-    {
-      category: RESOURCE_CATEGORY.APPROVAL_POLICY,
-      provider: 'dowhiz_approvals',
-      state: RESOURCE_PROVISIONING_STATE.AVAILABLE_NOT_CONFIGURED,
-      note: 'Human approval stays explicit for sensitive actions.'
-    },
-    {
-      category: RESOURCE_CATEGORY.KNOWLEDGE_HUB_STRUCTURED,
-      provider: 'notion',
-      state: RESOURCE_PROVISIONING_STATE.PLANNED_MANUAL,
-      note: 'Modeled now; may require manual setup.'
-    },
-    {
-      category: RESOURCE_CATEGORY.PUBLISH_PRESENCE,
-      provider: 'distribution_channels',
-      state: RESOURCE_PROVISIONING_STATE.PLANNED_MANUAL,
-      note: 'Publishing integrations can be phased in.'
-    }
-  ];
-
-  resources.push({
-    category: RESOURCE_CATEGORY.BUILD_SYSTEM,
-    provider: blueprint.stack.primary_repo_provider || 'github',
-    state: blueprint.stack.has_existing_repo
-      ? RESOURCE_PROVISIONING_STATE.CONNECTED
-      : RESOURCE_PROVISIONING_STATE.AVAILABLE_NOT_CONFIGURED,
-    note: blueprint.stack.has_existing_repo
-      ? 'Repository workflows can run immediately.'
-      : 'Connect repository to unlock build workflows.'
-  });
-
-  const hasGoogleWorkspace =
-    blueprint.stack.has_docs_workspace ||
-    blueprint.preferred_channels.some((channel) => channel.toLowerCase().includes('google'));
-
-  resources.push({
-    category: RESOURCE_CATEGORY.FORMAL_DOCS,
-    provider: 'google_workspace',
-    state: hasGoogleWorkspace
-      ? RESOURCE_PROVISIONING_STATE.CONNECTED
-      : RESOURCE_PROVISIONING_STATE.AVAILABLE_NOT_CONFIGURED,
-    note: hasGoogleWorkspace
-      ? 'Docs/sheets/slides are available for formal artifacts.'
-      : 'Connect Google Workspace for formal document workflows.'
-  });
-
-  resources.push({
-    category: RESOURCE_CATEGORY.EXTERNAL_EXECUTION,
-    provider: 'email',
-    state: blueprint.preferred_channels.some((channel) => channel.toLowerCase() === 'email')
-      ? RESOURCE_PROVISIONING_STATE.CONNECTED
-      : RESOURCE_PROVISIONING_STATE.AVAILABLE_NOT_CONFIGURED,
-    note: 'Email remains a strong outbound execution channel.'
-  });
-
-  const coordinationProvider = blueprint.preferred_channels.find((channel) => {
-    const lower = channel.toLowerCase();
-    return lower === 'slack' || lower === 'discord';
-  });
-
-  resources.push({
-    category: RESOURCE_CATEGORY.COORDINATION_LAYER,
-    provider: coordinationProvider || 'slack',
-    state: coordinationProvider
-      ? RESOURCE_PROVISIONING_STATE.CONNECTED
-      : RESOURCE_PROVISIONING_STATE.PLANNED_MANUAL,
-    note: coordinationProvider
-      ? 'Approvals and updates are routed in-channel.'
-      : 'Connect Slack or Discord for coordination loops.'
-  });
-
-  return resources;
 }
 
 function deriveStarterTasks(blueprint) {
@@ -311,10 +185,11 @@ function deriveNextActions(resources, approvalQueue, starterTasks) {
   const pendingResources = resources
     .filter((resource) => resource.state !== RESOURCE_PROVISIONING_STATE.CONNECTED)
     .slice(0, 2)
-    .map(
-      (resource) =>
-        `Configure ${getResourceCategoryLabel(resource.category)} (${resource.provider})`
-    );
+    .map((resource) => {
+      const providerName = resource.provider?.display_name || 'Provider';
+      const baseAction = `Configure ${resource.object_name} (${providerName})`;
+      return resource.manual_next_step ? `${baseAction}: ${resource.manual_next_step}` : baseAction;
+    });
 
   const approvalActions = approvalQueue.slice(0, 2).map((item) => item.title);
 

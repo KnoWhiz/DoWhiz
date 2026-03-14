@@ -2,12 +2,9 @@ import { Link } from 'react-router-dom';
 import WorkspaceSectionCard from '../components/workspace/WorkspaceSectionCard';
 import WorkspaceStatusPill from '../components/workspace/WorkspaceStatusPill';
 import { demoWorkspace } from '../data/demoWorkspace';
+import { getProvisioningLabel } from '../domain/resourceModel';
 import { loadWorkspaceBlueprint } from '../domain/workspaceBlueprint';
-import {
-  createWorkspaceHomeModel,
-  getProvisioningLabel,
-  getResourceCategoryLabel
-} from '../domain/workspaceHomeModel';
+import { createWorkspaceHomeModel } from '../domain/workspaceHomeModel';
 
 function WorkspaceHomePage() {
   const savedBlueprint = loadWorkspaceBlueprint();
@@ -87,13 +84,22 @@ function WorkspaceHomePage() {
           <WorkspaceSectionCard title="Resource Status" subtitle="Product objects mapped to providers">
             <ul className="workspace-list">
               {model.resources.map((resource) => (
-                <li key={`${resource.category}-${resource.provider}`} className="workspace-list-row">
+                <li
+                  key={`${resource.category}-${resource.provider.key}`}
+                  className="workspace-list-row"
+                >
                   <div>
-                    <strong>{getResourceCategoryLabel(resource.category)}</strong>
+                    <strong>{resource.object_name}</strong>
                     <p>
-                      Provider: {resource.provider}
-                      {resource.note ? ` - ${resource.note}` : ''}
+                      {resource.object_purpose}
                     </p>
+                    <p>
+                      Provider: {resource.provider.display_name}
+                      {resource.note ? ` | ${resource.note}` : ''}
+                    </p>
+                    {resource.manual_next_step ? (
+                      <p>Manual next step: {resource.manual_next_step}</p>
+                    ) : null}
                   </div>
                   <WorkspaceStatusPill
                     status={resource.state}
