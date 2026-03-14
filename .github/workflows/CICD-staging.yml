@@ -11,6 +11,9 @@ concurrency:
   group: cicd-staging
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,7 +30,56 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || github.ref }}
+
+      - name: Auto bump base version when Dockerfile.base changes
+        working-directory: .
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            target_branch="${{ github.event.pull_request.base.ref }}"
+          else
+            target_branch="${{ github.ref_name }}"
+          fi
+          [[ -n "$target_branch" ]] || { echo "Unable to resolve target branch" >&2; exit 1; }
+
+          base_file="Dockerfile.base"
+          version_file="version_base.txt"
+          md5_file="version_base.md5"
+
+          [[ -f "$base_file" ]] || { echo "Missing $base_file" >&2; exit 1; }
+          [[ -f "$version_file" ]] || { echo "Missing $version_file" >&2; exit 1; }
+
+          current_md5="$(md5sum "$base_file" | awk '{print $1}')"
+          previous_md5=""
+          if [[ -f "$md5_file" ]]; then
+            previous_md5="$(tr -d '[:space:]' < "$md5_file")"
+          fi
+
+          current_version="$(tr -d '[:space:]' < "$version_file")"
+          [[ "$current_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Invalid version in $version_file: $current_version" >&2
+            exit 1
+          }
+
+          if [[ "$current_md5" != "$previous_md5" ]]; then
+            IFS='.' read -r major minor patch <<< "$current_version"
+            new_version="${major}.${minor}.$((patch + 1))"
+            echo "$new_version" > "$version_file"
+            echo "$current_md5" > "$md5_file"
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add "$version_file" "$md5_file"
+            git commit -m "chore(ci): bump base version to $new_version [skip ci]"
+            git push origin "HEAD:$target_branch"
+
+            echo "Base Dockerfile changed: bumped version_base.txt to $new_version"
+          else
+            echo "Base Dockerfile unchanged: keep version_base.txt at $current_version"
+          fi
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
@@ -305,6 +357,35 @@ jobs:
             exit 1
           }
 
+          [[ "$image_name" == *:* ]] || {
+            echo "RUN_TASK_AZURE_ACI_IMAGE must include an explicit tag: $run_task_image" >&2
+            exit 1
+          }
+
+          base_version_file="$APP_ROOT/version_base.txt"
+          base_dockerfile="$APP_ROOT/Dockerfile.base"
+          [[ -f "$base_version_file" ]] || {
+            echo "Missing base version file: $base_version_file" >&2
+            exit 1
+          }
+          [[ -f "$base_dockerfile" ]] || {
+            echo "Missing base Dockerfile: $base_dockerfile" >&2
+            exit 1
+          }
+
+          base_version="$(tr -d '[:space:]' < "$base_version_file")"
+          [[ -n "$base_version" ]] || {
+            echo "Base version file is empty: $base_version_file" >&2
+            exit 1
+          }
+          base_md5="$(md5sum "$base_dockerfile" | awk '{print $1}')"
+          base_md5_short="${base_md5:0:12}"
+          run_task_repo="${image_name%:*}"
+          base_repo="${run_task_repo}-base"
+          base_tag="${base_version}-${base_md5_short}"
+          base_image_name="${base_repo}:${base_tag}"
+          base_image_full="${login_server}/${base_image_name}"
+
           build_context_root="$(mktemp -d)"
           cleanup_build_context() {
             rm -rf "$build_context_root"
@@ -317,14 +398,27 @@ jobs:
             --exclude='DoWhiz_service/.workspace' \
             --exclude='DoWhiz_service/.env' \
             --exclude='DoWhiz_service/.env.*' \
-            -cf - Dockerfile .dockerignore DoWhiz_service | tar -C "$build_context_root" -xf -
+            -cf - Dockerfile Dockerfile.base .dockerignore DoWhiz_service | tar -C "$build_context_root" -xf -
 
-          echo "Building ACI image via az acr build: $run_task_image"
           cd "$build_context_root"
+          if az acr repository show --name "$registry_name" --image "$base_image_name" --only-show-errors >/dev/null 2>&1; then
+            echo "Reusing base image: $base_image_full"
+          else
+            echo "Base image not found, building: $base_image_full"
+            az acr build \
+              --registry "$registry_name" \
+              --image "$base_image_name" \
+              --file Dockerfile.base \
+              . \
+              --only-show-errors
+          fi
+
+          echo "Building ACI runtime image via az acr build: $run_task_image"
           az acr build \
             --registry "$registry_name" \
             --image "$image_name" \
             --file Dockerfile \
+            --build-arg BASE_IMAGE="$base_image_full" \
             . \
             --only-show-errors
           EOF
