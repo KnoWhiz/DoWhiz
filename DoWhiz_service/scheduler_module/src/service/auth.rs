@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use crate::account_store::{AccountStore, AccountStoreError};
 use crate::blob_store::BlobStore;
+use crate::notion_store::{NotionCredential, NotionStore};
 use crate::user_store::UserStore;
 use crate::{load_tasks_with_status, TaskStatusSummary};
 
@@ -2172,14 +2173,45 @@ pub async fn notion_oauth_callback(
                 notion_token.workspace_id, account.id
             );
 
-            // TODO: Store the access_token securely for API calls
-            // For now, we could store it in a separate table or encrypted field
-            // The token is needed for future Notion API calls
-            info!(
-                "Notion access token obtained for workspace {} (token starts with: {}...)",
-                notion_token.workspace_id,
-                &notion_token.access_token[..8.min(notion_token.access_token.len())]
-            );
+            // Store the access_token in NotionStore for future API calls
+            let credential = NotionCredential {
+                account_id: account.id,
+                workspace_id: notion_token.workspace_id.clone(),
+                workspace_name: notion_token.workspace_name.clone(),
+                access_token: notion_token.access_token.clone(),
+                bot_id: notion_token.bot_id.clone(),
+                owner_user_id: notion_user_id.clone(),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            };
+
+            let store_result = task::spawn_blocking(move || {
+                match NotionStore::new() {
+                    Ok(store) => store.upsert_credential(&credential),
+                    Err(e) => {
+                        error!("Failed to create NotionStore: {}", e);
+                        Err(e)
+                    }
+                }
+            })
+            .await;
+
+            match store_result {
+                Ok(Ok(())) => {
+                    info!(
+                        "Stored Notion access token for workspace {} (token starts with: {}...)",
+                        notion_token.workspace_id,
+                        &notion_token.access_token[..8.min(notion_token.access_token.len())]
+                    );
+                }
+                Ok(Err(e)) => {
+                    error!("Failed to store Notion credential: {}", e);
+                    // Continue anyway - the identifier is already linked
+                }
+                Err(e) => {
+                    error!("spawn_blocking panicked while storing Notion credential: {}", e);
+                }
+            }
 
             redirect_to("/auth/index.html?notion=success")
         }

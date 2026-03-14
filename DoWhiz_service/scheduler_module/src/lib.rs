@@ -19,6 +19,7 @@ pub mod mongo_store;
 pub mod raw_payload_store;
 pub mod service_bus_queue;
 pub mod slack_store;
+pub mod notion_store;
 pub mod storage_backend;
 pub(crate) mod thread_state;
 
