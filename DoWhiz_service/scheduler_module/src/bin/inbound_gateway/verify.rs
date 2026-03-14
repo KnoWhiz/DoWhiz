@@ -187,13 +187,26 @@ pub(super) fn verify_wechat(
 /// Message format after decryption: random(16B) + msg_len(4B, big endian) + msg + receiveid
 fn decrypt_wechat_echostr(echostr: &str, encoding_aes_key: &str) -> Result<String, &'static str> {
     use aes::cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
+    use base64::engine::{GeneralPurpose, GeneralPurposeConfig, DecodePaddingMode};
     type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 
     // Derive AESKey: Base64_Decode(EncodingAESKey + "=")
-    let aes_key_b64 = format!("{}=", encoding_aes_key.trim());
-    let aes_key = base64::engine::general_purpose::STANDARD
+    // Use lenient decoder because WeChat's EncodingAESKey may have non-zero trailing bits
+    let trimmed_key = encoding_aes_key.trim();
+    let aes_key_b64 = format!("{}=", trimmed_key);
+
+    let lenient_engine = GeneralPurpose::new(
+        &base64::alphabet::STANDARD,
+        GeneralPurposeConfig::new()
+            .with_decode_padding_mode(DecodePaddingMode::Indifferent)
+            .with_decode_allow_trailing_bits(true),
+    );
+    let aes_key = lenient_engine
         .decode(&aes_key_b64)
-        .map_err(|_| "invalid_encoding_aes_key")?;
+        .map_err(|e| {
+            tracing::error!("base64 decode error: {:?}", e);
+            "invalid_encoding_aes_key"
+        })?;
 
     if aes_key.len() != 32 {
         return Err("invalid_aes_key_length");
