@@ -11,6 +11,7 @@ mod postmark;
 mod recipients;
 mod scheduler;
 mod server;
+pub mod startup_workspace;
 mod state;
 mod workspace;
 
