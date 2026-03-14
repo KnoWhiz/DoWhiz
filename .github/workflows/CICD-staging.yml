@@ -126,6 +126,12 @@ jobs:
       (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
 
     steps:
+      - name: Checkout deploy source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.build.outputs.deploy_sha }}
+
       - name: Download rust binaries
         uses: actions/download-artifact@v4
         with:
@@ -327,17 +333,45 @@ jobs:
           echo "Early health check passed: worker=$worker_health gateway=$gateway_health"
           EOF
 
-      - name: Build and push ACI image on Azure VM
+      - name: Resolve ACI build configuration
+        id: aci_config
+        env:
+          ENV_COMMON: ${{ secrets.ENV_COMMON }}
+          ENV_TARGET: ${{ secrets.ENV_STAGING }}
+          GATEWAY_ONLY: ${{ steps.update_repo.outputs.gateway_only }}
         run: |
-          ssh -F ~/.ssh/config azureproduction << 'EOF'
-          set -e
-          APP_ROOT=/home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz
-          APP_DIR="$APP_ROOT/DoWhiz_service"
-          ENV_FILE="$APP_DIR/.env"
+          set -euo pipefail
+          common_env="${ENV_COMMON:-}"
+          target_env="${ENV_TARGET:-}"
+
           read_env_value() {
-            local key="$1"
+            local target_key="$1"
             local value
-            value="$(grep -E "^${key}=" "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+            value="$(
+              {
+                printf '%s\n' "$common_env"
+                printf '%s\n' "$target_env"
+              } | awk -v wanted="$target_key" '
+                function trim(s) {
+                  gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+                  return s
+                }
+                {
+                  line = $0
+                  sub(/\r$/, "", line)
+                  if (line ~ /^[[:space:]]*($|#)/) next
+                  if (line ~ /^export[[:space:]]+/) sub(/^export[[:space:]]+/, "", line)
+                  pos = index(line, "=")
+                  if (pos == 0) next
+                  key = trim(substr(line, 1, pos - 1))
+                  if (key == "") next
+                  env[key] = substr(line, pos + 1)
+                }
+                END {
+                  if (wanted in env) print env[wanted]
+                }
+              ' | tail -n1
+            )"
             value="${value#\"}"
             value="${value%\"}"
             value="${value#\'}"
@@ -358,14 +392,15 @@ jobs:
               fi
               ;;
           esac
-          if [[ "$should_build" -eq 0 ]]; then
-            echo "Skipping ACI image build: RUN_TASK_EXECUTION_BACKEND=$run_task_backend DEPLOY_TARGET=$deploy_target"
-            exit 0
+
+          if [[ "$GATEWAY_ONLY" == "true" ]]; then
+            echo "Skipping ACI image build: only inbound_gateway files changed (rust_service unaffected)"
+            should_build=0
           fi
 
-          # Skip ACI rebuild if only gateway files changed (passed from update_repo step)
-          if [[ "${{ steps.update_repo.outputs.gateway_only }}" == "true" ]]; then
-            echo "Skipping ACI image build: only inbound_gateway files changed (rust_service unaffected)"
+          if [[ "$should_build" -eq 0 ]]; then
+            echo "should_build=0" >> "$GITHUB_OUTPUT"
+            echo "Skipping ACI image build: RUN_TASK_EXECUTION_BACKEND=$run_task_backend DEPLOY_TARGET=$deploy_target"
             exit 0
           fi
 
@@ -385,12 +420,35 @@ jobs:
             echo "Unable to parse ACR registry name from image: $run_task_image" >&2
             exit 1
           }
-
           [[ "$image_name" == *:* ]] || {
             echo "RUN_TASK_AZURE_ACI_IMAGE must include an explicit tag: $run_task_image" >&2
             exit 1
           }
 
+          echo "should_build=1" >> "$GITHUB_OUTPUT"
+          echo "run_task_image=$run_task_image" >> "$GITHUB_OUTPUT"
+          echo "login_server=$login_server" >> "$GITHUB_OUTPUT"
+          echo "image_name=$image_name" >> "$GITHUB_OUTPUT"
+          echo "registry_name=$registry_name" >> "$GITHUB_OUTPUT"
+
+      - name: Azure login for ACR build
+        if: steps.aci_config.outputs.should_build == '1'
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.STAGING_AZURE_CREDENTIALS != '' && secrets.STAGING_AZURE_CREDENTIALS || secrets.AZURE_CREDENTIALS }}
+
+      - name: Build and push ACI image on GitHub Runner
+        if: steps.aci_config.outputs.should_build == '1'
+        env:
+          RUN_TASK_IMAGE: ${{ steps.aci_config.outputs.run_task_image }}
+          LOGIN_SERVER: ${{ steps.aci_config.outputs.login_server }}
+          IMAGE_NAME: ${{ steps.aci_config.outputs.image_name }}
+          REGISTRY_NAME: ${{ steps.aci_config.outputs.registry_name }}
+        run: |
+          set -euo pipefail
+          command -v az >/dev/null 2>&1 || { echo "Azure CLI not found on runner" >&2; exit 1; }
+
+          APP_ROOT="$GITHUB_WORKSPACE"
           build_context_root="$(mktemp -d)"
           cleanup_build_context() {
             rm -rf "$build_context_root"
@@ -403,16 +461,16 @@ jobs:
             --exclude='DoWhiz_service/.workspace' \
             --exclude='DoWhiz_service/.env' \
             --exclude='DoWhiz_service/.env.*' \
-            -cf - Dockerfile Dockerfile.aci Dockerfile.base version_base.txt .dockerignore DoWhiz_service | tar -C "$build_context_root" -xf -
+            -cf - Dockerfile.aci Dockerfile.base version_base.txt .dockerignore DoWhiz_service | tar -C "$build_context_root" -xf -
 
           ctx_release_dir="$build_context_root/DoWhiz_service/target/release"
           mkdir -p "$ctx_release_dir"
           required_runtime_bins=(rust_service inbound_fanout inbound_gateway google-docs)
           for bin_name in "${required_runtime_bins[@]}"; do
-            src_bin="$APP_DIR/target/release/$bin_name"
-            [[ -x "$src_bin" ]] || {
-              echo "Missing executable binary required for ACI image: $src_bin" >&2
-              ls -al "$APP_DIR/target/release" 2>/dev/null || true
+            src_bin="$GITHUB_WORKSPACE/rust-binaries/$bin_name"
+            [[ -f "$src_bin" ]] || {
+              echo "Missing binary artifact required for ACI image: $src_bin" >&2
+              ls -al "$GITHUB_WORKSPACE/rust-binaries" 2>/dev/null || true
               exit 1
             }
             install -m 755 "$src_bin" "$ctx_release_dir/$bin_name"
@@ -436,34 +494,33 @@ jobs:
           }
           base_md5="$(md5sum "$base_dockerfile" | awk '{print $1}')"
           base_md5_short="${base_md5:0:12}"
-          run_task_repo="${image_name%:*}"
+          run_task_repo="${IMAGE_NAME%:*}"
           base_repo="${run_task_repo}-base"
           base_tag="${base_version}-${base_md5_short}"
           base_image_name="${base_repo}:${base_tag}"
-          base_image_full="${login_server}/${base_image_name}"
+          base_image_full="${LOGIN_SERVER}/${base_image_name}"
 
           cd "$build_context_root"
-          if az acr repository show --name "$registry_name" --image "$base_image_name" --only-show-errors >/dev/null 2>&1; then
+          if az acr repository show --name "$REGISTRY_NAME" --image "$base_image_name" --only-show-errors >/dev/null 2>&1; then
             echo "Reusing base image: $base_image_full"
           else
             echo "Base image not found, building: $base_image_full"
             az acr build \
-              --registry "$registry_name" \
+              --registry "$REGISTRY_NAME" \
               --image "$base_image_name" \
               --file Dockerfile.base \
               . \
               --only-show-errors
           fi
 
-          echo "Building ACI runtime image via az acr build: $run_task_image"
+          echo "Building ACI runtime image via az acr build: $RUN_TASK_IMAGE"
           az acr build \
-            --registry "$registry_name" \
-            --image "$image_name" \
+            --registry "$REGISTRY_NAME" \
+            --image "$IMAGE_NAME" \
             --file Dockerfile.aci \
             --build-arg BASE_IMAGE="$base_image_full" \
             . \
             --only-show-errors
-          EOF
 
       - name: Restart DoWhiz services
         run: |
