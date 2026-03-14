@@ -4,7 +4,8 @@ use mongodb::options::{FindOneOptions, FindOptions, UpdateOptions};
 use mongodb::sync::Collection;
 use mongodb::IndexModel;
 use std::collections::HashSet;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use uuid::Uuid;
 
@@ -15,6 +16,7 @@ use super::super::utils::{task_kind_channel, task_kind_label};
 use super::TaskStatusSummary;
 
 static EXECUTION_SEQ: AtomicI64 = AtomicI64::new(1);
+const REQUEST_SUMMARY_MAX_CHARS: usize = 72;
 
 #[derive(Debug)]
 pub(crate) struct MongoSchedulerStore {
@@ -264,6 +266,7 @@ impl MongoSchedulerStore {
             if !seen_task_ids.insert(task_id.to_string()) {
                 continue;
             }
+            let request_summary = derive_request_summary(&task_doc);
             let schedule = task_doc.get_document("schedule").ok();
             let execution = self
                 .executions
@@ -282,6 +285,7 @@ impl MongoSchedulerStore {
                 id: task_id.to_string(),
                 kind: task_doc.get_str("kind").unwrap_or("unknown").to_string(),
                 channel: task_doc.get_str("channel").unwrap_or("email").to_string(),
+                request_summary,
                 enabled: task_doc.get_bool("enabled").unwrap_or(false),
                 created_at: datetime_field_to_rfc3339(&task_doc, "created_at").unwrap_or_default(),
                 last_run: datetime_field_to_rfc3339(&task_doc, "last_run"),
@@ -399,6 +403,200 @@ fn numeric_field_to_u32(document: &Document, key: &str) -> Option<u32> {
     }
 }
 
+fn derive_request_summary(task_doc: &Document) -> Option<String> {
+    let task_json = task_doc.get_str("task_json").ok()?;
+    let task_value: serde_json::Value = serde_json::from_str(task_json).ok()?;
+    let task_kind = task_value.pointer("/kind/type").and_then(|v| v.as_str())?;
+
+    match task_kind {
+        "send_email" => task_value
+            .pointer("/kind/subject")
+            .and_then(|v| v.as_str())
+            .and_then(normalize_summary_text),
+        "run_task" => {
+            let workspace_dir = task_value
+                .pointer("/kind/workspace_dir")
+                .and_then(|v| v.as_str())?;
+            let channel = task_value
+                .pointer("/kind/channel")
+                .and_then(|v| v.as_str())
+                .or_else(|| task_doc.get_str("channel").ok())
+                .unwrap_or("");
+            derive_run_task_summary(Path::new(workspace_dir), channel)
+        }
+        _ => None,
+    }
+}
+
+fn derive_run_task_summary(workspace_dir: &Path, channel: &str) -> Option<String> {
+    let incoming_dir = workspace_dir.join("incoming_email");
+    if !incoming_dir.exists() {
+        return None;
+    }
+
+    match channel {
+        "email" => derive_email_summary(&incoming_dir),
+        "google_docs" => derive_google_workspace_summary(&incoming_dir, "gdocs"),
+        "google_sheets" => derive_google_workspace_summary(&incoming_dir, "gsheets"),
+        "google_slides" => derive_google_workspace_summary(&incoming_dir, "gslides"),
+        "discord" => derive_discord_summary(&incoming_dir),
+        "slack" => derive_text_file_summary(&incoming_dir, &["_slack_message.txt"]),
+        "sms" => derive_text_file_summary(&incoming_dir, &["_sms_message.txt"]),
+        "bluebubbles" => derive_text_file_summary(&incoming_dir, &["_bluebubbles_message.txt"]),
+        "telegram" => derive_header_text_file_summary(&incoming_dir, &["_telegram.txt"]),
+        "whatsapp" => derive_header_text_file_summary(&incoming_dir, &["_whatsapp.txt"]),
+        "wechat" => derive_header_text_file_summary(&incoming_dir, &["_wechat.txt"]),
+        _ => None,
+    }
+}
+
+fn derive_email_summary(incoming_dir: &Path) -> Option<String> {
+    let payload_path = incoming_dir.join("postmark_payload.json");
+    let raw_payload = fs::read_to_string(payload_path).ok()?;
+    let payload_value: serde_json::Value = serde_json::from_str(&raw_payload).ok()?;
+
+    payload_value
+        .get("Subject")
+        .and_then(|v| v.as_str())
+        .and_then(normalize_summary_text)
+        .or_else(|| {
+            payload_value
+                .get("StrippedTextReply")
+                .and_then(|v| v.as_str())
+                .and_then(normalize_summary_text)
+        })
+        .or_else(|| {
+            payload_value
+                .get("TextBody")
+                .and_then(|v| v.as_str())
+                .and_then(normalize_summary_text)
+        })
+}
+
+fn derive_google_workspace_summary(incoming_dir: &Path, file_prefix: &str) -> Option<String> {
+    let comment_suffix = format!("_{}_comment.json", file_prefix);
+    if let Some(comment_path) = latest_file_with_suffix(incoming_dir, &[comment_suffix.as_str()]) {
+        if let Ok(raw_comment) = fs::read_to_string(comment_path) {
+            if let Ok(comment) = serde_json::from_str::<serde_json::Value>(&raw_comment) {
+                if let Some(summary) = comment
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .and_then(normalize_summary_text)
+                {
+                    return Some(summary);
+                }
+            }
+        }
+    }
+
+    let meta_suffix = format!("_{}_meta.json", file_prefix);
+    let meta_path = latest_file_with_suffix(incoming_dir, &[meta_suffix.as_str()])?;
+    let raw_meta = fs::read_to_string(meta_path).ok()?;
+    let meta: serde_json::Value = serde_json::from_str(&raw_meta).ok()?;
+    let file_name = meta.get("file_name").and_then(|v| v.as_str())?;
+
+    normalize_summary_text(&format!("Comment on {}", file_name))
+}
+
+fn derive_discord_summary(incoming_dir: &Path) -> Option<String> {
+    let raw = read_latest_text_by_suffix(incoming_dir, &["_discord_message.txt"])?;
+    if let Some((_, user_section)) = raw.split_once("User message:\n") {
+        if let Some(summary) = normalize_summary_text(user_section) {
+            return Some(summary);
+        }
+    }
+    normalize_summary_text(&raw)
+}
+
+fn derive_text_file_summary(incoming_dir: &Path, suffixes: &[&str]) -> Option<String> {
+    let raw = read_latest_text_by_suffix(incoming_dir, suffixes)?;
+    normalize_summary_text(&raw)
+}
+
+fn derive_header_text_file_summary(incoming_dir: &Path, suffixes: &[&str]) -> Option<String> {
+    let raw = read_latest_text_by_suffix(incoming_dir, suffixes)?;
+    extract_header_file_body_summary(&raw).or_else(|| normalize_summary_text(&raw))
+}
+
+fn read_latest_text_by_suffix(incoming_dir: &Path, suffixes: &[&str]) -> Option<String> {
+    let path = latest_file_with_suffix(incoming_dir, suffixes)?;
+    fs::read_to_string(path).ok()
+}
+
+fn latest_file_with_suffix(incoming_dir: &Path, suffixes: &[&str]) -> Option<PathBuf> {
+    let mut matches: Vec<(String, PathBuf)> = Vec::new();
+
+    for entry in fs::read_dir(incoming_dir).ok()? {
+        let entry = entry.ok()?;
+        if !entry.file_type().ok()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if suffixes.iter().any(|suffix| name.ends_with(suffix)) {
+            matches.push((name, entry.path()));
+        }
+    }
+
+    matches.sort_by(|a, b| a.0.cmp(&b.0));
+    matches.pop().map(|(_, path)| path)
+}
+
+fn extract_header_file_body_summary(raw: &str) -> Option<String> {
+    let mut body_started = false;
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            body_started = true;
+            continue;
+        }
+
+        if !body_started
+            && (trimmed.starts_with("From:")
+                || trimmed.starts_with("Date:")
+                || trimmed.starts_with("To:")
+                || trimmed.starts_with("Subject:"))
+        {
+            continue;
+        }
+
+        return clean_summary_line(trimmed);
+    }
+
+    None
+}
+
+fn normalize_summary_text(raw: &str) -> Option<String> {
+    let first_line = raw.lines().map(str::trim).find(|line| !line.is_empty())?;
+    clean_summary_line(first_line)
+}
+
+fn clean_summary_line(line: &str) -> Option<String> {
+    let compact = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.is_empty() {
+        return None;
+    }
+    Some(truncate_summary(&compact, REQUEST_SUMMARY_MAX_CHARS))
+}
+
+fn truncate_summary(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let mut output = String::new();
+
+    for _ in 0..max_chars {
+        match chars.next() {
+            Some(ch) => output.push(ch),
+            None => return output,
+        }
+    }
+
+    if chars.next().is_some() {
+        output.push_str("...");
+    }
+
+    output
+}
+
 fn mongo_err(err: mongodb::error::Error) -> SchedulerError {
     SchedulerError::Storage(format!("mongodb error: {err}"))
 }
@@ -409,9 +607,13 @@ fn mongo_config_err(err: crate::mongo_store::MongoStoreError) -> SchedulerError 
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::PathBuf;
 
-    use super::resolve_owner_scope;
+    use mongodb::bson::doc;
+    use tempfile::TempDir;
+
+    use super::{derive_request_summary, resolve_owner_scope};
 
     #[test]
     fn resolve_owner_scope_extracts_user_id() {
@@ -419,5 +621,93 @@ mod tests {
         let scope = resolve_owner_scope(&path);
         assert_eq!(scope.0, "user");
         assert_eq!(scope.1, "user-123");
+    }
+
+    #[test]
+    fn derive_request_summary_prefers_send_email_subject() {
+        let task_json = serde_json::json!({
+            "kind": {
+                "type": "send_email",
+                "subject": "Weekly analytics summary and next actions"
+            }
+        })
+        .to_string();
+        let doc = doc! {
+            "task_json": task_json,
+            "channel": "email",
+        };
+
+        let summary = derive_request_summary(&doc);
+        assert_eq!(
+            summary.as_deref(),
+            Some("Weekly analytics summary and next actions")
+        );
+    }
+
+    #[test]
+    fn derive_request_summary_reads_latest_slack_message() {
+        let temp = TempDir::new().expect("tempdir");
+        let incoming_dir = temp.path().join("incoming_email");
+        fs::create_dir_all(&incoming_dir).expect("create incoming_email");
+        fs::write(
+            incoming_dir.join("00001_slack_message.txt"),
+            "Earlier message",
+        )
+        .expect("write old message");
+        fs::write(
+            incoming_dir.join("00002_slack_message.txt"),
+            "Please draft a concise project update for the team.",
+        )
+        .expect("write latest message");
+
+        let task_json = serde_json::json!({
+            "kind": {
+                "type": "run_task",
+                "workspace_dir": temp.path().to_string_lossy(),
+                "channel": "slack"
+            }
+        })
+        .to_string();
+        let doc = doc! {
+            "task_json": task_json,
+            "channel": "slack",
+        };
+
+        let summary = derive_request_summary(&doc);
+        assert_eq!(
+            summary.as_deref(),
+            Some("Please draft a concise project update for the team.")
+        );
+    }
+
+    #[test]
+    fn derive_request_summary_skips_header_lines_for_telegram_text() {
+        let temp = TempDir::new().expect("tempdir");
+        let incoming_dir = temp.path().join("incoming_email");
+        fs::create_dir_all(&incoming_dir).expect("create incoming_email");
+        fs::write(
+            incoming_dir.join("0001_telegram.txt"),
+            "From: User (123)\nDate: 2026-03-13T20:00:00Z\n\nReview the attached budget and flag risks.",
+        )
+        .expect("write telegram message");
+
+        let task_json = serde_json::json!({
+            "kind": {
+                "type": "run_task",
+                "workspace_dir": temp.path().to_string_lossy(),
+                "channel": "telegram"
+            }
+        })
+        .to_string();
+        let doc = doc! {
+            "task_json": task_json,
+            "channel": "telegram",
+        };
+
+        let summary = derive_request_summary(&doc);
+        assert_eq!(
+            summary.as_deref(),
+            Some("Review the attached budget and flag risks.")
+        );
     }
 }
