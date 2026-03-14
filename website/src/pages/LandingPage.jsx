@@ -1185,8 +1185,7 @@ function LandingPage() {
           <div className="halo-effect"></div>
           <div className="container hero-content">
             <h1 className="hero-title">
-              <span className="hero-title-line hero-title-line-primary">Launch your startup workspace in one click.</span>
-              <span className="hero-title-line hero-title-line-secondary">Your digital founding team executes from idea to GTM.</span>
+              <span className="hero-title-line hero-title-line-primary">One-click setup of a one-person company</span>
             </h1>
             <p className="hero-subtitle hero-subtitle-desktop">
               Start from a founder brief, generate a workspace, and coordinate <a href="#roles" className="role-link">specialized agents</a> across build, docs, research, and GTM. Email, Slack, Discord, GitHub, and Google Workspace stay execution surfaces while your workspace is the product home.
