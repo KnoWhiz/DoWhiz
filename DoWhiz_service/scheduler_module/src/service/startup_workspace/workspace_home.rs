@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+use crate::domain::agent_roster::AgentRosterPlan;
+use crate::domain::artifact_queue::{ArtifactQueuePlan, ArtifactQueueStatus};
 use crate::domain::resource_model::WorkspaceResourcePlan;
 use crate::domain::starter_tasks::{StarterTaskPlan, StarterTaskStatus};
 use crate::domain::workspace_blueprint::{BlueprintValidationError, StartupWorkspaceBlueprint};
 
 use super::bootstrap::{bootstrap_workspace_plan, StartupWorkspaceBootstrapPlan};
+use super::provisioning::StartupProvisioningSnapshot;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -36,7 +39,10 @@ pub struct WorkspaceHomeSnapshot {
     pub startup_brief: String,
     pub founder_name: String,
     pub resources: WorkspaceResourcePlan,
+    pub agent_roster: AgentRosterPlan,
     pub starter_tasks: StarterTaskPlan,
+    pub artifact_queue: ArtifactQueuePlan,
+    pub provisioning: StartupProvisioningSnapshot,
     pub recent_artifacts: Vec<WorkspaceArtifactSummary>,
     pub approval_queue: Vec<WorkspaceApprovalItem>,
     pub next_recommended_actions: Vec<String>,
@@ -58,21 +64,21 @@ pub fn build_workspace_home_snapshot(
         plan.blueprint.founder.name.trim().to_string()
     };
 
-    let mut recent_artifacts = vec![WorkspaceArtifactSummary {
-        id: "artifact_founder_summary".to_string(),
-        title: "Founder intake summary".to_string(),
-        surface: "workspace_home".to_string(),
-        status: WorkspaceQueueStatus::Planned,
-    }];
-
-    for (index, goal) in plan.blueprint.goals_30_90_days.iter().take(2).enumerate() {
-        recent_artifacts.push(WorkspaceArtifactSummary {
-            id: format!("artifact_goal_brief_{index}"),
-            title: format!("Goal brief: {goal}"),
-            surface: "task_board".to_string(),
-            status: WorkspaceQueueStatus::Planned,
-        });
-    }
+    let recent_artifacts = plan
+        .artifact_queue
+        .artifacts
+        .iter()
+        .take(3)
+        .map(|artifact| WorkspaceArtifactSummary {
+            id: artifact.id.clone(),
+            title: artifact.title.clone(),
+            surface: artifact.surface.clone(),
+            status: match artifact.status {
+                ArtifactQueueStatus::Planned => WorkspaceQueueStatus::Planned,
+                ArtifactQueueStatus::PendingReview => WorkspaceQueueStatus::PendingReview,
+            },
+        })
+        .collect::<Vec<_>>();
 
     let mut approval_queue = Vec::new();
 
@@ -111,6 +117,30 @@ pub fn build_workspace_home_snapshot(
 
     let mut next_recommended_actions = Vec::new();
 
+    for resource in plan
+        .resources
+        .resources
+        .iter()
+        .filter(|resource| {
+            !matches!(
+                resource.state,
+                crate::domain::resource_model::ProvisioningState::Connected
+            )
+        })
+        .take(2)
+    {
+        if let Some(step) = resource
+            .manual_next_step
+            .as_deref()
+            .map(str::trim)
+            .filter(|step| !step.is_empty())
+        {
+            next_recommended_actions.push(step.to_string());
+        } else {
+            next_recommended_actions.push(format!("Configure {}", resource.object_name));
+        }
+    }
+
     for task in plan.starter_tasks.tasks.iter() {
         if matches!(task.status, StarterTaskStatus::ManualStepRequired) {
             next_recommended_actions.push(format!("Manual step: {}", task.title));
@@ -131,7 +161,10 @@ pub fn build_workspace_home_snapshot(
         startup_brief,
         founder_name,
         resources: plan.resources.clone(),
+        agent_roster: plan.agent_roster.clone(),
         starter_tasks: plan.starter_tasks.clone(),
+        artifact_queue: plan.artifact_queue.clone(),
+        provisioning: plan.provisioning.clone(),
         recent_artifacts,
         approval_queue,
         next_recommended_actions,
@@ -163,6 +196,8 @@ mod tests {
             .approval_queue
             .iter()
             .any(|item| item.id == "approval_repo_connection"));
+        assert!(!snapshot.agent_roster.assignments.is_empty());
+        assert!(!snapshot.artifact_queue.artifacts.is_empty());
         assert!(snapshot
             .approval_queue
             .iter()
