@@ -1,6 +1,9 @@
 *
+!Dockerfile
+!Dockerfile.base
 !DoWhiz_service/
 !DoWhiz_service/**
+!version_base.txt
 
 DoWhiz_service/.workspace
 DoWhiz_service/.workspace/**
