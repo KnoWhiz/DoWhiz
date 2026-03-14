@@ -97,7 +97,7 @@ Deployment workflows should:
 3. Validate `GATEWAY_CONFIG_PATH` and `EMPLOYEE_CONFIG_PATH` exist and match expected target files.
 4. After release binaries and `.env` are installed, source `.env` and restart PM2-managed services immediately so live traffic moves onto the new worker/gateway before any long-running follow-up work.
 5. Disable any legacy `systemd` worker unit (for example `dowhiz-oliver.service`) so PM2 remains the only supervisor.
-6. If Azure ACI backend is enabled (`RUN_TASK_EXECUTION_BACKEND=azure_aci` or `auto` with `DEPLOY_TARGET in {staging,production}`), stage a temporary VM build context that contains only `Dockerfile`, `.dockerignore`, and `DoWhiz_service/` without runtime `.env`, `.workspace`, or `target`, then rebuild and push `RUN_TASK_AZURE_ACI_IMAGE`. This keeps the upload small without mutating the live PM2 binaries.
+6. If Azure ACI backend is enabled (`RUN_TASK_EXECUTION_BACKEND=azure_aci` or `auto` with `DEPLOY_TARGET in {staging,production}`), stage a temporary VM build context that contains `Dockerfile.aci`, `Dockerfile.base`, `.dockerignore`, `version_base.txt`, and `DoWhiz_service/` without runtime `.env` or `.workspace`; then inject prebuilt binaries from `DoWhiz_service/target/release` (`rust_service`, `inbound_fanout`, `inbound_gateway`, `google-docs`) and run `az acr build`. This avoids a second Rust compile during image build while keeping uploads small.
 7. Use `pm2 restart --update-env` so runtime env changes (for example `EMPLOYEE_ID`) are applied to existing processes, and finish with local health checks that allow a short retry window while worker/gateway bind their ports.
 
 ## 5) Health Checks

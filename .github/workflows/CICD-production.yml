@@ -111,7 +111,9 @@ jobs:
           compression-level: 0
           path: |
             DoWhiz_service/target/release/rust_service
+            DoWhiz_service/target/release/inbound_fanout
             DoWhiz_service/target/release/inbound_gateway
+            DoWhiz_service/target/release/google-docs
             DoWhiz_service/target/release/set_postmark_inbound_hook
           if-no-files-found: error
 
@@ -187,7 +189,9 @@ jobs:
           set -e
           RELEASE_DIR=/home/${{ secrets.PROD_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
           install -m 755 /tmp/dowhiz-release/rust_service "$RELEASE_DIR/rust_service"
+          install -m 755 /tmp/dowhiz-release/inbound_fanout "$RELEASE_DIR/inbound_fanout"
           install -m 755 /tmp/dowhiz-release/inbound_gateway "$RELEASE_DIR/inbound_gateway"
+          install -m 755 /tmp/dowhiz-release/google-docs "$RELEASE_DIR/google-docs"
           install -m 755 /tmp/dowhiz-release/set_postmark_inbound_hook "$RELEASE_DIR/set_postmark_inbound_hook"
           rm -rf /tmp/dowhiz-release
           EOF
@@ -369,7 +373,20 @@ jobs:
             --exclude='DoWhiz_service/.workspace' \
             --exclude='DoWhiz_service/.env' \
             --exclude='DoWhiz_service/.env.*' \
-            -cf - Dockerfile Dockerfile.base version_base.txt .dockerignore DoWhiz_service | tar -C "$build_context_root" -xf -
+            -cf - Dockerfile Dockerfile.aci Dockerfile.base version_base.txt .dockerignore DoWhiz_service | tar -C "$build_context_root" -xf -
+
+          ctx_release_dir="$build_context_root/DoWhiz_service/target/release"
+          mkdir -p "$ctx_release_dir"
+          required_runtime_bins=(rust_service inbound_fanout inbound_gateway google-docs)
+          for bin_name in "${required_runtime_bins[@]}"; do
+            src_bin="$APP_DIR/target/release/$bin_name"
+            [[ -x "$src_bin" ]] || {
+              echo "Missing executable binary required for ACI image: $src_bin" >&2
+              ls -al "$APP_DIR/target/release" 2>/dev/null || true
+              exit 1
+            }
+            install -m 755 "$src_bin" "$ctx_release_dir/$bin_name"
+          done
 
           base_version_file="$build_context_root/version_base.txt"
           base_dockerfile="$build_context_root/Dockerfile.base"
@@ -412,7 +429,7 @@ jobs:
           az acr build \
             --registry "$registry_name" \
             --image "$image_name" \
-            --file Dockerfile \
+            --file Dockerfile.aci \
             --build-arg BASE_IMAGE="$base_image_full" \
             . \
             --only-show-errors
