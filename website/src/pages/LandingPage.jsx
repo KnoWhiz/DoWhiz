@@ -91,7 +91,8 @@ function LandingPage() {
     trackAnalyticsEvent(
       'landing_page_view',
       {
-        landing_page_variant: 'default',
+        landing_page_variant: 'startup_workspace_phase1',
+        landing_page_variant_legacy: 'default',
         language: isCnPath(window.location.pathname) ? 'zh-CN' : 'en-US'
       },
       {
@@ -543,7 +544,7 @@ function LandingPage() {
     }
 
     setIsSubmittingDeployment(true);
-    setDeploymentStatusMessage('Uploading package and starting deployment intake...', 'info');
+    setDeploymentStatusMessage('Uploading package and starting manual deployment intake...', 'info');
 
     try {
       const formData = new FormData();
@@ -581,7 +582,7 @@ function LandingPage() {
 
       if (!response.ok) {
         throw new Error(
-          payload?.error || 'Deployment intake is temporarily unavailable. Please retry in a few minutes.'
+          payload?.error || 'Manual deployment intake is temporarily unavailable. Please retry in a few minutes.'
         );
       }
 
@@ -589,12 +590,12 @@ function LandingPage() {
       const etaHours = payload?.eta_hours || 24;
       const requestSuffix = requestId ? ` (request: ${requestId})` : '';
       setDeploymentStatusMessage(
-        `Deployment request accepted${requestSuffix}. Provisioning is in progress and is usually ready within ${etaHours} hours.`,
+        `Manual deployment request accepted${requestSuffix}. Provisioning is in progress and is usually ready within ${etaHours} hours.`,
         'success'
       );
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to submit deployment request. Please retry.';
+        error instanceof Error ? error.message : 'Failed to submit manual deployment request. Please retry.';
       setDeploymentStatusMessage(message, 'error');
     } finally {
       setIsSubmittingDeployment(false);
@@ -634,8 +635,8 @@ function LandingPage() {
     },
     {
       tag: '06',
-      title: 'Cross-agent collaboration',
-      desc: 'Agents can hand off tasks to each other while keeping a shared context trail so delivery stays coherent end to end.',
+      title: 'Reviewable artifacts + approvals',
+      desc: 'Each run returns auditable artifacts and explicit human approval points before external delivery or sensitive actions.',
       icon: '/icons/The%20Digital%20Employee%20Stack/collaboration.svg'
     }
   ];
@@ -737,23 +738,24 @@ function LandingPage() {
   const deploymentSteps = [
     {
       id: '01',
-      title: 'Submit deployment package',
-      desc: 'Share operator details, skills files, private data folders, and environment keys required to run your OpenClaw.'
+      title: 'Submit manual runtime package',
+      desc: 'Share operator details, skills files, private data folders, and environment keys for managed runtime setup.'
     },
     {
       id: '02',
-      title: 'Validation and orchestration',
-      desc: 'DoWhiz validates the package, checks security requirements, and starts deployment orchestration automatically.'
+      title: 'Validation and provisioning review',
+      desc: 'DoWhiz validates the package, checks security requirements, and confirms provisioning readiness.'
     },
     {
       id: '03',
-      title: 'Provisioning handoff',
-      desc: 'Your OpenClaw environment is provisioned on DoWhiz and handed off with status updates and next-step guidance.'
+      title: 'Handoff with runbook',
+      desc: 'Your managed runtime is provisioned with status updates and a clear manual-next-step runbook.'
     }
   ];
 
   const deploymentChecklist = [
-    'Upload only the minimum secrets and private files required for this deployment.',
+    'Use this path only when you need managed runtime deployment help.',
+    'Upload only the minimum secrets and private files required for this request.',
     'Use uppercase env key names like OPENAI_API_KEY to avoid validation failures.',
     'Provisioning is typically ready within 24 hours after submission.'
   ];
@@ -843,11 +845,11 @@ function LandingPage() {
   const faqItems = [
     {
       question: 'What is DoWhiz?',
-      answer: 'DoWhiz is a multi-channel, tool-native digital employee team with shared memory that you can message to delegate work and receive finished outputs in-thread.'
+      answer: 'DoWhiz is a startup workspace operating system where a digital founding team executes tasks across your tools and channels with shared memory.'
     },
     {
       question: 'How do I get started?',
-      answer: 'Choose an agent and trigger work from your preferred surface: email, Slack/Discord, GitHub issue assignment, or shared doc comments.'
+      answer: 'Start with founder intake to create your workspace blueprint, then assign work to agents through email, Slack/Discord, GitHub, or shared docs.'
     },
     {
       question: 'Do the employees remember context?',
@@ -863,7 +865,7 @@ function LandingPage() {
     },
     {
       question: 'Where can I reach the team?',
-      answer: 'Across email, Slack, Discord, GitHub issues, and shared workspace comments. See the Integrations page for the latest trigger surfaces.'
+      answer: 'Across email, Slack, Discord, GitHub issues, and shared workspace comments. These channels are execution surfaces while workspace remains your operating home.'
     }
   ];
 
@@ -1051,15 +1053,14 @@ function LandingPage() {
     }
   ];
 
-  const oliverMember = teamMembers.find((member) => member.name === 'Oliver');
-  const heroPrimaryCtaHref = oliverMember
-    ? buildMailtoLink(oliverMember.email, oliverMember.subject, oliverMember.body)
-    : 'mailto:oliver@dowhiz.com';
+  const heroPrimaryCtaHref = '/start';
+  const heroSecondaryCtaHref = '/workspace';
 
   const handleHeroCtaClick = () => {
     trackAnalyticsEvent('secondary_cta_click', {
       cta_location: 'hero_primary',
-      cta_text: 'Try DoWhiz service today'
+      cta_text: 'Start workspace',
+      cta_text_legacy: 'Try DoWhiz service today'
     });
   };
 
@@ -1090,7 +1091,7 @@ function LandingPage() {
               <a href="#workflows" className="nav-btn">Workflows</a>
               <a href="#safety" className="nav-btn">Safety</a>
               <a href="#features" className="nav-btn">Features</a>
-              <a href="#deployment" className="nav-btn">Deployment</a>
+              <a href="#deployment" className="nav-btn">Manual setup</a>
               <a href="#faq" className="nav-btn">FAQ</a>
               <a href="#blog" className="nav-btn">Blog</a>
             </div>
@@ -1184,27 +1185,25 @@ function LandingPage() {
           <div className="halo-effect"></div>
           <div className="container hero-content">
             <h1 className="hero-title">
-              <span className="hero-title-line hero-title-line-primary">OpenClaw🦞, but scalable, accessible, and safe.</span>
-              <span className="hero-title-line hero-title-line-secondary">Message Anywhere, Done Everywhere!</span>
+              <span className="hero-title-line hero-title-line-primary">Spin up an agent-native startup workspace in one click.</span>
+              <span className="hero-title-line hero-title-line-secondary">Build with a digital founding team from idea to GTM.</span>
             </h1>
             <p className="hero-subtitle hero-subtitle-desktop">
-              Collaborate with <a href="#roles" className="role-link">Oliver 🧸</a> (Generalist), <a href="#roles" className="role-link">Maggie 🐭</a> (TPM), <a href="#roles" className="role-link">Devin 🐙</a> (Coder), <a href="#roles" className="role-link">Lumio 🐉</a> (CEO), <a href="#roles" className="role-link">Claw 🦞</a> (Workflow Specialist), <a href="#roles" className="role-link">Jeffery 🐦</a> (DeepTutor), <a href="#roles" className="role-link">Anna 🐘</a> (Role Design), and <a href="#roles" className="role-link">Rachel 👾</a> (GTM Specialist), each focused on different functions and connected by shared memory.
+              Start from a founder brief, generate a workspace, and coordinate <a href="#roles" className="role-link">specialized agents</a> across build, docs, research, and GTM. Email, Slack, Discord, GitHub, and Google Workspace stay execution surfaces while your workspace is the product home.
             </p>
             <p className="hero-subtitle hero-subtitle-mobile">
-              Collaborate with specialized digital employees across operations, delivery, coding, docs, and GTM, all connected by shared memory.
+              Create a workspace first, then run your digital founding team across existing channels with shared memory and approvals.
             </p>
             <div className="hero-cta">
               <a
                 className="btn btn-primary"
                 href={heroPrimaryCtaHref}
-                target="_blank"
-                rel="noopener noreferrer"
                 onClick={handleHeroCtaClick}
               >
-                Try DoWhiz service today
+                Start your workspace
               </a>
-              <a className="btn btn-secondary" href="/demo-videos/">
-                Watch demo videos
+              <a className="btn btn-secondary" href={heroSecondaryCtaHref}>
+                Preview workspace home
               </a>
             </div>
           </div>
@@ -1213,7 +1212,7 @@ function LandingPage() {
         {/* Roles & Scenarios */}
         <section id="roles" className="section roles-section">
           <div className="container">
-            <h2 className="section-title">Meet Your Digital Employee Team</h2>
+            <h2 className="section-title">Meet Your Digital Founding Team</h2>
             <div className="roles-grid">
               {teamMembers.map((member) => {
                 const isActive = member.status === 'Active';
@@ -1296,9 +1295,9 @@ function LandingPage() {
 
         <section id="how-it-works" className="section workflow-section">
           <div className="container">
-            <h2 className="section-title">How it works</h2>
+            <h2 className="section-title">Workspace Operating Flow</h2>
             <p className="section-intro">
-              One operating model across channels: trigger, execute, and return with persistent shared memory.
+              One model from founder intent to approved delivery: intake, execution, and return with persistent shared memory.
             </p>
             <div className="how-columns">
               {howItWorksSteps.map((step) => {
@@ -1348,7 +1347,7 @@ function LandingPage() {
 
         <section id="workflows" className="section">
           <div className="container">
-            <h2 className="section-title">Example workflows</h2>
+            <h2 className="section-title">Founder Workflow Examples</h2>
             <p className="section-intro">
               Concrete, trigger-to-outcome examples across engineering, planning, and GTM.
             </p>
@@ -1447,9 +1446,9 @@ function LandingPage() {
         {/* Features */}
         <section id="features" className="section features-section">
           <div className="container">
-            <h2 className="section-title">The Digital Employee Stack</h2>
+            <h2 className="section-title">Startup Workspace System</h2>
             <p className="section-intro">
-              Built for real teams that need multi-channel, tool-native delivery. Pick an employee, send a request, and receive shared-memory outputs with clear next steps.
+              Built for founder execution: channel-native triggers, scoped permissions, shared memory, reviewable artifacts, and explicit human approvals.
             </p>
             <div className="features-grid">
               {features.map((feature) => (
@@ -1467,9 +1466,9 @@ function LandingPage() {
 
         <section id="deployment" className="section deployment-section">
           <div className="container">
-            <h2 className="section-title">Deployment</h2>
+            <h2 className="section-title">Manual Runtime Deployment (Optional)</h2>
             <p className="section-intro">
-              Launch OpenClaw with a structured intake flow while staying in the same DoWhiz landing-page experience.
+              This is a secondary path for teams that need DoWhiz-managed runtime setup beyond standard workspace onboarding.
             </p>
             <div className="deployment-grid">
               {deploymentSteps.map((step) => (
@@ -1481,7 +1480,7 @@ function LandingPage() {
               ))}
             </div>
             <article className="deployment-cta-card">
-              <h3>Before you submit</h3>
+              <h3>Before you submit manual setup</h3>
               <ul className="deployment-point-list">
                 {deploymentChecklist.map((item) => (
                   <li key={item}>{item}</li>
@@ -1489,7 +1488,7 @@ function LandingPage() {
               </ul>
               <div className="deployment-actions">
                 <a className="btn btn-secondary" href="#deployment-intake">
-                  Open full deployment intake form
+                  Open manual deployment intake
                 </a>
                 <a className="btn btn-secondary" href="/trust-safety/">
                   Review trust &amp; safety
@@ -1501,15 +1500,15 @@ function LandingPage() {
 
         <section id="deployment-intake" className="section deployment-intake-section">
           <div className="container">
-            <h2 className="section-title">Deployment Intake Form</h2>
+            <h2 className="section-title">Manual Deployment Intake (Secondary Path)</h2>
             <p className="section-intro">
-              Submit deployment details in the same DoWhiz UI. Intake starts immediately after validation.
+              Submit manual runtime setup details. Intake starts after validation.
             </p>
 
             <form className="deployment-intake-form" onSubmit={handleDeploymentSubmit} noValidate>
               <article className="deployment-form-card">
                 <h3>Operator Profile</h3>
-                <p>Tell us who owns this OpenClaw deployment request.</p>
+                <p>Tell us who owns this manual runtime deployment request.</p>
                 <div className="deployment-field-grid">
                   <label className="deployment-field">
                     <span>Full name</span>
@@ -1621,7 +1620,7 @@ function LandingPage() {
 
               <article className="deployment-form-card">
                 <h3>Uploads</h3>
-                <p>Select your skills and private data folders for deployment.</p>
+                <p>Select skills and private data folders required for manual runtime setup.</p>
                 <div className="deployment-upload-grid">
                   <div className="deployment-upload-box">
                     <h4>Skills files</h4>
@@ -1698,7 +1697,7 @@ function LandingPage() {
                 <div className="deployment-env-header">
                   <div>
                     <h3>Environment Keys</h3>
-                    <p>Add env key name + value pairs for the requested deployment.</p>
+                    <p>Add env key name + value pairs for the requested manual runtime setup.</p>
                   </div>
                   <button type="button" className="btn btn-secondary deployment-mini-btn" onClick={addEnvRow}>
                     Add env key
@@ -1743,7 +1742,7 @@ function LandingPage() {
 
               <article className="deployment-form-card">
                 <h3>Review &amp; Send</h3>
-                <p>Submitting starts DoWhiz deployment intake immediately.</p>
+                <p>Submitting starts manual deployment intake after validation.</p>
                 <div className="deployment-checklist">
                   <label className="deployment-check">
                     <input
@@ -1752,7 +1751,7 @@ function LandingPage() {
                       onChange={(event) => setConfirmOwnership(event.target.checked)}
                       required
                     />
-                    <span>I confirm I am allowed to share these files and secrets for DoWhiz deployment.</span>
+                    <span>I confirm I am allowed to share these files and secrets for manual runtime setup.</span>
                   </label>
                   <label className="deployment-check">
                     <input
@@ -1767,7 +1766,7 @@ function LandingPage() {
 
                 <div className="deployment-submit-row">
                   <button type="submit" className="btn btn-primary" disabled={isSubmittingDeployment}>
-                    {isSubmittingDeployment ? 'Submitting...' : 'Start OpenClaw Deployment'}
+                    {isSubmittingDeployment ? 'Submitting...' : 'Start Manual Runtime Deployment'}
                   </button>
                   <button type="button" className="btn btn-secondary" onClick={resetDeploymentForm}>
                     Reset form
