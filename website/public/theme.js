@@ -47,8 +47,7 @@
       .replaceAll('多威兹', 'DoWhiz')
       .replaceAll('多惠兹', 'DoWhiz')
       .replaceAll('多维兹', 'DoWhiz')
-      .replaceAll('多奇才', 'DoWhiz')
-      .replaceAll('Open Claw', 'OpenClaw');
+      .replaceAll('多奇才', 'DoWhiz');
   }
 
   function isCnPath(pathname) {

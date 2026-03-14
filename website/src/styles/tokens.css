@@ -1,0 +1,181 @@
+/* Satoshi font from FontShare */
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&display=swap');
+@import url('/brand-theme.css');
+
+:root {
+  /* Shared brand tokens live in /public/brand-theme.css */
+  --glass-blur: blur(12px);
+
+  /* Spacing */
+  --container-width: 1200px;
+  --section-padding: 6rem 0;
+
+  /* Typography */
+  --font-sans: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --tracking-tight: -0.025em;
+  --tracking-tighter: -0.05em;
+
+  /* Border Radius */
+  --radius-full: 9999px;
+  --radius-2xl: 1.5rem;
+  --radius-xl: 1rem;
+  --radius-lg: 0.75rem;
+}
+
+[data-theme="light"] {
+  /* Keep light mode selectors, but pull from shared brand palette. */
+  .btn-primary {
+    background: var(--brand-primary);
+    color: var(--text-on-brand);
+  }
+
+  .btn-primary:hover {
+    background: var(--brand-primary-hover);
+  }
+
+  .btn-secondary {
+    background: var(--color-secondary);
+    border-color: var(--color-border);
+    color: var(--text-primary);
+  }
+
+  .btn-secondary:hover {
+    background: var(--color-muted);
+    border-color: var(--color-ring);
+  }
+
+  .btn-small {
+    background: var(--color-secondary);
+    border-color: var(--color-border);
+    color: var(--text-primary);
+  }
+
+  .btn-small:hover {
+    background: var(--color-muted);
+    border-color: var(--color-ring);
+  }
+
+  .navbar {
+    background: var(--navbar-bg);
+    border-color: var(--color-border);
+  }
+
+  .logo {
+    color: var(--text-primary);
+  }
+
+  .nav-btn:hover {
+    background: var(--color-muted);
+  }
+
+  .role-card,
+  .feature-card,
+  .blog-card,
+  .safety-card,
+  .faq-accordion-item {
+    background: var(--glass-bg);
+    border-color: var(--glass-border);
+  }
+
+  .role-card:hover,
+  .feature-card:hover,
+  .blog-card:hover,
+  .safety-card:hover {
+    border-color: var(--card-hover-border);
+    box-shadow: 0 8px 24px -8px var(--shadow-color);
+  }
+
+  .social-icon:hover {
+    color: var(--accent-color);
+  }
+
+  .workflow-line {
+    background: linear-gradient(90deg,
+        var(--color-border) 0%,
+        var(--accent-color) 50%,
+        var(--color-border) 100%);
+  }
+
+  .step-icon {
+    border-color: var(--color-border);
+  }
+
+  .role-example {
+    background: var(--color-muted);
+    border-color: var(--color-border);
+  }
+
+  .role-example p {
+    color: var(--text-secondary);
+  }
+
+  .nickname-tag,
+  .pronoun-tag {
+    border-color: var(--color-border);
+    background: var(--color-muted);
+    color: var(--text-secondary);
+  }
+
+  .security-card h3 {
+    color: var(--text-primary);
+  }
+
+  .site-footer {
+    background: var(--color-secondary);
+    border-top: 1px solid var(--color-border);
+  }
+
+  .footer-link {
+    background: var(--glass-bg);
+    border-color: var(--color-border);
+  }
+
+  .footer-link:hover {
+    border-color: var(--card-hover-border);
+    background: var(--glass-bg);
+  }
+
+  .footer-pill {
+    border-color: var(--color-border);
+    background: var(--color-muted);
+    color: var(--text-primary);
+  }
+
+  .footer-bottom {
+    border-top: 1px solid var(--color-border);
+  }
+
+  .user-profile-btn {
+    background: var(--color-secondary);
+    border-color: var(--color-border);
+  }
+
+  .user-profile-btn:hover {
+    background: var(--color-muted);
+  }
+
+  .user-dropdown {
+    background: var(--glass-bg);
+    border-color: var(--color-border);
+    box-shadow: 0 10px 40px var(--shadow-color);
+  }
+
+  .dropdown-item {
+    color: var(--text-primary);
+  }
+
+  .dropdown-item:hover {
+    background: var(--color-muted);
+  }
+
+  /* How it works connector */
+  .how-connector-dot {
+    background: var(--glass-bg);
+  }
+
+  /* Mouse field opacity reduction for light mode */
+  .mouse-field {
+    opacity: 0.25;
+  }
+}
+

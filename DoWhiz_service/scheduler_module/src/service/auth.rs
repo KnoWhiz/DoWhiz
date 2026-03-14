@@ -14,8 +14,14 @@ use uuid::Uuid;
 
 use crate::account_store::{AccountStore, AccountStoreError, AnalyticsEventInsert};
 use crate::blob_store::BlobStore;
+use crate::google_auth::GoogleAuthConfig;
 use crate::user_store::UserStore;
 use crate::{load_tasks_with_status, TaskStatusSummary};
+
+use super::startup_workspace::{
+    derive_provider_capabilities, derive_provider_connections, LinkedIdentifierSnapshot,
+    ProviderCapabilityInputs, WorkspaceProviderRuntimeState,
+};
 
 /// State for auth routes
 #[derive(Clone)]
@@ -540,6 +546,196 @@ pub async fn get_account(State(state): State<AuthState>, headers: HeaderMap) -> 
         }),
     )
         .into_response()
+}
+
+#[derive(Debug, Serialize)]
+pub struct WorkspaceProviderStateResponse {
+    pub runtime: WorkspaceProviderRuntimeState,
+    pub identifiers: Vec<IdentifierResponse>,
+}
+
+/// GET /api/workspace/provider-state
+/// Returns runtime provider capabilities and connected provider state
+/// from verified account identifiers.
+pub async fn get_workspace_provider_state(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let token = match extract_bearer_token(&headers) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Missing Authorization header"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(user) => user.id,
+        Err((status, msg)) => {
+            return (status, Json(serde_json::json!({ "error": msg }))).into_response();
+        }
+    };
+
+    let capabilities = derive_provider_capabilities(&ProviderCapabilityInputs {
+        github_oauth_ready: oauth_ready(
+            &state.github_client_id,
+            &state.github_client_secret,
+            &state.github_redirect_uri,
+        ),
+        google_docs_runtime_ready: env_flag_enabled("GOOGLE_DOCS_ENABLED")
+            || GoogleAuthConfig::from_env().is_valid(),
+        email_outbound_ready: env_has_value("POSTMARK_SERVER_TOKEN"),
+        slack_oauth_ready: oauth_ready(
+            &state.slack_client_id,
+            &state.slack_client_secret,
+            &state.slack_redirect_uri,
+        ),
+        slack_bot_ready: env_has_value("SLACK_BOT_TOKEN"),
+        discord_oauth_ready: oauth_ready(
+            &state.discord_client_id,
+            &state.discord_client_secret,
+            &state.discord_redirect_uri,
+        ),
+        discord_bot_ready: env_has_value("DISCORD_BOT_TOKEN"),
+    });
+
+    let store = state.account_store.clone();
+    let account_result = task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id))
+        .await
+        .map_err(|e| {
+            error!("spawn_blocking panicked: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
+        });
+
+    let account = match account_result {
+        Ok(Ok(Some(acc))) => acc,
+        Ok(Ok(None)) => {
+            return (
+                StatusCode::OK,
+                Json(WorkspaceProviderStateResponse {
+                    runtime: WorkspaceProviderRuntimeState {
+                        has_account: false,
+                        capabilities,
+                        connected: Default::default(),
+                    },
+                    identifiers: Vec::new(),
+                }),
+            )
+                .into_response();
+        }
+        Ok(Err(e)) => {
+            error!("Failed to get account: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Database error"
+                })),
+            )
+                .into_response();
+        }
+        Err(resp) => return resp.into_response(),
+    };
+
+    let account_id = account.id;
+    let store = state.account_store.clone();
+    let identifiers_result = task::spawn_blocking(move || store.list_identifiers(account_id))
+        .await
+        .map_err(|e| {
+            error!("spawn_blocking panicked: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal error" })),
+            )
+        });
+
+    let identifiers = match identifiers_result {
+        Ok(Ok(ids)) => ids,
+        Ok(Err(e)) => {
+            error!("Failed to list identifiers: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Database error"
+                })),
+            )
+                .into_response();
+        }
+        Err(resp) => return resp.into_response(),
+    };
+
+    let identifier_snapshots = identifiers
+        .iter()
+        .map(|identifier| LinkedIdentifierSnapshot {
+            identifier_type: identifier.identifier_type.clone(),
+            identifier: identifier.identifier.clone(),
+            verified: identifier.verified,
+        })
+        .collect::<Vec<_>>();
+
+    let connected = derive_provider_connections(&identifier_snapshots);
+
+    (
+        StatusCode::OK,
+        Json(WorkspaceProviderStateResponse {
+            runtime: WorkspaceProviderRuntimeState {
+                has_account: true,
+                capabilities,
+                connected,
+            },
+            identifiers: identifiers
+                .into_iter()
+                .map(|i| IdentifierResponse {
+                    identifier_type: i.identifier_type,
+                    identifier: i.identifier,
+                    verified: i.verified,
+                })
+                .collect(),
+        }),
+    )
+        .into_response()
+}
+
+fn oauth_ready(
+    client_id: &Option<String>,
+    client_secret: &Option<String>,
+    redirect_uri: &Option<String>,
+) -> bool {
+    has_value(client_id.as_deref())
+        && has_value(client_secret.as_deref())
+        && has_value(redirect_uri.as_deref())
+}
+
+fn env_has_value(key: &str) -> bool {
+    std::env::var(key)
+        .ok()
+        .as_deref()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn env_flag_enabled(key: &str) -> bool {
+    std::env::var(key)
+        .ok()
+        .as_deref()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn has_value(value: Option<&str>) -> bool {
+    value.map(|value| !value.trim().is_empty()).unwrap_or(false)
 }
 
 // ============================================================================
@@ -2857,6 +3053,10 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/auth/slack/callback", get(slack_oauth_callback))
         .route("/auth/github", get(github_oauth_start))
         .route("/auth/github/callback", get(github_oauth_callback))
+        .route(
+            "/api/workspace/provider-state",
+            get(get_workspace_provider_state),
+        )
         .route("/api/tasks", get(get_tasks))
         .route("/api/account/tasks", get(get_account_tasks))
         .with_state(state)
