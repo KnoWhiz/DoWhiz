@@ -194,7 +194,6 @@ fn decrypt_wechat_echostr(echostr: &str, encoding_aes_key: &str) -> Result<Strin
     // Use lenient decoder because WeChat's EncodingAESKey may have non-zero trailing bits
     let trimmed_key = encoding_aes_key.trim();
     let aes_key_b64 = format!("{}=", trimmed_key);
-    tracing::info!("wechat decrypt: key={}", trimmed_key);
 
     let lenient_engine = GeneralPurpose::new(
         &base64::alphabet::STANDARD,
