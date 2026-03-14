@@ -2506,6 +2506,10 @@
           scheduleDisplay = `Next: ${formatDate(task.next_run)}`;
         }
 
+        // Prefer response time when available, fallback to request creation time
+        const updatedAt = task.last_run || task.execution_started_at || task.created_at;
+        const updatedDisplay = formatDate(updatedAt);
+
         // Encode task data for modal
         const taskData = encodeURIComponent(JSON.stringify(task));
 
@@ -2524,12 +2528,10 @@
                 <span class="task-detail-label">Schedule:</span>
                 <span>${scheduleDisplay}</span>
               </span>
-              ${task.last_run ? `
-                <span class="task-detail">
-                  <span class="task-detail-label">Last run:</span>
-                  <span>${formatDate(task.last_run)}</span>
-                </span>
-              ` : ''}
+              <span class="task-detail">
+                <span class="task-detail-label">Updated:</span>
+                <span>${updatedDisplay}</span>
+              </span>
               ${task.error_message ? `
                 <span class="task-detail" style="color: #ef4444;">
                   <span class="task-detail-label">Error:</span>
