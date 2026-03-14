@@ -166,6 +166,56 @@ impl NotionStore {
         Self::doc_to_credential(doc)
     }
 
+    /// Get credential by workspace_name with fuzzy matching.
+    ///
+    /// This is useful for matching email URL slugs (e.g., "myworkspace")
+    /// against OAuth-stored workspace names (e.g., "My Workspace").
+    ///
+    /// Returns the first matching credential found.
+    pub fn get_credential_by_workspace_name_fuzzy(
+        &self,
+        name_or_slug: &str,
+    ) -> Result<NotionCredential, NotionStoreError> {
+        // Normalize the search term: lowercase, remove non-alphanumeric
+        let normalized_search = Self::normalize_workspace_name(name_or_slug);
+
+        // Get all credentials and find a match
+        let cursor = self.credentials.find(doc! {}, None)?;
+
+        for result in cursor {
+            let doc = result?;
+            if let Some(Bson::String(ws_name)) = doc.get("workspace_name") {
+                let normalized_stored = Self::normalize_workspace_name(ws_name);
+                // Check if the normalized names match
+                if normalized_stored == normalized_search
+                    || normalized_stored.contains(&normalized_search)
+                    || normalized_search.contains(&normalized_stored)
+                {
+                    return Self::doc_to_credential(doc);
+                }
+            }
+        }
+
+        Err(NotionStoreError::NotFound(format!(
+            "no workspace matching '{}'",
+            name_or_slug
+        )))
+    }
+
+    /// Normalize a workspace name for comparison.
+    /// Converts to lowercase, removes spaces and special characters.
+    fn normalize_workspace_name(name: &str) -> String {
+        name.chars()
+            .filter_map(|c| {
+                if c.is_ascii_alphanumeric() {
+                    Some(c.to_ascii_lowercase())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// Delete a credential.
     pub fn delete_credential(
         &self,

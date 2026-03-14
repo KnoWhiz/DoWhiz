@@ -1,15 +1,16 @@
 //! Inbound handler for Notion email notifications.
 //!
 //! This module processes email notifications from Notion and creates tasks
-//! that can use browser automation to interact with Notion pages.
+//! that use the Notion API (via OAuth tokens) to interact with pages.
 //!
 //! ## Flow
 //!
 //! 1. Email from `notify@mail.notion.so` is detected
 //! 2. NotionEmailNotification is parsed from email content
-//! 3. A workspace is created with Notion context
-//! 4. A RunTask is scheduled (agent can use browser-use skill to access Notion)
-//! 5. Agent reads the page, processes the request, and replies via comment
+//! 3. OAuth token is fetched from NotionStore (by workspace_id)
+//! 4. A workspace is created with Notion context and API token
+//! 5. A RunTask is scheduled (agent uses notion_api_cli to access Notion)
+//! 6. Agent reads the page, processes the request, and replies via API
 
 use std::path::Path;
 use std::time::Duration;
@@ -21,6 +22,7 @@ use crate::account_store::AccountStore;
 use crate::channel::Channel;
 use crate::index_store::IndexStore;
 use crate::notion_email_detector::NotionEmailNotification;
+use crate::notion_store::NotionStore;
 use crate::user_store::{extract_emails, UserStore};
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
 
@@ -100,12 +102,43 @@ pub(crate) fn process_notion_email(
         .map(|v| v.trim().to_string());
     let thread_state = bump_thread_state(&thread_state_path, &thread_key, message_id.clone())?;
 
+    // Try to get Notion OAuth token
+    // First check environment variable, then try MongoDB by workspace_name fuzzy match
+    let access_token = std::env::var("NOTION_API_TOKEN").ok().or_else(|| {
+        // Try to find a token by workspace_name fuzzy match
+        if let Some(ref ws_name) = notification.workspace_name {
+            match NotionStore::new() {
+                Ok(store) => {
+                    info!("Looking for Notion token for workspace: {}", ws_name);
+                    match store.get_credential_by_workspace_name_fuzzy(ws_name) {
+                        Ok(credential) => {
+                            info!(
+                                "Found Notion token for workspace '{}' (matched: {:?})",
+                                ws_name,
+                                credential.workspace_name
+                            );
+                            return Some(credential.access_token);
+                        }
+                        Err(e) => {
+                            warn!("No Notion token found for workspace '{}': {}", ws_name, e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to connect to NotionStore: {}", e);
+                }
+            }
+        }
+        None
+    });
+
     // Write Notion context to workspace
     write_notion_email_context(
         &workspace,
         notification,
         email_payload,
         thread_state.last_email_seq,
+        access_token.as_deref(),
     )?;
 
     // Determine model
@@ -253,12 +286,29 @@ fn write_notion_email_context(
     notification: &NotionEmailNotification,
     email_payload: &PostmarkInbound,
     seq: u64,
+    access_token: Option<&str>,
 ) -> Result<(), BoxError> {
     let incoming_dir = workspace.join("incoming_email");
     std::fs::create_dir_all(&incoming_dir)?;
 
+    // If we have an OAuth token, write it to .notion_env for the agent
+    let has_api_access = if let Some(token) = access_token {
+        let env_path = workspace.join(".notion_env");
+        std::fs::write(&env_path, format!("NOTION_API_TOKEN={}\n", token))?;
+        info!("Wrote Notion API token to workspace");
+        true
+    } else {
+        warn!("No Notion OAuth token available for this workspace");
+        false
+    };
+
     // Write the notification context as JSON
     let context_path = workspace.join(".notion_email_context.json");
+    let instructions = if has_api_access {
+        "This task was triggered by a Notion @mention. Use notion_api_cli to read the page and post replies. The NOTION_API_TOKEN is available in .notion_env - source it before using the CLI."
+    } else {
+        "This task was triggered by a Notion @mention. No API token is available - the workspace owner needs to authorize the bot at dowhiz.com/settings. For now, inform the user that you cannot access the page."
+    };
     let context = serde_json::json!({
         "channel": "notion",
         "trigger": "email_notification",
@@ -271,7 +321,8 @@ fn write_notion_email_context(
         "comment_preview": notification.comment_preview,
         "comment_url": notification.comment_url,
         "email_subject": notification.subject,
-        "instructions": "This task was triggered by a Notion email notification. First try using the Notion API to read page content and post replies (more reliable). If the API is unavailable or fails, fallback to browser-use. Write your reply to reply_message.txt."
+        "has_api_access": has_api_access,
+        "instructions": instructions
     });
     std::fs::write(&context_path, serde_json::to_string_pretty(&context)?)?;
 
@@ -294,6 +345,21 @@ fn write_notion_email_context(
         .as_deref()
         .unwrap_or("[Not available - extract from URL]");
 
+    let api_section = if has_api_access {
+        r#"<h3>How to respond (using Notion API):</h3>
+<ol>
+<li>Source the token: <code>source .notion_env</code></li>
+<li>Read the page: <code>notion_api_cli read-blocks PAGE_ID</code></li>
+<li>Get comments: <code>notion_api_cli get-comments PAGE_ID</code></li>
+<li>Complete the requested task</li>
+<li>Post reply: <code>notion_api_cli create-comment PAGE_ID "Your reply"</code></li>
+</ol>"#
+    } else {
+        r#"<h3>No API Access</h3>
+<p>The workspace owner needs to authorize the bot at dowhiz.com/settings.</p>
+<p>Please inform the user that you cannot access this page until authorization is complete.</p>"#
+    };
+
     let html_content = format!(
         r#"<!DOCTYPE html>
 <html>
@@ -308,25 +374,9 @@ fn write_notion_email_context(
 <p>{comment_preview}</p>
 
 <hr>
-<h3>How to respond:</h3>
-<p><strong>Preferred method (Notion API):</strong></p>
-<ol>
-<li>Use the Notion API to retrieve the page content and comments</li>
-<li>Read the full context and understand the request</li>
-<li>Complete the requested task (if any)</li>
-<li>Use the Notion API to post a reply comment</li>
-</ol>
+{api_section}
 
-<p><strong>Fallback method (browser-use):</strong></p>
-<p>If the Notion API is unavailable or fails, use the <code>browser-use</code> skill to:</p>
-<ol>
-<li>Open the Notion page URL</li>
-<li>Read the context and comments visually</li>
-<li>Reply to the comment by typing in the browser</li>
-</ol>
-
-<p><strong>Page URL:</strong> <code>{page_url}</code></p>
-<p><strong>Page ID:</strong> <code>{page_id}</code> (use this with Notion API)</p>
+<p><strong>Page ID:</strong> <code>{page_id}</code></p>
 </body>
 </html>"#,
         notification_type = format!("{:?}", notification.notification_type),

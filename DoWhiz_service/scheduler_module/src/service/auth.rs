@@ -4,6 +4,7 @@ use axum::response::{IntoResponse, Redirect};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use base64::Engine;
+use chrono::Utc;
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -96,14 +97,17 @@ pub async fn validate_supabase_token(
 
     // Fallback: validate via Supabase API (slow path)
     // This handles cases where JWT_SECRET isn't configured or token format differs
+    let anon_key = std::env::var("SUPABASE_ANON_KEY").unwrap_or_default();
+    info!(
+        "validate_supabase_token: using remote validation, anon_key_set={}, url={}",
+        !anon_key.is_empty(),
+        supabase_url
+    );
     let client = reqwest::Client::new();
     let resp = client
         .get(format!("{}/auth/v1/user", supabase_url))
         .header("Authorization", format!("Bearer {}", token))
-        .header(
-            "apikey",
-            std::env::var("SUPABASE_ANON_KEY").unwrap_or_default(),
-        )
+        .header("apikey", anon_key)
         .send()
         .await
         .map_err(|e| {
@@ -2019,6 +2023,11 @@ pub async fn notion_oauth_start(
 
     // Encode the Supabase token in state so we can identify the user on callback
     let encoded_state = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(token.as_bytes());
+    info!(
+        "Notion OAuth start: token_len={}, state_len={}",
+        token.len(),
+        encoded_state.len()
+    );
 
     // Build Notion OAuth URL
     // Notion uses owner=user for user-level access (vs owner=workspace for workspace integration)
@@ -2051,6 +2060,12 @@ pub async fn notion_oauth_callback(
         Redirect::to(&format!("{}{}", frontend_url, path)).into_response()
     };
 
+    info!(
+        "Notion callback: code_len={}, state_id={}",
+        params.code.len(),
+        params.state
+    );
+
     // Check if Notion OAuth is configured
     let (client_id, client_secret, redirect_uri) = match (
         &state.notion_client_id,
@@ -2077,9 +2092,21 @@ pub async fn notion_oauth_callback(
     };
 
     // Validate Supabase token and get user
+    info!(
+        "Notion callback: validating token (len={}, first_50={}...)",
+        token.len(),
+        &token[..token.len().min(50)]
+    );
     let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
-        Ok(user) => user.id,
-        Err(_) => {
+        Ok(user) => {
+            info!("Notion callback: token valid, user_id={}", user.id);
+            user.id
+        }
+        Err((status, msg)) => {
+            error!(
+                "Notion callback: token validation failed: status={}, msg={}",
+                status, msg
+            );
             return redirect_to("/auth/index.html?notion=error&reason=invalid_token");
         }
     };

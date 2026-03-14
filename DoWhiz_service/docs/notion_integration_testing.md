@@ -1,196 +1,245 @@
-# Notion Browser Integration - Testing Guide
+# Notion Integration - Testing Guide
 
 ## Overview
 
-This guide covers testing the Notion browser automation integration, which allows the digital employee to:
-- Monitor Notion notifications for @mentions
-- Read page content for context
-- Reply to comments via browser automation
+This guide covers testing the Notion OAuth + API integration, which allows the digital employee to:
+- Receive @mentions via email notifications from Notion
+- Read page content via Notion API
+- Reply to comments via Notion API
+
+## Architecture
+
+```
+┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+│ Notion Workspace    │     │ DoWhiz Gateway      │     │ DoWhiz Worker       │
+│                     │     │                     │     │                     │
+│ @mention in comment │────>│ Email notification  │────>│ RunTask with        │
+│                     │     │ from Notion         │     │ .notion_env token   │
+│                     │<────│                     │<────│                     │
+│ API comment reply   │     │ notion_api_cli      │     │ Codex/Claude agent  │
+└─────────────────────┘     └─────────────────────┘     └─────────────────────┘
+```
 
 ## Prerequisites
 
-### 1. WebDriver Setup
+### 1. Notion Integration Setup
 
-The integration uses WebDriver (fantoccini) for browser automation. You need either:
+**Option A: Internal Integration (for testing)**
+1. Go to https://www.notion.so/my-integrations
+2. Create a new Internal Integration
+3. Copy the "Internal Integration Secret" (starts with `secret_`)
+4. Share your test page with the integration
 
-**Option A: geckodriver (Firefox)**
-```bash
-# macOS
-brew install geckodriver
-
-# Linux
-wget https://github.com/mozilla/geckodriver/releases/latest/download/geckodriver-v0.34.0-linux64.tar.gz
-tar -xvzf geckodriver-v0.34.0-linux64.tar.gz
-sudo mv geckodriver /usr/local/bin/
-
-# Start geckodriver
-geckodriver --port 4444
-```
-
-**Option B: chromedriver (Chrome)**
-```bash
-# macOS
-brew install chromedriver
-
-# Linux
-# Download from https://chromedriver.chromium.org/downloads
-
-# Start chromedriver
-chromedriver --port=4444
-```
+**Option B: Public Integration (for production)**
+1. Configure OAuth at https://www.notion.so/my-integrations
+2. Set redirect URI to `https://dowhiz.com/auth/notion/callback`
+3. Add to `.env`:
+   ```bash
+   NOTION_CLIENT_ID=<from Notion>
+   NOTION_CLIENT_SECRET=<from Notion>
+   NOTION_REDIRECT_URI=https://dowhiz.com/auth/notion/callback
+   ```
 
 ### 2. MongoDB
 
 Ensure MongoDB is accessible. The integration uses MongoDB for:
+- Storing OAuth tokens (NotionStore)
 - Tracking processed notifications (deduplication)
-- User/task storage
 
 ### 3. Environment Variables
 
-Add to your `.env` file:
-
+For testing with Internal Integration:
 ```bash
-# Notion Browser Integration
-NOTION_BROWSER_ENABLED=true
-NOTION_EMPLOYEE_EMAIL=agent@dowhiz.com
-NOTION_EMPLOYEE_PASSWORD=A2da74ae9e06496088e3b385702ca55b
-NOTION_POLL_INTERVAL_SECS=30
-NOTION_BROWSER_HEADLESS=false
-NOTION_BROWSER_SLOW_MO=100
-WEBDRIVER_URL=http://localhost:4444
-NOTION_EMPLOYEE_NAME=Oliver
+# Internal Integration token (testing only)
+NOTION_API_TOKEN=secret_xxx
 
 # MongoDB
 MONGODB_URI=mongodb://localhost:27017
 MONGODB_DATABASE=dowhiz
 ```
 
-## Testing Steps
-
-### Step 1: Verify WebDriver
-
+For production OAuth:
 ```bash
-# Check if WebDriver is running
-curl http://localhost:4444/status
+# Notion OAuth
+NOTION_CLIENT_ID=xxx
+NOTION_CLIENT_SECRET=xxx
+NOTION_REDIRECT_URI=https://dowhiz.com/auth/notion/callback
 
-# Should return JSON with "ready": true
+# MongoDB
+MONGODB_URI=mongodb://cosmosdb-uri
+MONGODB_DATABASE=dowhiz_staging_boiled_egg
 ```
 
-### Step 2: Run Unit Tests
+## Testing Steps
+
+### Step 1: Test notion_api_cli
+
+```bash
+cd DoWhiz_service/scripts
+
+# Set token
+export NOTION_API_TOKEN="secret_xxx"
+
+# Verify token works
+./notion_api_cli me
+
+# Read a page
+./notion_api_cli read-page YOUR_PAGE_ID
+
+# Read page blocks
+./notion_api_cli read-blocks YOUR_PAGE_ID
+
+# Create a test comment
+./notion_api_cli create-comment YOUR_PAGE_ID "Test comment from CLI"
+```
+
+### Step 2: Test Token Storage
+
+```bash
+cd DoWhiz_service/scripts
+
+# Store a token manually (simulates OAuth result)
+./store_notion_token.sh "test-workspace-id" "secret_xxx" "boiled_egg"
+
+# Verify it's stored
+mongosh "$MONGODB_URI" --eval "db.notion_credentials.find()"
+```
+
+### Step 3: E2E Test (Full Codex Flow)
+
+```bash
+cd DoWhiz_service/scripts
+
+# Run the E2E test script
+./test_notion_e2e.sh secret_xxx YOUR_PAGE_ID
+
+# This will:
+# 1. Verify the token works
+# 2. Store token in MongoDB
+# 3. Create a test workspace for Codex
+# 4. Show manual test instructions
+```
+
+### Step 4: Run Unit Tests
 
 ```bash
 cd DoWhiz_service
 cargo test --release -p scheduler_module notion -- --nocapture
 ```
 
-### Step 3: Manual Browser Login Test
+### Step 5: Integration Test (with Services)
 
-Create a test script to verify browser login:
-
-```bash
-# From project root
-cd DoWhiz_service
-
-# Run a simple test
-NOTION_BROWSER_ENABLED=true \
-NOTION_EMPLOYEE_EMAIL=agent@dowhiz.com \
-NOTION_EMPLOYEE_PASSWORD=A2da74ae9e06496088e3b385702ca55b \
-NOTION_BROWSER_HEADLESS=false \
-cargo test --release -p scheduler_module test_notion_browser_login -- --nocapture --ignored
-```
-
-### Step 4: End-to-End Test
-
-1. **Start the inbound gateway:**
+1. **Start the gateway:**
    ```bash
    ./scripts/run_gateway_local.sh
    ```
 
 2. **Start the worker:**
    ```bash
-   ./scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
+   ./scripts/run_employee.sh boiled_egg 9001 --skip-hook --skip-ngrok
    ```
 
 3. **Create a test @mention:**
-   - Go to a Notion workspace where agent@dowhiz.com is a member
-   - Create a comment mentioning @agent@dowhiz.com
-   - Wait for the poll interval (30 seconds)
+   - Go to a Notion page shared with the integration
+   - Create a comment mentioning the bot
+   - Notion will send an email to the configured address
 
 4. **Verify:**
-   - Check gateway logs for "Processing notification"
+   - Check gateway logs for email processing
    - Check worker logs for task execution
-   - Check if reply was posted (browser reply)
+   - Check Notion page for API reply
 
 ## Testing Checklist
 
-### Inbound Flow
-- [ ] Browser connects to WebDriver
-- [ ] Login succeeds (session persists)
-- [ ] Notifications page loads
-- [ ] @mentions are detected
-- [ ] Processed notifications are tracked in MongoDB
-- [ ] InboundMessage is created correctly
-- [ ] Task is scheduled for worker
+### OAuth Flow
+- [ ] User can initiate OAuth at /auth/notion
+- [ ] Callback handles code exchange correctly
+- [ ] Token is stored in NotionStore (MongoDB)
+- [ ] Token can be retrieved by workspace_id
+- [ ] Token can be retrieved by workspace_name (fuzzy match)
 
-### Outbound Flow
-- [ ] Worker generates reply_message.txt
-- [ ] .notion_context.json is read
-- [ ] .notion_reply_request.json is created
-- [ ] Poller picks up reply request (TODO: implement)
-- [ ] Browser posts reply to correct comment
+### Email Detection
+- [ ] Emails from notify@mail.notion.so are detected
+- [ ] NotionEmailNotification is parsed correctly
+- [ ] workspace_name is extracted from URL
+- [ ] page_id is extracted from URL
+- [ ] actor_name is extracted (English and Chinese)
+
+### Token Lookup
+- [ ] Token found by exact workspace_name match
+- [ ] Token found by fuzzy workspace_name match
+- [ ] Token fallback to NOTION_API_TOKEN env var
+- [ ] No token case handled gracefully
+
+### Task Execution
+- [ ] .notion_email_context.json is created
+- [ ] .notion_env is created with token (when available)
+- [ ] Codex can source .notion_env
+- [ ] notion_api_cli commands work
+- [ ] Reply is posted to correct page
 
 ## Troubleshooting
 
-### WebDriver Connection Failed
-```
-Error: Failed to create browser session
-```
-- Ensure geckodriver/chromedriver is running on port 4444
-- Check firewall settings
-- Try restarting WebDriver
+### Token Not Found
 
-### Login Failed
 ```
-Error: Login appeared to fail
+WARN No Notion token found for workspace 'myworkspace'
 ```
-- Verify NOTION_EMPLOYEE_EMAIL and NOTION_EMPLOYEE_PASSWORD
-- Check if Notion requires 2FA (not supported yet)
-- Try manual login in browser first
 
-### Notifications Not Detected
+- Verify OAuth was completed for this workspace
+- Check workspace_name matching in logs
+- Try using exact NOTION_API_TOKEN env var for testing
+
+### API Errors
+
 ```
-No new Notion notifications
+Error: 401 Unauthorized
 ```
-- Verify the account has unread notifications
-- Check Notion notifications page manually
-- Verify HTML parsing selectors in parser.rs
+- Token may be expired - user needs to re-authorize
+- Check token is correctly stored in MongoDB
 
-### MongoDB Connection Issues
 ```
-Error: MongoDB config error
+Error: 403 Forbidden
 ```
-- Verify MONGODB_URI is correct
-- Check MongoDB is running and accessible
-- Verify network/firewall settings
+- Page not shared with the integration
+- For Internal Integration: share page explicitly
+- For Public Integration: user needs to grant page access during OAuth
 
-## Current Limitations
+### Email Detection Failed
 
-1. **2FA Not Supported**: The browser automation doesn't handle 2FA flows yet.
-
-2. **Reply Posting**: The reply mechanism writes to `.notion_reply_request.json` but the poller doesn't yet process these requests. This is a TODO.
-
-3. **Session Management**: Browser sessions are recreated on each poll cycle. A persistent session mechanism would be more efficient.
-
-4. **Selector Fragility**: HTML selectors in parser.rs may break if Notion updates their UI.
+```
+No Notion notification detected in email
+```
+- Check sender is from notion.so domain
+- Verify email format matches expected patterns
+- Check parser regex patterns in notion_email_detector.rs
 
 ## Files Reference
 
 | File | Purpose |
 |------|---------|
-| `notion_browser/browser.rs` | WebDriver session management |
-| `notion_browser/poller.rs` | Polling loop for notifications |
-| `notion_browser/parser.rs` | HTML parsing for notifications/pages |
-| `notion_browser/store.rs` | MongoDB deduplication store |
-| `notion_browser/models.rs` | Data structures |
-| `service/inbound/notion.rs` | Inbound message handler |
-| `scheduler/outbound.rs` | Reply executor (execute_notion_send) |
+| `scheduler_module/src/notion_store.rs` | OAuth token storage (MongoDB) |
+| `scheduler_module/src/notion_email_detector.rs` | Email parsing and detection |
+| `scheduler_module/src/service/inbound/notion_email.rs` | Email → task processing |
+| `scheduler_module/src/service/auth.rs` | OAuth callback handlers |
+| `scripts/notion_api_cli` | CLI for Notion API calls |
+| `scripts/test_notion_e2e.sh` | E2E test script |
+| `scripts/store_notion_token.sh` | Manual token storage |
+| `scripts/test_notion_api.sh` | Direct API test |
+
+## Deprecated: Browser Automation
+
+The browser automation approach (notion_browser/*) has been superseded by the OAuth + API integration. The old files remain for reference but are no longer used:
+
+| Deprecated File | Replacement |
+|----------------|-------------|
+| `notion_browser/browser.rs` | OAuth + notion_api_cli |
+| `notion_browser/poller.rs` | Email notifications |
+| `notion_browser/parser.rs` | notion_email_detector.rs |
+
+Benefits of the new approach:
+- No WebDriver dependency
+- No login credentials to manage
+- No DOM selector fragility
+- Multi-workspace support via OAuth tokens
+- Faster and more reliable
