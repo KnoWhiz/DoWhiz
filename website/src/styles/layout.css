@@ -65,3 +65,129 @@
   flex-wrap: wrap;
   gap: 0.75rem;
 }
+
+.route-card-intake {
+  width: min(980px, 100%);
+}
+
+.intake-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.intake-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.intake-field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.intake-field-full {
+  grid-column: 1 / -1;
+}
+
+.intake-field label {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.intake-field input,
+.intake-field textarea,
+.intake-field select {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text-primary);
+  font: inherit;
+  padding: 0.62rem 0.7rem;
+}
+
+.intake-field textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.intake-field-checkbox {
+  align-items: end;
+}
+
+.intake-field-checkbox label {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.intake-field-checkbox input {
+  width: auto;
+  margin: 0;
+}
+
+.intake-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.intake-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  background: #fff;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.intake-chip.is-checked {
+  border-color: var(--brand-primary);
+  background: var(--brand-primary-soft, #edf4ff);
+}
+
+.intake-chip input {
+  margin: 0;
+}
+
+.intake-errors h2 {
+  margin-bottom: 0.5rem;
+}
+
+.intake-errors ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: #b42318;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.intake-blueprint-preview {
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: #fbfdff;
+  padding: 0.8rem;
+  max-height: 460px;
+  overflow: auto;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 768px) {
+  .intake-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .intake-field-full {
+    grid-column: auto;
+  }
+}
