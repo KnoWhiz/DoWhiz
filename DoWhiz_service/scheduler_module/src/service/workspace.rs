@@ -1,11 +1,17 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+use chrono::Utc;
+use serde::Serialize;
 use tracing::error;
 
+use crate::domain::workspace_blueprint::StartupWorkspaceBlueprint;
 use crate::employee_config::EmployeeProfile;
 
 use super::html::{strip_html_tags, truncate_preview};
+use super::startup_workspace::{
+    bootstrap_workspace_plan, build_workspace_home_snapshot, StartupWorkspaceBootstrapPlan,
+};
 use super::BoxError;
 
 fn thread_workspace_name(thread_key: &str) -> String {
@@ -186,6 +192,155 @@ pub(crate) fn ensure_thread_workspace(
     }
 
     Ok(workspace)
+}
+
+/// Bootstrap a startup workspace plan and persist it as reviewable workspace artifacts.
+pub fn bootstrap_startup_workspace_files(
+    workspace: &Path,
+    blueprint: StartupWorkspaceBlueprint,
+) -> Result<StartupWorkspaceBootstrapPlan, BoxError> {
+    let plan = bootstrap_workspace_plan(blueprint)?;
+    persist_startup_workspace_files(workspace, &plan)?;
+    Ok(plan)
+}
+
+pub fn persist_startup_workspace_files(
+    workspace: &Path,
+    plan: &StartupWorkspaceBootstrapPlan,
+) -> Result<PathBuf, BoxError> {
+    std::fs::create_dir_all(workspace)?;
+
+    let bootstrap_root = workspace.join("startup_workspace");
+    std::fs::create_dir_all(&bootstrap_root)?;
+
+    let workspace_home_snapshot = build_workspace_home_snapshot(plan);
+    write_json_pretty(&bootstrap_root.join("blueprint.json"), &plan.blueprint)?;
+    write_json_pretty(&bootstrap_root.join("resources.json"), &plan.resources)?;
+    write_json_pretty(
+        &bootstrap_root.join("agent_roster.json"),
+        &plan.agent_roster,
+    )?;
+    write_json_pretty(
+        &bootstrap_root.join("starter_tasks.json"),
+        &plan.starter_tasks,
+    )?;
+    write_json_pretty(
+        &bootstrap_root.join("artifact_queue.json"),
+        &plan.artifact_queue,
+    )?;
+    write_json_pretty(
+        &bootstrap_root.join("provisioning.json"),
+        &plan.provisioning,
+    )?;
+    write_json_pretty(
+        &bootstrap_root.join("workspace_home_snapshot.json"),
+        &workspace_home_snapshot,
+    )?;
+
+    let placeholders_root = bootstrap_root.join("artifact_placeholders");
+    std::fs::create_dir_all(&placeholders_root)?;
+
+    let mut placeholder_index: Vec<String> = Vec::new();
+    placeholder_index.push("# Startup Workspace Bootstrap".to_string());
+    placeholder_index.push(String::new());
+    placeholder_index.push(format!(
+        "Generated at: {}",
+        Utc::now().format("%Y-%m-%dT%H:%M:%SZ")
+    ));
+    placeholder_index.push(String::new());
+    placeholder_index.push("Generated files:".to_string());
+    placeholder_index.push("- blueprint.json".to_string());
+    placeholder_index.push("- resources.json".to_string());
+    placeholder_index.push("- agent_roster.json".to_string());
+    placeholder_index.push("- starter_tasks.json".to_string());
+    placeholder_index.push("- artifact_queue.json".to_string());
+    placeholder_index.push("- provisioning.json".to_string());
+    placeholder_index.push("- workspace_home_snapshot.json".to_string());
+    placeholder_index.push(String::new());
+    placeholder_index.push("Artifact placeholders:".to_string());
+
+    for artifact in plan.artifact_queue.artifacts.iter() {
+        let file_name = format!("{}.md", slugify_filename(&artifact.id));
+        let placeholder_path = placeholders_root.join(&file_name);
+        let content = render_artifact_placeholder(plan, artifact);
+        std::fs::write(&placeholder_path, content)?;
+        placeholder_index.push(format!("- artifact_placeholders/{file_name}"));
+    }
+
+    std::fs::write(
+        bootstrap_root.join("README.md"),
+        placeholder_index.join("\n"),
+    )?;
+
+    Ok(bootstrap_root)
+}
+
+fn write_json_pretty<T: Serialize>(path: &Path, value: &T) -> Result<(), BoxError> {
+    let serialized = serde_json::to_string_pretty(value)?;
+    std::fs::write(path, serialized)?;
+    Ok(())
+}
+
+fn slugify_filename(value: &str) -> String {
+    let mut output = String::new();
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            output.push(ch.to_ascii_lowercase());
+        } else if !output.ends_with('_') {
+            output.push('_');
+        }
+    }
+    let trimmed = output.trim_matches('_');
+    if trimmed.is_empty() {
+        "artifact".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn render_artifact_placeholder(
+    plan: &StartupWorkspaceBootstrapPlan,
+    artifact: &crate::domain::artifact_queue::ArtifactPlaceholder,
+) -> String {
+    let status = match artifact.status {
+        crate::domain::artifact_queue::ArtifactQueueStatus::Planned => "planned",
+        crate::domain::artifact_queue::ArtifactQueueStatus::PendingReview => "pending_review",
+    };
+
+    let workspace_title = if plan.blueprint.venture.name.trim().is_empty() {
+        "Founder Workspace".to_string()
+    } else {
+        plan.blueprint.venture.name.trim().to_string()
+    };
+
+    [
+        format!("# {}", artifact.title),
+        String::new(),
+        format!("Workspace: {workspace_title}"),
+        format!("Owner Role: {}", artifact.owner_role),
+        format!("Surface: {}", artifact.surface),
+        format!("Status: {status}"),
+        String::new(),
+        "## Rationale".to_string(),
+        artifact.rationale.clone(),
+        String::new(),
+        "## Source Context".to_string(),
+        format!("- Founder: {}", plan.blueprint.founder.name),
+        format!("- Thesis: {}", plan.blueprint.venture.thesis),
+        format!(
+            "- Goals: {}",
+            if plan.blueprint.goals_30_90_days.is_empty() {
+                "None listed".to_string()
+            } else {
+                plan.blueprint.goals_30_90_days.join("; ")
+            }
+        ),
+        String::new(),
+        "## Draft".to_string(),
+        "Fill in this placeholder during bootstrap execution.".to_string(),
+        String::new(),
+    ]
+    .join("\n")
 }
 
 pub(super) fn write_thread_history(
@@ -372,4 +527,54 @@ pub(super) fn create_unique_dir(root: &Path, base: &str) -> Result<PathBuf, std:
         std::io::ErrorKind::AlreadyExists,
         "failed to create unique workspace directory",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::workspace_blueprint::StartupWorkspaceBlueprint;
+    use tempfile::tempdir;
+
+    #[test]
+    fn bootstrap_startup_workspace_files_writes_plan_and_placeholders() {
+        let workspace_root = tempdir().expect("tempdir should be created");
+        let workspace_dir = workspace_root.path().join("workspace");
+
+        let mut blueprint = StartupWorkspaceBlueprint::default();
+        blueprint.founder.name = "Founder".to_string();
+        blueprint.founder.email = "founder@example.com".to_string();
+        blueprint.venture.name = "Acme".to_string();
+        blueprint.venture.thesis = "Build an agent-native startup workspace".to_string();
+        blueprint.goals_30_90_days = vec!["Launch alpha".to_string()];
+
+        let plan = bootstrap_startup_workspace_files(&workspace_dir, blueprint)
+            .expect("bootstrap workspace files should succeed");
+
+        assert!(!plan.resources.resources.is_empty());
+        assert!(!plan.agent_roster.assignments.is_empty());
+        assert!(!plan.artifact_queue.artifacts.is_empty());
+
+        let startup_workspace_dir = workspace_dir.join("startup_workspace");
+        assert!(startup_workspace_dir.join("blueprint.json").exists());
+        assert!(startup_workspace_dir.join("resources.json").exists());
+        assert!(startup_workspace_dir.join("agent_roster.json").exists());
+        assert!(startup_workspace_dir.join("starter_tasks.json").exists());
+        assert!(startup_workspace_dir.join("artifact_queue.json").exists());
+        assert!(startup_workspace_dir.join("provisioning.json").exists());
+        assert!(startup_workspace_dir
+            .join("workspace_home_snapshot.json")
+            .exists());
+        assert!(startup_workspace_dir.join("README.md").exists());
+
+        let placeholder_count =
+            std::fs::read_dir(startup_workspace_dir.join("artifact_placeholders"))
+                .expect("artifact placeholders directory should exist")
+                .filter_map(Result::ok)
+                .count();
+        assert!(placeholder_count > 0);
+
+        let resources_json = std::fs::read_to_string(startup_workspace_dir.join("resources.json"))
+            .expect("resources.json should exist");
+        assert!(resources_json.contains("manual_next_step"));
+    }
 }
