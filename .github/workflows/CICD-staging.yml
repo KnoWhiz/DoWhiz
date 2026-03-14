@@ -1,4 +1,4 @@
-name: CICD_production
+name: CICD_staging
 
 on:
   pull_request:
@@ -18,9 +18,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     environment: staging
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev') ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     env:
       CARGO_INCREMENTAL: 0
+    outputs:
+      deploy_sha: ${{ steps.auto_bump_base.outputs.deploy_sha }}
 
     defaults:
       run:
@@ -31,12 +35,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || github.ref }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}
 
       - name: Auto bump base version when Dockerfile.base changes
+        id: auto_bump_base
         working-directory: .
         run: |
           set -euo pipefail
+          trigger_sha="${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}"
 
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             target_branch="${{ github.event.pull_request.base.ref }}"
@@ -75,14 +81,25 @@ jobs:
             git add "$version_file" "$md5_file"
             git commit -m "chore(ci): bump base version to $new_version [skip ci]"
             git push origin "HEAD:$target_branch"
+            deploy_sha="$(git rev-parse HEAD)"
+            echo "deploy_sha=$deploy_sha" >> "$GITHUB_OUTPUT"
 
-            echo "Base Dockerfile changed: bumped version_base.txt to $new_version"
+            echo "Base Dockerfile changed: bumped version_base.txt to $new_version (deploy_sha=$deploy_sha)"
           else
+            echo "deploy_sha=$trigger_sha" >> "$GITHUB_OUTPUT"
             echo "Base Dockerfile unchanged: keep version_base.txt at $current_version"
           fi
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
+
+      - name: Run tests (scheduler_module)
+        run: cargo test --locked -p scheduler_module
+        continue-on-error: true
+
+      - name: Run tests (run_task_module)
+        run: cargo test --locked -p run_task_module
+        continue-on-error: true
 
       - name: Build release binaries
         run: cargo build --locked -p scheduler_module --bins --release
@@ -94,17 +111,27 @@ jobs:
           compression-level: 0
           path: |
             DoWhiz_service/target/release/rust_service
+            DoWhiz_service/target/release/inbound_fanout
             DoWhiz_service/target/release/inbound_gateway
+            DoWhiz_service/target/release/google-docs
             DoWhiz_service/target/release/set_postmark_inbound_hook
           if-no-files-found: error
 
   deploy:
     runs-on: ubuntu-latest
     needs: build
-    environment: production
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    environment: staging
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev') ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
 
     steps:
+      - name: Checkout deploy source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.build.outputs.deploy_sha }}
+
       - name: Download rust binaries
         uses: actions/download-artifact@v4
         with:
@@ -137,11 +164,16 @@ jobs:
         id: update_repo
         run: |
           result=$(ssh -F ~/.ssh/config azureproduction << 'EOF'
+          TARGET_SHA="${{ needs.build.outputs.deploy_sha }}"
+          [[ -n "$TARGET_SHA" ]] || {
+            echo "Missing TARGET_SHA" >&2
+            exit 1
+          }
           cd /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz
           OLD_HEAD=$(git rev-parse HEAD)
+          git fetch origin --prune
           git checkout -f
-          git checkout dev
-          git pull
+          git checkout -f "$TARGET_SHA"
           NEW_HEAD=$(git rev-parse HEAD)
           mkdir -p /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
 
@@ -151,7 +183,8 @@ jobs:
           if [[ -n "$changed_files" ]]; then
             while IFS= read -r file; do
               [[ -z "$file" ]] && continue
-              if [[ "$file" != DoWhiz_service/scheduler_module/src/bin/inbound_gateway/* ]]; then
+              if [[ "$file" != DoWhiz_service/scheduler_module/src/bin/inbound_gateway/* &&
+                    "$file" != DoWhiz_service/scheduler_module/src/bin/inbound_gateway.rs ]]; then
                 gateway_only=false
                 break
               fi
@@ -186,7 +219,9 @@ jobs:
           set -e
           RELEASE_DIR=/home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
           install -m 755 /tmp/dowhiz-release/rust_service "$RELEASE_DIR/rust_service"
+          install -m 755 /tmp/dowhiz-release/inbound_fanout "$RELEASE_DIR/inbound_fanout"
           install -m 755 /tmp/dowhiz-release/inbound_gateway "$RELEASE_DIR/inbound_gateway"
+          install -m 755 /tmp/dowhiz-release/google-docs "$RELEASE_DIR/google-docs"
           install -m 755 /tmp/dowhiz-release/set_postmark_inbound_hook "$RELEASE_DIR/set_postmark_inbound_hook"
           rm -rf /tmp/dowhiz-release
           EOF
@@ -298,17 +333,45 @@ jobs:
           echo "Early health check passed: worker=$worker_health gateway=$gateway_health"
           EOF
 
-      - name: Build and push ACI image on Azure VM
+      - name: Resolve ACI build configuration
+        id: aci_config
+        env:
+          ENV_COMMON: ${{ secrets.ENV_COMMON }}
+          ENV_TARGET: ${{ secrets.ENV_STAGING }}
+          GATEWAY_ONLY: ${{ steps.update_repo.outputs.gateway_only }}
         run: |
-          ssh -F ~/.ssh/config azureproduction << 'EOF'
-          set -e
-          APP_ROOT=/home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz
-          APP_DIR="$APP_ROOT/DoWhiz_service"
-          ENV_FILE="$APP_DIR/.env"
+          set -euo pipefail
+          common_env="${ENV_COMMON:-}"
+          target_env="${ENV_TARGET:-}"
+
           read_env_value() {
-            local key="$1"
+            local target_key="$1"
             local value
-            value="$(grep -E "^${key}=" "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+            value="$(
+              {
+                printf '%s\n' "$common_env"
+                printf '%s\n' "$target_env"
+              } | awk -v wanted="$target_key" '
+                function trim(s) {
+                  gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+                  return s
+                }
+                {
+                  line = $0
+                  sub(/\r$/, "", line)
+                  if (line ~ /^[[:space:]]*($|#)/) next
+                  if (line ~ /^export[[:space:]]+/) sub(/^export[[:space:]]+/, "", line)
+                  pos = index(line, "=")
+                  if (pos == 0) next
+                  key = trim(substr(line, 1, pos - 1))
+                  if (key == "") next
+                  env[key] = substr(line, pos + 1)
+                }
+                END {
+                  if (wanted in env) print env[wanted]
+                }
+              ' | tail -n1
+            )"
             value="${value#\"}"
             value="${value%\"}"
             value="${value#\'}"
@@ -329,14 +392,15 @@ jobs:
               fi
               ;;
           esac
-          if [[ "$should_build" -eq 0 ]]; then
-            echo "Skipping ACI image build: RUN_TASK_EXECUTION_BACKEND=$run_task_backend DEPLOY_TARGET=$deploy_target"
-            exit 0
+
+          if [[ "$GATEWAY_ONLY" == "true" ]]; then
+            echo "Skipping ACI image build: only inbound_gateway files changed (rust_service unaffected)"
+            should_build=0
           fi
 
-          # Skip ACI rebuild if only gateway files changed (passed from update_repo step)
-          if [[ "${{ steps.update_repo.outputs.gateway_only }}" == "true" ]]; then
-            echo "Skipping ACI image build: only inbound_gateway files changed (rust_service unaffected)"
+          if [[ "$should_build" -eq 0 ]]; then
+            echo "should_build=0" >> "$GITHUB_OUTPUT"
+            echo "Skipping ACI image build: RUN_TASK_EXECUTION_BACKEND=$run_task_backend DEPLOY_TARGET=$deploy_target"
             exit 0
           fi
 
@@ -356,14 +420,64 @@ jobs:
             echo "Unable to parse ACR registry name from image: $run_task_image" >&2
             exit 1
           }
-
           [[ "$image_name" == *:* ]] || {
             echo "RUN_TASK_AZURE_ACI_IMAGE must include an explicit tag: $run_task_image" >&2
             exit 1
           }
 
-          base_version_file="$APP_ROOT/version_base.txt"
-          base_dockerfile="$APP_ROOT/Dockerfile.base"
+          echo "should_build=1" >> "$GITHUB_OUTPUT"
+          echo "run_task_image=$run_task_image" >> "$GITHUB_OUTPUT"
+          echo "login_server=$login_server" >> "$GITHUB_OUTPUT"
+          echo "image_name=$image_name" >> "$GITHUB_OUTPUT"
+          echo "registry_name=$registry_name" >> "$GITHUB_OUTPUT"
+
+      - name: Azure login for ACR build
+        if: steps.aci_config.outputs.should_build == '1'
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.STAGING_AZURE_CREDENTIALS != '' && secrets.STAGING_AZURE_CREDENTIALS || secrets.AZURE_CREDENTIALS }}
+
+      - name: Build and push ACI image on GitHub Runner
+        if: steps.aci_config.outputs.should_build == '1'
+        env:
+          RUN_TASK_IMAGE: ${{ steps.aci_config.outputs.run_task_image }}
+          LOGIN_SERVER: ${{ steps.aci_config.outputs.login_server }}
+          IMAGE_NAME: ${{ steps.aci_config.outputs.image_name }}
+          REGISTRY_NAME: ${{ steps.aci_config.outputs.registry_name }}
+        run: |
+          set -euo pipefail
+          command -v az >/dev/null 2>&1 || { echo "Azure CLI not found on runner" >&2; exit 1; }
+
+          APP_ROOT="$GITHUB_WORKSPACE"
+          build_context_root="$(mktemp -d)"
+          cleanup_build_context() {
+            rm -rf "$build_context_root"
+          }
+          trap cleanup_build_context EXIT
+
+          echo "Preparing clean ACR build context at $build_context_root"
+          tar -C "$APP_ROOT" \
+            --exclude='DoWhiz_service/target' \
+            --exclude='DoWhiz_service/.workspace' \
+            --exclude='DoWhiz_service/.env' \
+            --exclude='DoWhiz_service/.env.*' \
+            -cf - Dockerfile.aci Dockerfile.base version_base.txt .dockerignore DoWhiz_service | tar -C "$build_context_root" -xf -
+
+          ctx_release_dir="$build_context_root/DoWhiz_service/target/release"
+          mkdir -p "$ctx_release_dir"
+          required_runtime_bins=(rust_service inbound_fanout inbound_gateway google-docs)
+          for bin_name in "${required_runtime_bins[@]}"; do
+            src_bin="$GITHUB_WORKSPACE/rust-binaries/$bin_name"
+            [[ -f "$src_bin" ]] || {
+              echo "Missing binary artifact required for ACI image: $src_bin" >&2
+              ls -al "$GITHUB_WORKSPACE/rust-binaries" 2>/dev/null || true
+              exit 1
+            }
+            install -m 755 "$src_bin" "$ctx_release_dir/$bin_name"
+          done
+
+          base_version_file="$build_context_root/version_base.txt"
+          base_dockerfile="$build_context_root/Dockerfile.base"
           [[ -f "$base_version_file" ]] || {
             echo "Missing base version file: $base_version_file" >&2
             exit 1
@@ -380,48 +494,33 @@ jobs:
           }
           base_md5="$(md5sum "$base_dockerfile" | awk '{print $1}')"
           base_md5_short="${base_md5:0:12}"
-          run_task_repo="${image_name%:*}"
+          run_task_repo="${IMAGE_NAME%:*}"
           base_repo="${run_task_repo}-base"
           base_tag="${base_version}-${base_md5_short}"
           base_image_name="${base_repo}:${base_tag}"
-          base_image_full="${login_server}/${base_image_name}"
-
-          build_context_root="$(mktemp -d)"
-          cleanup_build_context() {
-            rm -rf "$build_context_root"
-          }
-          trap cleanup_build_context EXIT
-
-          echo "Preparing clean ACR build context at $build_context_root"
-          tar -C "$APP_ROOT" \
-            --exclude='DoWhiz_service/target' \
-            --exclude='DoWhiz_service/.workspace' \
-            --exclude='DoWhiz_service/.env' \
-            --exclude='DoWhiz_service/.env.*' \
-            -cf - Dockerfile Dockerfile.base .dockerignore DoWhiz_service | tar -C "$build_context_root" -xf -
+          base_image_full="${LOGIN_SERVER}/${base_image_name}"
 
           cd "$build_context_root"
-          if az acr repository show --name "$registry_name" --image "$base_image_name" --only-show-errors >/dev/null 2>&1; then
+          if az acr repository show --name "$REGISTRY_NAME" --image "$base_image_name" --only-show-errors >/dev/null 2>&1; then
             echo "Reusing base image: $base_image_full"
           else
             echo "Base image not found, building: $base_image_full"
             az acr build \
-              --registry "$registry_name" \
+              --registry "$REGISTRY_NAME" \
               --image "$base_image_name" \
               --file Dockerfile.base \
               . \
               --only-show-errors
           fi
 
-          echo "Building ACI runtime image via az acr build: $run_task_image"
+          echo "Building ACI runtime image via az acr build: $RUN_TASK_IMAGE"
           az acr build \
-            --registry "$registry_name" \
-            --image "$image_name" \
-            --file Dockerfile \
+            --registry "$REGISTRY_NAME" \
+            --image "$IMAGE_NAME" \
+            --file Dockerfile.aci \
             --build-arg BASE_IMAGE="$base_image_full" \
             . \
             --only-show-errors
-          EOF
 
       - name: Restart DoWhiz services
         run: |

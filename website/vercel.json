@@ -1,6 +1,22 @@
 {
   "rewrites": [
     {
+      "source": "/start",
+      "destination": "/"
+    },
+    {
+      "source": "/start/",
+      "destination": "/"
+    },
+    {
+      "source": "/workspace",
+      "destination": "/"
+    },
+    {
+      "source": "/workspace/",
+      "destination": "/"
+    },
+    {
       "source": "/dashboard",
       "destination": "/"
     },
