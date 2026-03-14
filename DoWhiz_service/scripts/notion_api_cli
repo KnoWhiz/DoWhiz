@@ -1,0 +1,138 @@
+#!/bin/bash
+# Notion API CLI for Codex agents
+#
+# Reads OAuth token from environment or MongoDB and makes Notion API calls.
+#
+# Usage:
+#   notion_api_cli me                    # Get bot user info
+#   notion_api_cli search [query]        # Search pages
+#   notion_api_cli read-page PAGE_ID     # Read page metadata
+#   notion_api_cli read-blocks PAGE_ID   # Read page blocks/content
+#   notion_api_cli get-comments PAGE_ID  # Get comments on a page
+#   notion_api_cli reply DISCUSSION_ID "message"  # Reply to a comment thread
+#   notion_api_cli create-comment PAGE_ID "message"  # Create new comment on page
+
+set -e
+
+NOTION_API_VERSION="2022-06-28"
+NOTION_API_BASE="https://api.notion.com/v1"
+
+# Get token from env or argument
+get_token() {
+    if [ -n "$NOTION_API_TOKEN" ]; then
+        echo "$NOTION_API_TOKEN"
+    elif [ -n "$NOTION_ACCESS_TOKEN" ]; then
+        echo "$NOTION_ACCESS_TOKEN"
+    else
+        echo "Error: No Notion token found. Set NOTION_API_TOKEN or NOTION_ACCESS_TOKEN" >&2
+        exit 1
+    fi
+}
+
+TOKEN=$(get_token)
+
+# Common curl options
+notion_curl() {
+    curl -s "$@" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Notion-Version: $NOTION_API_VERSION" \
+        -H "Content-Type: application/json"
+}
+
+case "$1" in
+    me|user)
+        notion_curl "$NOTION_API_BASE/users/me"
+        ;;
+
+    search)
+        QUERY="${2:-}"
+        if [ -n "$QUERY" ]; then
+            notion_curl -X POST "$NOTION_API_BASE/search" \
+                -d "{\"query\": \"$QUERY\", \"page_size\": 10}"
+        else
+            notion_curl -X POST "$NOTION_API_BASE/search" \
+                -d '{"page_size": 10}'
+        fi
+        ;;
+
+    read-page|page)
+        PAGE_ID="$2"
+        if [ -z "$PAGE_ID" ]; then
+            echo "Usage: notion_api_cli read-page PAGE_ID" >&2
+            exit 1
+        fi
+        notion_curl "$NOTION_API_BASE/pages/$PAGE_ID"
+        ;;
+
+    read-blocks|blocks)
+        PAGE_ID="$2"
+        if [ -z "$PAGE_ID" ]; then
+            echo "Usage: notion_api_cli read-blocks PAGE_ID" >&2
+            exit 1
+        fi
+        notion_curl "$NOTION_API_BASE/blocks/$PAGE_ID/children?page_size=100"
+        ;;
+
+    get-comments|comments)
+        BLOCK_ID="$2"
+        if [ -z "$BLOCK_ID" ]; then
+            echo "Usage: notion_api_cli get-comments PAGE_ID|BLOCK_ID" >&2
+            exit 1
+        fi
+        notion_curl "$NOTION_API_BASE/comments?block_id=$BLOCK_ID"
+        ;;
+
+    reply)
+        DISCUSSION_ID="$2"
+        MESSAGE="$3"
+        if [ -z "$DISCUSSION_ID" ] || [ -z "$MESSAGE" ]; then
+            echo "Usage: notion_api_cli reply DISCUSSION_ID \"message\"" >&2
+            exit 1
+        fi
+        notion_curl -X POST "$NOTION_API_BASE/comments" \
+            -d "{\"discussion_id\": \"$DISCUSSION_ID\", \"rich_text\": [{\"text\": {\"content\": \"$MESSAGE\"}}]}"
+        ;;
+
+    create-comment|comment)
+        PAGE_ID="$2"
+        MESSAGE="$3"
+        if [ -z "$PAGE_ID" ] || [ -z "$MESSAGE" ]; then
+            echo "Usage: notion_api_cli create-comment PAGE_ID \"message\"" >&2
+            exit 1
+        fi
+        notion_curl -X POST "$NOTION_API_BASE/comments" \
+            -d "{\"parent\": {\"page_id\": \"$PAGE_ID\"}, \"rich_text\": [{\"text\": {\"content\": \"$MESSAGE\"}}]}"
+        ;;
+
+    append-block|append)
+        PAGE_ID="$2"
+        CONTENT="$3"
+        BLOCK_TYPE="${4:-paragraph}"
+        if [ -z "$PAGE_ID" ] || [ -z "$CONTENT" ]; then
+            echo "Usage: notion_api_cli append-block PAGE_ID \"content\" [block_type]" >&2
+            exit 1
+        fi
+        notion_curl -X PATCH "$NOTION_API_BASE/blocks/$PAGE_ID/children" \
+            -d "{\"children\": [{\"object\": \"block\", \"type\": \"$BLOCK_TYPE\", \"$BLOCK_TYPE\": {\"rich_text\": [{\"type\": \"text\", \"text\": {\"content\": \"$CONTENT\"}}]}}]}"
+        ;;
+
+    *)
+        echo "Notion API CLI"
+        echo ""
+        echo "Usage: notion_api_cli <command> [args...]"
+        echo ""
+        echo "Commands:"
+        echo "  me                          Get bot user info"
+        echo "  search [query]              Search pages/databases"
+        echo "  read-page PAGE_ID           Read page metadata"
+        echo "  read-blocks PAGE_ID         Read page blocks/content"
+        echo "  get-comments PAGE_ID        Get comments on a page"
+        echo "  reply DISCUSSION_ID msg     Reply to a comment thread"
+        echo "  create-comment PAGE_ID msg  Create new comment on page"
+        echo "  append-block PAGE_ID text   Append a paragraph block"
+        echo ""
+        echo "Environment:"
+        echo "  NOTION_API_TOKEN            OAuth access token (required)"
+        exit 1
+        ;;
+esac
