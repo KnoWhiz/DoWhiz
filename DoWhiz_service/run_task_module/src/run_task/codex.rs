@@ -1849,6 +1849,17 @@ fn collect_google_workspace_cli_env_overrides(
             path.to_string_lossy().into_owned(),
         ));
     }
+
+    // Service Account + Domain-Wide Delegation support
+    // These env vars allow google-docs CLI to use Service Account authentication
+    // instead of OAuth refresh tokens (tokens never expire with Service Account)
+    if let Some(sa_json) = read_env_trimmed("GOOGLE_SERVICE_ACCOUNT_JSON") {
+        overrides.push(("GOOGLE_SERVICE_ACCOUNT_JSON".to_string(), sa_json));
+    }
+    if let Some(sa_subject) = read_env_trimmed("GOOGLE_SERVICE_ACCOUNT_SUBJECT") {
+        overrides.push(("GOOGLE_SERVICE_ACCOUNT_SUBJECT".to_string(), sa_subject));
+    }
+
     Ok(overrides)
 }
 
