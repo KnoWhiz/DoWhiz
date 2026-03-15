@@ -6,10 +6,12 @@ use tracing::{info, warn};
 
 use crate::account_store::lookup_account_by_channel;
 use crate::adapters::bluebubbles::send_quick_bluebubbles_response;
+use crate::adapters::google_common::GoogleCommentsClient;
 use crate::adapters::telegram::send_quick_telegram_response;
 use crate::adapters::whatsapp::send_quick_whatsapp_response;
 use crate::blob_store::get_blob_store;
 use crate::channel::Channel;
+use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
 use crate::memory_diff::{MemoryDiff, SectionChange};
 use crate::memory_queue::{global_memory_queue, MemoryWriteRequest};
 use crate::message_router::{MessageRouter, RouterDecision};
@@ -890,6 +892,115 @@ pub(crate) fn try_quick_response_whatsapp(
     }
 }
 
+/// Try to handle a Google Workspace (Docs/Sheets/Slides) comment with the upstream classifier.
+/// Returns Ok(true) if the message was handled, Ok(false) if it should go to the full pipeline.
+pub(crate) fn try_quick_response_google_workspace(
+    config: &ServiceConfig,
+    user_store: &UserStore,
+    message_router: &MessageRouter,
+    runtime: &tokio::runtime::Handle,
+    message: &crate::channel::InboundMessage,
+) -> Result<bool, BoxError> {
+    let Some(text) = message.text_body.as_deref() else {
+        return Ok(false);
+    };
+
+    // Extract file_id and comment_id based on channel
+    let (file_id, comment_id) = match message.channel {
+        Channel::GoogleDocs => {
+            let file_id = message.metadata.google_docs_document_id.as_deref();
+            let comment_id = message.metadata.google_docs_comment_id.as_deref();
+            (file_id, comment_id)
+        }
+        Channel::GoogleSheets => {
+            let file_id = message.metadata.google_sheets_spreadsheet_id.as_deref();
+            let comment_id = message.metadata.google_sheets_comment_id.as_deref();
+            (file_id, comment_id)
+        }
+        Channel::GoogleSlides => {
+            let file_id = message.metadata.google_slides_presentation_id.as_deref();
+            let comment_id = message.metadata.google_slides_comment_id.as_deref();
+            (file_id, comment_id)
+        }
+        _ => return Ok(false),
+    };
+
+    let (file_id, comment_id) = match (file_id, comment_id) {
+        (Some(f), Some(c)) => (f, c),
+        _ => return Ok(false),
+    };
+
+    // Look up user and memory
+    let channel_key = match message.channel {
+        Channel::GoogleDocs => "gdocs",
+        Channel::GoogleSheets => "gsheets",
+        Channel::GoogleSlides => "gslides",
+        _ => return Ok(false),
+    };
+    let account_id = lookup_account_by_channel(&message.channel, &message.sender);
+    let user = user_store.get_or_create_user(channel_key, &message.sender)?;
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+    let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
+
+    let employee_name = config.employee_profile.display_name.as_deref();
+    let decision = runtime.block_on(message_router.classify(
+        text,
+        memory.as_deref(),
+        employee_name,
+        None,
+    ));
+
+    match decision {
+        RouterDecision::Simple {
+            response,
+            memory_update,
+        } => {
+            // Write memory update if present
+            if let Some(update) = memory_update {
+                if let Err(e) =
+                    write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update)
+                {
+                    warn!("Failed to write memory update: {}", e);
+                }
+            }
+
+            // Send quick response via Google API
+            if send_quick_google_workspace_response(file_id, comment_id, &response).is_ok() {
+                info!(
+                    "google workspace quick response sent: channel={:?} file_id={} comment_id={}",
+                    message.channel, file_id, comment_id
+                );
+                return Ok(true);
+            }
+            Ok(false)
+        }
+        RouterDecision::Complex | RouterDecision::Passthrough => Ok(false),
+    }
+}
+
+/// Send a quick response to a Google Workspace comment using service account auth.
+fn send_quick_google_workspace_response(
+    file_id: &str,
+    comment_id: &str,
+    response: &str,
+) -> Result<(), BoxError> {
+    let auth_config = GoogleAuthConfig::from_env();
+    let auth = GoogleAuth::new(auth_config)
+        .map_err(|e| format!("Failed to initialize Google auth: {}", e))?;
+
+    let client = GoogleCommentsClient::new(
+        auth,
+        std::collections::HashSet::new(),
+        |_| false, // No mention checking needed for quick response
+    );
+
+    client
+        .reply_to_comment(file_id, comment_id, response)
+        .map_err(|e| format!("Failed to reply to comment: {}", e))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1052,5 +1163,174 @@ mod tests {
 
         let message_id = slack_inbound_message_id(&message).expect("message id");
         assert_eq!(message_id, "1712345678.000100");
+    }
+
+    fn build_google_docs_message(
+        document_id: Option<&str>,
+        comment_id: Option<&str>,
+        text: Option<&str>,
+    ) -> InboundMessage {
+        InboundMessage {
+            channel: Channel::GoogleDocs,
+            sender: "user@example.com".to_string(),
+            sender_name: Some("Test User".to_string()),
+            recipient: "bot@example.com".to_string(),
+            subject: None,
+            text_body: text.map(str::to_string),
+            html_body: None,
+            thread_id: "thread-1".to_string(),
+            message_id: Some("msg-1".to_string()),
+            attachments: Vec::new(),
+            reply_to: Vec::new(),
+            raw_payload: Vec::new(),
+            metadata: ChannelMetadata {
+                google_docs_document_id: document_id.map(str::to_string),
+                google_docs_comment_id: comment_id.map(str::to_string),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn build_google_sheets_message(
+        spreadsheet_id: Option<&str>,
+        comment_id: Option<&str>,
+        text: Option<&str>,
+    ) -> InboundMessage {
+        InboundMessage {
+            channel: Channel::GoogleSheets,
+            sender: "user@example.com".to_string(),
+            sender_name: Some("Test User".to_string()),
+            recipient: "bot@example.com".to_string(),
+            subject: None,
+            text_body: text.map(str::to_string),
+            html_body: None,
+            thread_id: "thread-1".to_string(),
+            message_id: Some("msg-1".to_string()),
+            attachments: Vec::new(),
+            reply_to: Vec::new(),
+            raw_payload: Vec::new(),
+            metadata: ChannelMetadata {
+                google_sheets_spreadsheet_id: spreadsheet_id.map(str::to_string),
+                google_sheets_comment_id: comment_id.map(str::to_string),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn build_google_slides_message(
+        presentation_id: Option<&str>,
+        comment_id: Option<&str>,
+        text: Option<&str>,
+    ) -> InboundMessage {
+        InboundMessage {
+            channel: Channel::GoogleSlides,
+            sender: "user@example.com".to_string(),
+            sender_name: Some("Test User".to_string()),
+            recipient: "bot@example.com".to_string(),
+            subject: None,
+            text_body: text.map(str::to_string),
+            html_body: None,
+            thread_id: "thread-1".to_string(),
+            message_id: Some("msg-1".to_string()),
+            attachments: Vec::new(),
+            reply_to: Vec::new(),
+            raw_payload: Vec::new(),
+            metadata: ChannelMetadata {
+                google_slides_presentation_id: presentation_id.map(str::to_string),
+                google_slides_comment_id: comment_id.map(str::to_string),
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn google_docs_message_has_correct_metadata() {
+        let message = build_google_docs_message(
+            Some("doc-123"),
+            Some("comment-456"),
+            Some("Hello!"),
+        );
+
+        assert_eq!(message.channel, Channel::GoogleDocs);
+        assert_eq!(
+            message.metadata.google_docs_document_id,
+            Some("doc-123".to_string())
+        );
+        assert_eq!(
+            message.metadata.google_docs_comment_id,
+            Some("comment-456".to_string())
+        );
+        assert_eq!(message.text_body, Some("Hello!".to_string()));
+    }
+
+    #[test]
+    fn google_sheets_message_has_correct_metadata() {
+        let message = build_google_sheets_message(
+            Some("sheet-123"),
+            Some("comment-789"),
+            Some("Check this cell"),
+        );
+
+        assert_eq!(message.channel, Channel::GoogleSheets);
+        assert_eq!(
+            message.metadata.google_sheets_spreadsheet_id,
+            Some("sheet-123".to_string())
+        );
+        assert_eq!(
+            message.metadata.google_sheets_comment_id,
+            Some("comment-789".to_string())
+        );
+    }
+
+    #[test]
+    fn google_slides_message_has_correct_metadata() {
+        let message = build_google_slides_message(
+            Some("slides-123"),
+            Some("comment-abc"),
+            Some("Nice slide!"),
+        );
+
+        assert_eq!(message.channel, Channel::GoogleSlides);
+        assert_eq!(
+            message.metadata.google_slides_presentation_id,
+            Some("slides-123".to_string())
+        );
+        assert_eq!(
+            message.metadata.google_slides_comment_id,
+            Some("comment-abc".to_string())
+        );
+    }
+
+    #[test]
+    fn google_workspace_message_without_text_returns_none() {
+        let message = build_google_docs_message(
+            Some("doc-123"),
+            Some("comment-456"),
+            None, // No text body
+        );
+
+        assert!(message.text_body.is_none());
+    }
+
+    #[test]
+    fn google_workspace_message_missing_file_id() {
+        let message = build_google_docs_message(
+            None, // Missing document ID
+            Some("comment-456"),
+            Some("Hello!"),
+        );
+
+        assert!(message.metadata.google_docs_document_id.is_none());
+    }
+
+    #[test]
+    fn google_workspace_message_missing_comment_id() {
+        let message = build_google_docs_message(
+            Some("doc-123"),
+            None, // Missing comment ID
+            Some("Hello!"),
+        );
+
+        assert!(message.metadata.google_docs_comment_id.is_none());
     }
 }
