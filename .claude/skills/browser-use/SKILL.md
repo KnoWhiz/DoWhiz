@@ -101,6 +101,22 @@ browser-use screenshot path.png           # Save screenshot to file
 browser-use screenshot --full path.png    # Full page screenshot
 ```
 
+**State output format:**
+The `state` command returns structured text with element indices in `[index]<element>` format:
+```
+url: https://example.com
+title: Example Page
+
+Interactive elements:
+*[123]<button>Submit</button>
+	[124]<a href="/link">Click here</a>
+	[125]<input type="text" placeholder="Enter text" />
+```
+- `[123]` is the element index used with `click`, `input`, etc.
+- `*` prefix indicates the element is visible/focused
+- Indentation (tabs) indicates DOM nesting
+- Element attributes like `aria-label`, `role`, `href` are included
+
 ### Interactions
 ```bash
 browser-use click <index>                 # Click element
@@ -334,6 +350,23 @@ Use when a task requires browsing a site the user is already logged into (e.g. G
 
 **Core workflow:** Check existing profiles → ask user which profile and browser mode → browse with that profile. Only sync cookies if no suitable profile exists.
 
+**IMPORTANT: Cookie-First for OAuth Sites**
+
+For sites that use Google OAuth or similar (Notion, Slack, etc.), **always prefer cookie import over automated login**:
+
+1. Frequent automated OAuth attempts trigger rate limiting and account security alerts
+2. Google may block the account after too many automated login attempts
+3. Saved cookies typically last 30 days and avoid all login issues
+
+```bash
+# Preferred: Use saved cookies
+IN_DOCKER=true browser-use --session mysite cookies import ~/.mysite/cookies.json
+IN_DOCKER=true browser-use --session mysite open "https://mysite.com"
+
+# After manual login, save cookies for future use
+IN_DOCKER=true browser-use --session mysite cookies export ~/.mysite/cookies.json
+```
+
 **Before browsing an authenticated site, the agent MUST:**
 1. Ask the user whether to use **real** (local Chrome) or **remote** (cloud) browser
 2. List available profiles for that mode
@@ -496,6 +529,8 @@ browser-use task status <id> -v --step 10  # Inspect specific step
 4. **Use `--json`** for programmatic parsing
 5. **Python variables persist** across `browser-use python` commands within a session
 6. **CLI aliases**: `bu`, `browser`, and `browseruse` all work identically to `browser-use`
+7. **Cookie-first authentication** — For sites with OAuth (Google, etc.), prefer importing saved cookies over automated login to avoid rate limiting
+8. **Save state for debugging** — Run `browser-use state > /tmp/debug_state.txt` to save state for regex testing
 
 ## Troubleshooting
 
@@ -504,11 +539,26 @@ browser-use task status <id> -v --step 10  # Inspect specific step
 browser-use doctor
 ```
 
+### CRITICAL: WSL/Docker/Root Environment
+
+**If running as root or in WSL/Docker, you MUST set `IN_DOCKER=true`:**
+
+```bash
+IN_DOCKER=true browser-use open "https://example.com"
+```
+
+Without this, the browser will timeout after 30 seconds because Chrome/Chromium requires `--no-sandbox` when running as root. The `IN_DOCKER=true` environment variable tells browser-use to add this flag automatically.
+
+**Symptoms of missing `IN_DOCKER=true`:**
+- Browser startup hangs for 30 seconds then fails
+- Error: "Browser failed to start within timeout"
+- Works fine as non-root user but fails as root
+
 **Browser won't start?**
 ```bash
 browser-use close --all               # Close all sessions
-browser-use --headed open <url>       # Try with visible window
-```
+IN_DOCKER=true browser-use --headed open <url>  # Try with IN_DOCKER flag
+browser-use --headed open <url>       # Try with visible window (if not root)
 
 **Element not found?**
 ```bash

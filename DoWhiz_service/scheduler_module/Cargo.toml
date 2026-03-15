@@ -48,6 +48,11 @@ urlencoding = "2"
 uuid = { version = "1", features = ["serde", "v4"] }
 serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "rustls_backend"] }
 
+# Browser automation for Notion integration (via browser-use CLI)
+scraper = "0.20"
+shellexpand = "3"
+rand = "0.8"
+
 send_emails_module = { path = "../send_emails_module" }
 run_task_module = { path = "../run_task_module" }
 
