@@ -1888,7 +1888,8 @@ addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com"]
             Channel::Email
             | Channel::GoogleDocs
             | Channel::GoogleSheets
-            | Channel::GoogleSlides => ("cross_channel_ack.html", "reply_email_attachments"),
+            | Channel::GoogleSlides
+            | Channel::Notion => ("cross_channel_ack.html", "reply_email_attachments"),
         };
         assert_eq!(ack_filename, "cross_channel_ack.txt");
         assert_eq!(attachments_dir, "reply_attachments");
@@ -1948,7 +1949,8 @@ addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com"]
             Channel::Email
             | Channel::GoogleDocs
             | Channel::GoogleSheets
-            | Channel::GoogleSlides => ("reply_email_draft.html", "reply_email_attachments"),
+            | Channel::GoogleSlides
+            | Channel::Notion => ("reply_email_draft.html", "reply_email_attachments"),
         };
         assert_eq!(reply_filename, "reply_message.txt");
         assert_eq!(attachments_dirname, "reply_attachments");
