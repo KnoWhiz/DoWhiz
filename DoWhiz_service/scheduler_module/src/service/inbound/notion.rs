@@ -1,6 +1,6 @@
 //! Inbound handler for Notion comments/mentions.
 //!
-//! Processes @mentions from Notion browser automation and creates tasks.
+//! Processes @mentions from Notion email notifications and creates tasks.
 
 use std::path::Path;
 use std::time::Duration;
@@ -232,7 +232,7 @@ fn write_notion_context_to_workspace(
         "block_id": mention.block_id,
         "notification_id": mention.id,
         "url": mention.url,
-        "reply_instructions": "Write your reply to reply_message.txt. The system will post it as a comment reply via browser automation."
+        "reply_instructions": "Use notion_api_cli to read the page and post your reply as a comment. The NOTION_API_TOKEN is available in .notion_env."
     });
 
     let context_path = workspace.join(".notion_context.json");
@@ -295,10 +295,10 @@ fn append_workspace_notion_comment(
 
 <hr>
 <h3>How to reply:</h3>
-<p>Write your reply to <code>reply_message.txt</code>. The system will post it as a comment via browser automation.</p>
+<p>Use <code>notion_api_cli</code> to read the page and post your reply. The NOTION_API_TOKEN is in <code>.notion_env</code>.</p>
 <p>You can reference the page content from the context in this message.</p>
 <hr>
-<p><em>Respond by writing to reply_message.txt</em></p>
+<p><em>Source .notion_env and use notion_api_cli to post comments</em></p>
 </body>
 </html>"#,
         page_title = page_title,

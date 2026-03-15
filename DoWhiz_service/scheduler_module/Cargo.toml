@@ -66,10 +66,6 @@ path = "src/bin/google_sheets_cli.rs"
 name = "google-slides"
 path = "src/bin/google_slides_cli.rs"
 
-[[bin]]
-name = "notion_poller"
-path = "src/bin/notion_poller.rs"
-
 [dev-dependencies]
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder"] }
 mockito = "1"

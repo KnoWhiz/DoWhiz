@@ -52,7 +52,7 @@ pub enum NotionApiError {
 
 impl From<NotionApiError> for NotionError {
     fn from(e: NotionApiError) -> Self {
-        NotionError::BrowserError(e.to_string())
+        NotionError::ApiError(e.to_string())
     }
 }
 
