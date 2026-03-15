@@ -80,7 +80,8 @@ fn sync_blob_memo_to_workspace(account_id: Uuid, workspace_memory_dir: &Path) ->
 
 use super::outbound::{
     execute_bluebubbles_send, execute_discord_send, execute_email_send, execute_google_docs_send,
-    execute_slack_send, execute_sms_send, execute_telegram_send, execute_wechat_send,
+execute_notion_send, execute_slack_send, execute_sms_send, execute_telegram_send,
+    execute_wechat_send,
     execute_whatsapp_send,
 };
 use super::types::{SchedulerError, SendReplyTask, TaskExecution, TaskKind};
@@ -543,6 +544,9 @@ fn dispatch_send_reply_task(task: &SendReplyTask) -> Result<(), SchedulerError> 
         }
         Channel::Email => {
             execute_email_send(task)?;
+        }
+        Channel::Notion => {
+            execute_notion_send(task)?;
         }
     }
     Ok(())
@@ -1066,7 +1070,7 @@ impl TaskExecutor for ModuleExecutor {
     fn execute(&self, task: &TaskKind) -> Result<TaskExecution, SchedulerError> {
         match task {
             TaskKind::SendReply(task) => {
-                dispatch_send_reply_task(task)?;
+dispatch_send_reply_task(task)?;
                 Ok(TaskExecution::empty())
             }
             TaskKind::RunTask(task) => {

@@ -606,7 +606,9 @@ fn is_internal_sender(task: &RunTaskTask) -> bool {
             let allowlist = load_internal_sender_id_whitelist(task.channel);
             !allowlist.is_empty() && allowlist.contains(&sender)
         }
-        Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => false,
+        Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides | Channel::Notion => {
+            false
+        }
     }
 }
 
@@ -907,6 +909,7 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         | Channel::Telegram
         | Channel::WhatsApp
         | Channel::Sms
+| Channel::Notion
         | Channel::WeChat => ("reply_message.txt", "reply_attachments"),
         Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
             ("reply_email_draft.html", "reply_email_attachments")
@@ -975,6 +978,7 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
             | Channel::Telegram
             | Channel::WhatsApp
             | Channel::Sms
+| Channel::Notion
             | Channel::WeChat => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email
             | Channel::GoogleDocs
@@ -1067,6 +1071,7 @@ fn format_channel_name(channel: &Channel) -> &'static str {
         Channel::GoogleDocs => "Google Docs",
         Channel::GoogleSheets => "Google Sheets",
         Channel::GoogleSlides => "Google Slides",
+        Channel::Notion => "Notion",
     }
 }
 
@@ -1493,6 +1498,7 @@ mod tests {
             | Channel::Telegram
             | Channel::WhatsApp
             | Channel::Sms
+| Channel::Notion
             | Channel::WeChat => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email
             | Channel::GoogleDocs
@@ -1513,6 +1519,7 @@ mod tests {
             | Channel::Telegram
             | Channel::WhatsApp
             | Channel::Sms
+| Channel::Notion
             | Channel::WeChat => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email
             | Channel::GoogleDocs

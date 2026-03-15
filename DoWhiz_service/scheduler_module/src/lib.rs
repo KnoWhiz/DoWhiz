@@ -11,6 +11,8 @@ pub mod google_docs_poller;
 pub mod google_drive_changes;
 pub mod google_workspace_poller;
 pub mod ingestion;
+pub mod notion_browser;
+pub(crate) mod notion_email_detector;
 pub mod ingestion_queue;
 pub mod mailbox;
 pub mod message_router;
@@ -18,6 +20,7 @@ pub mod mongo_store;
 pub mod raw_payload_store;
 pub mod service_bus_queue;
 pub mod slack_store;
+pub mod notion_store;
 pub mod storage_backend;
 pub(crate) mod thread_state;
 

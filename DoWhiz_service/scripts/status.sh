@@ -29,6 +29,27 @@ else
     echo "Ngrok:      未运行（可选，本地 webhook 调试时才需要）"
 fi
 
+echo ""
+echo "=== 轮询服务 ==="
+if pgrep -f "notion_poller" > /dev/null; then
+    echo "⚠️  Notion Poller: 运行中 (PID: $(pgrep -f notion_poller)) - 会自动操作浏览器"
+else
+    echo "   Notion Poller: 未运行"
+fi
+
+if pgrep -f "browser_use.skill_cli.server" > /dev/null; then
+    SESSION=$(ps aux | grep "browser_use.skill_cli.server" | grep -v grep | sed -n 's/.*--session \([^ ]*\).*/\1/p')
+    echo "⚠️  Browser-use: 运行中 (session: ${SESSION:-unknown})"
+else
+    echo "   Browser-use: 未运行"
+fi
+
+if pgrep -f "chrome.*browser-use-user-data-dir" > /dev/null; then
+    echo "⚠️  Browser-use Chrome: 运行中"
+else
+    echo "   Browser-use Chrome: 未运行"
+fi
+
 # 2. 健康检查
 echo ""
 echo "=== 健康检查 ==="

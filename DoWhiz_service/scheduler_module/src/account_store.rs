@@ -1072,6 +1072,7 @@ pub fn channel_to_identifier_type(channel: &crate::channel::Channel) -> &'static
         Channel::BlueBubbles => "phone",
         Channel::WeChat => "wechat",
         Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => "email",
+        Channel::Notion => "email", // Notion accounts are linked by email
     }
 }
 

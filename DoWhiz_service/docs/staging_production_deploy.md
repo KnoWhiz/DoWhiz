@@ -50,6 +50,22 @@ Staging ingest isolation policy:
 - Current staging container: `ingestion-raw`
 - In `ENV_STAGING`, explicitly set `AZURE_STORAGE_ACCOUNT` and `AZURE_STORAGE_CONTAINER_SAS_URL` so staging does not fall back to shared/common storage credentials.
 
+### Notion Browser Integration (Optional)
+
+| Key | Description |
+|-----|-------------|
+| `NOTION_EMPLOYEE_EMAIL` | Notion account email |
+| `NOTION_EMPLOYEE_PASSWORD` | Notion account password |
+| `NOTION_BROWSER_ENABLED` | Enable browser automation (true/false) |
+| `NOTION_POLL_INTERVAL_SECS` | Poll interval in seconds (default: 45) |
+| `NOTION_BROWSER_PROFILE_DIR` | Browser profile directory |
+| `NOTION_BROWSER_HEADLESS` | Headless mode (true/false, recommend: false) |
+| `NOTION_BROWSER_SLOW_MO` | Slow-mo delay in ms (recommend: 100) |
+| `WEBDRIVER_URL` | WebDriver server URL (default: http://localhost:4444) |
+
+Note: Notion browser integration uses WebDriver (geckodriver/chromedriver) for browser automation.
+Recommended settings for anti-detection: `NOTION_BROWSER_HEADLESS=false`, `NOTION_BROWSER_SLOW_MO=100`.
+
 ## 3) VM Deployment
 
 PM2 is the canonical process manager on staging/production VMs. Do not use the foreground
