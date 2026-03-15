@@ -5,6 +5,8 @@ on:
     types: [closed]
     branches:
       - main
+    paths-ignore:
+      - website/**
   workflow_dispatch:
 
 concurrency:
