@@ -13,6 +13,7 @@ pub mod image_search;
 pub mod postmark;
 pub mod slack;
 pub mod telegram;
+pub mod wechat;
 pub mod whatsapp;
 
 pub use bluebubbles::{
@@ -36,6 +37,7 @@ pub use slack::{
 pub use telegram::{
     send_quick_telegram_response, TelegramInboundAdapter, TelegramOutboundAdapter, TelegramUpdate,
 };
+pub use wechat::{WeChatInboundAdapter, WeChatOutboundAdapter};
 pub use whatsapp::{
     send_quick_whatsapp_response, WhatsAppInboundAdapter, WhatsAppOutboundAdapter, WhatsAppWebhook,
 };

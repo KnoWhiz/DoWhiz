@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use postgres_native_tls::MakeTlsConnector;
 use r2d2::{Pool, PooledConnection};
 use r2d2_postgres::PostgresConnectionManager;
+use serde_json::Value;
 use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -77,6 +78,64 @@ pub struct EmailVerificationToken {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone)]
+pub struct AnalyticsEventInsert {
+    pub event_name: String,
+    pub source: String,
+    pub event_timestamp: DateTime<Utc>,
+    pub account_id: Option<Uuid>,
+    pub auth_user_id: Option<Uuid>,
+    pub anonymous_id: Option<String>,
+    pub session_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub org_id: Option<String>,
+    pub plan_type: Option<String>,
+    pub environment: Option<String>,
+    pub app_version: Option<String>,
+    pub page_path: Option<String>,
+    pub route_path: Option<String>,
+    pub referrer: Option<String>,
+    pub utm_source: Option<String>,
+    pub utm_medium: Option<String>,
+    pub utm_campaign: Option<String>,
+    pub utm_term: Option<String>,
+    pub utm_content: Option<String>,
+    pub device_type: Option<String>,
+    pub browser: Option<String>,
+    pub os: Option<String>,
+    pub event_key: Option<String>,
+    pub properties: Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct AnalyticsEventRecord {
+    pub event_name: String,
+    pub source: String,
+    pub event_timestamp: DateTime<Utc>,
+    pub account_id: Option<Uuid>,
+    pub auth_user_id: Option<Uuid>,
+    pub anonymous_id: Option<String>,
+    pub session_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub org_id: Option<String>,
+    pub plan_type: Option<String>,
+    pub environment: Option<String>,
+    pub app_version: Option<String>,
+    pub page_path: Option<String>,
+    pub route_path: Option<String>,
+    pub referrer: Option<String>,
+    pub utm_source: Option<String>,
+    pub utm_medium: Option<String>,
+    pub utm_campaign: Option<String>,
+    pub utm_term: Option<String>,
+    pub utm_content: Option<String>,
+    pub device_type: Option<String>,
+    pub browser: Option<String>,
+    pub os: Option<String>,
+    pub event_key: Option<String>,
+    pub properties: Value,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum AccountStoreError {
     #[error("postgres error: {0}")]
@@ -115,6 +174,21 @@ pub struct AccountStore {
     primary_pool: Option<PgPool>,
     fallback_pool: Option<PgPool>,
     prefer_fallback: Arc<AtomicBool>,
+}
+
+fn log_record_analytics_event_error(
+    context: &str,
+    event: &AnalyticsEventInsert,
+    err: &AccountStoreError,
+) {
+    let account_suffix = event
+        .account_id
+        .map(|id| format!(" for account {}", id))
+        .unwrap_or_default();
+    warn!(
+        "{}: failed to record analytics event {}{}: {}",
+        context, event.event_name, account_suffix, err
+    );
 }
 
 impl AccountStore {
@@ -163,20 +237,24 @@ impl AccountStore {
             info!("account_store initialized with SUPABASE_POOLER_URL only");
         }
 
-        Ok(Self {
+        let store = Self {
             primary_pool,
             fallback_pool,
             prefer_fallback: Arc::new(AtomicBool::new(false)),
-        })
+        };
+        store.ensure_analytics_schema()?;
+        Ok(store)
     }
 
     pub fn new(db_url: &str) -> Result<Self, AccountStoreError> {
         let primary_pool = Self::build_pool(db_url, "primary")?;
-        Ok(Self {
+        let store = Self {
             primary_pool: Some(primary_pool),
             fallback_pool: None,
             prefer_fallback: Arc::new(AtomicBool::new(false)),
-        })
+        };
+        store.ensure_analytics_schema()?;
+        Ok(store)
     }
 
     fn build_pool(db_url: &str, pool_name: &'static str) -> Result<PgPool, AccountStoreError> {
@@ -248,6 +326,58 @@ impl AccountStore {
         Err(AccountStoreError::Config(
             "account store pools dropped".to_string(),
         ))
+    }
+
+    fn ensure_analytics_schema(&self) -> Result<(), AccountStoreError> {
+        let mut conn = self.conn()?;
+        conn.batch_execute(
+            "
+            CREATE TABLE IF NOT EXISTS analytics_events (
+                id UUID PRIMARY KEY,
+                event_name TEXT NOT NULL,
+                source TEXT NOT NULL,
+                event_timestamp TIMESTAMPTZ NOT NULL,
+                account_id UUID NULL,
+                auth_user_id UUID NULL,
+                anonymous_id TEXT NULL,
+                session_id TEXT NULL,
+                workspace_id TEXT NULL,
+                org_id TEXT NULL,
+                plan_type TEXT NULL,
+                environment TEXT NULL,
+                app_version TEXT NULL,
+                page_path TEXT NULL,
+                route_path TEXT NULL,
+                referrer TEXT NULL,
+                utm_source TEXT NULL,
+                utm_medium TEXT NULL,
+                utm_campaign TEXT NULL,
+                utm_term TEXT NULL,
+                utm_content TEXT NULL,
+                device_type TEXT NULL,
+                browser TEXT NULL,
+                os TEXT NULL,
+                event_key TEXT NULL,
+                properties_json TEXT NOT NULL DEFAULT '{}',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            CREATE INDEX IF NOT EXISTS analytics_events_event_time_idx
+                ON analytics_events (event_timestamp);
+            CREATE INDEX IF NOT EXISTS analytics_events_name_time_idx
+                ON analytics_events (event_name, event_timestamp);
+            CREATE INDEX IF NOT EXISTS analytics_events_account_time_idx
+                ON analytics_events (account_id, event_timestamp);
+            CREATE INDEX IF NOT EXISTS analytics_events_auth_user_time_idx
+                ON analytics_events (auth_user_id, event_timestamp);
+            CREATE INDEX IF NOT EXISTS analytics_events_anonymous_time_idx
+                ON analytics_events (anonymous_id, event_timestamp);
+            CREATE UNIQUE INDEX IF NOT EXISTS analytics_events_event_key_idx
+                ON analytics_events (event_name, event_key)
+                WHERE event_key IS NOT NULL;
+            ",
+        )?;
+        Ok(())
     }
 
     /// Get a connection from the pool (primarily for tests)
@@ -540,6 +670,257 @@ impl AccountStore {
         Ok(row.is_some())
     }
 
+    pub fn list_accounts_created_between(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<Account>, AccountStoreError> {
+        let mut conn = self.conn()?;
+        let rows = conn.query(
+            "SELECT id, auth_user_id, created_at, tokens_to_hours::float8, purchased_hours::float8
+             FROM accounts
+             WHERE created_at >= $1 AND created_at < $2
+             ORDER BY created_at ASC",
+            &[&start, &end],
+        )?;
+        Ok(rows
+            .iter()
+            .map(|row| Account {
+                id: row.get(0),
+                auth_user_id: row.get(1),
+                created_at: row.get(2),
+                tokens_to_hours: row.get(3),
+                purchased_hours: row.get(4),
+            })
+            .collect())
+    }
+
+    pub fn list_payments_between(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<Payment>, AccountStoreError> {
+        let mut conn = self.conn()?;
+        let rows = conn.query(
+            "SELECT stripe_session_id, account_id, amount_cents, hours_purchased::float8, created_at
+             FROM payments
+             WHERE created_at >= $1 AND created_at < $2
+             ORDER BY created_at ASC",
+            &[&start, &end],
+        )?;
+        Ok(rows
+            .iter()
+            .map(|row| Payment {
+                stripe_session_id: row.get(0),
+                account_id: row.get(1),
+                amount_cents: row.get(2),
+                hours_purchased: row.get(3),
+                created_at: row.get(4),
+            })
+            .collect())
+    }
+
+    pub fn record_analytics_event(
+        &self,
+        event: &AnalyticsEventInsert,
+    ) -> Result<bool, AccountStoreError> {
+        let mut conn = self.conn()?;
+        let id = Uuid::new_v4();
+        let properties_json =
+            serde_json::to_string(&event.properties).unwrap_or_else(|_| "{}".to_string());
+        let inserted = conn.execute(
+            "INSERT INTO analytics_events (
+                id,
+                event_name,
+                source,
+                event_timestamp,
+                account_id,
+                auth_user_id,
+                anonymous_id,
+                session_id,
+                workspace_id,
+                org_id,
+                plan_type,
+                environment,
+                app_version,
+                page_path,
+                route_path,
+                referrer,
+                utm_source,
+                utm_medium,
+                utm_campaign,
+                utm_term,
+                utm_content,
+                device_type,
+                browser,
+                os,
+                event_key,
+                properties_json
+            )
+            VALUES (
+                $1,  $2,  $3,  $4,  $5,  $6,  $7,  $8,  $9,  $10, $11, $12, $13,
+                $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
+            )
+            ON CONFLICT (event_name, event_key) WHERE event_key IS NOT NULL DO NOTHING",
+            &[
+                &id,
+                &event.event_name,
+                &event.source,
+                &event.event_timestamp,
+                &event.account_id,
+                &event.auth_user_id,
+                &event.anonymous_id,
+                &event.session_id,
+                &event.workspace_id,
+                &event.org_id,
+                &event.plan_type,
+                &event.environment,
+                &event.app_version,
+                &event.page_path,
+                &event.route_path,
+                &event.referrer,
+                &event.utm_source,
+                &event.utm_medium,
+                &event.utm_campaign,
+                &event.utm_term,
+                &event.utm_content,
+                &event.device_type,
+                &event.browser,
+                &event.os,
+                &event.event_key,
+                &properties_json,
+            ],
+        )?;
+        Ok(inserted > 0)
+    }
+
+    pub fn record_analytics_event_detached(
+        self: &Arc<Self>,
+        event: AnalyticsEventInsert,
+        context: &'static str,
+    ) {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let store = Arc::clone(self);
+            std::mem::drop(handle.spawn_blocking(move || {
+                if let Err(err) = store.record_analytics_event(&event) {
+                    log_record_analytics_event_error(context, &event, &err);
+                }
+            }));
+            return;
+        }
+
+        let store = Arc::clone(self);
+        std::mem::drop(std::thread::spawn(move || {
+            if let Err(err) = store.record_analytics_event(&event) {
+                log_record_analytics_event_error(context, &event, &err);
+            }
+        }));
+    }
+
+    pub fn count_analytics_events(
+        &self,
+        event_name: &str,
+        account_id: Option<Uuid>,
+        auth_user_id: Option<Uuid>,
+    ) -> Result<i64, AccountStoreError> {
+        let mut conn = self.conn()?;
+        let row = if let Some(account_id) = account_id {
+            conn.query_one(
+                "SELECT COUNT(*)::bigint FROM analytics_events
+                 WHERE event_name = $1 AND account_id = $2",
+                &[&event_name, &account_id],
+            )?
+        } else if let Some(auth_user_id) = auth_user_id {
+            conn.query_one(
+                "SELECT COUNT(*)::bigint FROM analytics_events
+                 WHERE event_name = $1 AND auth_user_id = $2",
+                &[&event_name, &auth_user_id],
+            )?
+        } else {
+            conn.query_one(
+                "SELECT COUNT(*)::bigint FROM analytics_events
+                 WHERE event_name = $1 AND account_id IS NULL AND auth_user_id IS NULL",
+                &[&event_name],
+            )?
+        };
+        Ok(row.get(0))
+    }
+
+    pub fn list_analytics_events_between(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<AnalyticsEventRecord>, AccountStoreError> {
+        let mut conn = self.conn()?;
+        let rows = conn.query(
+            "SELECT
+                event_name,
+                source,
+                event_timestamp,
+                account_id,
+                auth_user_id,
+                anonymous_id,
+                session_id,
+                workspace_id,
+                org_id,
+                plan_type,
+                environment,
+                app_version,
+                page_path,
+                route_path,
+                referrer,
+                utm_source,
+                utm_medium,
+                utm_campaign,
+                utm_term,
+                utm_content,
+                device_type,
+                browser,
+                os,
+                event_key,
+                properties_json
+             FROM analytics_events
+             WHERE event_timestamp >= $1 AND event_timestamp < $2
+             ORDER BY event_timestamp ASC, created_at ASC",
+            &[&start, &end],
+        )?;
+
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let properties_json: String = row.get(24);
+                let properties = serde_json::from_str(&properties_json).unwrap_or(Value::Null);
+                AnalyticsEventRecord {
+                    event_name: row.get(0),
+                    source: row.get(1),
+                    event_timestamp: row.get(2),
+                    account_id: row.get(3),
+                    auth_user_id: row.get(4),
+                    anonymous_id: row.get(5),
+                    session_id: row.get(6),
+                    workspace_id: row.get(7),
+                    org_id: row.get(8),
+                    plan_type: row.get(9),
+                    environment: row.get(10),
+                    app_version: row.get(11),
+                    page_path: row.get(12),
+                    route_path: row.get(13),
+                    referrer: row.get(14),
+                    utm_source: row.get(15),
+                    utm_medium: row.get(16),
+                    utm_campaign: row.get(17),
+                    utm_term: row.get(18),
+                    utm_content: row.get(19),
+                    device_type: row.get(20),
+                    browser: row.get(21),
+                    os: row.get(22),
+                    event_key: row.get(23),
+                    properties,
+                }
+            })
+            .collect())
+    }
+
     /// Create an email verification token (expires in 24 hours)
     pub fn create_email_verification_token(
         &self,
@@ -689,6 +1070,7 @@ pub fn channel_to_identifier_type(channel: &crate::channel::Channel) -> &'static
         Channel::Slack => "slack",
         Channel::Discord => "discord",
         Channel::BlueBubbles => "phone",
+        Channel::WeChat => "wechat",
         Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => "email",
         Channel::Notion => "email", // Notion accounts are linked by email
     }
@@ -785,9 +1167,12 @@ pub fn lookup_account_by_channel(
 
 #[cfg(test)]
 mod tests {
-    use super::account_store_allow_invalid_certs;
+    use super::{account_store_allow_invalid_certs, AccountStore, AnalyticsEventInsert};
+    use chrono::Utc;
+    use serde_json::json;
     use std::env;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex, OnceLock};
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -830,5 +1215,47 @@ mod tests {
         env::set_var("ACCOUNT_STORE_TLS_ALLOW_INVALID_CERTS", "1");
         assert!(account_store_allow_invalid_certs());
         reset_tls_env();
+    }
+
+    #[test]
+    fn detached_analytics_recording_can_be_called_inside_tokio_runtime() {
+        let store = Arc::new(AccountStore {
+            primary_pool: None,
+            fallback_pool: None,
+            prefer_fallback: Arc::new(AtomicBool::new(false)),
+        });
+        let event = AnalyticsEventInsert {
+            event_name: "auth_smoke".to_string(),
+            source: "server".to_string(),
+            event_timestamp: Utc::now(),
+            account_id: None,
+            auth_user_id: None,
+            anonymous_id: None,
+            session_id: None,
+            workspace_id: None,
+            org_id: None,
+            plan_type: None,
+            environment: Some("test".to_string()),
+            app_version: None,
+            page_path: None,
+            route_path: Some("/auth/signup".to_string()),
+            referrer: None,
+            utm_source: None,
+            utm_medium: None,
+            utm_campaign: None,
+            utm_term: None,
+            utm_content: None,
+            device_type: None,
+            browser: None,
+            os: None,
+            event_key: Some("auth_smoke".to_string()),
+            properties: json!({}),
+        };
+
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        runtime.block_on(async move {
+            store.record_analytics_event_detached(event, "test");
+            tokio::task::yield_now().await;
+        });
     }
 }

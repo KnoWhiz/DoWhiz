@@ -1,4 +1,4 @@
-name: CICD_production
+name: CICD_staging
 
 on:
   pull_request:
@@ -11,13 +11,20 @@ concurrency:
   group: cicd-staging
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     environment: staging
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev') ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     env:
       CARGO_INCREMENTAL: 0
+    outputs:
+      deploy_sha: ${{ steps.auto_bump_base.outputs.deploy_sha }}
 
     defaults:
       run:
@@ -27,44 +34,103 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}
 
-      - name: Build
-        run: cargo build
+      - name: Auto bump base version when Dockerfile.base changes
+        id: auto_bump_base
+        working-directory: .
+        run: |
+          set -euo pipefail
+          trigger_sha="${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}"
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            target_branch="${{ github.event.pull_request.base.ref }}"
+          else
+            target_branch="${{ github.ref_name }}"
+          fi
+          [[ -n "$target_branch" ]] || { echo "Unable to resolve target branch" >&2; exit 1; }
+
+          base_file="Dockerfile.base"
+          version_file="version_base.txt"
+          md5_file="version_base.md5"
+
+          [[ -f "$base_file" ]] || { echo "Missing $base_file" >&2; exit 1; }
+          [[ -f "$version_file" ]] || { echo "Missing $version_file" >&2; exit 1; }
+
+          current_md5="$(md5sum "$base_file" | awk '{print $1}')"
+          previous_md5=""
+          if [[ -f "$md5_file" ]]; then
+            previous_md5="$(tr -d '[:space:]' < "$md5_file")"
+          fi
+
+          current_version="$(tr -d '[:space:]' < "$version_file")"
+          [[ "$current_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Invalid version in $version_file: $current_version" >&2
+            exit 1
+          }
+
+          if [[ "$current_md5" != "$previous_md5" ]]; then
+            IFS='.' read -r major minor patch <<< "$current_version"
+            new_version="${major}.${minor}.$((patch + 1))"
+            echo "$new_version" > "$version_file"
+            echo "$current_md5" > "$md5_file"
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add "$version_file" "$md5_file"
+            git commit -m "chore(ci): bump base version to $new_version [skip ci]"
+            git push origin "HEAD:$target_branch"
+            deploy_sha="$(git rev-parse HEAD)"
+            echo "deploy_sha=$deploy_sha" >> "$GITHUB_OUTPUT"
+
+            echo "Base Dockerfile changed: bumped version_base.txt to $new_version (deploy_sha=$deploy_sha)"
+          else
+            echo "deploy_sha=$trigger_sha" >> "$GITHUB_OUTPUT"
+            echo "Base Dockerfile unchanged: keep version_base.txt at $current_version"
+          fi
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Run tests (scheduler_module)
-        run: cargo test -p scheduler_module
+        run: cargo test --locked -p scheduler_module
         continue-on-error: true
 
       - name: Run tests (run_task_module)
-        run: cargo test -p run_task_module
+        run: cargo test --locked -p run_task_module
         continue-on-error: true
 
-      - name: Clean target before release build
-        run: cargo clean
-
       - name: Build release binaries
-        run: cargo build -p scheduler_module --bins --release
+        run: cargo build --locked -p scheduler_module --bins --release
 
       - name: Archive rust binaries
         uses: actions/upload-artifact@v4
         with:
           name: rust-binaries
+          compression-level: 0
           path: |
             DoWhiz_service/target/release/rust_service
+            DoWhiz_service/target/release/inbound_fanout
             DoWhiz_service/target/release/inbound_gateway
+            DoWhiz_service/target/release/google-docs
             DoWhiz_service/target/release/set_postmark_inbound_hook
           if-no-files-found: error
 
   deploy:
     runs-on: ubuntu-latest
     needs: build
-    environment: production
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    environment: staging
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev') ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
 
     steps:
-      - name: Checkout code
+      - name: Checkout deploy source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.build.outputs.deploy_sha }}
 
       - name: Download rust binaries
         uses: actions/download-artifact@v4
@@ -94,15 +160,44 @@ jobs:
           echo "  Port 22" >> ~/.ssh/config
           echo "  IdentityFile ~/.ssh/private_key.pem" >> ~/.ssh/config
 
-      - name: Update repo and build on Azure VM
+      - name: Update repo on Azure VM
+        id: update_repo
         run: |
-          ssh -F ~/.ssh/config azureproduction << 'EOF'
+          result=$(ssh -F ~/.ssh/config azureproduction << 'EOF'
+          TARGET_SHA="${{ needs.build.outputs.deploy_sha }}"
+          [[ -n "$TARGET_SHA" ]] || {
+            echo "Missing TARGET_SHA" >&2
+            exit 1
+          }
           cd /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz
+          OLD_HEAD=$(git rev-parse HEAD)
+          git fetch origin --prune
           git checkout -f
-          git checkout dev
-          git pull
+          git checkout -f "$TARGET_SHA"
+          NEW_HEAD=$(git rev-parse HEAD)
           mkdir -p /home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
+
+          # Check if only gateway files changed
+          changed_files=$(git diff --name-only "$OLD_HEAD" "$NEW_HEAD" 2>/dev/null || echo "")
+          gateway_only=true
+          if [[ -n "$changed_files" ]]; then
+            while IFS= read -r file; do
+              [[ -z "$file" ]] && continue
+              if [[ "$file" != DoWhiz_service/scheduler_module/src/bin/inbound_gateway/* &&
+                    "$file" != DoWhiz_service/scheduler_module/src/bin/inbound_gateway.rs ]]; then
+                gateway_only=false
+                break
+              fi
+            done <<< "$changed_files"
+          else
+            gateway_only=false
+          fi
+          echo "GATEWAY_ONLY=$gateway_only"
           EOF
+          )
+          echo "$result"
+          gateway_only=$(echo "$result" | grep "GATEWAY_ONLY=" | cut -d= -f2)
+          echo "gateway_only=$gateway_only" >> $GITHUB_OUTPUT
 
       - name: Ensure release directory is writable
         run: |
@@ -111,24 +206,6 @@ jobs:
           RELEASE_DIR=/home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
           mkdir -p "$RELEASE_DIR"
           chmod u+rwx "$RELEASE_DIR"
-          EOF
-
-      - name: Inspect release directory (debug)
-        run: |
-          ssh -F ~/.ssh/config azureproduction << 'EOF'
-          RELEASE_DIR=/home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
-          echo "== whoami =="
-          whoami
-          echo "== id =="
-          id
-          echo "== ls -ald =="
-          ls -ald "$RELEASE_DIR"
-          echo "== ls -al =="
-          ls -al "$RELEASE_DIR"
-          echo "== stat =="
-          stat "$RELEASE_DIR" || true
-          echo "== df -h =="
-          df -h "$RELEASE_DIR" || true
           EOF
 
       - name: Upload rust binaries to Azure VM (tmp)
@@ -142,7 +219,9 @@ jobs:
           set -e
           RELEASE_DIR=/home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service/target/release
           install -m 755 /tmp/dowhiz-release/rust_service "$RELEASE_DIR/rust_service"
+          install -m 755 /tmp/dowhiz-release/inbound_fanout "$RELEASE_DIR/inbound_fanout"
           install -m 755 /tmp/dowhiz-release/inbound_gateway "$RELEASE_DIR/inbound_gateway"
+          install -m 755 /tmp/dowhiz-release/google-docs "$RELEASE_DIR/google-docs"
           install -m 755 /tmp/dowhiz-release/set_postmark_inbound_hook "$RELEASE_DIR/set_postmark_inbound_hook"
           rm -rf /tmp/dowhiz-release
           EOF
@@ -202,17 +281,97 @@ jobs:
           chmod 600 "$APP_DIR/.env"
           EOF
 
-      - name: Build and push ACI image on Azure VM
+      - name: Restart DoWhiz services before ACI build
         run: |
           ssh -F ~/.ssh/config azureproduction << 'EOF'
           set -e
-          APP_ROOT=/home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz
-          APP_DIR="$APP_ROOT/DoWhiz_service"
+          if [ -s /home/${{ secrets.STAGING_AZURE_VM_USER }}/.nvm/nvm.sh ]; then
+            source /home/${{ secrets.STAGING_AZURE_VM_USER }}/.nvm/nvm.sh
+          fi
+          APP_DIR=/home/${{ secrets.STAGING_AZURE_VM_USER }}/server/DoWhiz/DoWhiz_service
           ENV_FILE="$APP_DIR/.env"
+          set -a
+          source "$ENV_FILE"
+          set +a
+
+          if systemctl list-unit-files 'dowhiz-oliver.service' --no-legend 2>/dev/null | grep -q '^dowhiz-oliver\.service'; then
+            sudo systemctl disable --now dowhiz-oliver.service || true
+          fi
+
+          if pm2 describe dw_worker >/dev/null 2>&1; then
+            pm2 restart dw_worker --update-env
+          else
+            pm2 start "$APP_DIR/target/release/rust_service" --name dw_worker --cwd "$APP_DIR" -- --host 0.0.0.0 --port "${RUST_SERVICE_PORT:-9001}"
+          fi
+
+          if pm2 describe dw_gateway >/dev/null 2>&1; then
+            pm2 restart dw_gateway --update-env
+          else
+            pm2 start "$APP_DIR/target/release/inbound_gateway" --name dw_gateway --cwd "$APP_DIR"
+          fi
+
+          wait_for_health() {
+            local label="$1"
+            local url="$2"
+            local http_code=""
+            local attempt
+            for attempt in $(seq 1 12); do
+              http_code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 "$url" || true)"
+              if [[ "$http_code" == "200" ]]; then
+                printf '%s' "$http_code"
+                return 0
+              fi
+              echo "Waiting for $label health endpoint (${attempt}/12), last HTTP ${http_code:-000}..."
+              sleep 5
+            done
+            echo "Early $label health check failed after retries (HTTP ${http_code:-000})" >&2
+            return 1
+          }
+
+          worker_health="$(wait_for_health worker "http://127.0.0.1:${RUST_SERVICE_PORT:-9001}/health")"
+          gateway_health="$(wait_for_health gateway "http://127.0.0.1:${GATEWAY_PORT:-9100}/health")"
+          echo "Early health check passed: worker=$worker_health gateway=$gateway_health"
+          EOF
+
+      - name: Resolve ACI build configuration
+        id: aci_config
+        env:
+          ENV_COMMON: ${{ secrets.ENV_COMMON }}
+          ENV_TARGET: ${{ secrets.ENV_STAGING }}
+          GATEWAY_ONLY: ${{ steps.update_repo.outputs.gateway_only }}
+        run: |
+          set -euo pipefail
+          common_env="${ENV_COMMON:-}"
+          target_env="${ENV_TARGET:-}"
+
           read_env_value() {
-            local key="$1"
+            local target_key="$1"
             local value
-            value="$(grep -E "^${key}=" "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+            value="$(
+              {
+                printf '%s\n' "$common_env"
+                printf '%s\n' "$target_env"
+              } | awk -v wanted="$target_key" '
+                function trim(s) {
+                  gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+                  return s
+                }
+                {
+                  line = $0
+                  sub(/\r$/, "", line)
+                  if (line ~ /^[[:space:]]*($|#)/) next
+                  if (line ~ /^export[[:space:]]+/) sub(/^export[[:space:]]+/, "", line)
+                  pos = index(line, "=")
+                  if (pos == 0) next
+                  key = trim(substr(line, 1, pos - 1))
+                  if (key == "") next
+                  env[key] = substr(line, pos + 1)
+                }
+                END {
+                  if (wanted in env) print env[wanted]
+                }
+              ' | tail -n1
+            )"
             value="${value#\"}"
             value="${value%\"}"
             value="${value#\'}"
@@ -233,7 +392,14 @@ jobs:
               fi
               ;;
           esac
+
+          if [[ "$GATEWAY_ONLY" == "true" ]]; then
+            echo "Skipping ACI image build: only inbound_gateway files changed (rust_service unaffected)"
+            should_build=0
+          fi
+
           if [[ "$should_build" -eq 0 ]]; then
+            echo "should_build=0" >> "$GITHUB_OUTPUT"
             echo "Skipping ACI image build: RUN_TASK_EXECUTION_BACKEND=$run_task_backend DEPLOY_TARGET=$deploy_target"
             exit 0
           fi
@@ -254,32 +420,107 @@ jobs:
             echo "Unable to parse ACR registry name from image: $run_task_image" >&2
             exit 1
           }
+          [[ "$image_name" == *:* ]] || {
+            echo "RUN_TASK_AZURE_ACI_IMAGE must include an explicit tag: $run_task_image" >&2
+            exit 1
+          }
 
-          # Prior VM builds can leave a very large Rust target directory that bloats Docker context.
-          # Keep release binaries required by PM2 restarts, trim everything else.
-          if [[ -d "$APP_DIR/target" ]]; then
-            echo "Trimming $APP_DIR/target before az acr build to keep context small"
-            if [[ -d "$APP_DIR/target/release" ]]; then
-              find "$APP_DIR/target/release" -mindepth 1 -maxdepth 1 \
-                ! -name rust_service \
-                ! -name inbound_gateway \
-                ! -name set_postmark_inbound_hook \
-                ! -name inbound_fanout \
-                ! -name google-docs \
-                -exec rm -rf {} +
-            fi
-            find "$APP_DIR/target" -mindepth 1 -maxdepth 1 ! -name release -exec rm -rf {} +
+          echo "should_build=1" >> "$GITHUB_OUTPUT"
+          echo "run_task_image=$run_task_image" >> "$GITHUB_OUTPUT"
+          echo "login_server=$login_server" >> "$GITHUB_OUTPUT"
+          echo "image_name=$image_name" >> "$GITHUB_OUTPUT"
+          echo "registry_name=$registry_name" >> "$GITHUB_OUTPUT"
+
+      - name: Azure login for ACR build
+        if: steps.aci_config.outputs.should_build == '1'
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.STAGING_AZURE_CREDENTIALS != '' && secrets.STAGING_AZURE_CREDENTIALS || secrets.AZURE_CREDENTIALS }}
+
+      - name: Build and push ACI image on GitHub Runner
+        if: steps.aci_config.outputs.should_build == '1'
+        env:
+          RUN_TASK_IMAGE: ${{ steps.aci_config.outputs.run_task_image }}
+          LOGIN_SERVER: ${{ steps.aci_config.outputs.login_server }}
+          IMAGE_NAME: ${{ steps.aci_config.outputs.image_name }}
+          REGISTRY_NAME: ${{ steps.aci_config.outputs.registry_name }}
+        run: |
+          set -euo pipefail
+          command -v az >/dev/null 2>&1 || { echo "Azure CLI not found on runner" >&2; exit 1; }
+
+          APP_ROOT="$GITHUB_WORKSPACE"
+          build_context_root="$(mktemp -d)"
+          cleanup_build_context() {
+            rm -rf "$build_context_root"
+          }
+          trap cleanup_build_context EXIT
+
+          echo "Preparing clean ACR build context at $build_context_root"
+          tar -C "$APP_ROOT" \
+            --exclude='DoWhiz_service/target' \
+            --exclude='DoWhiz_service/.workspace' \
+            --exclude='DoWhiz_service/.env' \
+            --exclude='DoWhiz_service/.env.*' \
+            -cf - Dockerfile.aci Dockerfile.base version_base.txt .dockerignore DoWhiz_service | tar -C "$build_context_root" -xf -
+
+          ctx_release_dir="$build_context_root/DoWhiz_service/target/release"
+          mkdir -p "$ctx_release_dir"
+          required_runtime_bins=(rust_service inbound_fanout inbound_gateway google-docs)
+          for bin_name in "${required_runtime_bins[@]}"; do
+            src_bin="$GITHUB_WORKSPACE/rust-binaries/$bin_name"
+            [[ -f "$src_bin" ]] || {
+              echo "Missing binary artifact required for ACI image: $src_bin" >&2
+              ls -al "$GITHUB_WORKSPACE/rust-binaries" 2>/dev/null || true
+              exit 1
+            }
+            install -m 755 "$src_bin" "$ctx_release_dir/$bin_name"
+          done
+
+          base_version_file="$build_context_root/version_base.txt"
+          base_dockerfile="$build_context_root/Dockerfile.base"
+          [[ -f "$base_version_file" ]] || {
+            echo "Missing base version file: $base_version_file" >&2
+            exit 1
+          }
+          [[ -f "$base_dockerfile" ]] || {
+            echo "Missing base Dockerfile: $base_dockerfile" >&2
+            exit 1
+          }
+
+          base_version="$(tr -d '[:space:]' < "$base_version_file")"
+          [[ -n "$base_version" ]] || {
+            echo "Base version file is empty: $base_version_file" >&2
+            exit 1
+          }
+          base_md5="$(md5sum "$base_dockerfile" | awk '{print $1}')"
+          base_md5_short="${base_md5:0:12}"
+          run_task_repo="${IMAGE_NAME%:*}"
+          base_repo="${run_task_repo}-base"
+          base_tag="${base_version}-${base_md5_short}"
+          base_image_name="${base_repo}:${base_tag}"
+          base_image_full="${LOGIN_SERVER}/${base_image_name}"
+
+          cd "$build_context_root"
+          if az acr repository show --name "$REGISTRY_NAME" --image "$base_image_name" --only-show-errors >/dev/null 2>&1; then
+            echo "Reusing base image: $base_image_full"
+          else
+            echo "Base image not found, building: $base_image_full"
+            az acr build \
+              --registry "$REGISTRY_NAME" \
+              --image "$base_image_name" \
+              --file Dockerfile.base \
+              . \
+              --only-show-errors
           fi
 
-          echo "Building ACI image via az acr build: $run_task_image"
-          cd "$APP_ROOT"
+          echo "Building ACI runtime image via az acr build: $RUN_TASK_IMAGE"
           az acr build \
-            --registry "$registry_name" \
-            --image "$image_name" \
-            --file Dockerfile \
+            --registry "$REGISTRY_NAME" \
+            --image "$IMAGE_NAME" \
+            --file Dockerfile.aci \
+            --build-arg BASE_IMAGE="$base_image_full" \
             . \
             --only-show-errors
-          EOF
 
       - name: Restart DoWhiz services
         run: |
@@ -358,9 +599,6 @@ jobs:
           # so ACI tasks share workspace/memory paths correctly.
           bash "$APP_DIR/scripts/ensure_aci_share_mount.sh"
 
-          # Ensure web auth bootstrap can use Playwright for Notion/Google sign-in.
-          bash "$APP_DIR/scripts/install_web_auth_bootstrap_deps.sh"
-
           required_bins=(
             "$APP_DIR/target/release/rust_service"
             "$APP_DIR/target/release/inbound_gateway"
@@ -377,8 +615,12 @@ jobs:
           worker_running=0
           for service in dw_worker dowhiz_rust_service dowhiz-rust-service; do
             if pm2 describe "$service" >/dev/null 2>&1; then
-              pm2 restart "$service" --update-env
-              worker_running=1
+              if pm2 restart "$service" --update-env; then
+                worker_running=1
+                break
+              fi
+              echo "PM2 restart failed for $service, deleting stale entry and trying next option." >&2
+              pm2 delete "$service" >/dev/null 2>&1 || true
             fi
           done
           if [ "$worker_running" -eq 0 ]; then
@@ -389,8 +631,12 @@ jobs:
           gateway_running=0
           for service in dw_gateway dowhiz_inbound_gateway dowhiz_gateway dowhiz-inbound-gateway; do
             if pm2 describe "$service" >/dev/null 2>&1; then
-              pm2 restart "$service" --update-env
-              gateway_running=1
+              if pm2 restart "$service" --update-env; then
+                gateway_running=1
+                break
+              fi
+              echo "PM2 restart failed for $service, deleting stale entry and trying next option." >&2
+              pm2 delete "$service" >/dev/null 2>&1 || true
             fi
           done
           if [ "$gateway_running" -eq 0 ]; then
@@ -419,9 +665,24 @@ jobs:
           [[ -n "$worker_pid" ]] || { echo "No running worker PID found after restart" >&2; exit 1; }
           [[ -n "$gateway_pid" ]] || { echo "No running gateway PID found after restart" >&2; exit 1; }
 
-          worker_health="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 "http://127.0.0.1:${RUST_SERVICE_PORT:-9001}/health" || true)"
-          gateway_health="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 "http://127.0.0.1:${GATEWAY_PORT:-9100}/health" || true)"
-          [[ "$worker_health" == "200" ]] || { echo "Worker health check failed (HTTP $worker_health)" >&2; exit 1; }
-          [[ "$gateway_health" == "200" ]] || { echo "Gateway health check failed (HTTP $gateway_health)" >&2; exit 1; }
+          wait_for_health() {
+            local label="$1"
+            local url="$2"
+            local http_code=""
+            local attempt
+            for attempt in $(seq 1 12); do
+              http_code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 "$url" || true)"
+              if [[ "$http_code" == "200" ]]; then
+                printf '%s' "$http_code"
+                return 0
+              fi
+              sleep 5
+            done
+            echo "$label health check failed after retries (HTTP ${http_code:-000})" >&2
+            return 1
+          }
+
+          worker_health="$(wait_for_health worker "http://127.0.0.1:${RUST_SERVICE_PORT:-9001}/health")"
+          gateway_health="$(wait_for_health gateway "http://127.0.0.1:${GATEWAY_PORT:-9100}/health")"
           echo "Post-restart health check passed: worker=$worker_health gateway=$gateway_health"
           EOF

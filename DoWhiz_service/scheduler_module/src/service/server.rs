@@ -27,6 +27,7 @@ use crate::{ModuleExecutor, Scheduler};
 use tokio::task;
 
 use super::agent_market::{agent_market_router, AgentMarketState};
+use super::analytics::{analytics_router, AnalyticsState};
 use super::auth::{auth_router, AuthState};
 use super::billing::{billing_router, BillingState};
 
@@ -42,8 +43,12 @@ pub async fn run_server(
 ) -> Result<(), BoxError> {
     let storage_backend = StorageBackend::from_env();
     if storage_backend.uses_mongo() {
-        health_check_from_env()?;
-        bootstrap_indexes_from_env()?;
+        task::spawn_blocking(health_check_from_env)
+            .await
+            .map_err(|err| -> BoxError { err.into() })??;
+        task::spawn_blocking(bootstrap_indexes_from_env)
+            .await
+            .map_err(|err| -> BoxError { err.into() })??;
         info!(
             "mongo backend enabled backend={:?} database={}",
             storage_backend,
@@ -201,6 +206,7 @@ pub async fn run_server(
         user_store: Some(user_store.clone()),
         users_root: Some(config.users_root.clone()),
     };
+    let analytics_state = AnalyticsState::from_env(auth_state.account_store.clone());
     let agent_market_state = AgentMarketState::from_env();
 
     let mut app = Router::new()
@@ -210,6 +216,7 @@ pub async fn run_server(
         .route("/slack/oauth/callback", get(slack_oauth_callback))
         .with_state(state)
         .merge(auth_router(auth_state))
+        .merge(analytics_router(analytics_state))
         .merge(agent_market_router(agent_market_state));
 
     // Add billing routes if Stripe is configured
@@ -236,7 +243,10 @@ pub async fn run_server(
     // Clean up any active ACI containers to prevent orphans
     let cleaned = run_task_module::cleanup_all_aci_containers();
     if cleaned > 0 {
-        info!("cleaned up {} orphaned ACI container(s) on shutdown", cleaned);
+        info!(
+            "cleaned up {} orphaned ACI container(s) on shutdown",
+            cleaned
+        );
     }
 
     serve_result?;

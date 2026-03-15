@@ -1,4 +1,6 @@
-use std::path::Path;
+use chrono::Utc;
+use serde_json::json;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -7,7 +9,7 @@ use tracing::{info, warn};
 
 use crate::account_store::{
     get_global_account_store, lookup_account_by_channel, lookup_account_by_identifier,
-    AccountIdentifier,
+    AccountIdentifier, AnalyticsEventInsert,
 };
 use crate::blob_store::get_blob_store;
 use crate::channel::Channel;
@@ -78,7 +80,8 @@ fn sync_blob_memo_to_workspace(account_id: Uuid, workspace_memory_dir: &Path) ->
 
 use super::outbound::{
     execute_bluebubbles_send, execute_discord_send, execute_email_send, execute_google_docs_send,
-    execute_notion_send, execute_slack_send, execute_sms_send, execute_telegram_send,
+execute_notion_send, execute_slack_send, execute_sms_send, execute_telegram_send,
+    execute_wechat_send,
     execute_whatsapp_send,
 };
 use super::types::{SchedulerError, SendReplyTask, TaskExecution, TaskKind};
@@ -133,6 +136,172 @@ fn resolve_account_for_run_task(
     }
 
     None
+}
+
+fn run_task_dedupe_key(task: &super::types::RunTaskTask) -> String {
+    let thread_id = task
+        .thread_id
+        .as_ref()
+        .map(|value| value.as_str())
+        .unwrap_or("none");
+    let thread_epoch = task.thread_epoch.unwrap_or(0);
+    format!(
+        "{}:{}:{}:{}",
+        task.channel,
+        task.workspace_dir.display(),
+        thread_id,
+        thread_epoch
+    )
+}
+
+fn track_scheduler_event(
+    event_name: &str,
+    account_id: Uuid,
+    event_key: Option<String>,
+    _task: &super::types::RunTaskTask,
+    properties: serde_json::Value,
+) {
+    let Some(store) = get_global_account_store() else {
+        return;
+    };
+    let environment = std::env::var("DEPLOY_TARGET")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "production".to_string());
+    let event = AnalyticsEventInsert {
+        event_name: event_name.to_string(),
+        source: "server".to_string(),
+        event_timestamp: Utc::now(),
+        account_id: Some(account_id),
+        auth_user_id: None,
+        anonymous_id: None,
+        session_id: None,
+        workspace_id: Some(account_id.to_string()),
+        org_id: None,
+        plan_type: Some("hourly_credits".to_string()),
+        environment: Some(environment),
+        app_version: None,
+        page_path: None,
+        route_path: Some("/scheduler/run_task".to_string()),
+        referrer: None,
+        utm_source: None,
+        utm_medium: None,
+        utm_campaign: None,
+        utm_term: None,
+        utm_content: None,
+        device_type: None,
+        browser: None,
+        os: None,
+        event_key,
+        properties,
+    };
+    store.record_analytics_event_detached(event, "scheduler");
+}
+
+fn track_task_start_markers(account_id: Uuid, task: &super::types::RunTaskTask, dedupe_key: &str) {
+    track_scheduler_event(
+        "task_started",
+        account_id,
+        Some(format!("task_started:{}", dedupe_key)),
+        task,
+        json!({
+            "task_type": "run_task",
+            "channel": task.channel.to_string(),
+            "thread_id": task.thread_id,
+            "thread_epoch": task.thread_epoch,
+        }),
+    );
+
+    let Some(store) = get_global_account_store() else {
+        return;
+    };
+    match store.count_analytics_events("task_started", Some(account_id), None) {
+        Ok(1) => {
+            track_scheduler_event(
+                "first_task_started",
+                account_id,
+                Some(format!("first_task_started:{}", account_id)),
+                task,
+                json!({
+                    "task_type": "run_task",
+                    "channel": task.channel.to_string(),
+                }),
+            );
+            track_scheduler_event(
+                "first_agent_or_workflow_created",
+                account_id,
+                Some(format!("first_agent_or_workflow_created:{}", account_id)),
+                task,
+                json!({
+                    "mapped_from": "first_task_started",
+                    "channel": task.channel.to_string(),
+                }),
+            );
+        }
+        Ok(_) => {}
+        Err(err) => {
+            warn!(
+                "failed to evaluate first task markers for account {}: {}",
+                account_id, err
+            );
+        }
+    }
+}
+
+fn track_task_success_markers(
+    account_id: Uuid,
+    task: &super::types::RunTaskTask,
+    dedupe_key: &str,
+) {
+    track_scheduler_event(
+        "task_succeeded",
+        account_id,
+        Some(format!("task_succeeded:{}", dedupe_key)),
+        task,
+        json!({
+            "task_type": "run_task",
+            "channel": task.channel.to_string(),
+            "thread_id": task.thread_id,
+            "thread_epoch": task.thread_epoch,
+        }),
+    );
+
+    let Some(store) = get_global_account_store() else {
+        return;
+    };
+    match store.count_analytics_events("task_succeeded", Some(account_id), None) {
+        Ok(1) => {
+            track_scheduler_event(
+                "first_task_succeeded",
+                account_id,
+                Some(format!("first_task_succeeded:{}", account_id)),
+                task,
+                json!({
+                    "task_type": "run_task",
+                    "channel": task.channel.to_string(),
+                }),
+            );
+        }
+        Ok(2) => {
+            track_scheduler_event(
+                "second_successful_task",
+                account_id,
+                Some(format!("second_successful_task:{}", account_id)),
+                task,
+                json!({
+                    "task_type": "run_task",
+                    "channel": task.channel.to_string(),
+                }),
+            );
+        }
+        Ok(_) => {}
+        Err(err) => {
+            warn!(
+                "failed to evaluate success markers for account {}: {}",
+                account_id, err
+            );
+        }
+    }
 }
 
 /// Fetch user identities from the account store for cross-channel routing.
@@ -248,6 +417,185 @@ fn write_github_sender_parse_failed_reply(
 </html>
 "#;
     std::fs::write(reply_path, html)?;
+    Ok(())
+}
+
+fn read_non_empty_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn configured_insufficient_balance_payment_link() -> Option<String> {
+    [
+        "INSUFFICIENT_BALANCE_PAYMENT_LINK",
+        "BILLING_PAYMENT_LINK",
+        "PAYMENT_LINK",
+    ]
+    .iter()
+    .find_map(|key| read_non_empty_env(key))
+}
+
+fn default_billing_link() -> String {
+    read_non_empty_env("FRONTEND_URL")
+        .map(|url| format!("{}/auth/index.html", url.trim_end_matches('/')))
+        .unwrap_or_else(|| "https://www.dowhiz.com/auth/index.html".to_string())
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn build_insufficient_balance_plain_text(payment_link: &str) -> String {
+    format!(
+        "Insufficient balance. I could not run this request.\n\
+Please add more employee hours, then resend your message.\n\
+Payment link: {payment_link}"
+    )
+}
+
+fn build_insufficient_balance_email_html(payment_link: &str) -> String {
+    let escaped_link = html_escape(payment_link);
+    format!(
+        r#"<!DOCTYPE html>
+<html>
+<body>
+  <p>Hi there,</p>
+  <p>Your account currently has insufficient balance, so I could not run this request.</p>
+  <p>Please add more employee hours, then resend your message.</p>
+  <p>Payment link: <a href="{link}">{link}</a></p>
+</body>
+</html>
+"#,
+        link = escaped_link
+    )
+}
+
+fn write_insufficient_balance_notice_body(
+    task: &super::types::RunTaskTask,
+    payment_link: &str,
+) -> Result<PathBuf, SchedulerError> {
+    let (filename, body) = match task.channel {
+        Channel::Email => (
+            ".insufficient_balance_notice.html",
+            build_insufficient_balance_email_html(payment_link),
+        ),
+        _ => (
+            ".insufficient_balance_notice.txt",
+            build_insufficient_balance_plain_text(payment_link),
+        ),
+    };
+    let path = task.workspace_dir.join(filename);
+    std::fs::write(&path, body)?;
+    Ok(path)
+}
+
+fn dispatch_send_reply_task(task: &SendReplyTask) -> Result<(), SchedulerError> {
+    if let Some(expected_epoch) = task.thread_epoch {
+        let state_path = task
+            .thread_state_path
+            .clone()
+            .or_else(|| task.html_path.parent().and_then(find_thread_state_path));
+        if let Some(state_path) = state_path {
+            if let Some(current_epoch) = current_thread_epoch(&state_path) {
+                if current_epoch != expected_epoch {
+                    info!(
+                        "skip stale send_email (expected epoch {}, current {}) for {}",
+                        expected_epoch,
+                        current_epoch,
+                        task.html_path.display()
+                    );
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    match task.channel {
+        Channel::Slack => {
+            delete_slack_working_placeholder_before_send(task);
+            execute_slack_send(task)?;
+        }
+        Channel::Discord => {
+            execute_discord_send(task)?;
+        }
+        Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
+            execute_google_docs_send(task)?;
+        }
+        Channel::Sms => {
+            execute_sms_send(task)?;
+        }
+        Channel::BlueBubbles => {
+            execute_bluebubbles_send(task)?;
+        }
+        Channel::Telegram => {
+            execute_telegram_send(task)?;
+        }
+        Channel::WhatsApp => {
+            execute_whatsapp_send(task)?;
+        }
+        Channel::WeChat => {
+            execute_wechat_send(task)?;
+        }
+        Channel::Email => {
+            execute_email_send(task)?;
+        }
+        Channel::Notion => {
+            execute_notion_send(task)?;
+        }
+    }
+    Ok(())
+}
+
+fn send_insufficient_balance_notice(
+    task: &super::types::RunTaskTask,
+    account_id: Uuid,
+) -> Result<(), SchedulerError> {
+    if task.reply_to.is_empty() {
+        warn!(
+            "Account {} has insufficient balance but no reply recipients for workspace {}",
+            account_id,
+            task.workspace_dir.display()
+        );
+        return Ok(());
+    }
+
+    let payment_link =
+        configured_insufficient_balance_payment_link().unwrap_or_else(default_billing_link);
+    let body_path = write_insufficient_balance_notice_body(task, &payment_link)?;
+    let attachments_dir = task
+        .workspace_dir
+        .join(".insufficient_balance_notice_attachments");
+    std::fs::create_dir_all(&attachments_dir)?;
+    let reply_context = super::reply::load_reply_context(&task.workspace_dir);
+
+    let send_task = SendReplyTask {
+        channel: task.channel.clone(),
+        subject: reply_context.subject,
+        html_path: body_path,
+        attachments_dir,
+        from: task.reply_from.clone().or(reply_context.from),
+        to: task.reply_to.clone(),
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        in_reply_to: reply_context.in_reply_to,
+        references: reply_context.references,
+        archive_root: task.archive_root.clone(),
+        thread_epoch: task.thread_epoch,
+        thread_state_path: task.thread_state_path.clone(),
+        employee_id: task.employee_id.clone(),
+    };
+
+    dispatch_send_reply_task(&send_task)?;
+    info!(
+        "sent insufficient-balance notice for account {} via {:?}",
+        account_id, task.channel
+    );
     Ok(())
 }
 
@@ -722,63 +1070,14 @@ impl TaskExecutor for ModuleExecutor {
     fn execute(&self, task: &TaskKind) -> Result<TaskExecution, SchedulerError> {
         match task {
             TaskKind::SendReply(task) => {
-                if let Some(expected_epoch) = task.thread_epoch {
-                    let state_path = task
-                        .thread_state_path
-                        .clone()
-                        .or_else(|| task.html_path.parent().and_then(find_thread_state_path));
-                    if let Some(state_path) = state_path {
-                        if let Some(current_epoch) = current_thread_epoch(&state_path) {
-                            if current_epoch != expected_epoch {
-                                info!(
-                                    "skip stale send_email (expected epoch {}, current {}) for {}",
-                                    expected_epoch,
-                                    current_epoch,
-                                    task.html_path.display()
-                                );
-                                return Ok(TaskExecution::empty());
-                            }
-                        }
-                    }
-                }
-
-                // Dispatch to the appropriate adapter based on channel
-                match task.channel {
-                    Channel::Slack => {
-                        delete_slack_working_placeholder_before_send(task);
-                        execute_slack_send(task)?;
-                    }
-                    Channel::Discord => {
-                        execute_discord_send(task)?;
-                    }
-                    Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
-                        execute_google_docs_send(task)?;
-                    }
-                    Channel::Sms => {
-                        execute_sms_send(task)?;
-                    }
-                    Channel::BlueBubbles => {
-                        execute_bluebubbles_send(task)?;
-                    }
-                    Channel::Telegram => {
-                        execute_telegram_send(task)?;
-                    }
-                    Channel::WhatsApp => {
-                        execute_whatsapp_send(task)?;
-                    }
-                    Channel::Email => {
-                        execute_email_send(task)?;
-                    }
-                    Channel::Notion => {
-                        execute_notion_send(task)?;
-                    }
-                }
+dispatch_send_reply_task(task)?;
                 Ok(TaskExecution::empty())
             }
             TaskKind::RunTask(task) => {
                 let github_inbound = load_github_inbound_context(task);
                 let account_id =
                     resolve_account_for_run_task(task, github_inbound.sender_login.as_deref());
+                let task_dedupe_key = run_task_dedupe_key(task);
 
                 if task.channel == Channel::Email && github_inbound.is_github_notification {
                     match github_inbound.sender_login.as_deref() {
@@ -799,6 +1098,46 @@ impl TaskExecutor for ModuleExecutor {
                             return Ok(TaskExecution::empty());
                         }
                     }
+                }
+
+                // Check balance before any run_task side effects.
+                if let Some(account_id) = account_id {
+                    if let Some(store) = get_global_account_store() {
+                        match store.has_sufficient_balance(account_id) {
+                            Ok(false) => {
+                                warn!(
+                                    "Account {} has insufficient balance, skipping task execution",
+                                    account_id
+                                );
+                                track_scheduler_event(
+                                    "upgrade_viewed_or_paywall_seen",
+                                    account_id,
+                                    Some(format!("paywall_seen:{}", task_dedupe_key)),
+                                    task,
+                                    json!({
+                                        "trigger_reason": "insufficient_balance",
+                                        "channel": task.channel.to_string(),
+                                    }),
+                                );
+                                send_insufficient_balance_notice(task, account_id)?;
+                                let mut execution = TaskExecution::empty();
+                                execution.skip_auto_reply = true;
+                                return Ok(execution);
+                            }
+                            Ok(true) => {}
+                            Err(e) => {
+                                // Balance check failed - log but continue (fail open)
+                                warn!(
+                                    "Failed to check balance for account {}: {}, continuing anyway",
+                                    account_id, e
+                                );
+                            }
+                        }
+                    }
+                }
+
+                if let Some(account_id) = account_id {
+                    track_task_start_markers(account_id, task, &task_dedupe_key);
                 }
 
                 let workspace_memory_dir = task.workspace_dir.join(&task.memory_dir);
@@ -848,6 +1187,22 @@ impl TaskExecutor for ModuleExecutor {
                     if let Some(user_memory_dir) = user_memory_dir.as_ref() {
                         sync_user_memory_to_workspace(user_memory_dir, &workspace_memory_dir)
                             .map_err(|err| {
+                                if let Some(account_id) = account_id {
+                                    track_scheduler_event(
+                                        "task_failed",
+                                        account_id,
+                                        Some(format!(
+                                            "task_failed:{}:memory_sync",
+                                            task_dedupe_key
+                                        )),
+                                        task,
+                                        json!({
+                                            "error_reason": "memory_sync_failed",
+                                            "error": err.to_string(),
+                                            "channel": task.channel.to_string(),
+                                        }),
+                                    );
+                                }
                                 SchedulerError::TaskFailed(format!("memory sync failed: {}", err))
                             })?;
                     } else {
@@ -861,6 +1216,22 @@ impl TaskExecutor for ModuleExecutor {
                 if let Some(user_secrets_path) = user_secrets_path.as_ref() {
                     sync_user_secrets_to_workspace(user_secrets_path, &task.workspace_dir)
                         .map_err(|err| {
+                            if let Some(account_id) = account_id {
+                                track_scheduler_event(
+                                    "task_failed",
+                                    account_id,
+                                    Some(format!(
+                                        "task_failed:{}:secrets_sync_to_workspace",
+                                        task_dedupe_key
+                                    )),
+                                    task,
+                                    json!({
+                                        "error_reason": "secrets_sync_to_workspace_failed",
+                                        "error": err.to_string(),
+                                        "channel": task.channel.to_string(),
+                                    }),
+                                );
+                            }
                             SchedulerError::TaskFailed(format!("secrets sync failed: {}", err))
                         })?;
                 } else {
@@ -869,51 +1240,6 @@ impl TaskExecutor for ModuleExecutor {
                         task.workspace_dir.display()
                     );
                 }
-                crate::web_auth_bootstrap::bootstrap_workspace_web_auth(&task.workspace_dir);
-                // Check balance before running task (only for unified accounts)
-                if let Some(account_id) = account_id {
-                    if let Some(store) = get_global_account_store() {
-                        match store.has_sufficient_balance(account_id) {
-                            Ok(false) => {
-                                // Insufficient balance - write error reply and skip task
-                                warn!(
-                                    "Account {} has insufficient balance, skipping task execution",
-                                    account_id
-                                );
-                                let reply_message = "Insufficient balance. Please increase your balance for more employee hours.";
-
-                                // Write to appropriate reply file based on channel
-                                let reply_path = match task.channel {
-                                    Channel::Email
-                                    | Channel::GoogleDocs
-                                    | Channel::GoogleSheets
-                                    | Channel::GoogleSlides => {
-                                        task.workspace_dir.join("reply_email_draft.html")
-                                    }
-                                    _ => task.workspace_dir.join("reply_message.txt"),
-                                };
-
-                                if let Err(e) = std::fs::write(&reply_path, reply_message) {
-                                    warn!("Failed to write balance error reply: {}", e);
-                                }
-
-                                // Return empty execution (no token usage, task considered complete)
-                                return Ok(TaskExecution::empty());
-                            }
-                            Ok(true) => {
-                                // Sufficient balance, continue with task
-                            }
-                            Err(e) => {
-                                // Balance check failed - log but continue (fail open)
-                                warn!(
-                                    "Failed to check balance for account {}: {}, continuing anyway",
-                                    account_id, e
-                                );
-                            }
-                        }
-                    }
-                }
-
                 let user_identities = fetch_user_identities(account_id);
                 let params = run_task_module::RunTaskParams {
                     workspace_dir: task.workspace_dir.clone(),
@@ -930,8 +1256,22 @@ impl TaskExecutor for ModuleExecutor {
                     has_unified_account: account_id.is_some(),
                     user_identities,
                 };
-                let output = run_task_module::run_task(&params)
-                    .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
+                let output = run_task_module::run_task(&params).map_err(|err| {
+                    if let Some(account_id) = account_id {
+                        track_scheduler_event(
+                            "task_failed",
+                            account_id,
+                            Some(format!("task_failed:{}:run_task", task_dedupe_key)),
+                            task,
+                            json!({
+                                "error_reason": "run_task_failed",
+                                "error": err.to_string(),
+                                "channel": task.channel.to_string(),
+                            }),
+                        );
+                    }
+                    SchedulerError::TaskFailed(err.to_string())
+                })?;
 
                 // Track token usage for accounts
                 if let Some(account_id) = account_id {
@@ -1012,14 +1352,34 @@ impl TaskExecutor for ModuleExecutor {
                 if let Some(user_secrets_path) = user_secrets_path.as_ref() {
                     sync_workspace_secrets_to_user(&task.workspace_dir, user_secrets_path)
                         .map_err(|err| {
+                            if let Some(account_id) = account_id {
+                                track_scheduler_event(
+                                    "task_failed",
+                                    account_id,
+                                    Some(format!(
+                                        "task_failed:{}:secrets_sync_to_user",
+                                        task_dedupe_key
+                                    )),
+                                    task,
+                                    json!({
+                                        "error_reason": "secrets_sync_to_user_failed",
+                                        "error": err.to_string(),
+                                        "channel": task.channel.to_string(),
+                                    }),
+                                );
+                            }
                             SchedulerError::TaskFailed(format!("secrets sync failed: {}", err))
                         })?;
+                }
+                if let Some(account_id) = account_id {
+                    track_task_success_markers(account_id, task, &task_dedupe_key);
                 }
                 Ok(TaskExecution {
                     follow_up_tasks: output.scheduled_tasks,
                     follow_up_error: output.scheduled_tasks_error,
                     scheduler_actions: output.scheduler_actions,
                     scheduler_actions_error: output.scheduler_actions_error,
+                    skip_auto_reply: false,
                 })
             }
             TaskKind::Noop => Ok(TaskExecution::empty()),

@@ -28,6 +28,16 @@ wire_api = "responses""#
     )
 }
 
+fn expected_hag_mcp_block() -> &'static str {
+    r#"# BEGIN DOWHIZ HUMAN APPROVAL GATE MCP
+[mcp_servers.human-approval-gate]
+command = "human_approval_gate_mcp"
+env_vars = ["POSTMARK_SERVER_TOKEN", "HUMAN_APPROVAL_FROM", "HUMAN_APPROVAL_REPLY_TO", "POSTMARK_API_BASE_URL"]
+tool_timeout_sec = 1860
+
+# END DOWHIZ HUMAN APPROVAL GATE MCP"#
+}
+
 #[test]
 #[cfg(unix)]
 fn run_task_updates_existing_config_block() {
@@ -87,6 +97,7 @@ value = "still"
     assert!(!updated.contains("model = \"override-model\""));
     assert!(updated.contains("https://example.azure.com/openai/v1"));
     assert!(!updated.contains("https://old.azure.com/openai/v1"));
+    assert!(updated.contains(expected_hag_mcp_block()));
 }
 
 #[test]
@@ -122,4 +133,5 @@ fn run_task_writes_expected_codex_block() {
         config.contains(&expected),
         "codex config block should match the expected canonical content"
     );
+    assert!(config.contains(expected_hag_mcp_block()));
 }

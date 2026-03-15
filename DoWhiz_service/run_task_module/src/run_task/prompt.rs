@@ -65,6 +65,9 @@ pub(super) fn build_prompt(
             "whatsapp" => {
                 "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Keep the reply concise and conversational. Do not use HTML. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."
             }
+            "wechat" => {
+                "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Keep the reply concise and conversational. Do not use HTML or markdown. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."
+            }
             _ => {
                 // Default to email (HTML)
                 "2. After finishing the task (step one), make sure you write a proper HTML email draft in reply_email_draft.html in the workspace root. If there are files to attach, put them in reply_email_attachments/ and reference them in the email draft. Do not pretend the job has been done without actually doing it, and do not write the email draft until the task is done. If you are not sure about the task, send another email to ask for clarification (and if any, attach information about why did you fail to get the task done, what is the exact error you encountered)."
@@ -82,6 +85,7 @@ pub(super) fn build_prompt(
     let filesystem_security_section =
         build_allowed_paths_section(&user_identities.allowed_user_ids);
     let web_auth_capabilities_section = build_web_auth_capabilities_section();
+    let human_approval_gate_section = build_human_approval_gate_section();
 
     // Build registration prompt section if user doesn't have a unified account
     // and we haven't prompted them yet in this thread
@@ -139,6 +143,7 @@ Scheduling:
 
 {cross_channel_capabilities}
 {web_auth_capabilities_section}
+{human_approval_gate_section}
 {user_identities_section}
 Rules:
 - Each workspace includes a `.env` file at the workspace root. You may edit it to manage per-user secrets; updates are synced back after the task completes.
@@ -159,6 +164,7 @@ Rules:
         github_coauthor_section = github_coauthor_section,
         cross_channel_capabilities = build_cross_channel_capabilities_section(),
         web_auth_capabilities_section = web_auth_capabilities_section,
+        human_approval_gate_section = human_approval_gate_section,
         user_identities_section = user_identities_section,
         filesystem_security_section = filesystem_security_section,
         registration_section = registration_section,
@@ -182,30 +188,48 @@ See `.agents/skills/google-*/SKILL.md` for detailed command references.
 
 fn build_web_auth_capabilities_section() -> &'static str {
     r#"Web Workspace Auth (Notion / Google web pages):
-- Workspace may include pre-bootstrapped browser states in `.auth/notion_state.json` and `.auth/google_state.json`.
 - For private Notion/Google pages, use browser automation (for example `playwright-cli`) instead of plain HTTP fetches.
-- Follow this login sequence:
-  1. If `.auth/bootstrap_status.json` exists, quickly check it for previous bootstrap failures.
-  2. Before opening private URLs, load available state files:
-     - `playwright-cli state-load .auth/notion_state.json`
-     - `playwright-cli state-load .auth/google_state.json`
-  3. Open the target page and verify you are already authenticated.
-  4. If browser launch fails before sign-in:
-     - If error says Chrome is missing, retry with:
-       - `export PLAYWRIGHT_MCP_EXECUTABLE_PATH=/opt/google/chrome/chrome`
-       - If that file does not exist, set it to the first hit under `/app/.cache/ms-playwright/*/chrome-linux*/chrome`.
-     - Avoid `npx playwright install ...` on mounted workspaces (can fail with symlink errors).
-       Prefer `python3 -m playwright install chromium` or `playwright install chromium`.
-       If npm must be used, set `NPM_CONFIG_CACHE=/tmp/.npm` first.
-  5. If still redirected to sign-in, use env credentials with this order:
-     - Notion email: `NOTION_ACCOUNT_EMAIL`, then `NOTION_EMAIL`
-     - Notion password: `NOTION_PASSWORD`
-     - Google email: `GOOGLE_ACCOUNT_EMAIL`, `GOOGLE_EMAIL`, `GOOGLE_EMPLOYEE_EMAIL`
-     - Google password: `GOOGLE_PASSWORD`, `GOOGLE_ACCOUNT_PASSWORD`, `GOOGLE_EMPLOYEE_PASSWORD`
-     - Also try prefixed keys (`<PREFIX>_<KEY>`) when `EMPLOYEE_WEB_AUTH_ENV_PREFIX` or `WEB_AUTH_ENV_PREFIX` is set.
-  6. After successful sign-in, refresh storage state in `.auth/` so retries are faster.
+- Complete sign-in only through the active browser session when needed.
+- Do not assume pre-bootstrapped auth state exists in the workspace.
+- If browser launch fails before sign-in:
+  - If error says Chrome is missing, retry with:
+    - `export PLAYWRIGHT_MCP_EXECUTABLE_PATH=/opt/google/chrome/chrome`
+    - If that file does not exist, set it to the first hit under `/app/.cache/ms-playwright/*/chrome-linux*/chrome`.
+  - Avoid `npx playwright install ...` on mounted workspaces (can fail with symlink errors).
+    Prefer `python3 -m playwright install chromium` or `playwright install chromium`.
+    If npm must be used, set `NPM_CONFIG_CACHE=/tmp/.npm` first.
 - Never include raw credentials in any user-facing reply, logs, or generated files.
-- Do not conclude "cannot access due to sign-in" until the sequence above has been attempted.
+- Do not conclude "cannot access due to sign-in" until browser-based sign-in has been attempted.
+
+"#
+}
+
+fn build_human_approval_gate_section() -> &'static str {
+    r#"Human Approval Gate (2FA / verification challenges):
+- If login/auth flow asks for OTP/passcode/device approval/number tap, or you are blocked on CAPTCHA/password after the required local checks below, use the `human-approval-gate` skill with an honest challenge type and browser screenshot.
+- If the page shows CAPTCHA/image puzzle/text recognition challenge, do NOT attempt to solve it yourself. Immediately take the current browser screenshot(s) and use the MCP tool `dowhiz_human_approval_gate_request_and_wait` with `challenge_type="captcha"`.
+- If login is waiting for a password, first check the workspace `.env` for the relevant secret (for Google login, check `GOOGLE_PASSWORD` first). Only if the needed password is still missing should you use `dowhiz_human_approval_gate_request_and_wait` with `challenge_type="password"` and the current browser screenshot path(s).
+- Only use `human_approval_gate` for steps that genuinely require human access outside the browser session, such as SMS codes, email codes sent to someone else, approval taps on another device, or information only the human can retrieve.
+- If multiple verification methods are available on the same challenge page, prefer SMS verification first by default. If SMS is unavailable or fails, fall back to another method and keep using `dowhiz_human_approval_gate_request_and_wait` for human input.
+- Before calling `dowhiz_human_approval_gate_request_and_wait` for 2FA, first use the website itself to initiate the challenge: click the button that sends the code / starts the approval / selects the method, and wait until the page is explicitly waiting for the human response.
+- For `challenge_type="two_factor"`, do not send the email unless you can truthfully identify the current page state as either `waiting_for_code_input` or `waiting_for_device_approval`.
+- For `challenge_type="two_factor"`, always describe the exact method in use: SMS, email, authenticator app, or device tap / number match, plus the masked destination if visible.
+- If login identifier (email/username) is missing for owner/admin account login, try known admin identifiers first (`dowhiz@deep-tutor.com` on staging, `oliver@dowhiz.com` on production) before requesting help through `human_approval_gate`.
+- For owner/admin account login, do NOT trigger `human_approval_gate` only to ask for account email/username when a known identifier is already available.
+- If the requested login still cannot proceed because required credential/challenge input is missing after trying known safe identifiers, request it through `human_approval_gate` instead of guessing.
+- Inside run_task/Codex environments, do NOT use the shell CLI `human_approval_gate` or split request/wait steps yourself. Use only the MCP tool `dowhiz_human_approval_gate_request_and_wait`, which blocks this Codex turn until reply or timeout.
+- Every `dowhiz_human_approval_gate_request_and_wait` call must attach the current browser screenshot path(s) and must describe the current state honestly. Never claim a code was sent unless the page actually shows that it was sent and is waiting.
+- HAG sends still write `.human_approval_gate/events.jsonl` and emit a `HAG_EVENT ...` stderr line that includes challenge type plus attachment filenames and sizes. Use those records for debugging instead of guessing.
+- Primary flow:
+  1) Take the current browser screenshot(s)
+  2) Call `dowhiz_human_approval_gate_request_and_wait`
+  3) Continue only if the returned status is `replied`
+  4) Inspect the returned `reply` payload yourself and decide what to type/click next
+  5) If status is `timeout`, stop login attempts and report clearly
+- Scope and recipient rules:
+  - Agent logging into owner/admin account (for example Oliver's own Google/Notion/X, `dowhiz@deep-tutor.com`, `oliver@dowhiz.com`): use `scope="admin"` (sends to `admin@dowhiz.com`)
+  - Agent logging into user's account: use `scope="user"` plus that user's recipient email
+- Never keep retrying password/sign-in while waiting for verification.
 
 "#
 }
@@ -269,7 +293,7 @@ If no routing file is written, the reply goes to the original inbound channel.
 reply_routing.json schema:
 ```json
 {{
-  "channel": "email" | "slack" | "discord" | "telegram" | "sms" | "whatsapp" | "bluebubbles",
+  "channel": "email" | "slack" | "discord" | "telegram" | "sms" | "whatsapp" | "bluebubbles" | "wechat",
   "identifier": "<target identifier for the channel>"
 }}
 ```
@@ -280,13 +304,14 @@ Identifier format per channel:
 - discord: Discord user ID (e.g., "123456789012345678")
 - telegram: Telegram user ID (e.g., "123456789")
 - sms/whatsapp/bluebubbles: phone number (e.g., "+15551234567")
+- wechat: WeChat Work UserID (e.g., "zhangsan")
 
 IMPORTANT: When using cross-channel routing, write the reply in the TARGET channel's format:
 - email target: reply_email_draft.html (HTML), attachments in reply_email_attachments/
 - slack target: reply_message.txt (Slack mrkdwn: *bold*, _italic_, `code`)
 - discord target: reply_message.txt (Discord markdown: **bold**, *italic*, `code`)
 - telegram target: reply_message.txt (MarkdownV2)
-- sms/whatsapp/bluebubbles target: reply_message.txt (plain text)
+- sms/whatsapp/bluebubbles/wechat target: reply_message.txt (plain text)
 - Attachments for non-email channels go in reply_attachments/
 
 Example: Inbound is email, user says "reply to my Discord instead"
@@ -549,9 +574,15 @@ fn format_guidance_block(label: &str, content: &str) -> String {
 
 fn build_discord_context_section(workspace_dir: &Path) -> String {
     let path = workspace_dir
+        .join("discord_context")
+        .join("context_for_agent.md");
+    let fallback_path = workspace_dir
         .join("incoming_email")
         .join("discord_context_for_agent.md");
-    let Ok(content) = fs::read_to_string(path) else {
+    let content = fs::read_to_string(&path)
+        .or_else(|_| fs::read_to_string(&fallback_path))
+        .ok();
+    let Some(content) = content else {
         return String::new();
     };
     let trimmed = content.trim();
@@ -561,7 +592,7 @@ fn build_discord_context_section(workspace_dir: &Path) -> String {
     let max_chars = 12_000usize;
     let mut clipped: String = trimmed.chars().take(max_chars).collect();
     if trimmed.chars().count() > max_chars {
-        clipped.push_str("\n\n(Truncated. Use incoming_email/discord_thread_context_full.json and incoming_email/discord_channel_last_24h.json for complete context.)");
+        clipped.push_str("\n\n(Truncated. Use discord_context/thread_full.json, discord_context/thread_full.txt, discord_context/channel_history_full.json, and discord_context/channel_history_full.txt for complete context.)");
     }
     format!(
         "Discord context snapshot (auto-generated; full history is stored in local files):\n```markdown\n{}\n```\n",
@@ -715,10 +746,10 @@ mod tests {
     fn build_prompt_includes_discord_context_snapshot_when_available() {
         let temp = TempDir::new().expect("tempdir");
         let workspace = temp.path();
-        let incoming_dir = workspace.join("incoming_email");
-        fs::create_dir_all(&incoming_dir).expect("incoming_email");
+        let context_dir = workspace.join("discord_context");
+        fs::create_dir_all(&context_dir).expect("discord_context");
         fs::write(
-            incoming_dir.join("discord_context_for_agent.md"),
+            context_dir.join("context_for_agent.md"),
             "# Discord Context Snapshot\nQuoted + thread context",
         )
         .expect("context file");
@@ -923,6 +954,50 @@ mod tests {
         assert!(prompt.contains("SKILL.md"));
         assert!(prompt.contains("/app/.cache/ms-playwright/*/chrome-linux*/chrome"));
         assert!(prompt.contains("Never include raw credentials"));
+    }
+
+    #[test]
+    fn build_prompt_includes_human_approval_gate_instructions() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let prompt = build_prompt(
+            Path::new("incoming_email"),
+            Path::new("incoming_attachments"),
+            Path::new("memory"),
+            Path::new("references"),
+            temp.path(),
+            "codex",
+            "",
+            true,
+            "email",
+            true,
+            &UserIdentities::default(),
+        );
+
+        assert!(prompt.contains("Human Approval Gate"));
+        assert!(prompt.contains("dowhiz_human_approval_gate_request_and_wait"));
+        assert!(prompt.contains("scope=\"admin\""));
+        assert!(prompt.contains("scope=\"user\""));
+        assert!(prompt.contains("challenge_type=\"captcha\""));
+        assert!(prompt.contains("challenge_type=\"password\""));
+        assert!(prompt.contains("challenge_type=\"two_factor\""));
+        assert!(prompt.contains("screenshot path(s)"));
+        assert!(prompt.contains("GOOGLE_PASSWORD"));
+        assert!(prompt.contains("timeout"));
+        assert!(prompt.contains("do NOT attempt to solve it yourself"));
+        assert!(prompt.contains("required credential"));
+        assert!(prompt.contains("prefer SMS verification first by default"));
+        assert!(prompt.contains("click the button that sends the code"));
+        assert!(prompt.contains("waiting_for_code_input"));
+        assert!(prompt.contains("waiting_for_device_approval"));
+        assert!(prompt.contains("Never claim a code was sent"));
+        assert!(prompt.contains(".human_approval_gate/events.jsonl"));
+        assert!(prompt.contains("HAG_EVENT"));
+        assert!(prompt.contains("status is `replied`"));
+        assert!(prompt.contains("returned `reply` payload"));
+        assert!(prompt.contains("dowhiz@deep-tutor.com"));
+        assert!(prompt.contains("oliver@dowhiz.com"));
+        assert!(prompt.contains("do NOT use the shell CLI `human_approval_gate`"));
     }
 
     #[test]

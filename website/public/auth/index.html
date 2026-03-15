@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Sign in to DoWhiz and manage your dashboard settings, channels, and tasks." />
     <meta name="robots" content="noindex, nofollow" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=20260301" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=20260301" />
-    <link rel="shortcut icon" href="/favicon.ico?v=20260301" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=20260301" />
-    <link rel="manifest" href="/site.webmanifest?v=20260301" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=20260311" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=20260311" />
+    <link rel="shortcut icon" href="/favicon.ico?v=20260311" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=20260311" />
+    <link rel="manifest" href="/site.webmanifest?v=20260311" />
     <link rel="canonical" href="https://dowhiz.com/auth/" />
     <link rel="stylesheet" href="/legal.css" />
     <title>Sign In | DoWhiz</title>
@@ -365,6 +365,99 @@
       .tasks-status {
         font-size: 0.85rem;
         color: var(--text-muted, #888);
+      }
+
+      .task-info-btn {
+        background: transparent;
+        border: 1px solid var(--text-muted, #888);
+        color: var(--text-muted, #888);
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        font-size: 12px;
+        font-weight: bold;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-left: 0.5rem;
+        transition: all 0.2s;
+      }
+
+      .task-info-btn:hover {
+        background: var(--text-muted, #888);
+        color: var(--bg-primary, #1a1a2e);
+      }
+
+
+      .task-modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+      }
+      .task-modal-overlay.active {
+        display: flex;
+      }
+      .task-modal {
+        background: var(--bg-secondary, #16213e);
+        border-radius: 12px;
+        padding: 1.5rem;
+        max-width: 500px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      }
+      .task-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid var(--border-color, #333);
+      }
+      .task-modal-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--text-primary, #fff);
+      }
+      .task-modal-close {
+        background: transparent;
+        border: none;
+        color: var(--text-muted, #888);
+        font-size: 1.5rem;
+        cursor: pointer;
+        line-height: 1;
+      }
+      .task-modal-close:hover {
+        color: var(--text-primary, #fff);
+      }
+      .task-modal-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid var(--border-color, #333);
+      }
+      .task-modal-row:last-child {
+        border-bottom: none;
+      }
+      .task-modal-label {
+        color: var(--text-muted, #888);
+        font-size: 0.9rem;
+      }
+      .task-modal-value {
+        color: var(--text-primary, #fff);
+        font-size: 0.9rem;
+        text-align: right;
+        word-break: break-all;
+        max-width: 60%;
       }
 
       #refresh-tasks-btn {
@@ -736,6 +829,16 @@
     <script src="/theme.js"></script>
   </head>
   <body>
+    <div id="task-modal-overlay" class="task-modal-overlay" onclick="closeTaskModal(event)">
+      <div class="task-modal" onclick="event.stopPropagation()">
+        <div class="task-modal-header">
+          <span class="task-modal-title">Task Details</span>
+          <button class="task-modal-close" onclick="closeTaskModal()">&times;</button>
+        </div>
+        <div id="task-modal-content"></div>
+      </div>
+    </div>
+
     <div class="page">
       <header class="page-header">
         <a class="brand" href="/">Do<span class="accent">Whiz</span></a>
@@ -1059,6 +1162,13 @@
         : isStaging
           ? 'https://api.staging.dowhiz.com/service'
           : 'https://api.production1.dowhiz.com/service';
+      const CN_PATH_PREFIX = '/cn';
+      const isCnPath = window.location.pathname === CN_PATH_PREFIX
+        || window.location.pathname === `${CN_PATH_PREFIX}/`
+        || window.location.pathname.startsWith(`${CN_PATH_PREFIX}/`);
+      const localizePath = (path) => `${isCnPath ? CN_PATH_PREFIX : ''}${path === '/' ? '' : path}`;
+      const authRedirectUrl = `${window.location.origin}${localizePath('/auth/index.html')}`;
+      const homeRedirectPath = localizePath('/');
 
       const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
@@ -1066,6 +1176,164 @@
           flowType: 'implicit'
         }
       });
+
+      const ANALYTICS_ANON_KEY = 'dowhiz_analytics_anonymous_id';
+      const ANALYTICS_SESSION_KEY = 'dowhiz_analytics_session_id';
+      const ANALYTICS_ATTRIBUTION_KEY = 'dowhiz_analytics_attribution';
+
+      function analyticsGenerateId(prefix) {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+          return `${prefix}_${crypto.randomUUID()}`;
+        }
+        return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 11)}`;
+      }
+
+      function getOrCreateAnonymousId() {
+        const existing = localStorage.getItem(ANALYTICS_ANON_KEY);
+        if (existing) {
+          return existing;
+        }
+        const created = analyticsGenerateId('anon');
+        localStorage.setItem(ANALYTICS_ANON_KEY, created);
+        return created;
+      }
+
+      function getOrCreateSessionId() {
+        const existing = sessionStorage.getItem(ANALYTICS_SESSION_KEY);
+        if (existing) {
+          return existing;
+        }
+        const created = analyticsGenerateId('sess');
+        sessionStorage.setItem(ANALYTICS_SESSION_KEY, created);
+        return created;
+      }
+
+      function normalizeOptional(value) {
+        if (value === undefined || value === null) return null;
+        const trimmed = String(value).trim();
+        return trimmed.length ? trimmed : null;
+      }
+
+      function inferDeviceType(userAgent) {
+        if (!userAgent) return 'unknown';
+        if (/mobile|iphone|ipod|android.*mobile|windows phone/i.test(userAgent)) return 'mobile';
+        if (/ipad|tablet|android(?!.*mobile)/i.test(userAgent)) return 'tablet';
+        return 'desktop';
+      }
+
+      function inferBrowser(userAgent) {
+        if (!userAgent) return 'unknown';
+        if (/edg\//i.test(userAgent)) return 'edge';
+        if (/chrome\//i.test(userAgent) && !/edg\//i.test(userAgent)) return 'chrome';
+        if (/safari\//i.test(userAgent) && !/chrome\//i.test(userAgent)) return 'safari';
+        if (/firefox\//i.test(userAgent)) return 'firefox';
+        if (/opr\//i.test(userAgent) || /opera\//i.test(userAgent)) return 'opera';
+        return 'unknown';
+      }
+
+      function inferOs(userAgent) {
+        if (!userAgent) return 'unknown';
+        if (/windows/i.test(userAgent)) return 'windows';
+        if (/macintosh|mac os x/i.test(userAgent)) return 'macos';
+        if (/android/i.test(userAgent)) return 'android';
+        if (/iphone|ipad|ios/i.test(userAgent)) return 'ios';
+        if (/linux/i.test(userAgent)) return 'linux';
+        return 'unknown';
+      }
+
+      function parseUtmAttribution() {
+        const params = new URLSearchParams(window.location.search);
+        const parsed = {
+          utm_source: normalizeOptional(params.get('utm_source')),
+          utm_medium: normalizeOptional(params.get('utm_medium')),
+          utm_campaign: normalizeOptional(params.get('utm_campaign')),
+          utm_term: normalizeOptional(params.get('utm_term')),
+          utm_content: normalizeOptional(params.get('utm_content'))
+        };
+        const hasAny = parsed.utm_source || parsed.utm_medium || parsed.utm_campaign || parsed.utm_term || parsed.utm_content;
+        return hasAny ? parsed : null;
+      }
+
+      function getStoredAttribution() {
+        const raw = localStorage.getItem(ANALYTICS_ATTRIBUTION_KEY);
+        if (!raw) return null;
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return null;
+        }
+      }
+
+      function persistAttributionFromLocation() {
+        const parsed = parseUtmAttribution();
+        if (!parsed) {
+          return getStoredAttribution();
+        }
+        const existing = getStoredAttribution();
+        const merged = {
+          utm_source: parsed.utm_source ?? existing?.utm_source ?? null,
+          utm_medium: parsed.utm_medium ?? existing?.utm_medium ?? null,
+          utm_campaign: parsed.utm_campaign ?? existing?.utm_campaign ?? null,
+          utm_term: parsed.utm_term ?? existing?.utm_term ?? null,
+          utm_content: parsed.utm_content ?? existing?.utm_content ?? null,
+          captured_at: new Date().toISOString()
+        };
+        localStorage.setItem(ANALYTICS_ATTRIBUTION_KEY, JSON.stringify(merged));
+        return merged;
+      }
+
+      function analyticsContext() {
+        const attribution = persistAttributionFromLocation() || getStoredAttribution() || {};
+        const ua = navigator.userAgent || '';
+        return {
+          anonymous_id: getOrCreateAnonymousId(),
+          session_id: getOrCreateSessionId(),
+          page_path: `${window.location.pathname}${window.location.search}`,
+          route_path: window.location.pathname,
+          referrer: document.referrer || null,
+          utm_source: attribution.utm_source || null,
+          utm_medium: attribution.utm_medium || null,
+          utm_campaign: attribution.utm_campaign || null,
+          utm_term: attribution.utm_term || null,
+          utm_content: attribution.utm_content || null,
+          device_type: inferDeviceType(ua),
+          browser: inferBrowser(ua),
+          os: inferOs(ua),
+          app_version: 'auth-dashboard-analytics-v1',
+          environment: isStaging ? 'staging' : window.location.hostname === 'localhost' ? 'local' : 'production'
+        };
+      }
+
+      async function trackAnalyticsEvent(eventName, properties = {}, options = {}) {
+        if (!eventName) return false;
+
+        const headers = { 'Content-Type': 'application/json' };
+        if (options.accessToken) {
+          headers.Authorization = `Bearer ${options.accessToken}`;
+        }
+
+        const payload = {
+          event_name: eventName,
+          event_timestamp: new Date().toISOString(),
+          source: options.source || 'client',
+          ...analyticsContext(),
+          event_key: normalizeOptional(options.eventKey),
+          properties
+        };
+
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/analytics/track`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload),
+            keepalive: true
+          });
+          return res.ok;
+        } catch (err) {
+          console.warn(`analytics track failed for ${eventName}:`, err);
+          return false;
+        }
+      }
 
       // DOM elements
       const signinFormContainer = document.getElementById('signin-form-container');
@@ -1103,6 +1371,17 @@
         setDashboardMode(false);
         signinFormContainer.classList.remove('hidden');
       }
+
+      persistAttributionFromLocation();
+      trackAnalyticsEvent(
+        'signup_page_view',
+        {
+          entry_mode: expectingDashboard ? 'logged_in_redirect' : 'direct'
+        },
+        {
+          eventKey: `signup_page_view:${getOrCreateSessionId()}:${window.location.pathname}`
+        }
+      );
 
       // Show message
       function showMessage(message, type = 'error') {
@@ -1223,7 +1502,7 @@
           return;
         }
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: `${window.location.origin}/auth/index.html`
+          redirectTo: authRedirectUrl
         });
         if (error) {
           showMessage(normalizeAuthError(error) || error.message);
@@ -1244,7 +1523,7 @@
         const { error } = await supabase.auth.signInWithOtp({
           email,
           options: {
-            emailRedirectTo: `${window.location.origin}/auth/index.html`,
+            emailRedirectTo: authRedirectUrl,
             shouldCreateUser: false
           }
         });
@@ -1338,11 +1617,23 @@
         const email = document.getElementById('signin-email').value;
         const password = document.getElementById('signin-password').value;
 
+        trackAnalyticsEvent('login_started', {
+          auth_method: 'email_password',
+          flow: 'signin',
+          email_domain: email.includes('@') ? email.split('@').pop() : null
+        });
+
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
+          trackAnalyticsEvent('auth_error', {
+            auth_method: 'email_password',
+            flow: 'signin',
+            error_type: 'signin_failed',
+            error: error.message
+          });
           showMessage(normalizeAuthError(error) || error.message);
         } else {
-          await handleAuthSuccess(data.session);
+          await handleAuthSuccess(data.session, { authMethod: 'email_password', flow: 'signin' });
         }
       });
 
@@ -1354,12 +1645,24 @@
         const email = document.getElementById('signup-email').value;
         const password = document.getElementById('signup-password').value;
 
+        trackAnalyticsEvent('signup_started', {
+          auth_method: 'email_password',
+          flow: 'signup',
+          email_domain: email.includes('@') ? email.split('@').pop() : null
+        });
+
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: `${window.location.origin}/auth/index.html` }
+          options: { emailRedirectTo: authRedirectUrl }
         });
         if (error) {
+          trackAnalyticsEvent('auth_error', {
+            auth_method: 'email_password',
+            flow: 'signup',
+            error_type: 'signup_failed',
+            error: error.message
+          });
           const normalizedError = (error.message || '').toLowerCase();
           if (normalizedError.includes('already registered') || normalizedError.includes('already exists')) {
             showExistingAccountOptions(email);
@@ -1377,17 +1680,29 @@
           }
           showMessage('Check your email for a confirmation link!', 'success');
         } else if (data.session) {
-          await handleAuthSuccess(data.session);
+          await handleAuthSuccess(data.session, { authMethod: 'email_password', flow: 'signup' });
         }
       });
 
       // Google OAuth
       document.getElementById('google-signin').addEventListener('click', async () => {
+        trackAnalyticsEvent('login_started', {
+          auth_method: 'oauth_google',
+          flow: 'oauth_redirect'
+        });
         const { error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
-          options: { redirectTo: window.location.origin + '/auth/index.html' }
+          options: { redirectTo: authRedirectUrl }
         });
-        if (error) showMessage(error.message);
+        if (error) {
+          trackAnalyticsEvent('auth_error', {
+            auth_method: 'oauth_google',
+            flow: 'oauth_redirect',
+            error_type: 'oauth_redirect_failed',
+            error: error.message
+          });
+          showMessage(error.message);
+        }
       });
 
       // Sign out
@@ -1414,6 +1729,14 @@
         // Fetch balance from billing endpoint
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
+          trackAnalyticsEvent(
+            'upgrade_viewed_or_paywall_seen',
+            {
+              trigger_reason: 'settings_modal_opened',
+              entry_point: 'auth_dashboard_settings'
+            },
+            { accessToken: session.access_token }
+          );
           try {
             const res = await fetch(`${DOWHIZ_API_URL}/billing/balance`, {
               headers: { 'Authorization': `Bearer ${session.access_token}` }
@@ -1450,16 +1773,31 @@
 
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
+          trackAnalyticsEvent('checkout_error', {
+            error_reason: 'unauthenticated',
+            checkout_entry_point: 'settings_modal_buy_hours',
+            hours
+          });
           statusEl.textContent = 'Please sign in first.';
           statusEl.style.color = '#ef4444';
           return;
         }
+
+        trackAnalyticsEvent(
+          'upgrade_clicked',
+          {
+            checkout_entry_point: 'settings_modal_buy_hours',
+            hours
+          },
+          { accessToken: session.access_token }
+        );
 
         try {
           const res = await fetch(`${DOWHIZ_API_URL}/billing/checkout`, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${session.access_token}`,
+              'x-dowhiz-checkout-entry': 'settings_modal_buy_hours',
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({ hours })
@@ -1471,11 +1809,31 @@
             window.location.href = data.checkout_url;
           } else {
             const error = await res.text();
+            trackAnalyticsEvent(
+              'checkout_error',
+              {
+                error_reason: 'checkout_create_failed',
+                error: error || 'Failed to create checkout session',
+                checkout_entry_point: 'settings_modal_buy_hours',
+                hours
+              },
+              { accessToken: session.access_token }
+            );
             statusEl.textContent = error || 'Failed to create checkout session.';
             statusEl.style.color = '#ef4444';
           }
         } catch (err) {
           console.error('Checkout error:', err);
+          trackAnalyticsEvent(
+            'checkout_error',
+            {
+              error_reason: 'network_error',
+              error: err.message,
+              checkout_entry_point: 'settings_modal_buy_hours',
+              hours
+            },
+            { accessToken: session.access_token }
+          );
           statusEl.textContent = 'Network error. Please try again.';
           statusEl.style.color = '#ef4444';
         }
@@ -1517,7 +1875,7 @@
 
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
-          await handleAuthSuccess(session);
+          await handleAuthSuccess(session, { authMethod: 'password_reset', flow: 'password_reset' });
         } else {
           signinFormContainer.classList.remove('hidden');
           passwordResetContainer.classList.add('hidden');
@@ -1525,12 +1883,15 @@
       });
 
       // Handle successful auth
-      async function handleAuthSuccess(session) {
+      async function handleAuthSuccess(session, context = {}) {
         try {
           // Create/get DoWhiz account
           const signupRes = await fetch(`${DOWHIZ_API_URL}/auth/signup`, {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${session.access_token}` }
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'x-dowhiz-auth-method': context.authMethod || 'unknown'
+            }
           });
 
           if (!signupRes.ok) {
@@ -1539,11 +1900,40 @@
           }
 
           const accountData = await signupRes.json();
+          trackAnalyticsEvent(
+            'login_completed',
+            {
+              auth_method: context.authMethod || 'unknown',
+              flow: context.flow || 'auth_success',
+              account_created: Boolean(accountData.created)
+            },
+            {
+              accessToken: session.access_token
+            }
+          );
+          trackAnalyticsEvent(
+            'first_authenticated_session',
+            {
+              auth_method: context.authMethod || 'unknown',
+              flow: context.flow || 'auth_success',
+              workspace_id: accountData.account_id
+            },
+            {
+              accessToken: session.access_token,
+              eventKey: `first_authenticated_session:${accountData.account_id}`
+            }
+          );
           showDashboard(session, accountData);
         } catch (err) {
           // On error, show sign-in form with error message
           setDashboardMode(false);
           signinFormContainer.classList.remove('hidden');
+          trackAnalyticsEvent('auth_error', {
+            auth_method: context.authMethod || 'unknown',
+            flow: context.flow || 'auth_success',
+            error_type: 'post_auth_signup_failed',
+            error: err.message
+          });
           showMessage(err.message);
         }
       }
@@ -1782,6 +2172,16 @@
         } else if (paymentResult === 'cancelled') {
           statusEl.textContent = 'Payment was cancelled.';
           statusEl.style.color = '#ef4444';
+          supabase.auth.getSession().then(({ data: { session } }) => {
+            trackAnalyticsEvent(
+              'checkout_abandoned',
+              {
+                checkout_entry_point: 'settings_modal_buy_hours',
+                reason_for_paywall_trigger: 'user_cancelled_on_stripe'
+              },
+              session ? { accessToken: session.access_token } : {}
+            );
+          });
         }
         // Refresh balance display for both success and cancelled
         document.getElementById('info-btn').click();
@@ -2044,19 +2444,51 @@
         }
       }
 
-      // Map task kind to user-friendly display name
-      function formatTaskKind(kind) {
-        const kindMap = {
-          'send_email': 'Send Reply',
-          'run_task': 'Run Task',
-          'noop': 'No-op'
+      // Build concise task titles that describe what each item is doing
+      function humanizeTaskToken(value) {
+        if (!value || typeof value !== 'string') return '';
+        return value
+          .split(/[_\-\s]+/)
+          .filter(Boolean)
+          .map(part => part.length <= 3
+            ? part.toUpperCase()
+            : part.charAt(0).toUpperCase() + part.slice(1))
+          .join(' ');
+      }
+
+      function formatTaskTitle(task) {
+        const kind = (task.kind || '').toLowerCase();
+        const channel = (task.channel || task.source || '').toLowerCase();
+        const requestSummary = (task.request_summary || '').trim();
+
+        const channelMap = {
+          'email': 'Email',
+          'slack': 'Slack',
+          'discord': 'Discord',
+          'sms': 'SMS',
+          'telegram': 'Telegram',
+          'whatsapp': 'WhatsApp',
+          'google_docs': 'Google Docs',
+          'google_sheets': 'Google Sheets',
+          'google_slides': 'Google Slides',
+          'bluebubbles': 'iMessage',
+          'wechat': 'WeChat'
         };
-        return kindMap[kind] || kind || 'Task';
+
+        if (requestSummary) return requestSummary;
+        if (kind === 'send_email') return 'Send Reply';
+        if (kind === 'noop') return 'No-op';
+        if (kind === 'run_task') {
+          const channelLabel = channelMap[channel] || humanizeTaskToken(channel);
+          return channelLabel ? `Handle ${channelLabel}` : 'Handle Task';
+        }
+
+        return humanizeTaskToken(kind) || 'Task';
       }
 
       // Render a single task item
       function renderTask(task) {
-        const status = task.execution_status || 'pending';
+        const status = task.execution_status || 'running';
         const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
 
         // Format dates
@@ -2074,10 +2506,17 @@
           scheduleDisplay = `Next: ${formatDate(task.next_run)}`;
         }
 
+        // Prefer response time when available, fallback to request creation time
+        const updatedAt = task.last_run || task.execution_started_at || task.created_at;
+        const updatedDisplay = formatDate(updatedAt);
+
+        // Encode task data for modal
+        const taskData = encodeURIComponent(JSON.stringify(task));
+
         return `
           <li class="task-item">
             <div class="task-header">
-              <span class="task-name">${escapeHtml(formatTaskKind(task.kind))}</span>
+              <span class="task-name">${escapeHtml(formatTaskTitle(task))}</span>
               <span class="task-badge ${status}">${statusLabel}</span>
             </div>
             <div class="task-details">
@@ -2089,18 +2528,17 @@
                 <span class="task-detail-label">Schedule:</span>
                 <span>${scheduleDisplay}</span>
               </span>
-              ${task.last_run ? `
-                <span class="task-detail">
-                  <span class="task-detail-label">Last run:</span>
-                  <span>${formatDate(task.last_run)}</span>
-                </span>
-              ` : ''}
+              <span class="task-detail">
+                <span class="task-detail-label">Updated:</span>
+                <span>${updatedDisplay}</span>
+              </span>
               ${task.error_message ? `
                 <span class="task-detail" style="color: #ef4444;">
                   <span class="task-detail-label">Error:</span>
-                  <span>${escapeHtml(task.error_message)}</span>
+                  <span>${escapeHtml(parseErrorMessage(task.error_message))}</span>
                 </span>
               ` : ''}
+              <button class="task-info-btn" onclick="showTaskModal('${taskData}')" title="View details" style="margin-left: auto;">i</button>
             </div>
           </li>
         `;
@@ -2113,6 +2551,76 @@
         div.textContent = str;
         return div.innerHTML;
       }
+
+      // Parse error message to extract clean summary
+      function parseErrorMessage(errorMessage) {
+        if (!errorMessage) return '';
+
+        // Try to find JSON error messages with "message" field
+        const jsonMatches = errorMessage.match(/\{"type"\s*:\s*"error"\s*,\s*"message"\s*:\s*"([^"]+)"\}/g);
+        if (jsonMatches && jsonMatches.length > 0) {
+          try {
+            // Get the last error message (usually the root cause)
+            const lastMatch = jsonMatches[jsonMatches.length - 1];
+            const parsed = JSON.parse(lastMatch);
+            if (parsed.message) {
+              // Truncate if too long
+              const msg = parsed.message;
+              return msg.length > 200 ? msg.substring(0, 200) + '...' : msg;
+            }
+          } catch (e) {
+            // JSON parse failed, continue to fallback
+          }
+        }
+
+        // Fallback: extract first meaningful line
+        const firstLine = errorMessage.split('\n')[0];
+        return firstLine.length > 150 ? firstLine.substring(0, 150) + '...' : firstLine;
+      }
+
+      // Show task details modal
+      function showTaskModal(encodedTask) {
+        const task = JSON.parse(decodeURIComponent(encodedTask));
+        const modalContent = document.getElementById('task-modal-content');
+
+        const formatModalDate = (dateStr) => {
+          if (!dateStr) return 'N/A';
+          const date = new Date(dateStr);
+          return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+        };
+
+        // Build modal content
+        const rows = [
+          { label: 'Task ID', value: task.id || 'N/A' },
+          { label: 'Channel', value: task.channel || 'N/A' },
+          { label: 'Status', value: task.execution_status || 'running' },
+          { label: 'Enabled', value: task.enabled ? 'Yes' : 'No' },
+          { label: 'Schedule Type', value: task.schedule_type || 'N/A' },
+          { label: 'Created At', value: formatModalDate(task.created_at) },
+          { label: 'Next Run', value: formatModalDate(task.next_run) },
+          { label: 'Last Run', value: formatModalDate(task.last_run) },
+        ];
+
+        modalContent.innerHTML = rows.map(row => `
+          <div class="task-modal-row">
+            <span class="task-modal-label">${row.label}</span>
+            <span class="task-modal-value">${escapeHtml(String(row.value))}</span>
+          </div>
+        `).join('');
+
+        document.getElementById('task-modal-overlay').classList.add('active');
+      }
+
+      // Close task details modal
+      function closeTaskModal(event) {
+        if (!event || event.target.id === 'task-modal-overlay') {
+          document.getElementById('task-modal-overlay').classList.remove('active');
+        }
+      }
+
+      // Expose modal functions globally for onclick handlers
+      window.showTaskModal = showTaskModal;
+      window.closeTaskModal = closeTaskModal;
 
       // Start polling for task updates
       function startTaskPolling() {
@@ -2203,7 +2711,10 @@
           }
 
           if (flowType === 'magiclink' || flowType === 'signup') {
-            await handleAuthSuccess(data.session);
+            await handleAuthSuccess(data.session, {
+              authMethod: flowType === 'magiclink' ? 'magic_link' : 'email_confirmation',
+              flow: flowType
+            });
             window.history.replaceState({}, document.title, window.location.pathname);
             return true;
           }
@@ -2212,15 +2723,50 @@
           try {
             const res = await fetch(`${DOWHIZ_API_URL}/auth/signup`, {
               method: 'POST',
-              headers: { 'Authorization': `Bearer ${data.session.access_token}` }
+              headers: {
+                'Authorization': `Bearer ${data.session.access_token}`,
+                'x-dowhiz-auth-method': 'oauth_google'
+              }
             });
             console.log('DoWhiz signup response:', res.status);
+            if (res.ok) {
+              const accountData = await res.json();
+              trackAnalyticsEvent(
+                'login_completed',
+                {
+                  auth_method: 'oauth_google',
+                  flow: 'oauth_callback',
+                  account_created: Boolean(accountData.created)
+                },
+                {
+                  accessToken: data.session.access_token
+                }
+              );
+              trackAnalyticsEvent(
+                'first_authenticated_session',
+                {
+                  auth_method: 'oauth_google',
+                  flow: 'oauth_callback',
+                  workspace_id: accountData.account_id
+                },
+                {
+                  accessToken: data.session.access_token,
+                  eventKey: `first_authenticated_session:${accountData.account_id}`
+                }
+              );
+            }
           } catch (err) {
             console.error('Failed to create DoWhiz account:', err);
+            trackAnalyticsEvent('auth_error', {
+              auth_method: 'oauth_google',
+              flow: 'oauth_callback',
+              error_type: 'post_auth_signup_failed',
+              error: err.message
+            });
           }
 
           // Redirect to home page after OAuth
-          window.location.href = '/';
+          window.location.href = homeRedirectPath;
           return true;
         }
 
@@ -2244,7 +2790,10 @@
 
         if (session) {
           // User is already logged in - show the dashboard
-          await handleAuthSuccess(session);
+          await handleAuthSuccess(session, {
+            authMethod: 'existing_session',
+            flow: expectingDashboard ? 'existing_session_dashboard' : 'existing_session'
+          });
         } else {
           // No session - show sign-in form
           setDashboardMode(false);

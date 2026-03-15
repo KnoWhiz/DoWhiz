@@ -65,6 +65,7 @@ Key binaries (from `scheduler_module/src/bin`):
 | `set_postmark_inbound_hook` | Utility to update Postmark inbound webhook |
 | `inbound_fanout` | Legacy fanout ingress helper |
 | `google-docs` / `google-sheets` / `google-slides` | Workspace integration CLI tools |
+| `human_approval_gate` / `human_approval_gate_mcp` | Human approval gate for CAPTCHA/password/2FA blockers; CLI for manual use and MCP server for blocking Codex runs |
 
 Key scripts:
 
@@ -114,6 +115,7 @@ Route model (`channel + key -> employee_id + tenant_id`):
 
 Notes:
 - Discord message routing uses bot-token-to-employee mapping for selected client; route table is mainly used to enable channel defaults/tenant defaults.
+- Discord inbound requests prepare a transient `discord_context/` folder inside the task workspace with thread context plus a large recent channel-history window for agent summarization; this context is not persisted outside the workspace.
 
 ## 4) Environment Variables
 
@@ -188,6 +190,7 @@ Azure ACI execution path (required vars):
 - Discord: `DISCORD_*` and/or employee-specific Discord token envs
 - Telegram: `TELEGRAM_BOT_TOKEN` or employee-derived env keys
 - WhatsApp: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`
+- WeChat Work: `WECHAT_CORP_ID`, `WECHAT_CORP_SECRET`, `WECHAT_AGENT_ID`, `WECHAT_TOKEN`, `WECHAT_ENCODING_AES_KEY`
 - Twilio SMS: `TWILIO_*`
 - Google Workspace: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, refresh tokens, `GOOGLE_*_ENABLED`
 - Google Workspace CLI (`gws`):
@@ -200,17 +203,43 @@ Azure ACI execution path (required vars):
   `.secrets/google_workspace_cli_credentials.json` in each workspace and injects
   `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` for local/docker/Azure ACI execution.
 - Google Drive push: `GOOGLE_DRIVE_PUSH_ENABLED`, `GOOGLE_DRIVE_WEBHOOK_URL`
-- Web app auth bootstrap (optional, for private Notion/Google web links in tasks):
-  `WEB_AUTH_BOOTSTRAP_ENABLED`, `WEB_AUTH_BOOTSTRAP_TIMEOUT_SECS`,
-  `NOTION_ACCOUNT_EMAIL`, `NOTION_PASSWORD`, `GOOGLE_ACCOUNT_EMAIL`, `GOOGLE_PASSWORD`
-  (also supports aliases: `NOTION_EMAIL`, `GOOGLE_EMAIL`, `GOOGLE_EMPLOYEE_EMAIL`,
-  `GOOGLE_ACCOUNT_PASSWORD`, `GOOGLE_EMPLOYEE_PASSWORD`, and prefixed forms like
-  `<PREFIX>_GOOGLE_EMPLOYEE_EMAIL` via `EMPLOYEE_WEB_AUTH_ENV_PREFIX`/`WEB_AUTH_ENV_PREFIX`).
-  Notion bootstrap tries Notion password login first, then falls back to Google login.
-  ACI run_task also sets Playwright/NPM runtime defaults for mounted workspaces:
+- Browser-based web auth for private Notion/Google pages is agent-driven at task runtime
+  (no service-side bootstrap step).
+- `human_approval_gate` (via skill `human-approval-gate`) provides a blocking
+  approval flow for login CAPTCHA/password/OTP/device-approval steps. In
+  run_task/Codex environments, the preferred path is the injected MCP tool
+  `dowhiz_human_approval_gate_request_and_wait`, which sends the email with the
+  current browser screenshot(s) and blocks the same Codex turn until the first
+  same-thread reply or timeout, preserving the current browser session while it
+  waits. run_task injects `tool_timeout_sec = 1860` for that MCP server so the
+  Codex-side tool call can remain blocked for the default 30-minute HAG wait
+  window plus a small buffer. The blocker must be modeled as `captcha`, `password`, or
+  `two_factor`. For `two_factor`, callers should only invoke it after the site
+  is explicitly waiting for a code or device approval, and they should include
+  the concrete method details (SMS/email/auth app/device tap). The manual CLI
+  remains available outside Codex runtime, but run_task sets
+  `HUMAN_APPROVAL_GATE_REQUIRE_MCP=1` so shell-side HAG calls are rejected and
+  the blocking MCP path is enforced. Each send also writes
+  `.human_approval_gate/events.jsonl` and emits a `HAG_EVENT ...` stderr line
+  containing challenge type plus attachment filenames and sizes, so
+  prod/staging task logs can prove exactly what was sent. Sender resolution
+  priority is `--from` > `HUMAN_APPROVAL_FROM` > employee mailbox from employee
+  config. HAG-thread replies (`[HAG:...]`) are ignored by normal inbound task
+  routing to prevent recursive Email->task loops.
+- ACI run_task sets Playwright/NPM runtime defaults for mounted workspaces:
   `PLAYWRIGHT_MCP_EXECUTABLE_PATH` auto-discovery (`chrome-linux` / `chrome-linux64`),
   `PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright`,
   and `NPM_CONFIG_CACHE=/tmp/.npm` to avoid symlink failures from `npx`.
+
+### 4.6 Billing / insufficient-balance notices
+
+- Stripe billing routes are enabled only when both keys are present:
+  - `STRIPE_SECRET_KEY`
+  - `STRIPE_WEBHOOK_SECRET`
+- Optional fixed payment link for insufficient-balance auto notices:
+  - `INSUFFICIENT_BALANCE_PAYMENT_LINK` (preferred)
+  - fallback order: `BILLING_PAYMENT_LINK` -> `PAYMENT_LINK` -> `${FRONTEND_URL}/auth/index.html` -> `https://www.dowhiz.com/auth/index.html`
+- Insufficient-balance notices bypass agent execution and are sent directly by channel adapter (email HTML / other channels plain text).
 
 ## 5) Local Run Workflows
 

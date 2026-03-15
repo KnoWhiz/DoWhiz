@@ -9,6 +9,8 @@ use std::sync::{LazyLock, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use serde::Deserialize;
+
 use super::constants::{
     CODEX_CONFIG_BASE_URL_PLACEHOLDER, CODEX_CONFIG_BLOCK_TEMPLATE, CODEX_CONFIG_MARKER,
     CODEX_MODEL_NAME, CODEX_SANDBOX_MODE, DOCKER_CODEX_HOME_DIR, DOCKER_WORKSPACE_DIR,
@@ -47,18 +49,21 @@ const PAYMENT_ENV_KEYS: &[&str] = &[
     "X402_API_KEY",
     "X402_API_SECRET",
 ];
-const NOTION_EMAIL_ENV_KEYS: &[&str] = &["NOTION_ACCOUNT_EMAIL", "NOTION_EMAIL"];
-const NOTION_PASSWORD_ENV_KEYS: &[&str] = &["NOTION_PASSWORD"];
-const GOOGLE_EMAIL_ENV_KEYS: &[&str] = &[
-    "GOOGLE_ACCOUNT_EMAIL",
-    "GOOGLE_EMAIL",
-    "GOOGLE_EMPLOYEE_EMAIL",
+const HUMAN_APPROVAL_GATE_ENV_KEYS: &[&str] = &[
+    "POSTMARK_SERVER_TOKEN",
+    "HUMAN_APPROVAL_FROM",
+    "HUMAN_APPROVAL_REPLY_TO",
+    "POSTMARK_API_BASE_URL",
 ];
-const GOOGLE_PASSWORD_ENV_KEYS: &[&str] = &[
-    "GOOGLE_PASSWORD",
-    "GOOGLE_ACCOUNT_PASSWORD",
-    "GOOGLE_EMPLOYEE_PASSWORD",
-];
+const HUMAN_APPROVAL_GATE_REQUIRE_MCP_ENV_KEY: &str = "HUMAN_APPROVAL_GATE_REQUIRE_MCP";
+const HUMAN_APPROVAL_GATE_MCP_SERVER_NAME: &str = "human-approval-gate";
+const HUMAN_APPROVAL_GATE_MCP_TOOL_TIMEOUT_SECONDS: u32 = 31 * 60;
+const HUMAN_APPROVAL_FROM_ENV_KEY: &str = "HUMAN_APPROVAL_FROM";
+const HUMAN_APPROVAL_REPLY_TO_ENV_KEY: &str = "HUMAN_APPROVAL_REPLY_TO";
+const EMPLOYEE_CONFIG_PATH_ENV_KEY: &str = "EMPLOYEE_CONFIG_PATH";
+const EMPLOYEE_ID_ENV_KEY: &str = "EMPLOYEE_ID";
+const DEPLOY_TARGET_ENV_KEY: &str = "DEPLOY_TARGET";
+const STAGING_DEPLOY_TARGET: &str = "staging";
 const GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV: &str = "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE";
 const GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS: &[&str] = &[
     "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID",
@@ -68,16 +73,25 @@ const GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS: &[&str] = &[
 ];
 const GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH: &str =
     ".secrets/google_workspace_cli_credentials.json";
-const WEB_AUTH_ENV_MAPPINGS: &[(&str, &[&str])] = &[
-    ("NOTION_ACCOUNT_EMAIL", NOTION_EMAIL_ENV_KEYS),
-    ("NOTION_PASSWORD", NOTION_PASSWORD_ENV_KEYS),
-    ("GOOGLE_ACCOUNT_EMAIL", GOOGLE_EMAIL_ENV_KEYS),
-    ("GOOGLE_PASSWORD", GOOGLE_PASSWORD_ENV_KEYS),
-];
 
 const REMOTE_OUTPUT_FILENAME: &str = ".codex_remote_output.log";
 const REMOTE_EXIT_CODE_FILENAME: &str = ".codex_remote_exit_code";
+const HAG_MCP_CONFIG_START_MARKER: &str = "# BEGIN DOWHIZ HUMAN APPROVAL GATE MCP";
+const HAG_MCP_CONFIG_END_MARKER: &str = "# END DOWHIZ HUMAN APPROVAL GATE MCP";
 static ACI_CONTAINER_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Deserialize)]
+struct HumanApprovalEmployeeConfigFile {
+    #[serde(default)]
+    employees: Vec<HumanApprovalEmployeeConfigEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HumanApprovalEmployeeConfigEntry {
+    id: String,
+    #[serde(default)]
+    addresses: Vec<String>,
+}
 
 /// Global registry of active ACI containers created by this process.
 /// Used for cleanup on shutdown to prevent orphaned containers.
@@ -304,12 +318,12 @@ pub(super) fn run_codex_task(
     }
     ensure_github_cli_auth(&github_auth)?;
     let payment_env_overrides = collect_payment_env_overrides();
-    let web_auth_env_overrides = collect_web_auth_env_overrides();
     let google_workspace_cli_env_overrides = collect_google_workspace_cli_env_overrides(
         host_workspace_dir
             .as_deref()
             .unwrap_or(request.workspace_dir),
     )?;
+    let human_approval_gate_env_overrides = collect_human_approval_gate_env_overrides();
 
     let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
     let prompt = build_prompt(
@@ -388,9 +402,6 @@ pub(super) fn run_codex_task(
         for (key, value) in &payment_env_overrides {
             cmd.arg("-e").arg(format!("{}={}", key, value));
         }
-        for (key, value) in &web_auth_env_overrides {
-            cmd.arg("-e").arg(format!("{}={}", key, value));
-        }
         for (key, value) in &google_workspace_cli_env_overrides {
             if key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV {
                 let host_path = PathBuf::from(value);
@@ -409,6 +420,11 @@ pub(super) fn run_codex_task(
                 cmd.arg("-e").arg(format!("{}={}", key, value));
             }
         }
+        for (key, value) in &human_approval_gate_env_overrides {
+            cmd.arg("-e").arg(format!("{}={}", key, value));
+        }
+        cmd.arg("-e")
+            .arg(format!("{}=1", HUMAN_APPROVAL_GATE_REQUIRE_MCP_ENV_KEY));
         for (key, value) in &github_auth.env_overrides {
             cmd.arg("-e").arg(format!("{}={}", key, value));
         }
@@ -519,12 +535,13 @@ pub(super) fn run_codex_task(
         for (key, value) in &payment_env_overrides {
             cmd.env(key, value);
         }
-        for (key, value) in &web_auth_env_overrides {
-            cmd.env(key, value);
-        }
         for (key, value) in &google_workspace_cli_env_overrides {
             cmd.env(key, value);
         }
+        for (key, value) in &human_approval_gate_env_overrides {
+            cmd.env(key, value);
+        }
+        cmd.env(HUMAN_APPROVAL_GATE_REQUIRE_MCP_ENV_KEY, "1");
         for (key, value) in github_auth.env_overrides {
             cmd.env(key, value);
         }
@@ -705,9 +722,9 @@ fn run_codex_task_azure_aci(
     let codex_home = host_workspace_dir.join(DOCKER_CODEX_HOME_DIR);
     ensure_codex_config_at(&codex_home, &container_workspace_dir, &azure_endpoint)?;
     let payment_env_overrides = collect_payment_env_overrides();
-    let web_auth_env_overrides = collect_web_auth_env_overrides();
     let google_workspace_cli_env_overrides =
         collect_google_workspace_cli_env_overrides(&host_workspace_dir)?;
+    let human_approval_gate_env_overrides = collect_human_approval_gate_env_overrides();
 
     let memory_context = load_memory_context(request.workspace_dir, request.memory_dir)?;
     let prompt = build_prompt(
@@ -778,9 +795,6 @@ fn run_codex_task_azure_aci(
     for (key, value) in payment_env_overrides {
         env_overrides.push((key, value));
     }
-    for (key, value) in web_auth_env_overrides {
-        env_overrides.push((key, value));
-    }
     for (key, value) in google_workspace_cli_env_overrides {
         if key == GOOGLE_WORKSPACE_CLI_CREDENTIAL_FILE_ENV {
             let host_path = PathBuf::from(&value);
@@ -798,6 +812,13 @@ fn run_codex_task_azure_aci(
             env_overrides.push((key, value));
         }
     }
+    for (key, value) in human_approval_gate_env_overrides {
+        env_overrides.push((key, value));
+    }
+    env_overrides.push((
+        HUMAN_APPROVAL_GATE_REQUIRE_MCP_ENV_KEY.to_string(),
+        "1".to_string(),
+    ));
     for (key, value) in github_auth.env_overrides {
         env_overrides.push((key, value));
     }
@@ -1611,6 +1632,7 @@ fn ensure_codex_config_at(
     fs::create_dir_all(config_dir)?;
 
     let block = build_codex_config_block(azure_endpoint);
+    let hag_mcp_block = build_human_approval_gate_mcp_block();
 
     let existing = if config_path.exists() {
         fs::read_to_string(&config_path)?
@@ -1619,6 +1641,12 @@ fn ensure_codex_config_at(
     };
 
     let updated = update_config_block(&existing, &block);
+    let updated = update_managed_config_block(
+        &updated,
+        HAG_MCP_CONFIG_START_MARKER,
+        HAG_MCP_CONFIG_END_MARKER,
+        &hag_mcp_block,
+    );
     let updated = ensure_project_trust(&updated, trust_workspace_dir);
     fs::write(config_path, updated)?;
     Ok(())
@@ -1688,12 +1716,6 @@ fn resolve_payment_env_prefix() -> Option<String> {
         })
 }
 
-fn resolve_web_auth_env_prefix() -> Option<String> {
-    read_env_trimmed("EMPLOYEE_WEB_AUTH_ENV_PREFIX")
-        .or_else(|| read_env_trimmed("WEB_AUTH_ENV_PREFIX"))
-        .or_else(resolve_payment_env_prefix)
-}
-
 fn collect_payment_env_overrides() -> Vec<(String, String)> {
     let prefix = resolve_payment_env_prefix();
     PAYMENT_ENV_KEYS
@@ -1710,15 +1732,118 @@ fn collect_payment_env_overrides() -> Vec<(String, String)> {
         .collect()
 }
 
-fn collect_web_auth_env_overrides() -> Vec<(String, String)> {
-    let prefix = resolve_web_auth_env_prefix();
-    WEB_AUTH_ENV_MAPPINGS
+fn collect_human_approval_gate_env_overrides() -> Vec<(String, String)> {
+    let mut overrides: Vec<(String, String)> = HUMAN_APPROVAL_GATE_ENV_KEYS
         .iter()
-        .filter_map(|(canonical_key, candidate_keys)| {
-            resolve_env_from_candidates(candidate_keys, prefix.as_deref())
-                .map(|value| ((*canonical_key).to_string(), value))
-        })
-        .collect()
+        .filter_map(|key| read_env_trimmed(key).map(|value| ((*key).to_string(), value)))
+        .collect();
+
+    let has_human_approval_from = overrides
+        .iter()
+        .any(|(key, _)| key == HUMAN_APPROVAL_FROM_ENV_KEY);
+    let has_human_approval_reply_to = overrides
+        .iter()
+        .any(|(key, _)| key == HUMAN_APPROVAL_REPLY_TO_ENV_KEY);
+
+    if let Some(mailbox_email) = resolve_human_approval_mailbox_email_from_employee_config() {
+        if !has_human_approval_from {
+            overrides.push((
+                HUMAN_APPROVAL_FROM_ENV_KEY.to_string(),
+                mailbox_email.clone(),
+            ));
+        }
+        if !has_human_approval_reply_to {
+            overrides.push((HUMAN_APPROVAL_REPLY_TO_ENV_KEY.to_string(), mailbox_email));
+        }
+    }
+
+    overrides
+}
+
+fn resolve_human_approval_mailbox_email_from_employee_config() -> Option<String> {
+    let employee_id = read_env_trimmed(EMPLOYEE_ID_ENV_KEY)?;
+    for config_path in resolve_employee_config_paths() {
+        if let Some(email) = load_employee_mailbox_email_from_config(&config_path, &employee_id) {
+            return Some(email);
+        }
+    }
+    None
+}
+
+fn resolve_employee_config_paths() -> Vec<PathBuf> {
+    if let Some(config_path_raw) = read_env_trimmed(EMPLOYEE_CONFIG_PATH_ENV_KEY) {
+        return vec![resolve_employee_config_path(&config_path_raw)];
+    }
+
+    let root = do_whiz_service_root_dir();
+    let deploy_target = read_env_trimmed(DEPLOY_TARGET_ENV_KEY)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let mut candidates = if deploy_target == STAGING_DEPLOY_TARGET {
+        vec![
+            root.join("employee.staging.toml"),
+            root.join("employee.toml"),
+        ]
+    } else {
+        vec![
+            root.join("employee.toml"),
+            root.join("employee.staging.toml"),
+        ]
+    };
+
+    candidates.retain(|path| path.exists());
+    candidates
+}
+
+fn resolve_employee_config_path(raw_path: &str) -> PathBuf {
+    let path = PathBuf::from(raw_path);
+    if path.is_absolute() {
+        path
+    } else {
+        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let cwd_candidate = cwd.join(&path);
+        if cwd_candidate.exists() {
+            return cwd_candidate;
+        }
+
+        let service_root_candidate = do_whiz_service_root_dir().join(path);
+        if service_root_candidate.exists() {
+            return service_root_candidate;
+        }
+
+        cwd_candidate
+    }
+}
+
+fn do_whiz_service_root_dir() -> PathBuf {
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if cwd
+        .file_name()
+        .map(|name| name == "DoWhiz_service")
+        .unwrap_or(false)
+    {
+        cwd
+    } else {
+        cwd.join("DoWhiz_service")
+    }
+}
+
+fn load_employee_mailbox_email_from_config(
+    config_path: &Path,
+    employee_id: &str,
+) -> Option<String> {
+    let content = fs::read_to_string(config_path).ok()?;
+    let parsed: HumanApprovalEmployeeConfigFile = toml::from_str(&content).ok()?;
+    let entry = parsed
+        .employees
+        .iter()
+        .find(|entry| entry.id.trim().eq_ignore_ascii_case(employee_id))?;
+    entry
+        .addresses
+        .iter()
+        .map(|address| address.trim())
+        .find(|address| !address.is_empty())
+        .map(|address| address.to_string())
 }
 
 fn collect_google_workspace_cli_env_overrides(
@@ -1731,6 +1856,17 @@ fn collect_google_workspace_cli_env_overrides(
             path.to_string_lossy().into_owned(),
         ));
     }
+
+    // Service Account + Domain-Wide Delegation support
+    // These env vars allow google-docs CLI to use Service Account authentication
+    // instead of OAuth refresh tokens (tokens never expire with Service Account)
+    if let Some(sa_json) = read_env_trimmed("GOOGLE_SERVICE_ACCOUNT_JSON") {
+        overrides.push(("GOOGLE_SERVICE_ACCOUNT_JSON".to_string(), sa_json));
+    }
+    if let Some(sa_subject) = read_env_trimmed("GOOGLE_SERVICE_ACCOUNT_SUBJECT") {
+        overrides.push(("GOOGLE_SERVICE_ACCOUNT_SUBJECT".to_string(), sa_subject));
+    }
+
     Ok(overrides)
 }
 
@@ -1875,22 +2011,6 @@ fn load_google_workspace_cli_credential_parts() -> Option<GoogleWorkspaceCliCred
     })
 }
 
-fn resolve_env_from_candidates(candidates: &[&str], prefix: Option<&str>) -> Option<String> {
-    for key in candidates {
-        if let Some(value) = read_env_trimmed(key) {
-            return Some(value);
-        }
-    }
-    if let Some(prefix) = prefix {
-        for key in candidates {
-            if let Some(value) = read_env_trimmed(&format!("{}_{}", prefix, key)) {
-                return Some(value);
-            }
-        }
-    }
-    None
-}
-
 fn codex_add_dirs(workspace_dir: &Path, use_docker: bool) -> Result<Vec<String>, RunTaskError> {
     let mut add_dirs = Vec::new();
     if use_docker {
@@ -1918,6 +2038,23 @@ fn build_codex_config_block(azure_endpoint: &str) -> String {
     CODEX_CONFIG_BLOCK_TEMPLATE.replace(CODEX_CONFIG_BASE_URL_PLACEHOLDER, azure_endpoint)
 }
 
+fn build_human_approval_gate_mcp_block() -> String {
+    let env_vars = HUMAN_APPROVAL_GATE_ENV_KEYS
+        .iter()
+        .map(|key| format!(r#""{key}""#))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        r#"{HAG_MCP_CONFIG_START_MARKER}
+[mcp_servers.{HUMAN_APPROVAL_GATE_MCP_SERVER_NAME}]
+command = "human_approval_gate_mcp"
+env_vars = [{env_vars}]
+tool_timeout_sec = {HUMAN_APPROVAL_GATE_MCP_TOOL_TIMEOUT_SECONDS}
+
+{HAG_MCP_CONFIG_END_MARKER}"#
+    )
+}
+
 fn normalize_azure_endpoint(endpoint: &str) -> String {
     let trimmed = endpoint.trim();
     if trimmed.ends_with("/openai/v1") {
@@ -1943,6 +2080,40 @@ fn update_config_block(existing: &str, block: &str) -> String {
             updated.push_str(block.trim_end());
             updated.push('\n');
             updated.push_str(existing[end_line_index..].trim_start());
+            return updated;
+        }
+    }
+
+    let mut updated = existing.trim_end().to_string();
+    if !updated.is_empty() {
+        updated.push_str("\n\n");
+    }
+    updated.push_str(block.trim_end());
+    updated.push('\n');
+    updated
+}
+
+fn update_managed_config_block(
+    existing: &str,
+    start_marker: &str,
+    end_marker: &str,
+    block: &str,
+) -> String {
+    if let Some(start_index) = existing.find(start_marker) {
+        if let Some(end_relative_index) = existing[start_index..].find(end_marker) {
+            let end_marker_index = start_index + end_relative_index + end_marker.len();
+            let trailing_newline_index = existing[end_marker_index..]
+                .find('\n')
+                .map(|idx| end_marker_index + idx + 1)
+                .unwrap_or(existing.len());
+            let mut updated = String::new();
+            updated.push_str(existing[..start_index].trim_end());
+            if !updated.is_empty() {
+                updated.push_str("\n\n");
+            }
+            updated.push_str(block.trim_end());
+            updated.push('\n');
+            updated.push_str(existing[trailing_newline_index..].trim_start());
             return updated;
         }
     }
@@ -2346,6 +2517,24 @@ mod tests {
         }
     }
 
+    struct CurrentDirGuard {
+        previous: PathBuf,
+    }
+
+    impl CurrentDirGuard {
+        fn set(path: &Path) -> Self {
+            let previous = env::current_dir().expect("read current dir");
+            env::set_current_dir(path).expect("set current dir");
+            Self { previous }
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            let _ = env::set_current_dir(&self.previous);
+        }
+    }
+
     #[test]
     fn test_extract_token_usage_success() {
         let output = r#"{"type":"thread.started","thread_id":"abc123"}
@@ -2557,135 +2746,149 @@ mod tests {
     }
 
     #[test]
-    fn test_collect_web_auth_env_overrides_uses_employee_prefix_fallback() {
+    fn test_collect_human_approval_gate_env_overrides_collects_expected_keys() {
         let _lock = env_lock();
         let _guards = vec![
-            EnvVarGuard::unset("NOTION_ACCOUNT_EMAIL"),
-            EnvVarGuard::unset("NOTION_PASSWORD"),
-            EnvVarGuard::unset("EMPLOYEE_WEB_AUTH_ENV_PREFIX"),
-            EnvVarGuard::unset("WEB_AUTH_ENV_PREFIX"),
-            EnvVarGuard::unset("EMPLOYEE_PAYMENT_ENV_PREFIX"),
-            EnvVarGuard::unset("PAYMENT_ENV_PREFIX"),
-            EnvVarGuard::unset("EMPLOYEE_GITHUB_ENV_PREFIX"),
-            EnvVarGuard::unset("GITHUB_ENV_PREFIX"),
-            EnvVarGuard::set("EMPLOYEE_ID", "boiled_egg"),
-            EnvVarGuard::set("PROTO_NOTION_ACCOUNT_EMAIL", "proto-notion@example.com"),
-            EnvVarGuard::set("PROTO_NOTION_PASSWORD", "proto-password"),
+            EnvVarGuard::set("POSTMARK_SERVER_TOKEN", "pm-token"),
+            EnvVarGuard::set("HUMAN_APPROVAL_REPLY_TO", "inbox@example.com"),
+            EnvVarGuard::set("EMPLOYEE_CONFIG_PATH", "/tmp/missing-employee-config.toml"),
+            EnvVarGuard::unset("EMPLOYEE_ID"),
         ];
 
-        let overrides = collect_web_auth_env_overrides();
+        let overrides = collect_human_approval_gate_env_overrides();
         assert!(overrides
             .iter()
-            .any(|(k, v)| k == "NOTION_ACCOUNT_EMAIL" && v == "proto-notion@example.com"));
+            .any(|(k, v)| k == "POSTMARK_SERVER_TOKEN" && v == "pm-token"));
         assert!(overrides
             .iter()
-            .any(|(k, v)| k == "NOTION_PASSWORD" && v == "proto-password"));
+            .any(|(k, v)| k == "HUMAN_APPROVAL_REPLY_TO" && v == "inbox@example.com"));
     }
 
     #[test]
-    fn test_collect_web_auth_env_overrides_prefers_unprefixed_values() {
+    fn test_collect_human_approval_gate_env_overrides_skips_unset_or_blank_values() {
         let _lock = env_lock();
         let _guards = vec![
-            EnvVarGuard::set("EMPLOYEE_WEB_AUTH_ENV_PREFIX", "PROTO"),
-            EnvVarGuard::set("NOTION_ACCOUNT_EMAIL", "global-notion@example.com"),
-            EnvVarGuard::set("PROTO_NOTION_ACCOUNT_EMAIL", "prefixed-notion@example.com"),
+            EnvVarGuard::unset("POSTMARK_SERVER_TOKEN"),
+            EnvVarGuard::set("HUMAN_APPROVAL_FROM", "   "),
+            EnvVarGuard::unset("HUMAN_APPROVAL_REPLY_TO"),
+            EnvVarGuard::unset("POSTMARK_API_BASE_URL"),
+            EnvVarGuard::unset("EMPLOYEE_ID"),
+            EnvVarGuard::set("EMPLOYEE_CONFIG_PATH", "/tmp/missing-employee-config.toml"),
         ];
 
-        let overrides = collect_web_auth_env_overrides();
-        assert!(overrides
-            .iter()
-            .any(|(k, v)| k == "NOTION_ACCOUNT_EMAIL" && v == "global-notion@example.com"));
+        let overrides = collect_human_approval_gate_env_overrides();
+        assert!(overrides.is_empty());
     }
 
     #[test]
-    fn test_collect_web_auth_env_overrides_maps_google_employee_aliases() {
+    fn test_collect_human_approval_gate_env_overrides_uses_employee_config_mailbox_defaults() {
         let _lock = env_lock();
-        let _guards = vec![
-            EnvVarGuard::unset("GOOGLE_ACCOUNT_EMAIL"),
-            EnvVarGuard::unset("GOOGLE_EMAIL"),
-            EnvVarGuard::unset("GOOGLE_ACCOUNT_PASSWORD"),
-            EnvVarGuard::unset("GOOGLE_PASSWORD"),
-            EnvVarGuard::set("GOOGLE_EMPLOYEE_EMAIL", "employee-google@example.com"),
-            EnvVarGuard::set("GOOGLE_EMPLOYEE_PASSWORD", "employee-password"),
-        ];
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("employee.staging.toml");
+        fs::write(
+            &config_path,
+            r#"
+default_employee_id = "boiled_egg"
 
-        let overrides = collect_web_auth_env_overrides();
-        assert_eq!(
-            overrides
-                .iter()
-                .find(|(k, _)| k == "GOOGLE_ACCOUNT_EMAIL")
-                .map(|(_, v)| v.as_str()),
-            Some("employee-google@example.com")
-        );
-        assert_eq!(
-            overrides
-                .iter()
-                .find(|(k, _)| k == "GOOGLE_PASSWORD")
-                .map(|(_, v)| v.as_str()),
-            Some("employee-password")
-        );
-    }
+[[employees]]
+id = "boiled_egg"
+addresses = ["dowhiz@deep-tutor.com"]
+"#,
+        )
+        .expect("write employee config");
 
-    #[test]
-    fn test_collect_web_auth_env_overrides_maps_prefixed_google_aliases() {
-        let _lock = env_lock();
         let _guards = vec![
-            EnvVarGuard::unset("GOOGLE_ACCOUNT_EMAIL"),
-            EnvVarGuard::unset("GOOGLE_EMAIL"),
-            EnvVarGuard::unset("GOOGLE_EMPLOYEE_EMAIL"),
-            EnvVarGuard::unset("GOOGLE_ACCOUNT_PASSWORD"),
-            EnvVarGuard::unset("GOOGLE_PASSWORD"),
-            EnvVarGuard::unset("GOOGLE_EMPLOYEE_PASSWORD"),
-            EnvVarGuard::set("EMPLOYEE_WEB_AUTH_ENV_PREFIX", "PROTO"),
             EnvVarGuard::set(
-                "PROTO_GOOGLE_EMPLOYEE_EMAIL",
-                "proto-employee-google@example.com",
+                "EMPLOYEE_CONFIG_PATH",
+                config_path.to_string_lossy().as_ref(),
             ),
-            EnvVarGuard::set("PROTO_GOOGLE_EMPLOYEE_PASSWORD", "proto-employee-password"),
+            EnvVarGuard::set("EMPLOYEE_ID", "boiled_egg"),
+            EnvVarGuard::unset("HUMAN_APPROVAL_FROM"),
+            EnvVarGuard::unset("HUMAN_APPROVAL_REPLY_TO"),
         ];
 
-        let overrides = collect_web_auth_env_overrides();
-        assert_eq!(
-            overrides
-                .iter()
-                .find(|(k, _)| k == "GOOGLE_ACCOUNT_EMAIL")
-                .map(|(_, v)| v.as_str()),
-            Some("proto-employee-google@example.com")
-        );
-        assert_eq!(
-            overrides
-                .iter()
-                .find(|(k, _)| k == "GOOGLE_PASSWORD")
-                .map(|(_, v)| v.as_str()),
-            Some("proto-employee-password")
-        );
+        let overrides = collect_human_approval_gate_env_overrides();
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "HUMAN_APPROVAL_FROM" && v == "dowhiz@deep-tutor.com"));
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "HUMAN_APPROVAL_REPLY_TO" && v == "dowhiz@deep-tutor.com"));
     }
 
     #[test]
-    fn test_collect_web_auth_env_overrides_prefers_primary_google_keys_over_aliases() {
+    fn test_collect_human_approval_gate_env_overrides_resolves_relative_employee_config_path() {
         let _lock = env_lock();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let service_root = temp.path().join("DoWhiz_service");
+        fs::create_dir_all(&service_root).expect("create service root");
+
+        let config_path = service_root.join("employee.staging.toml");
+        fs::write(
+            &config_path,
+            r#"
+default_employee_id = "boiled_egg"
+
+[[employees]]
+id = "boiled_egg"
+addresses = ["dowhiz@deep-tutor.com"]
+"#,
+        )
+        .expect("write employee config");
+
+        let _cwd_guard = CurrentDirGuard::set(temp.path());
         let _guards = vec![
-            EnvVarGuard::set("GOOGLE_ACCOUNT_EMAIL", "primary-google@example.com"),
-            EnvVarGuard::set("GOOGLE_EMPLOYEE_EMAIL", "alias-google@example.com"),
-            EnvVarGuard::set("GOOGLE_PASSWORD", "primary-password"),
-            EnvVarGuard::set("GOOGLE_EMPLOYEE_PASSWORD", "alias-password"),
+            EnvVarGuard::set("EMPLOYEE_CONFIG_PATH", "employee.staging.toml"),
+            EnvVarGuard::set("EMPLOYEE_ID", "boiled_egg"),
+            EnvVarGuard::unset("HUMAN_APPROVAL_FROM"),
+            EnvVarGuard::unset("HUMAN_APPROVAL_REPLY_TO"),
         ];
 
-        let overrides = collect_web_auth_env_overrides();
-        assert_eq!(
-            overrides
-                .iter()
-                .find(|(k, _)| k == "GOOGLE_ACCOUNT_EMAIL")
-                .map(|(_, v)| v.as_str()),
-            Some("primary-google@example.com")
-        );
-        assert_eq!(
-            overrides
-                .iter()
-                .find(|(k, _)| k == "GOOGLE_PASSWORD")
-                .map(|(_, v)| v.as_str()),
-            Some("primary-password")
-        );
+        let overrides = collect_human_approval_gate_env_overrides();
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "HUMAN_APPROVAL_FROM" && v == "dowhiz@deep-tutor.com"));
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "HUMAN_APPROVAL_REPLY_TO" && v == "dowhiz@deep-tutor.com"));
+    }
+
+    #[test]
+    fn test_collect_human_approval_gate_env_overrides_keeps_explicit_human_approval_from() {
+        let _lock = env_lock();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("employee.toml");
+        fs::write(
+            &config_path,
+            r#"
+[[employees]]
+id = "boiled_egg"
+addresses = ["dowhiz@deep-tutor.com"]
+"#,
+        )
+        .expect("write employee config");
+
+        let _guards = vec![
+            EnvVarGuard::set(
+                "EMPLOYEE_CONFIG_PATH",
+                config_path.to_string_lossy().as_ref(),
+            ),
+            EnvVarGuard::set("EMPLOYEE_ID", "boiled_egg"),
+            EnvVarGuard::set("HUMAN_APPROVAL_FROM", "manual@dowhiz.com"),
+            EnvVarGuard::unset("HUMAN_APPROVAL_REPLY_TO"),
+        ];
+
+        let overrides = collect_human_approval_gate_env_overrides();
+        let from_values: Vec<&String> = overrides
+            .iter()
+            .filter(|(key, _)| key == "HUMAN_APPROVAL_FROM")
+            .map(|(_, value)| value)
+            .collect();
+        assert_eq!(from_values.len(), 1);
+        assert_eq!(from_values[0], "manual@dowhiz.com");
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| k == "HUMAN_APPROVAL_REPLY_TO" && v == "dowhiz@deep-tutor.com"));
     }
 
     #[test]

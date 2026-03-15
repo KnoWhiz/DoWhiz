@@ -1,10 +1,10 @@
 # SEO Top Pages (H1 Audit)
 
-As of 2026-02-26, the website repo exposes 21 indexable pages.
+As of 2026-03-14, the website repo exposes 21 indexable pages.
 
 1. https://dowhiz.com/
 H1 count: 1
-H1: OpenClaw🦞, but scalable, accessible, and safe. Message Anywhere, Done Everywhere!
+H1: One-click setup of a one-person company
 H2: How it works, Example workflows, Safety & Access, Meet Your Digital Employee Team, The Digital Employee Stack
 
 2. https://dowhiz.com/blog/

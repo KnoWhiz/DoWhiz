@@ -93,8 +93,7 @@ impl GoogleDocsPollerConfig {
         let employee_id =
             std::env::var("EMPLOYEE_ID").unwrap_or_else(|_| "little_bear".to_string());
 
-        let model_name =
-            std::env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.4".to_string());
+        let model_name = std::env::var("CODEX_MODEL").unwrap_or_else(|_| "gpt-5.4".to_string());
 
         let runner = if std::env::var("CLAUDE_MODEL").is_ok() {
             "claude".to_string()

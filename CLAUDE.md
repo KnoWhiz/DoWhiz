@@ -91,6 +91,51 @@ npm run dev
 npm run lint
 ```
 
+## Rust Compilation Optimization (Important)
+
+The project runs in WSL accessing Windows filesystem via `/mnt/d/`, making full builds slow. **Always use incremental/partial compilation**:
+
+### Partial Build - Only compile needed modules
+```bash
+# Only build scheduler_module (contains email, google workspace, notion core features)
+cargo build -p scheduler_module
+
+# Only build send_emails_module
+cargo build -p send_emails_module
+
+# Avoid full builds unless necessary
+# DO NOT use: cargo build (compiles all modules)
+```
+
+### Partial Test - Only run relevant tests
+```bash
+# Test by module
+cargo test -p scheduler_module
+cargo test -p send_emails_module
+
+# Filter tests by keyword (faster)
+cargo test -p scheduler_module google
+cargo test -p scheduler_module email
+cargo test -p scheduler_module notion
+
+# Run single test
+cargo test -p scheduler_module test_function_name -- --exact
+```
+
+### Incremental Compilation Notes
+- Build artifacts go to `/mnt/d/cargo-cache` (configured in `~/.cargo/config.toml`)
+- After code changes, incremental build should complete in 1-2 minutes
+- If every build takes 10+ minutes, incremental compilation is not working properly
+
+### Clean Build Cache
+```bash
+# Clean all build artifacts (requires full rebuild)
+cargo clean
+
+# Only clean debug artifacts, keep release
+cargo clean --profile dev
+```
+
 ## RunTask Behavior (Important)
 
 - `run_task_module` supports `codex` and `claude` runners.

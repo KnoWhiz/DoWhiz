@@ -68,26 +68,39 @@ Recommended settings for anti-detection: `NOTION_BROWSER_HEADLESS=false`, `NOTIO
 
 ## 3) VM Deployment
 
+PM2 is the canonical process manager on staging/production VMs. Do not use the foreground
+`run_gateway_local.sh` / `run_employee.sh` pair as the steady-state VM runtime; those are for
+local debugging and manual foreground sessions only.
+
+If a legacy `systemd` worker unit such as `dowhiz-oliver.service` exists on a VM, disable it so
+PM2 is the only process supervisor for DoWhiz.
+
 ### Staging (`dev`)
 ```bash
 ssh dowhizstaging
-cd /home/azureuser/server/.dowhiz/DoWhiz
-git fetch origin
-git checkout dev
-git pull --ff-only origin dev
-./DoWhiz_service/scripts/run_gateway_local.sh
-./DoWhiz_service/scripts/run_employee.sh boiled_egg 9001 --skip-hook --skip-ngrok
+cd /home/azureuser/server/.dowhiz/DoWhiz/DoWhiz_service
+set -a
+source .env
+set +a
+sudo systemctl disable --now dowhiz-oliver.service || true
+pm2 restart dw_gateway --update-env || pm2 start ./target/release/inbound_gateway --name dw_gateway --cwd "$PWD"
+pm2 restart dw_worker --update-env || pm2 start ./target/release/rust_service --name dw_worker --cwd "$PWD" -- --host 0.0.0.0 --port "${RUST_SERVICE_PORT:-9001}"
+pm2 save
+pm2 list
 ```
 
 ### Production (`main`)
 ```bash
 ssh dowhizprod1
-cd /home/azureuser/server/.dowhiz/DoWhiz
-git fetch origin
-git checkout main
-git pull --ff-only origin main
-./DoWhiz_service/scripts/run_gateway_local.sh
-./DoWhiz_service/scripts/run_employee.sh little_bear 9001 --skip-hook --skip-ngrok
+cd /home/azureuser/server/.dowhiz/DoWhiz/DoWhiz_service
+set -a
+source .env
+set +a
+sudo systemctl disable --now dowhiz-oliver.service || true
+pm2 restart dw_gateway --update-env || pm2 start ./target/release/inbound_gateway --name dw_gateway --cwd "$PWD"
+pm2 restart dw_worker --update-env || pm2 start ./target/release/rust_service --name dw_worker --cwd "$PWD" -- --host 0.0.0.0 --port "${RUST_SERVICE_PORT:-9001}"
+pm2 save
+pm2 list
 ```
 
 Do not use `scripts/start_all.sh` on staging/production VMs; it is local-only and will start ngrok plus rewrite Postmark inbound hook.
@@ -98,8 +111,10 @@ Deployment workflows should:
 1. Write `.env` from `ENV_COMMON + ENV_STAGING/ENV_PROD`.
 2. Fail if `.env` contains keys matching `^(STAGING_|PROD_)`.
 3. Validate `GATEWAY_CONFIG_PATH` and `EMPLOYEE_CONFIG_PATH` exist and match expected target files.
-4. If Azure ACI backend is enabled (`RUN_TASK_EXECUTION_BACKEND=azure_aci` or `auto` with `DEPLOY_TARGET in {staging,production}`), trim `DoWhiz_service/target` on the VM before `az acr build` (drop debug/intermediate artifacts, keep required release binaries), then rebuild and push `RUN_TASK_AZURE_ACI_IMAGE` before restarting services.
-5. Source `.env` before PM2 restarts and use `pm2 restart --update-env` so runtime env changes (for example `EMPLOYEE_ID`) are applied to existing processes.
+4. After release binaries and `.env` are installed, source `.env` and restart PM2-managed services immediately so live traffic moves onto the new worker/gateway before any long-running follow-up work.
+5. Disable any legacy `systemd` worker unit (for example `dowhiz-oliver.service`) so PM2 remains the only supervisor.
+6. If Azure ACI backend is enabled (`RUN_TASK_EXECUTION_BACKEND=azure_aci` or `auto` with `DEPLOY_TARGET in {staging,production}`), build/push image from GitHub Runner (not from VM): checkout `deploy_sha`, stage a temporary build context with `Dockerfile.aci`, `Dockerfile.base`, `.dockerignore`, `version_base.txt`, and `DoWhiz_service/` without runtime `.env` or `.workspace`; inject prebuilt binaries from artifact (`rust_service`, `inbound_fanout`, `inbound_gateway`, `google-docs`); then run `az acr build`. This avoids a second Rust compile during image build while keeping uploads small.
+7. Use `pm2 restart --update-env` so runtime env changes (for example `EMPLOYEE_ID`) are applied to existing processes, and finish with local health checks that allow a short retry window while worker/gateway bind their ports.
 
 ## 5) Health Checks
 

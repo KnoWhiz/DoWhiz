@@ -18,7 +18,8 @@ use super::config::ServiceConfig;
 use super::email::{process_inbound_payload, PostmarkInbound};
 use super::inbound::{
     process_bluebubbles_event, process_discord_inbound_message, process_google_workspace_message,
-    process_notion_message, process_slack_event, process_sms_message, process_telegram_event,
+process_notion_message, process_slack_event, process_sms_message, process_telegram_event,
+    process_wechat_event,
     process_whatsapp_event, try_quick_response_bluebubbles, try_quick_response_discord,
     try_quick_response_slack, try_quick_response_telegram, try_quick_response_whatsapp,
 };
@@ -133,7 +134,22 @@ fn process_ingestion_envelope(
                 return Ok(());
             }
             let (payload, raw_payload) = resolve_email_payload(envelope)?;
-            process_inbound_payload(config, user_store, index_store, account_store, &payload, &raw_payload)
+            let subject = payload.subject.as_deref().unwrap_or("");
+            if is_human_approval_gate_subject(subject) {
+                info!(
+                    "skipping human approval gate reply from ingestion workflow: subject={}",
+                    subject
+                );
+                return Ok(());
+            }
+            process_inbound_payload(
+                config,
+                user_store,
+                index_store,
+                account_store,
+                &payload,
+                &raw_payload,
+            )
         }
         Channel::Slack => {
             info!("processing slack envelope, trying quick response first");
@@ -235,8 +251,8 @@ fn process_ingestion_envelope(
             let raw_payload = envelope.raw_payload_bytes();
             process_whatsapp_event(config, user_store, index_store, &message, &raw_payload)
         }
-        Channel::Notion => {
-            // Process Notion comments via browser automation
+Channel::Notion => {
+            // Process Notion comments via API
             let message = envelope.to_inbound_message();
             let raw_payload = envelope.raw_payload_bytes();
             process_notion_message(
@@ -248,6 +264,11 @@ fn process_ingestion_envelope(
                 &raw_payload,
             )
         }
+        Channel::WeChat => {
+            let message = envelope.to_inbound_message();
+            let raw_payload = envelope.raw_payload_bytes();
+            process_wechat_event(config, user_store, index_store, &message, &raw_payload)
+        }
     }
 }
 
@@ -256,6 +277,24 @@ fn is_blacklisted_email_sender(
     service_addresses: &std::collections::HashSet<String>,
 ) -> bool {
     super::email::is_blacklisted_sender(sender, service_addresses)
+}
+
+fn is_human_approval_gate_subject(subject: &str) -> bool {
+    let normalized = subject.trim();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    let lowered = normalized.to_ascii_lowercase();
+    if lowered.starts_with("[hag:") {
+        return true;
+    }
+    if let Some(rest) = lowered.strip_prefix("re:") {
+        if rest.trim_start().starts_with("[hag:") {
+            return true;
+        }
+    }
+    false
 }
 
 fn resolve_email_payload(
@@ -320,7 +359,9 @@ fn resolve_email_payload(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_blacklisted_email_sender, resolve_email_payload};
+    use super::{
+        is_blacklisted_email_sender, is_human_approval_gate_subject, resolve_email_payload,
+    };
     use crate::channel::{Attachment, Channel, ChannelMetadata};
     use crate::ingestion::{IngestionEnvelope, IngestionPayload};
     use chrono::Utc;
@@ -394,5 +435,20 @@ mod tests {
             "user@example.com",
             &service_addresses
         ));
+    }
+
+    #[test]
+    fn human_approval_gate_subject_detection_matches_hag_threads() {
+        assert!(is_human_approval_gate_subject(
+            "[HAG:49d7368d-95a6-4c6c-91cc-8c30a4583c35] 2FA approval needed"
+        ));
+        assert!(is_human_approval_gate_subject(
+            "Re: [HAG:49d7368d-95a6-4c6c-91cc-8c30a4583c35] 2FA approval needed"
+        ));
+        assert!(is_human_approval_gate_subject(
+            "re:    [hag:49d7368d-95a6-4c6c-91cc-8c30a4583c35] 2fa approval needed"
+        ));
+        assert!(!is_human_approval_gate_subject("Re: Project update"));
+        assert!(!is_human_approval_gate_subject(""));
     }
 }

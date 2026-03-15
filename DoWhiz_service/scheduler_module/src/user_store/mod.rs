@@ -7,6 +7,7 @@ use mongodb::sync::Collection;
 use mongodb::IndexModel;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::mongo_store::{create_client_from_env, database_from_env, ensure_index_compatible};
@@ -388,24 +389,20 @@ fn should_refresh_last_seen(last_seen_at: DateTime<Utc>, now: DateTime<Utc>) -> 
 
 const LAST_SEEN_UPDATE_INTERVAL_SECS: i64 = 5 * 60;
 
-use std::sync::Arc;
-
 /// Lazy-initialized global UserStore
 static USER_STORE: std::sync::OnceLock<Option<Arc<UserStore>>> = std::sync::OnceLock::new();
 
 /// Get or initialize the global UserStore (returns None if not configured)
 pub fn get_global_user_store() -> Option<Arc<UserStore>> {
     USER_STORE
-        .get_or_init(|| {
-            match UserStore::new("") {
-                Ok(store) => {
-                    tracing::info!("UserStore initialized for user lookups");
-                    Some(Arc::new(store))
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to initialize UserStore: {}", e);
-                    None
-                }
+        .get_or_init(|| match UserStore::new("") {
+            Ok(store) => {
+                tracing::info!("UserStore initialized for user lookups");
+                Some(Arc::new(store))
+            }
+            Err(e) => {
+                tracing::warn!("Failed to initialize UserStore: {}", e);
+                None
             }
         })
         .clone()

@@ -30,8 +30,10 @@ pub enum Channel {
     GoogleSlides,
     /// iMessage via BlueBubbles bridge
     BlueBubbles,
-    /// Notion collaboration via comments (browser automation)
+/// Notion collaboration via API
     Notion,
+    /// WeChat Work (企业微信) via qyapi
+    WeChat,
 }
 
 impl Default for Channel {
@@ -53,7 +55,8 @@ impl std::fmt::Display for Channel {
             Channel::GoogleSheets => write!(f, "google_sheets"),
             Channel::GoogleSlides => write!(f, "google_slides"),
             Channel::BlueBubbles => write!(f, "bluebubbles"),
-            Channel::Notion => write!(f, "notion"),
+Channel::Notion => write!(f, "notion"),
+            Channel::WeChat => write!(f, "wechat"),
         }
     }
 }
@@ -73,7 +76,8 @@ impl std::str::FromStr for Channel {
             "google_sheets" | "googlesheets" => Ok(Channel::GoogleSheets),
             "google_slides" | "googleslides" => Ok(Channel::GoogleSlides),
             "bluebubbles" | "imessage" => Ok(Channel::BlueBubbles),
-            "notion" => Ok(Channel::Notion),
+"notion" => Ok(Channel::Notion),
+            "wechat" | "weixin" => Ok(Channel::WeChat),
             _ => Err(format!("unknown channel: {}", s)),
         }
     }
@@ -183,7 +187,7 @@ pub struct ChannelMetadata {
     pub google_slides_owner_email: Option<String>,
     /// BlueBubbles-specific: Chat GUID (e.g., "iMessage;-;+1234567890")
     pub bluebubbles_chat_guid: Option<String>,
-    /// Notion-specific: Workspace ID
+/// Notion-specific: Workspace ID
     pub notion_workspace_id: Option<String>,
     /// Notion-specific: Workspace name
     pub notion_workspace_name: Option<String>,
@@ -197,6 +201,12 @@ pub struct ChannelMetadata {
     pub notion_block_id: Option<String>,
     /// Notion-specific: Notification ID (for deduplication)
     pub notion_notification_id: Option<String>,
+    /// WeChat Work-specific: Corp ID (企业ID)
+    pub wechat_corp_id: Option<String>,
+    /// WeChat Work-specific: User ID (用户ID)
+    pub wechat_user_id: Option<String>,
+    /// WeChat Work-specific: Agent ID (应用ID)
+    pub wechat_agent_id: Option<String>,
 
     // =========================================================================
     // Multi-channel collaboration support
@@ -299,4 +309,140 @@ pub enum AdapterError {
     IoError(#[from] std::io::Error),
     #[error("json error: {0}")]
     JsonError(#[from] serde_json::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== Channel Enum Tests ====================
+
+    #[test]
+    fn channel_display_wechat() {
+        assert_eq!(Channel::WeChat.to_string(), "wechat");
+    }
+
+    #[test]
+    fn channel_display_all() {
+        assert_eq!(Channel::Email.to_string(), "email");
+        assert_eq!(Channel::Slack.to_string(), "slack");
+        assert_eq!(Channel::Discord.to_string(), "discord");
+        assert_eq!(Channel::Sms.to_string(), "sms");
+        assert_eq!(Channel::Telegram.to_string(), "telegram");
+        assert_eq!(Channel::WhatsApp.to_string(), "whatsapp");
+        assert_eq!(Channel::GoogleDocs.to_string(), "google_docs");
+        assert_eq!(Channel::GoogleSheets.to_string(), "google_sheets");
+        assert_eq!(Channel::GoogleSlides.to_string(), "google_slides");
+        assert_eq!(Channel::BlueBubbles.to_string(), "bluebubbles");
+        assert_eq!(Channel::WeChat.to_string(), "wechat");
+    }
+
+    #[test]
+    fn channel_from_str_wechat() {
+        assert_eq!("wechat".parse::<Channel>().unwrap(), Channel::WeChat);
+        assert_eq!("WeChat".parse::<Channel>().unwrap(), Channel::WeChat);
+        assert_eq!("WECHAT".parse::<Channel>().unwrap(), Channel::WeChat);
+        assert_eq!("weixin".parse::<Channel>().unwrap(), Channel::WeChat);
+        assert_eq!("Weixin".parse::<Channel>().unwrap(), Channel::WeChat);
+    }
+
+    #[test]
+    fn channel_from_str_all_variants() {
+        assert_eq!("email".parse::<Channel>().unwrap(), Channel::Email);
+        assert_eq!("slack".parse::<Channel>().unwrap(), Channel::Slack);
+        assert_eq!("discord".parse::<Channel>().unwrap(), Channel::Discord);
+        assert_eq!("sms".parse::<Channel>().unwrap(), Channel::Sms);
+        assert_eq!("telegram".parse::<Channel>().unwrap(), Channel::Telegram);
+        assert_eq!("whatsapp".parse::<Channel>().unwrap(), Channel::WhatsApp);
+        assert_eq!("google_docs".parse::<Channel>().unwrap(), Channel::GoogleDocs);
+        assert_eq!("googledocs".parse::<Channel>().unwrap(), Channel::GoogleDocs);
+        assert_eq!("google_sheets".parse::<Channel>().unwrap(), Channel::GoogleSheets);
+        assert_eq!("google_slides".parse::<Channel>().unwrap(), Channel::GoogleSlides);
+        assert_eq!("bluebubbles".parse::<Channel>().unwrap(), Channel::BlueBubbles);
+        assert_eq!("imessage".parse::<Channel>().unwrap(), Channel::BlueBubbles);
+    }
+
+    #[test]
+    fn channel_from_str_unknown_fails() {
+        assert!("unknown".parse::<Channel>().is_err());
+        assert!("facebook".parse::<Channel>().is_err());
+        assert!("".parse::<Channel>().is_err());
+    }
+
+    #[test]
+    fn channel_serde_roundtrip_wechat() {
+        let channel = Channel::WeChat;
+        let json = serde_json::to_string(&channel).unwrap();
+        assert_eq!(json, "\"we_chat\""); // snake_case serialization
+        let parsed: Channel = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, Channel::WeChat);
+    }
+
+    #[test]
+    fn channel_serde_roundtrip_all() {
+        let channels = vec![
+            Channel::Email,
+            Channel::Slack,
+            Channel::Discord,
+            Channel::Sms,
+            Channel::Telegram,
+            Channel::WhatsApp,
+            Channel::GoogleDocs,
+            Channel::GoogleSheets,
+            Channel::GoogleSlides,
+            Channel::BlueBubbles,
+            Channel::WeChat,
+        ];
+        for channel in channels {
+            let json = serde_json::to_string(&channel).unwrap();
+            let parsed: Channel = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, channel, "roundtrip failed for {:?}", channel);
+        }
+    }
+
+    #[test]
+    fn channel_default_is_email() {
+        assert_eq!(Channel::default(), Channel::Email);
+    }
+
+    // ==================== ChannelMetadata WeChat Fields Tests ====================
+
+    #[test]
+    fn channel_metadata_wechat_fields_default() {
+        let meta = ChannelMetadata::default();
+        assert!(meta.wechat_corp_id.is_none());
+        assert!(meta.wechat_user_id.is_none());
+        assert!(meta.wechat_agent_id.is_none());
+    }
+
+    #[test]
+    fn channel_metadata_wechat_fields_set() {
+        let meta = ChannelMetadata {
+            wechat_corp_id: Some("ww1234567890".to_string()),
+            wechat_user_id: Some("zhangsan".to_string()),
+            wechat_agent_id: Some("1000002".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(meta.wechat_corp_id.as_deref(), Some("ww1234567890"));
+        assert_eq!(meta.wechat_user_id.as_deref(), Some("zhangsan"));
+        assert_eq!(meta.wechat_agent_id.as_deref(), Some("1000002"));
+    }
+
+    #[test]
+    fn channel_metadata_serde_wechat() {
+        let meta = ChannelMetadata {
+            wechat_corp_id: Some("corp123".to_string()),
+            wechat_user_id: Some("user456".to_string()),
+            wechat_agent_id: Some("789".to_string()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        assert!(json.contains("wechat_corp_id"));
+        assert!(json.contains("corp123"));
+
+        let parsed: ChannelMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.wechat_corp_id, meta.wechat_corp_id);
+        assert_eq!(parsed.wechat_user_id, meta.wechat_user_id);
+        assert_eq!(parsed.wechat_agent_id, meta.wechat_agent_id);
+    }
 }

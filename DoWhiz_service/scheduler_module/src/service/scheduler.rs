@@ -18,8 +18,8 @@ use super::config::ServiceConfig;
 use super::state::{ClaimResult, ConcurrencyLimiter, SchedulerClaims, TaskClaim};
 use super::BoxError;
 
-/// Default task timeout in seconds (10 minutes)
-const DEFAULT_TASK_TIMEOUT_SECS: u64 = 600;
+/// Default task timeout in seconds (100 minutes)
+const DEFAULT_TASK_TIMEOUT_SECS: u64 = 6000;
 /// Keep run_task timeout below watchdog timeout by this margin.
 const WATCHDOG_TIMEOUT_HEADROOM_SECS: u64 = 30;
 /// Maximum number of retries before giving up

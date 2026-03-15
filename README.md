@@ -1,4 +1,4 @@
-# DoWhiz - OpenClaw🦞, but scalable, accessible, and safe.
+# DoWhiz - One-click startup workspace for founders and digital founding teams.
 
 <p align="center"><strong>Product Shorts</strong></p>
 
@@ -29,7 +29,12 @@
 
 <p align="center"><sub>Tap any preview to watch the full Shorts video.</sub></p>
 
-DoWhiz is a multi-channel digital employee platform.
+DoWhiz is an agent-native startup workspace platform.
+
+Current product model:
+- Solo-founder-first onboarding to generate a startup workspace blueprint.
+- Workspace-first operating surface for resources, tasks, artifacts, approvals, and memory.
+- Multi-channel execution across email, Slack/Discord, GitHub, Google Docs, and related surfaces.
 
 Current production model:
 - `inbound_gateway` handles ingress (email/webhooks/chat events) and enqueue.
@@ -97,7 +102,3 @@ Inbound message
 
 - Staging deploy branch: `dev`
 - Production deploy branch: `main`
-
-## License
-
-Apache-2.0. See [`LICENSE`](LICENSE).

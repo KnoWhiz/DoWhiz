@@ -3,6 +3,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use stripe::{
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::account_store::AccountStore;
+use crate::account_store::{AccountStore, AnalyticsEventInsert};
 
 use super::auth::{extract_bearer_token, validate_supabase_token};
 
@@ -45,6 +46,55 @@ impl BillingState {
             frontend_url,
         })
     }
+}
+
+fn track_billing_event(
+    state: &BillingState,
+    event_name: &str,
+    account_id: Option<Uuid>,
+    auth_user_id: Option<Uuid>,
+    event_key: Option<String>,
+    properties: serde_json::Value,
+) {
+    let environment = std::env::var("DEPLOY_TARGET")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "production".to_string());
+    let plan_type = properties
+        .get("plan_type")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
+        .or_else(|| Some("hourly_credits".to_string()));
+    let event = AnalyticsEventInsert {
+        event_name: event_name.to_string(),
+        source: "server".to_string(),
+        event_timestamp: Utc::now(),
+        account_id,
+        auth_user_id,
+        anonymous_id: None,
+        session_id: None,
+        workspace_id: account_id.map(|id| id.to_string()),
+        org_id: None,
+        plan_type,
+        environment: Some(environment),
+        app_version: None,
+        page_path: None,
+        route_path: Some("/billing".to_string()),
+        referrer: None,
+        utm_source: None,
+        utm_medium: None,
+        utm_campaign: None,
+        utm_term: None,
+        utm_content: None,
+        device_type: None,
+        browser: None,
+        os: None,
+        event_key,
+        properties,
+    };
+    state
+        .account_store
+        .record_analytics_event_detached(event, "billing");
 }
 
 // ============================================================================
@@ -180,6 +230,29 @@ async fn create_checkout(
 
     // Calculate price in cents ($10/hr)
     let amount_cents = (payload.hours as i64) * 1000; // $10 = 1000 cents
+    let checkout_entry_point = headers
+        .get("x-dowhiz-checkout-entry")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    track_billing_event(
+        &state,
+        "checkout_started",
+        Some(account.id),
+        Some(auth_user.id),
+        None,
+        serde_json::json!({
+            "hours": payload.hours,
+            "amount_cents": amount_cents,
+            "amount_usd": (amount_cents as f64) / 100.0,
+            "currency": "usd",
+            "billing_interval": "one_time",
+            "plan_type": "hourly_credits",
+            "checkout_entry_point": checkout_entry_point.clone(),
+        }),
+    );
 
     // Create Stripe checkout session
     let success_url = format!("{}/auth/?payment=success", state.frontend_url);
@@ -216,6 +289,21 @@ async fn create_checkout(
         .await
         .map_err(|e| {
             error!("Failed to create Stripe checkout session: {}", e);
+            track_billing_event(
+                &state,
+                "checkout_error",
+                Some(account.id),
+                Some(auth_user.id),
+                None,
+                serde_json::json!({
+                    "hours": payload.hours,
+                    "amount_cents": amount_cents,
+                    "error_reason": "stripe_checkout_create_failed",
+                    "error": e.to_string(),
+                    "plan_type": "hourly_credits",
+                    "checkout_entry_point": checkout_entry_point.clone(),
+                }),
+            );
             (
                 StatusCode::BAD_GATEWAY,
                 "Failed to create checkout session".to_string(),
@@ -224,6 +312,20 @@ async fn create_checkout(
 
     let checkout_url = session.url.ok_or_else(|| {
         error!("Stripe session missing URL");
+        track_billing_event(
+            &state,
+            "checkout_error",
+            Some(account.id),
+            Some(auth_user.id),
+            None,
+            serde_json::json!({
+                "hours": payload.hours,
+                "amount_cents": amount_cents,
+                "error_reason": "stripe_checkout_missing_url",
+                "plan_type": "hourly_credits",
+                "checkout_entry_point": checkout_entry_point,
+            }),
+        );
         (
             StatusCode::BAD_GATEWAY,
             "Invalid checkout session".to_string(),
@@ -269,6 +371,18 @@ async fn handle_webhook(
     let event =
         Webhook::construct_event(payload, signature, &state.webhook_secret).map_err(|e| {
             warn!("Webhook signature verification failed: {}", e);
+            track_billing_event(
+                &state,
+                "webhook_error",
+                None,
+                None,
+                None,
+                serde_json::json!({
+                    "error_reason": "invalid_signature",
+                    "error": e.to_string(),
+                    "provider": "stripe",
+                }),
+            );
             (StatusCode::BAD_REQUEST, "Invalid signature".to_string())
         })?;
 
@@ -394,6 +508,39 @@ async fn handle_webhook(
     info!(
         "Payment {} processed: {} hours added to account {}",
         session_id, hours, account_id
+    );
+
+    track_billing_event(
+        &state,
+        "payment_succeeded",
+        Some(account_id),
+        None,
+        Some(format!("payment:{}", session_id)),
+        serde_json::json!({
+            "amount_cents": amount_cents,
+            "amount_usd": (amount_cents as f64) / 100.0,
+            "currency": session
+                .currency
+                .map(|currency| currency.to_string())
+                .unwrap_or_else(|| "usd".to_string()),
+            "hours_purchased": hours,
+            "billing_interval": "one_time",
+            "plan_type": "hourly_credits",
+            "checkout_session_id": session_id,
+        }),
+    );
+    track_billing_event(
+        &state,
+        "subscription_activated",
+        Some(account_id),
+        None,
+        Some(format!("subscription:{}", session_id)),
+        serde_json::json!({
+            "billing_interval": "one_time",
+            "status": "active_credits",
+            "plan_type": "hourly_credits",
+            "checkout_session_id": session_id,
+        }),
     );
 
     Ok(StatusCode::OK)

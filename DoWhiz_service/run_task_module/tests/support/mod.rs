@@ -130,6 +130,7 @@ pub enum FakeCodexMode {
     EnsureYolo,
     EnsureDangerSandbox,
     EnsureAddDir,
+    EnsureHumanApprovalGateMcpEnv,
     Sleep,
 }
 
@@ -296,6 +297,18 @@ for arg in "$@"; do
 done
 if [ "$found" != "1" ]; then
   echo "missing --add-dir ${expected}" >&2
+  exit 3
+fi
+echo "<html><body>Test reply</body></html>" > reply_email_draft.html
+mkdir -p reply_email_attachments
+echo "attachment" > reply_email_attachments/attachment.txt
+"#
+        }
+        FakeCodexMode::EnsureHumanApprovalGateMcpEnv => {
+            r#"#!/bin/sh
+set -e
+if [ "${HUMAN_APPROVAL_GATE_REQUIRE_MCP:-}" != "1" ]; then
+  echo "missing HUMAN_APPROVAL_GATE_REQUIRE_MCP=1" >&2
   exit 3
 fi
 echo "<html><body>Test reply</body></html>" > reply_email_draft.html
