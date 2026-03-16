@@ -8,7 +8,9 @@ use crate::account_store::lookup_account_by_channel;
 use crate::adapters::bluebubbles::send_quick_bluebubbles_response;
 use crate::adapters::google_common::GoogleCommentsClient;
 use crate::adapters::telegram::send_quick_telegram_response;
+use crate::adapters::wechat::WeChatOutboundAdapter;
 use crate::adapters::whatsapp::send_quick_whatsapp_response;
+use crate::channel::OutboundMessage;
 use crate::blob_store::get_blob_store;
 use crate::channel::Channel;
 use crate::google_auth::{GoogleAuth, GoogleAuthConfig};
@@ -1001,6 +1003,94 @@ fn send_quick_google_workspace_response(
     Ok(())
 }
 
+/// Try to handle a WeChat message with the upstream classifier.
+/// Returns Ok(true) if the message was handled, Ok(false) if it should go to the full pipeline.
+pub(crate) fn try_quick_response_wechat(
+    config: &ServiceConfig,
+    user_store: &UserStore,
+    message_router: &MessageRouter,
+    runtime: &tokio::runtime::Handle,
+    message: &crate::channel::InboundMessage,
+) -> Result<bool, BoxError> {
+    let Some(text) = message.text_body.as_deref() else {
+        return Ok(false);
+    };
+
+    // WeChat user ID is the sender
+    let user_id = &message.sender;
+
+    // Look up user and memory
+    let account_id = lookup_account_by_channel(&Channel::WeChat, user_id);
+    let user = user_store.get_or_create_user("wechat", user_id)?;
+    let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
+    let memory = read_user_memo(runtime, account_id, &user_paths.memory_dir);
+
+    let employee_name = config.employee_profile.display_name.as_deref();
+    let decision = runtime.block_on(message_router.classify(
+        text,
+        memory.as_deref(),
+        employee_name,
+        None,
+    ));
+
+    match decision {
+        RouterDecision::Simple {
+            response,
+            memory_update,
+        } => {
+            // Write memory update if present
+            if let Some(update) = memory_update {
+                if let Err(e) =
+                    write_memory_update(account_id, &user.user_id, &user_paths.memory_dir, &update)
+                {
+                    warn!("Failed to write memory update: {}", e);
+                }
+            }
+
+            // Send quick response via WeChat API
+            if send_quick_wechat_response(user_id, &response).is_ok() {
+                info!("wechat quick response sent: user_id={}", user_id);
+                return Ok(true);
+            }
+            Ok(false)
+        }
+        RouterDecision::Complex | RouterDecision::Passthrough => Ok(false),
+    }
+}
+
+/// Send a quick response to a WeChat user.
+fn send_quick_wechat_response(user_id: &str, response: &str) -> Result<(), BoxError> {
+    use crate::channel::{ChannelMetadata, OutboundAdapter};
+
+    let adapter = WeChatOutboundAdapter::from_env()
+        .map_err(|e| format!("Failed to create WeChat adapter: {}", e))?;
+
+    let message = OutboundMessage {
+        channel: Channel::WeChat,
+        from: None, // WeChat uses agent_id from env, not from message
+        to: vec![user_id.to_string()],
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        subject: String::new(),
+        text_body: response.to_string(),
+        html_body: String::new(),
+        html_path: None,
+        attachments_dir: None,
+        thread_id: None,
+        metadata: ChannelMetadata::default(),
+    };
+
+    let result = adapter
+        .send(&message)
+        .map_err(|e| format!("Failed to send WeChat message: {}", e))?;
+
+    if !result.success {
+        return Err(format!("WeChat send failed: {:?}", result.error).into());
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1332,5 +1422,57 @@ mod tests {
         );
 
         assert!(message.metadata.google_docs_comment_id.is_none());
+    }
+
+    fn build_wechat_message(
+        sender: &str,
+        text: Option<&str>,
+        corp_id: Option<&str>,
+    ) -> InboundMessage {
+        InboundMessage {
+            channel: Channel::WeChat,
+            sender: sender.to_string(),
+            sender_name: Some("Test User".to_string()),
+            recipient: "bot".to_string(),
+            subject: None,
+            text_body: text.map(str::to_string),
+            html_body: None,
+            thread_id: format!("wechat:{}:{}", corp_id.unwrap_or("corp"), sender),
+            message_id: Some("msg-1".to_string()),
+            attachments: Vec::new(),
+            reply_to: Vec::new(),
+            raw_payload: Vec::new(),
+            metadata: ChannelMetadata {
+                wechat_corp_id: corp_id.map(str::to_string),
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn wechat_message_has_correct_metadata() {
+        let message = build_wechat_message("user123", Some("Hello!"), Some("corp456"));
+
+        assert_eq!(message.channel, Channel::WeChat);
+        assert_eq!(message.sender, "user123");
+        assert_eq!(message.text_body, Some("Hello!".to_string()));
+        assert_eq!(
+            message.metadata.wechat_corp_id,
+            Some("corp456".to_string())
+        );
+    }
+
+    #[test]
+    fn wechat_message_without_text_returns_none() {
+        let message = build_wechat_message("user123", None, Some("corp456"));
+
+        assert!(message.text_body.is_none());
+    }
+
+    #[test]
+    fn wechat_message_thread_id_format() {
+        let message = build_wechat_message("user123", Some("Hi"), Some("corp456"));
+
+        assert_eq!(message.thread_id, "wechat:corp456:user123");
     }
 }
