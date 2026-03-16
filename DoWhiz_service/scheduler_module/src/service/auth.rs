@@ -20,8 +20,9 @@ use crate::user_store::UserStore;
 use crate::{load_tasks_with_status, TaskStatusSummary};
 
 use super::startup_workspace::{
-    derive_provider_capabilities, derive_provider_connections, LinkedIdentifierSnapshot,
-    ProviderCapabilityInputs, WorkspaceProviderRuntimeState,
+    derive_provider_capabilities, derive_provider_connections,
+    generate_startup_intake_chat_response, LinkedIdentifierSnapshot, ProviderCapabilityInputs,
+    StartupIntakeChatRequest, WorkspaceProviderRuntimeState,
 };
 
 /// State for auth routes
@@ -709,6 +710,43 @@ pub async fn get_workspace_provider_state(
         }),
     )
         .into_response()
+}
+
+/// POST /api/startup-workspace/intake-chat
+/// LLM-driven conversational intake that returns a structured draft JSON.
+pub async fn startup_workspace_intake_chat(
+    Json(request): Json<StartupIntakeChatRequest>,
+) -> impl IntoResponse {
+    if request.messages.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "messages must include at least one conversation message"
+            })),
+        )
+            .into_response();
+    }
+
+    match generate_startup_intake_chat_response(request).await {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(error_message) => {
+            let status = if error_message.contains("No conversation messages")
+                || error_message.contains("messages")
+            {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
+
+            (
+                status,
+                Json(serde_json::json!({
+                    "error": error_message
+                })),
+            )
+                .into_response()
+        }
+    }
 }
 
 fn oauth_ready(
@@ -2866,7 +2904,9 @@ pub async fn notion_oauth_callback(
 
     info!(
         "Notion OAuth successful for user {} (Notion workspace: {} / user: {:?})",
-        auth_user_id, notion_token.workspace_name.as_deref().unwrap_or("unknown"), notion_user_id
+        auth_user_id,
+        notion_token.workspace_name.as_deref().unwrap_or("unknown"),
+        notion_user_id
     );
 
     // Get user's account
@@ -2891,13 +2931,18 @@ pub async fn notion_oauth_callback(
 
     // Create a unique identifier for this Notion connection
     // We use workspace_id to allow users to connect multiple workspaces
-    let notion_identifier = format!("{}:{}", notion_token.workspace_id, notion_user_id.as_deref().unwrap_or("bot"));
+    let notion_identifier = format!(
+        "{}:{}",
+        notion_token.workspace_id,
+        notion_user_id.as_deref().unwrap_or("bot")
+    );
 
     // Link Notion to account
     let store = state.account_store.clone();
-    let link_result =
-        task::spawn_blocking(move || store.create_identifier(account.id, "notion", &notion_identifier))
-            .await;
+    let link_result = task::spawn_blocking(move || {
+        store.create_identifier(account.id, "notion", &notion_identifier)
+    })
+    .await;
 
     match link_result {
         Ok(Ok(_identifier)) => {
@@ -2918,13 +2963,11 @@ pub async fn notion_oauth_callback(
                 updated_at: chrono::Utc::now(),
             };
 
-            let store_result = task::spawn_blocking(move || {
-                match NotionStore::new() {
-                    Ok(store) => store.upsert_credential(&credential),
-                    Err(e) => {
-                        error!("Failed to create NotionStore: {}", e);
-                        Err(e)
-                    }
+            let store_result = task::spawn_blocking(move || match NotionStore::new() {
+                Ok(store) => store.upsert_credential(&credential),
+                Err(e) => {
+                    error!("Failed to create NotionStore: {}", e);
+                    Err(e)
                 }
             })
             .await;
@@ -2942,7 +2985,10 @@ pub async fn notion_oauth_callback(
                     // Continue anyway - the identifier is already linked
                 }
                 Err(e) => {
-                    error!("spawn_blocking panicked while storing Notion credential: {}", e);
+                    error!(
+                        "spawn_blocking panicked while storing Notion credential: {}",
+                        e
+                    );
                 }
             }
 
@@ -3380,8 +3426,12 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/auth/slack/callback", get(slack_oauth_callback))
         .route("/auth/github", get(github_oauth_start))
         .route("/auth/github/callback", get(github_oauth_callback))
-.route("/auth/notion", get(notion_oauth_start))
+        .route("/auth/notion", get(notion_oauth_start))
         .route("/auth/notion/callback", get(notion_oauth_callback))
+        .route(
+            "/api/startup-workspace/intake-chat",
+            post(startup_workspace_intake_chat),
+        )
         .route(
             "/api/workspace/provider-state",
             get(get_workspace_provider_state),

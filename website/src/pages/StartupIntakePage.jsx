@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { getDoWhizApiBaseUrl } from '../analytics';
 import {
   createFounderIntakeDefaults,
   createValidatedWorkspaceBlueprintFromIntake,
@@ -7,6 +8,7 @@ import {
 } from '../domain/workspaceBlueprint';
 
 const DASHBOARD_PATH = '/auth/index.html?loggedIn=true#section-workspace';
+const INTAKE_CHAT_API_PATH = '/api/startup-workspace/intake-chat';
 
 const DEFAULT_RESOURCE_SELECTIONS = {
   build_system: 'github',
@@ -15,91 +17,8 @@ const DEFAULT_RESOURCE_SELECTIONS = {
   external_execution: 'email'
 };
 
-const TOOL_LABELS = {
-  github: 'GitHub',
-  gitlab: 'GitLab',
-  bitbucket: 'Bitbucket',
-  google_docs: 'Google Docs',
-  notion: 'Notion',
-  slack: 'Slack',
-  discord: 'Discord',
-  email: 'Email'
-};
-
-const CHAT_STEPS = {
-  PROJECT_DESCRIPTION: 'project_description',
-  FOUNDER_NAME: 'founder_name',
-  VENTURE_NAME: 'venture_name',
-  GOALS: 'goals',
-  LAUNCH_MODE: 'launch_mode',
-  RESOURCE_CATEGORY: 'resource_category',
-  CONFIRM: 'confirm',
-  COMPLETED: 'completed'
-};
-
-const LAUNCH_MODE_OPTIONS = [
-  {
-    value: 'default',
-    label: 'Use default resource launch',
-    description: 'Fastest path: GitHub + Google Docs + Slack + Email.'
-  },
-  {
-    value: 'custom',
-    label: 'Choose tools step by step',
-    description: 'Pick one tool in each resource category.'
-  }
-];
-
-const RESOURCE_CATEGORY_FLOW = [
-  {
-    id: 'build_system',
-    label: 'Build System',
-    options: [
-      { value: 'github', label: 'GitHub' },
-      { value: 'gitlab', label: 'GitLab' },
-      { value: 'bitbucket', label: 'Bitbucket' }
-    ]
-  },
-  {
-    id: 'formal_docs',
-    label: 'Formal Docs',
-    options: [
-      { value: 'google_docs', label: 'Google Docs' },
-      { value: 'notion', label: 'Notion' }
-    ]
-  },
-  {
-    id: 'coordination',
-    label: 'Coordination',
-    options: [
-      { value: 'slack', label: 'Slack' },
-      { value: 'discord', label: 'Discord' },
-      { value: 'email', label: 'Email' }
-    ]
-  },
-  {
-    id: 'external_execution',
-    label: 'External Execution',
-    options: [
-      { value: 'email', label: 'Email' },
-      { value: 'slack', label: 'Slack' },
-      { value: 'discord', label: 'Discord' }
-    ]
-  }
-];
-
-const CONFIRM_OPTIONS = [
-  {
-    value: 'create',
-    label: 'Create blueprint now',
-    description: 'Save team setup and continue to dashboard.'
-  },
-  {
-    value: 'restart',
-    label: 'Start over',
-    description: 'Clear this chat and restart intake.'
-  }
-];
+const INITIAL_ASSISTANT_PROMPT =
+  'Describe the project you want to start. I will ask follow-ups and build the JSON blueprint draft with you.';
 
 function createMessage(role, text) {
   return {
@@ -110,12 +29,91 @@ function createMessage(role, text) {
 }
 
 function createInitialMessages() {
-  return [
-    createMessage(
-      'assistant',
-      'Describe the project you want to start. I will build your agent-team workspace setup from that.'
-    )
-  ];
+  return [createMessage('assistant', INITIAL_ASSISTANT_PROMPT)];
+}
+
+function normalizeLaunchMode(mode) {
+  const value = String(mode || '').trim().toLowerCase();
+  if (!value) return null;
+  if (value.includes('default') || value === 'auto') return 'default';
+  if (value.includes('custom') || value === 'manual') return 'custom';
+  return null;
+}
+
+function normalizeToolValue(value, allowed) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return allowed.includes(normalized) ? normalized : null;
+}
+
+function normalizeToolSelections(mode, resourceTools = {}) {
+  if (mode === 'default') {
+    return { ...DEFAULT_RESOURCE_SELECTIONS };
+  }
+
+  return {
+    build_system:
+      normalizeToolValue(resourceTools.build_system, ['github', 'gitlab', 'bitbucket']) || 'github',
+    formal_docs: normalizeToolValue(resourceTools.formal_docs, ['google_docs', 'notion']) || 'google_docs',
+    coordination: normalizeToolValue(resourceTools.coordination, ['slack', 'discord', 'email']) || 'slack',
+    external_execution:
+      normalizeToolValue(resourceTools.external_execution, ['email', 'slack', 'discord']) || 'email'
+  };
+}
+
+function clampPlanHorizon(value) {
+  const numeric = Number.parseInt(value, 10);
+  if (!Number.isFinite(numeric) || Number.isNaN(numeric) || numeric <= 30) {
+    return '30';
+  }
+  if (numeric <= 60) {
+    return '60';
+  }
+  return '90';
+}
+
+function normalizeStringList(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    const normalized = String(value || '').trim();
+    if (!normalized) {
+      continue;
+    }
+    const key = normalized.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(normalized);
+    }
+  }
+  return result;
+}
+
+function normalizeRequestedAgents(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    const role = String(value?.role || '').trim();
+    const owner = String(value?.owner || '').trim();
+    if (!role) {
+      continue;
+    }
+    const key = role.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push({
+      role,
+      owner
+    });
+  }
+  return result;
 }
 
 function applyResourceSelectionsToIntake(intake, selections) {
@@ -130,35 +128,31 @@ function applyResourceSelectionsToIntake(intake, selections) {
     }
   };
 
-  const buildSystem = selections.build_system || DEFAULT_RESOURCE_SELECTIONS.build_system;
-  if (buildSystem === 'github') {
+  if (selections.build_system === 'github') {
     addChannel('GitHub');
   }
 
-  const formalDocs = selections.formal_docs || DEFAULT_RESOURCE_SELECTIONS.formal_docs;
-  if (formalDocs === 'google_docs') {
+  if (selections.formal_docs === 'google_docs') {
     addChannel('Google Docs');
   }
 
-  const coordination = selections.coordination || DEFAULT_RESOURCE_SELECTIONS.coordination;
-  if (coordination === 'slack') {
+  if (selections.coordination === 'slack') {
     addChannel('Slack');
   }
-  if (coordination === 'discord') {
+  if (selections.coordination === 'discord') {
     addChannel('Discord');
   }
-  if (coordination === 'email') {
+  if (selections.coordination === 'email') {
     addChannel('Email');
   }
 
-  const externalExecution = selections.external_execution || DEFAULT_RESOURCE_SELECTIONS.external_execution;
-  if (externalExecution === 'email') {
+  if (selections.external_execution === 'email') {
     addChannel('Email');
   }
-  if (externalExecution === 'slack') {
+  if (selections.external_execution === 'slack') {
     addChannel('Slack');
   }
-  if (externalExecution === 'discord') {
+  if (selections.external_execution === 'discord') {
     addChannel('Discord');
   }
 
@@ -166,34 +160,75 @@ function applyResourceSelectionsToIntake(intake, selections) {
     addChannel('Email');
   }
 
-  const hasExistingRepo = buildSystem === 'github' || buildSystem === 'gitlab' || buildSystem === 'bitbucket';
+  const hasExistingRepo =
+    selections.build_system === 'github' ||
+    selections.build_system === 'gitlab' ||
+    selections.build_system === 'bitbucket';
 
   next.preferred_channels = channels;
   next.has_existing_repo = hasExistingRepo;
-  next.primary_repo_provider = hasExistingRepo ? buildSystem : 'github';
-  next.has_docs_workspace = formalDocs === 'google_docs' || formalDocs === 'notion';
+  next.primary_repo_provider = hasExistingRepo ? selections.build_system : 'github';
+  next.has_docs_workspace = selections.formal_docs === 'google_docs' || selections.formal_docs === 'notion';
 
   return next;
 }
 
-function summarizeSelections(selections) {
-  return RESOURCE_CATEGORY_FLOW.map((category) => {
-    const tool = selections[category.id];
-    const label = TOOL_LABELS[tool] || tool || 'Not selected';
-    return `${category.label}: ${label}`;
-  }).join('\n');
+function mapDraftToIntake(draft) {
+  const base = createFounderIntakeDefaults();
+  const launchMode = normalizeLaunchMode(draft?.resource_launch_mode);
+  const normalizedTools = normalizeToolSelections(launchMode, draft?.resource_tools || {});
+  const withResources = applyResourceSelectionsToIntake(base, normalizedTools);
+
+  const goals = normalizeStringList(draft?.goals_30_90_days);
+  const assets = normalizeStringList(draft?.current_assets);
+  const requestedAgents = normalizeRequestedAgents(draft?.requested_agents);
+  const requestedAgentsText = requestedAgents
+    .map((agent) => (agent.owner ? `${agent.role}:${agent.owner}` : agent.role))
+    .join('\n');
+
+  return {
+    ...withResources,
+    founder_name: String(draft?.founder_name || '').trim(),
+    founder_email: String(draft?.founder_email || '').trim(),
+    venture_name: String(draft?.venture_name || '').trim(),
+    venture_thesis: String(draft?.venture_thesis || '').trim(),
+    venture_stage: String(draft?.venture_stage || '').trim() || 'idea',
+    plan_horizon_days: clampPlanHorizon(draft?.plan_horizon_days),
+    goals_text: goals.join('\n'),
+    assets_text: assets.join('\n'),
+    requested_agents_text: requestedAgentsText
+  };
+}
+
+function summarizeToolSelections(draft) {
+  const mode = normalizeLaunchMode(draft?.resource_launch_mode);
+  const tools = normalizeToolSelections(mode, draft?.resource_tools || {});
+  return [
+    `Mode: ${mode || 'not selected'}`,
+    `Build System: ${tools.build_system}`,
+    `Formal Docs: ${tools.formal_docs}`,
+    `Coordination: ${tools.coordination}`,
+    `External Execution: ${tools.external_execution}`
+  ].join('\n');
+}
+
+function serializeMessagesForApi(messages) {
+  return messages.map((message) => ({
+    role: message.role,
+    content: message.text
+  }));
 }
 
 function StartupIntakePage() {
-  const [intake, setIntake] = useState(() => createFounderIntakeDefaults());
   const [messages, setMessages] = useState(() => createInitialMessages());
   const [inputValue, setInputValue] = useState('');
-  const [step, setStep] = useState(CHAT_STEPS.PROJECT_DESCRIPTION);
-  const [resourceIndex, setResourceIndex] = useState(0);
-  const [launchMode, setLaunchMode] = useState(null);
-  const [resourceSelections, setResourceSelections] = useState(() => ({ ...DEFAULT_RESOURCE_SELECTIONS }));
+  const [isSending, setIsSending] = useState(false);
   const [errors, setErrors] = useState([]);
   const [blueprint, setBlueprint] = useState(null);
+  const [intakeDraft, setIntakeDraft] = useState(null);
+  const [missingFields, setMissingFields] = useState([]);
+  const [readyForBlueprint, setReadyForBlueprint] = useState(false);
+  const [requestError, setRequestError] = useState('');
   const chatFeedRef = useRef(null);
 
   const blueprintJson = useMemo(
@@ -201,41 +236,10 @@ function StartupIntakePage() {
     [blueprint]
   );
 
-  const activeResourceCategory = RESOURCE_CATEGORY_FLOW[resourceIndex] || null;
-  const isTextInputStep =
-    step === CHAT_STEPS.PROJECT_DESCRIPTION ||
-    step === CHAT_STEPS.FOUNDER_NAME ||
-    step === CHAT_STEPS.VENTURE_NAME ||
-    step === CHAT_STEPS.GOALS;
-
-  const chatPlaceholder = (() => {
-    if (step === CHAT_STEPS.PROJECT_DESCRIPTION) {
-      return 'Example: AI onboarding copilot for B2B SaaS customer success teams...';
-    }
-    if (step === CHAT_STEPS.FOUNDER_NAME) {
-      return 'Your name';
-    }
-    if (step === CHAT_STEPS.VENTURE_NAME) {
-      return "Project name (or type 'skip')";
-    }
-    if (step === CHAT_STEPS.GOALS) {
-      return 'Ship MVP, close 3 pilots, launch onboarding analytics...';
-    }
-    return 'Type your answer...';
-  })();
-
-  const activeChoiceOptions = useMemo(() => {
-    if (step === CHAT_STEPS.LAUNCH_MODE) {
-      return LAUNCH_MODE_OPTIONS;
-    }
-    if (step === CHAT_STEPS.RESOURCE_CATEGORY && activeResourceCategory) {
-      return activeResourceCategory.options;
-    }
-    if (step === CHAT_STEPS.CONFIRM) {
-      return CONFIRM_OPTIONS;
-    }
-    return [];
-  }, [activeResourceCategory, step]);
+  const draftJson = useMemo(
+    () => (intakeDraft ? JSON.stringify(intakeDraft, null, 2) : ''),
+    [intakeDraft]
+  );
 
   useEffect(() => {
     const node = chatFeedRef.current;
@@ -249,67 +253,21 @@ function StartupIntakePage() {
     setMessages((prev) => [...prev, createMessage('assistant', text)]);
   };
 
-  const addUserMessage = (text) => {
-    setMessages((prev) => [...prev, createMessage('user', text)]);
-  };
-
   const resetConversation = () => {
-    setIntake(createFounderIntakeDefaults());
     setMessages(createInitialMessages());
     setInputValue('');
-    setStep(CHAT_STEPS.PROJECT_DESCRIPTION);
-    setResourceIndex(0);
-    setLaunchMode(null);
-    setResourceSelections({ ...DEFAULT_RESOURCE_SELECTIONS });
+    setIsSending(false);
     setErrors([]);
     setBlueprint(null);
+    setIntakeDraft(null);
+    setMissingFields([]);
+    setReadyForBlueprint(false);
+    setRequestError('');
   };
 
-  const finalizeSelections = (mode, selections) => {
-    setLaunchMode(mode);
-    setResourceSelections(selections);
-    setIntake((prev) => applyResourceSelectionsToIntake(prev, selections));
-    addAssistantMessage(
-      `Great. I mapped your resource launch to:\n${summarizeSelections(selections)}\n\nReady to create your agent team blueprint?`
-    );
-    setStep(CHAT_STEPS.CONFIRM);
-    setErrors([]);
-  };
-
-  const askNextResourceCategory = (nextIndex) => {
-    const category = RESOURCE_CATEGORY_FLOW[nextIndex];
-    if (!category) {
-      return;
-    }
-    setResourceIndex(nextIndex);
-    addAssistantMessage(`Choose one tool for ${category.label}.`);
-    setStep(CHAT_STEPS.RESOURCE_CATEGORY);
-  };
-
-  const createBlueprintFromConversation = () => {
-    const finalIntake = applyResourceSelectionsToIntake(intake, resourceSelections);
-    setIntake(finalIntake);
-
-    const result = createValidatedWorkspaceBlueprintFromIntake(finalIntake);
-    if (!result.is_valid) {
-      setErrors(result.errors);
-      setBlueprint(null);
-      addAssistantMessage(`I still need a few fields:\n- ${result.errors.join('\n- ')}`);
-      return;
-    }
-
-    saveWorkspaceBlueprint(result.blueprint);
-    setErrors([]);
-    setBlueprint(result.blueprint);
-    addAssistantMessage(
-      'Blueprint saved. You can open your unified dashboard now, or restart this chat to adjust the setup.'
-    );
-    setStep(CHAT_STEPS.COMPLETED);
-  };
-
-  const handleTextSubmit = (event) => {
+  const handleTextSubmit = async (event) => {
     event.preventDefault();
-    if (!isTextInputStep) {
+    if (isSending) {
       return;
     }
 
@@ -318,107 +276,91 @@ function StartupIntakePage() {
       return;
     }
 
+    const userMessage = createMessage('user', value);
+    const nextMessages = [...messages, userMessage];
+    setMessages(nextMessages);
     setInputValue('');
-    addUserMessage(value);
     setErrors([]);
     setBlueprint(null);
+    setRequestError('');
+    setIsSending(true);
 
-    if (step === CHAT_STEPS.PROJECT_DESCRIPTION) {
-      setIntake((prev) => ({
-        ...prev,
-        venture_thesis: value
-      }));
-      addAssistantMessage('Great context. What should I call you?');
-      setStep(CHAT_STEPS.FOUNDER_NAME);
-      return;
-    }
+    try {
+      const response = await fetch(`${getDoWhizApiBaseUrl()}${INTAKE_CHAT_API_PATH}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messages: serializeMessagesForApi(nextMessages),
+          current_draft: intakeDraft
+        })
+      });
 
-    if (step === CHAT_STEPS.FOUNDER_NAME) {
-      if (value.toLowerCase() === 'skip') {
-        addAssistantMessage('I need your name to create the team blueprint. What should I call you?');
-        return;
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({}));
+        throw new Error(errorPayload.error || 'Failed to get a model response for startup intake.');
       }
 
-      setIntake((prev) => ({
-        ...prev,
-        founder_name: value
-      }));
-      addAssistantMessage("What is the project or company name? You can type 'skip' if undecided.");
-      setStep(CHAT_STEPS.VENTURE_NAME);
-      return;
-    }
+      const payload = await response.json();
+      const assistantMessage = String(payload.assistant_message || '').trim();
+      setIntakeDraft(payload.intake_draft || null);
+      setMissingFields(Array.isArray(payload.missing_fields) ? payload.missing_fields : []);
+      setReadyForBlueprint(Boolean(payload.ready_for_blueprint));
 
-    if (step === CHAT_STEPS.VENTURE_NAME) {
-      if (value.toLowerCase() !== 'skip') {
-        setIntake((prev) => ({
-          ...prev,
-          venture_name: value
-        }));
+      if (assistantMessage) {
+        addAssistantMessage(assistantMessage);
+      } else {
+        addAssistantMessage('I updated the intake JSON. Please continue with any missing details.');
       }
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Startup intake conversation request failed.';
+      setRequestError(message);
       addAssistantMessage(
-        'What are your top goals for the next 30-90 days? You can answer in one line or comma-separated.'
+        'I could not reach the startup intake model right now. Please try again in a few seconds.'
       );
-      setStep(CHAT_STEPS.GOALS);
-      return;
-    }
-
-    if (step === CHAT_STEPS.GOALS) {
-      if (value.toLowerCase() === 'skip') {
-        addAssistantMessage('I need at least one goal before launch planning. Please share your top goal.');
-        return;
-      }
-
-      setIntake((prev) => ({
-        ...prev,
-        goals_text: value
-      }));
-      addAssistantMessage('How do you want to launch resources?');
-      setStep(CHAT_STEPS.LAUNCH_MODE);
+    } finally {
+      setIsSending(false);
     }
   };
 
-  const handleChoiceSelect = (option) => {
-    addUserMessage(option.label);
+  const handleCreateBlueprint = () => {
     setErrors([]);
-    setBlueprint(null);
+    setRequestError('');
 
-    if (step === CHAT_STEPS.LAUNCH_MODE) {
-      if (option.value === 'default') {
-        finalizeSelections('default', { ...DEFAULT_RESOURCE_SELECTIONS });
-        return;
-      }
-
-      setLaunchMode('custom');
-      setResourceSelections({});
-      askNextResourceCategory(0);
+    if (!intakeDraft) {
+      addAssistantMessage('I need more intake context first. Please describe your project to continue.');
       return;
     }
 
-    if (step === CHAT_STEPS.RESOURCE_CATEGORY && activeResourceCategory) {
-      const nextSelections = {
-        ...resourceSelections,
-        [activeResourceCategory.id]: option.value
-      };
-      const nextIndex = resourceIndex + 1;
-
-      if (nextIndex < RESOURCE_CATEGORY_FLOW.length) {
-        setResourceSelections(nextSelections);
-        addAssistantMessage(`Noted. ${activeResourceCategory.label}: ${option.label}.`);
-        askNextResourceCategory(nextIndex);
-        return;
-      }
-
-      finalizeSelections('custom', nextSelections);
+    if (!readyForBlueprint) {
+      addAssistantMessage(
+        `I still need a few fields before creating the blueprint:\n- ${
+          missingFields.length ? missingFields.join('\n- ') : 'additional details'
+        }`
+      );
       return;
     }
 
-    if (step === CHAT_STEPS.CONFIRM) {
-      if (option.value === 'restart') {
-        resetConversation();
-        return;
-      }
-      createBlueprintFromConversation();
+    const intake = mapDraftToIntake(intakeDraft);
+    const result = createValidatedWorkspaceBlueprintFromIntake(intake);
+
+    if (!result.is_valid) {
+      setErrors(result.errors);
+      setBlueprint(null);
+      addAssistantMessage(`Validation still failed:\n- ${result.errors.join('\n- ')}`);
+      return;
     }
+
+    saveWorkspaceBlueprint(result.blueprint);
+    setBlueprint(result.blueprint);
+    setErrors([]);
+    addAssistantMessage(
+      'Blueprint saved. Open your dashboard workspace section to continue setup.'
+    );
   };
 
   return (
@@ -427,8 +369,7 @@ function StartupIntakePage() {
         <p className="route-kicker">Conversational Intake</p>
         <h1>Create Your Agent Team</h1>
         <p>
-          Start by describing your project in chat. Then pick default launch or configure each resource category one
-          step at a time.
+          This chat is powered by GPT-5.4. Describe your project and I will gather what is needed for blueprint JSON.
         </p>
 
         <section className="route-section intake-chat-shell" aria-label="Conversational workspace intake">
@@ -440,42 +381,44 @@ function StartupIntakePage() {
             ))}
           </div>
 
-          {isTextInputStep ? (
-            <form className="intake-chat-composer" onSubmit={handleTextSubmit}>
-              <input
-                type="text"
-                className="intake-chat-input"
-                value={inputValue}
-                onChange={(event) => setInputValue(event.target.value)}
-                placeholder={chatPlaceholder}
-              />
-              <button type="submit" className="btn btn-primary intake-chat-send-btn">
-                Send
-              </button>
-            </form>
-          ) : null}
-
-          {activeChoiceOptions.length ? (
-            <div className="intake-chat-options">
-              {activeChoiceOptions.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className="intake-chat-option"
-                  onClick={() => handleChoiceSelect(option)}
-                >
-                  <span>{option.label}</span>
-                  {option.description ? <small>{option.description}</small> : null}
-                </button>
-              ))}
-            </div>
-          ) : null}
+          <form className="intake-chat-composer" onSubmit={handleTextSubmit}>
+            <input
+              type="text"
+              className="intake-chat-input"
+              value={inputValue}
+              onChange={(event) => setInputValue(event.target.value)}
+              placeholder="Share project details or answer the latest question..."
+              disabled={isSending}
+            />
+            <button type="submit" className="btn btn-primary intake-chat-send-btn" disabled={isSending}>
+              {isSending ? 'Thinking...' : 'Send'}
+            </button>
+          </form>
         </section>
 
-        {launchMode ? (
+        {requestError ? (
+          <section className="route-section intake-errors" aria-live="polite">
+            <h2>Conversation API error</h2>
+            <ul>
+              <li>{requestError}</li>
+            </ul>
+          </section>
+        ) : null}
+
+        {intakeDraft ? (
           <section className="route-section">
-            <h2>Launch Plan</h2>
-            <pre className="intake-conversation-summary">{summarizeSelections(resourceSelections)}</pre>
+            <h2>Current JSON Draft</h2>
+            <p>The model updates this draft every turn.</p>
+            <pre className="intake-conversation-summary">{summarizeToolSelections(intakeDraft)}</pre>
+            <details className="intake-advanced">
+              <summary>View full draft JSON</summary>
+              <pre className="intake-blueprint-preview">{draftJson}</pre>
+            </details>
+            <p className="workspace-inline-note">
+              {readyForBlueprint
+                ? 'Ready to create blueprint.'
+                : `Missing fields: ${missingFields.length ? missingFields.join(', ') : 'waiting for more details'}`}
+            </p>
           </section>
         ) : null}
 
@@ -491,6 +434,9 @@ function StartupIntakePage() {
         ) : null}
 
         <div className="route-actions">
+          <button type="button" className="btn btn-primary" onClick={handleCreateBlueprint}>
+            Create blueprint now
+          </button>
           <button type="button" className="btn btn-secondary" onClick={resetConversation}>
             Restart chat
           </button>
