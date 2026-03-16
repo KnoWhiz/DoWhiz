@@ -35,6 +35,19 @@ use super::verify::{
     verify_whatsapp_subscription,
 };
 
+/// Request payload for creating a workspace brief document
+#[derive(Debug, Deserialize)]
+pub(super) struct CreateWorkspaceBriefRequest {
+    pub founder_name: String,
+    pub founder_email: String,
+    pub venture_name: Option<String>,
+    pub thesis: Option<String>,
+    pub stage: Option<String>,
+    pub goals: Vec<String>,
+    pub current_assets: Option<Vec<String>>,
+    pub plan_horizon_days: Option<i32>,
+}
+
 pub(super) async fn health() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
@@ -936,6 +949,146 @@ pub(super) async fn build_envelope(
     })
 }
 
+/// Handle workspace brief creation request
+/// POST /api/workspace/create-brief
+pub(super) async fn create_workspace_brief(
+    State(state): State<Arc<GatewayState>>,
+    Json(request): Json<CreateWorkspaceBriefRequest>,
+) -> impl IntoResponse {
+    info!(
+        "workspace brief request: founder={} email={}",
+        request.founder_name, request.founder_email
+    );
+
+    // Determine employee to route to (default to oliver)
+    let employee_id = state
+        .config
+        .defaults
+        .employee_id
+        .clone()
+        .unwrap_or_else(|| "oliver".to_string());
+
+    let tenant_id = state
+        .config
+        .defaults
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| "default".to_string());
+
+    // Build the prompt for Codex
+    let venture_name = request.venture_name.as_deref().unwrap_or("Startup");
+    let thesis = request.thesis.as_deref().unwrap_or("Building something great");
+    let stage = request.stage.as_deref().unwrap_or("idea");
+    let horizon = request.plan_horizon_days.unwrap_or(30);
+    let goals_text = if request.goals.is_empty() {
+        "- Define initial goals".to_string()
+    } else {
+        request.goals.iter().map(|g| format!("- {}", g)).collect::<Vec<_>>().join("\n")
+    };
+    let assets_text = request
+        .current_assets
+        .as_ref()
+        .filter(|a| !a.is_empty())
+        .map(|a| a.iter().map(|x| format!("- {}", x)).collect::<Vec<_>>().join("\n"))
+        .unwrap_or_else(|| "- None listed yet".to_string());
+
+    let prompt = format!(
+        r#"Create a Startup Workspace Brief Google Doc for this founder and share it with them.
+
+## Founder Information
+- **Name:** {founder_name}
+- **Email:** {founder_email}
+- **Venture Name:** {venture_name}
+- **Thesis:** {thesis}
+- **Stage:** {stage}
+- **Planning Horizon:** {horizon} days
+
+## Goals (30-90 days)
+{goals_text}
+
+## Current Assets
+{assets_text}
+
+## Instructions
+1. Create a new Google Doc titled "Startup Workspace Brief - {venture_name}"
+2. Add the following sections with professional formatting:
+   - Executive Summary (synthesize the thesis and stage)
+   - Founder Profile
+   - 30-90 Day Goals (expand on each goal with suggested milestones)
+   - Current Assets & Resources
+   - Recommended Next Steps
+   - Key Metrics to Track
+3. Share the document with {founder_email} as a writer
+4. Send an email to {founder_email} with the document link and a brief introduction
+
+Use the google-docs skill to create and share the document."#,
+        founder_name = request.founder_name,
+        founder_email = request.founder_email,
+        venture_name = venture_name,
+        thesis = thesis,
+        stage = stage,
+        horizon = horizon,
+        goals_text = goals_text,
+        assets_text = assets_text,
+    );
+
+    // Build InboundMessage with the prompt
+    let message = InboundMessage {
+        channel: Channel::GoogleDocs,
+        sender: request.founder_email.clone(),
+        sender_name: Some(request.founder_name.clone()),
+        recipient: format!("{}@dowhiz.com", employee_id),
+        subject: Some(format!("Create Workspace Brief for {}", venture_name)),
+        text_body: Some(prompt),
+        html_body: None,
+        thread_id: format!("workspace-brief:{}", Uuid::new_v4()),
+        message_id: Some(format!("workspace-brief-{}", Uuid::new_v4())),
+        attachments: Vec::new(),
+        reply_to: vec![request.founder_email.clone()],
+        raw_payload: Vec::new(),
+        metadata: ChannelMetadata::default(),
+    };
+
+    let route = RouteDecision {
+        tenant_id,
+        employee_id,
+    };
+
+    let external_message_id = message.message_id.clone();
+    let envelope = match build_envelope(
+        route,
+        Channel::GoogleDocs,
+        external_message_id,
+        &message,
+        &[],
+    )
+    .await
+    {
+        Ok(envelope) => envelope,
+        Err(err) => {
+            error!("failed to build workspace brief envelope: {}", err);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"status": "envelope_build_failed", "error": err.to_string()})),
+            );
+        }
+    };
+
+    let task_id = envelope.envelope_id.to_string();
+    let result = enqueue_envelope(state.queue.clone(), envelope).await;
+
+    // Augment response with task_id for potential polling
+    match result {
+        (StatusCode::OK, Json(mut body)) => {
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert("task_id".to_string(), json!(task_id));
+            }
+            (StatusCode::OK, Json(body))
+        }
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1106,6 +1259,72 @@ mod tests {
         };
 
         assert!(should_enqueue_slack_message(&wrapper, None));
+    }
+
+    #[test]
+    fn create_workspace_brief_request_parses_full_payload() {
+        let json = r#"{
+            "founder_name": "Dylan Tang",
+            "founder_email": "dylan@example.com",
+            "venture_name": "Acme Labs",
+            "thesis": "Building AI tools for productivity",
+            "stage": "mvp",
+            "goals": ["Launch MVP", "Get 3 pilot customers", "Raise seed round"],
+            "current_assets": ["Landing page", "Figma mockups"],
+            "plan_horizon_days": 60
+        }"#;
+
+        let request: CreateWorkspaceBriefRequest =
+            serde_json::from_str(json).expect("should parse");
+
+        assert_eq!(request.founder_name, "Dylan Tang");
+        assert_eq!(request.founder_email, "dylan@example.com");
+        assert_eq!(request.venture_name.as_deref(), Some("Acme Labs"));
+        assert_eq!(request.thesis.as_deref(), Some("Building AI tools for productivity"));
+        assert_eq!(request.stage.as_deref(), Some("mvp"));
+        assert_eq!(request.goals.len(), 3);
+        assert_eq!(request.goals[0], "Launch MVP");
+        assert_eq!(request.current_assets.as_ref().map(|a| a.len()), Some(2));
+        assert_eq!(request.plan_horizon_days, Some(60));
+    }
+
+    #[test]
+    fn create_workspace_brief_request_parses_minimal_payload() {
+        let json = r#"{
+            "founder_name": "Jane Doe",
+            "founder_email": "jane@example.com",
+            "goals": []
+        }"#;
+
+        let request: CreateWorkspaceBriefRequest =
+            serde_json::from_str(json).expect("should parse");
+
+        assert_eq!(request.founder_name, "Jane Doe");
+        assert_eq!(request.founder_email, "jane@example.com");
+        assert!(request.venture_name.is_none());
+        assert!(request.thesis.is_none());
+        assert!(request.stage.is_none());
+        assert!(request.goals.is_empty());
+        assert!(request.current_assets.is_none());
+        assert!(request.plan_horizon_days.is_none());
+    }
+
+    #[test]
+    fn create_workspace_brief_request_rejects_missing_required_fields() {
+        // Missing founder_email
+        let json = r#"{"founder_name": "Test", "goals": []}"#;
+        let result: Result<CreateWorkspaceBriefRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+
+        // Missing founder_name
+        let json = r#"{"founder_email": "test@example.com", "goals": []}"#;
+        let result: Result<CreateWorkspaceBriefRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+
+        // Missing goals
+        let json = r#"{"founder_name": "Test", "founder_email": "test@example.com"}"#;
+        let result: Result<CreateWorkspaceBriefRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err());
     }
 }
 

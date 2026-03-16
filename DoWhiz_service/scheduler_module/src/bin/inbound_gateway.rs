@@ -42,8 +42,9 @@ use discord::spawn_discord_gateway;
 use google_drive_webhook::handle_google_drive_webhook;
 use google_workspace::spawn_google_workspace_poller;
 use handlers::{
-    health, ingest_bluebubbles, ingest_postmark, ingest_slack, ingest_sms, ingest_telegram,
-    ingest_wechat, ingest_whatsapp, verify_wechat_webhook, verify_whatsapp_webhook,
+    create_workspace_brief, health, ingest_bluebubbles, ingest_postmark, ingest_slack,
+    ingest_sms, ingest_telegram, ingest_wechat, ingest_whatsapp, verify_wechat_webhook,
+    verify_whatsapp_webhook,
 };
 use routes::normalize_routes;
 use state::{build_address_map, GatewayConfig, GatewayState};
@@ -217,6 +218,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "/webhooks/google-drive-changes",
             post(handle_google_drive_webhook),
         )
+        .route("/api/workspace/create-brief", post(create_workspace_brief))
         .with_state(state)
         .merge(auth_router(auth_state))
         .merge(agent_market_router(agent_market_state))
