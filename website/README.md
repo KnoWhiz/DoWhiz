@@ -69,7 +69,7 @@ If you are using a dedicated API subdomain (example: `api.dowhiz.com`) for the R
 
 ## Core route map
 - `/`: Landing page.
-- `/start`: Founder intake for creating/updating your agent-team blueprint.
+- `/start`: Conversational founder intake for creating/updating your agent-team blueprint (default launch or custom tool-by-category setup).
 - `/workspace`: Lightweight handoff route to the unified dashboard workspace section.
 - `/auth/index.html`: Unified team + personal dashboard (channels, tasks, memo, settings).
 
