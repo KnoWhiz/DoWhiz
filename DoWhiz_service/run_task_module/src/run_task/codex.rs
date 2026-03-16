@@ -464,6 +464,8 @@ pub(super) fn run_codex_task(
             .arg("-c")
             .arg(format!("sandbox=\"{}\"", sandbox_mode))
             .arg("-c")
+            .arg("model_provider=\"azure\"")
+            .arg("-c")
             .arg("model_providers.azure.env_key=\"AZURE_OPENAI_API_KEY_BACKUP\"")
             .arg("--cd")
             .arg(DOCKER_WORKSPACE_DIR)
@@ -495,12 +497,15 @@ pub(super) fn run_codex_task(
             .arg("-c")
             .arg(format!("sandbox=\"{}\"", sandbox_mode))
             .arg("-c")
+            .arg("model_provider=\"azure\"")
+            .arg("-c")
             .arg("model_providers.azure.env_key=\"AZURE_OPENAI_API_KEY_BACKUP\"")
             .arg("--cd")
             .arg(request.workspace_dir)
             .arg(prompt)
             .env("AZURE_OPENAI_API_KEY_BACKUP", api_key)
             .env("AZURE_OPENAI_ENDPOINT_BACKUP", &azure_endpoint)
+            .env_remove("OPENAI_API_KEY")  // Prevent Codex from using OpenAI instead of Azure
             .current_dir(request.workspace_dir);
         // Extend PATH with DoWhiz bin directory for tools like google-docs
         let current_path = env::var("PATH").unwrap_or_default();
@@ -1104,6 +1109,7 @@ fn run_azure_aci_execution(
     let web_search_cfg = shell_quote("web_search=\"live\"");
     let ask_for_approval_cfg = shell_quote("ask_for_approval=\"never\"");
     let sandbox_cfg = shell_quote(&format!("sandbox=\"{}\"", sandbox_mode));
+    let model_provider_cfg = shell_quote("model_provider=\"azure\"");
     let azure_env_cfg =
         shell_quote("model_providers.azure.env_key=\"AZURE_OPENAI_API_KEY_BACKUP\"");
     let add_dir_lines = add_dirs
@@ -1166,7 +1172,7 @@ if [ \"{bypass}\" = \"1\" ]; then\n\
   fi\n\
 fi\n\
 {add_dirs}\n\
-codex_cmd+=(--skip-git-repo-check -m {model_name} -c {azure_env_cfg} --cd {workspace} \"$(cat .codex_remote_prompt.txt)\")\n\
+codex_cmd+=(--skip-git-repo-check -m {model_name} -c {model_provider_cfg} -c {azure_env_cfg} --cd {workspace} \"$(cat .codex_remote_prompt.txt)\")\n\
 set +e\n\
 \"${{codex_cmd[@]}}\" > {output_tmp} 2>&1\n\
 status=$?\n\
@@ -1192,6 +1198,7 @@ exit \"$status\"\n",
         bypass = bypass_enabled,
         add_dirs = add_dir_lines,
         model_name = model_name_sh,
+        model_provider_cfg = model_provider_cfg,
         azure_env_cfg = azure_env_cfg,
     );
 
@@ -1849,6 +1856,17 @@ fn collect_google_workspace_cli_env_overrides(
             path.to_string_lossy().into_owned(),
         ));
     }
+
+    // Service Account + Domain-Wide Delegation support
+    // These env vars allow google-docs CLI to use Service Account authentication
+    // instead of OAuth refresh tokens (tokens never expire with Service Account)
+    if let Some(sa_json) = read_env_trimmed("GOOGLE_SERVICE_ACCOUNT_JSON") {
+        overrides.push(("GOOGLE_SERVICE_ACCOUNT_JSON".to_string(), sa_json));
+    }
+    if let Some(sa_subject) = read_env_trimmed("GOOGLE_SERVICE_ACCOUNT_SUBJECT") {
+        overrides.push(("GOOGLE_SERVICE_ACCOUNT_SUBJECT".to_string(), sa_subject));
+    }
+
     Ok(overrides)
 }
 

@@ -42,8 +42,9 @@ use discord::spawn_discord_gateway;
 use google_drive_webhook::handle_google_drive_webhook;
 use google_workspace::spawn_google_workspace_poller;
 use handlers::{
-    health, ingest_bluebubbles, ingest_postmark, ingest_slack, ingest_sms, ingest_telegram,
-    ingest_wechat, ingest_whatsapp, verify_wechat_webhook, verify_whatsapp_webhook,
+    create_workspace_brief, health, ingest_bluebubbles, ingest_postmark, ingest_slack,
+    ingest_sms, ingest_telegram, ingest_wechat, ingest_whatsapp, verify_wechat_webhook,
+    verify_whatsapp_webhook,
 };
 use routes::normalize_routes;
 use state::{build_address_map, GatewayConfig, GatewayState};
@@ -171,6 +172,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let github_client_secret = env::var("GITHUB_CLIENT_SECRET").ok();
     let github_redirect_uri = env::var("GITHUB_REDIRECT_URI").ok();
 
+    // Notion OAuth config (optional)
+    let notion_client_id = env::var("NOTION_CLIENT_ID").ok();
+    let notion_client_secret = env::var("NOTION_CLIENT_SECRET").ok();
+    let notion_redirect_uri = env::var("NOTION_REDIRECT_URI").ok();
+
     // Frontend URL for OAuth redirects
     let frontend_url =
         env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:5173".to_string());
@@ -188,6 +194,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         github_client_id,
         github_client_secret,
         github_redirect_uri,
+        notion_client_id,
+        notion_client_secret,
+        notion_redirect_uri,
         frontend_url,
         user_store: None, // Task lookups not available in inbound gateway
         users_root: None,
@@ -209,6 +218,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "/webhooks/google-drive-changes",
             post(handle_google_drive_webhook),
         )
+        .route("/api/workspace/create-brief", post(create_workspace_brief))
         .with_state(state)
         .merge(auth_router(auth_state))
         .merge(agent_market_router(agent_market_state))

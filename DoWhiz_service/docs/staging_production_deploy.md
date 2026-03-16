@@ -50,6 +50,22 @@ Staging ingest isolation policy:
 - Current staging container: `ingestion-raw`
 - In `ENV_STAGING`, explicitly set `AZURE_STORAGE_ACCOUNT` and `AZURE_STORAGE_CONTAINER_SAS_URL` so staging does not fall back to shared/common storage credentials.
 
+### Notion Browser Integration (Optional)
+
+| Key | Description |
+|-----|-------------|
+| `NOTION_EMPLOYEE_EMAIL` | Notion account email |
+| `NOTION_EMPLOYEE_PASSWORD` | Notion account password |
+| `NOTION_BROWSER_ENABLED` | Enable browser automation (true/false) |
+| `NOTION_POLL_INTERVAL_SECS` | Poll interval in seconds (default: 45) |
+| `NOTION_BROWSER_PROFILE_DIR` | Browser profile directory |
+| `NOTION_BROWSER_HEADLESS` | Headless mode (true/false, recommend: false) |
+| `NOTION_BROWSER_SLOW_MO` | Slow-mo delay in ms (recommend: 100) |
+| `WEBDRIVER_URL` | WebDriver server URL (default: http://localhost:4444) |
+
+Note: Notion browser integration uses WebDriver (geckodriver/chromedriver) for browser automation.
+Recommended settings for anti-detection: `NOTION_BROWSER_HEADLESS=false`, `NOTION_BROWSER_SLOW_MO=100`.
+
 ## 3) VM Deployment
 
 PM2 is the canonical process manager on staging/production VMs. Do not use the foreground
@@ -97,8 +113,40 @@ Deployment workflows should:
 3. Validate `GATEWAY_CONFIG_PATH` and `EMPLOYEE_CONFIG_PATH` exist and match expected target files.
 4. After release binaries and `.env` are installed, source `.env` and restart PM2-managed services immediately so live traffic moves onto the new worker/gateway before any long-running follow-up work.
 5. Disable any legacy `systemd` worker unit (for example `dowhiz-oliver.service`) so PM2 remains the only supervisor.
-6. If Azure ACI backend is enabled (`RUN_TASK_EXECUTION_BACKEND=azure_aci` or `auto` with `DEPLOY_TARGET in {staging,production}`), build/push image from GitHub Runner (not from VM): checkout `deploy_sha`, stage a temporary build context with `Dockerfile.aci`, `Dockerfile.base`, `.dockerignore`, `version_base.txt`, and `DoWhiz_service/` without runtime `.env` or `.workspace`; inject prebuilt binaries from artifact (`rust_service`, `inbound_fanout`, `inbound_gateway`, `google-docs`); then run `az acr build`. This avoids a second Rust compile during image build while keeping uploads small.
-7. Use `pm2 restart --update-env` so runtime env changes (for example `EMPLOYEE_ID`) are applied to existing processes, and finish with local health checks that allow a short retry window while worker/gateway bind their ports.
+6. Keep build/deploy deterministic: checkout by trigger commit and pass `deploy_sha` from build job into deploy job so VM and image build use the exact same code revision.
+7. Restrict manual release safety gates by branch (`workflow_dispatch` must run from `dev` for staging and `main` for production).
+8. Skip staging/production workflow runs when PR merge changes only files under `website/**`.
+9. Use layered image strategy for Azure ACI:
+- `Dockerfile.base` for heavy shared dependencies.
+- `Dockerfile.aci` for runtime assembly from prebuilt binaries.
+10. Gate base image rebuild by file hash:
+- Compare `md5(Dockerfile.base)` with `version_base.md5`.
+- If changed, auto-bump patch in `version_base.txt`, update `version_base.md5`, and commit back.
+- Base image tag format: `<runtime_repo>-base:<version_base>-<dockerfile_base_md5_prefix12>`.
+11. Reuse base image when present in ACR; build only when missing.
+12. If Azure ACI backend is enabled (`RUN_TASK_EXECUTION_BACKEND=azure_aci` or `auto` with `DEPLOY_TARGET in {staging,production}`), build/push image from GitHub Runner (not VM):
+- checkout `deploy_sha`
+- stage temporary context with `Dockerfile.aci`, `Dockerfile.base`, `.dockerignore`, `version_base.txt`, `DoWhiz_service/` (exclude runtime `.env` and `.workspace`)
+- inject artifact binaries (`rust_service`, `inbound_fanout`, `inbound_gateway`, `google-docs`)
+- run `az acr build`
+- do not run `cargo build` during image build
+13. Use `pm2 restart --update-env` so runtime env changes (for example `EMPLOYEE_ID`) are applied to existing processes, and finish with local health checks that allow a short retry window while worker/gateway bind their ports.
+14. Staging may skip ACI rebuild for gateway-only source changes to reduce unnecessary image churn.
+
+### CI/CD Maintenance Notes
+
+1. `RUN_TASK_AZURE_ACI_IMAGE` must include an explicit tag; mutable env tags (`:staging`, `:prod`) are overwritten on each successful release.
+2. Base image tags are version/hash derived and effectively immutable for cache reuse.
+3. `paths-ignore: website/**` applies only to PR-triggered workflow execution; manual `workflow_dispatch` can still run full deployment.
+4. If runtime binaries change, update all related points together:
+- artifact upload list
+- VM install step
+- ACI build-context binary injection
+- `COPY` entries in `Dockerfile.aci`
+5. Keep Dockerfile responsibilities clear:
+- `Dockerfile.base`: base layer
+- `Dockerfile.aci`: ACI runtime image
+- `Dockerfile.local`: local/other development build path
 
 ## 5) Health Checks
 

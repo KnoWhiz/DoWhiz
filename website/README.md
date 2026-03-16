@@ -67,6 +67,12 @@ If you are using a dedicated API subdomain (example: `api.dowhiz.com`) for the R
 - `website/vite.config.js`: Vite configuration.
 - `website/eslint.config.js`: Lint rules (source of truth).
 
+## Core route map
+- `/`: Landing page.
+- `/start`: Conversational founder intake for creating/updating your agent-team blueprint (default launch or custom tool-by-category setup).
+- `/workspace`: Lightweight handoff route to the unified dashboard workspace section.
+- `/auth/index.html`: Unified team + personal dashboard (channels, tasks, memo, settings).
+
 ## Environment variables
 No `.env` file is required for local development at the moment.
 

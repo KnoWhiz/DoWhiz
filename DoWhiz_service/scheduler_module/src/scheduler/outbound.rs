@@ -795,6 +795,120 @@ pub(crate) fn execute_google_docs_send(task: &SendReplyTask) -> Result<(), Sched
     Ok(())
 }
 
+/// Get the central Notion reply queue directory for an employee.
+pub fn notion_reply_queue_dir(employee_id: &str) -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(".dowhiz")
+        .join("notion_reply_queue")
+        .join(employee_id)
+}
+
+/// Execute a SendReplyTask via Notion browser automation.
+///
+/// This function queues a reply request for the Notion browser poller to process.
+/// The reply is written to a central queue directory that the poller monitors.
+pub(crate) fn execute_notion_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
+    dotenvy::dotenv().ok();
+
+    // Read text content from reply_message.txt (html_path field reused)
+    let text_body = if task.html_path.exists() {
+        fs::read_to_string(&task.html_path).unwrap_or_default()
+    } else {
+        return Err(SchedulerError::TaskFailed(
+            "Notion reply: reply_message.txt not found".to_string(),
+        ));
+    };
+
+    if text_body.trim().is_empty() {
+        return Err(SchedulerError::TaskFailed(
+            "Notion reply: reply_message.txt is empty".to_string(),
+        ));
+    }
+
+    // Read Notion context from workspace
+    let workspace_dir = task.html_path.parent().unwrap_or(Path::new("."));
+    let context_path = workspace_dir.join(".notion_context.json");
+
+    let context: serde_json::Value = if context_path.exists() {
+        let content = fs::read_to_string(&context_path)
+            .map_err(|e| SchedulerError::TaskFailed(format!("Failed to read context: {}", e)))?;
+        serde_json::from_str(&content)
+            .map_err(|e| SchedulerError::TaskFailed(format!("Failed to parse context: {}", e)))?
+    } else {
+        // Try to extract from in_reply_to which has format "notion:workspace:page:notification"
+        let parts: Vec<&str> = task
+            .in_reply_to
+            .as_deref()
+            .unwrap_or("")
+            .split(':')
+            .collect();
+        if parts.len() >= 4 && parts[0] == "notion" {
+            serde_json::json!({
+                "workspace_id": parts[1],
+                "page_id": parts[2],
+                "notification_id": parts[3]
+            })
+        } else {
+            return Err(SchedulerError::TaskFailed(
+                "Notion reply: no context available (missing .notion_context.json)".to_string(),
+            ));
+        }
+    };
+
+    // Get employee ID from task or environment
+    let employee_id = task
+        .employee_id
+        .clone()
+        .or_else(|| std::env::var("EMPLOYEE_ID").ok())
+        .unwrap_or_else(|| "default".to_string());
+
+    // Create central queue directory
+    let queue_dir = notion_reply_queue_dir(&employee_id);
+    fs::create_dir_all(&queue_dir)
+        .map_err(|e| SchedulerError::TaskFailed(format!("Failed to create queue dir: {}", e)))?;
+
+    // Create a reply request for the poller to process
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let reply_request = serde_json::json!({
+        "id": request_id,
+        "reply_text": text_body.trim(),
+        "workspace_id": context.get("workspace_id"),
+        "page_id": context.get("page_id"),
+        "comment_id": context.get("comment_id"),
+        "block_id": context.get("block_id"),
+        "notification_id": context.get("notification_id"),
+        "url": context.get("url"),
+        "workspace_dir": workspace_dir.to_string_lossy(),
+        "requested_at": chrono::Utc::now().to_rfc3339(),
+        "status": "pending"
+    });
+
+    // Write to central queue with unique filename
+    let request_filename = format!("{}.json", request_id);
+    let request_path = queue_dir.join(&request_filename);
+    fs::write(
+        &request_path,
+        serde_json::to_string_pretty(&reply_request)
+            .map_err(|e| SchedulerError::TaskFailed(format!("Failed to serialize reply: {}", e)))?,
+    )
+    .map_err(|e| SchedulerError::TaskFailed(format!("Failed to write reply request: {}", e)))?;
+
+    // Also write to workspace for reference
+    let workspace_request_path = workspace_dir.join(".notion_reply_request.json");
+    let _ = fs::write(&workspace_request_path, serde_json::to_string_pretty(&reply_request).unwrap_or_default());
+
+    info!(
+        "queued Notion reply request id={} to {:?}, page_id={:?}, queue={}",
+        request_id,
+        task.to,
+        context.get("page_id"),
+        queue_dir.display()
+    );
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

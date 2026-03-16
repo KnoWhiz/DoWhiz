@@ -1054,12 +1054,11 @@ function LandingPage() {
   ];
 
   const heroPrimaryCtaHref = '/start';
-  const heroSecondaryCtaHref = '/workspace';
 
   const handleHeroCtaClick = () => {
     trackAnalyticsEvent('secondary_cta_click', {
       cta_location: 'hero_primary',
-      cta_text: 'Start workspace',
+      cta_text: 'Create your agent team',
       cta_text_legacy: 'Try DoWhiz service today'
     });
   };
@@ -1199,10 +1198,7 @@ function LandingPage() {
                 href={heroPrimaryCtaHref}
                 onClick={handleHeroCtaClick}
               >
-                Start your workspace
-              </a>
-              <a className="btn btn-secondary" href={heroSecondaryCtaHref}>
-                Preview workspace home
+                Create your agent team
               </a>
             </div>
           </div>

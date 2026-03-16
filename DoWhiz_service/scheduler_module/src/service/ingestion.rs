@@ -18,9 +18,10 @@ use super::config::ServiceConfig;
 use super::email::{process_inbound_payload, PostmarkInbound};
 use super::inbound::{
     process_bluebubbles_event, process_discord_inbound_message, process_google_workspace_message,
-    process_slack_event, process_sms_message, process_telegram_event, process_wechat_event,
-    process_whatsapp_event, try_quick_response_bluebubbles, try_quick_response_discord,
-    try_quick_response_slack, try_quick_response_telegram, try_quick_response_whatsapp,
+    process_notion_message, process_slack_event, process_sms_message, process_telegram_event,
+    process_wechat_event, process_whatsapp_event, try_quick_response_bluebubbles,
+    try_quick_response_discord, try_quick_response_google_workspace, try_quick_response_slack,
+    try_quick_response_telegram, try_quick_response_wechat, try_quick_response_whatsapp,
 };
 use super::BoxError;
 
@@ -224,6 +225,15 @@ fn process_ingestion_envelope(
         }
         Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
             let message = envelope.to_inbound_message();
+            if try_quick_response_google_workspace(
+                config,
+                user_store,
+                message_router,
+                runtime,
+                &message,
+            )? {
+                return Ok(());
+            }
             let raw_payload = envelope.raw_payload_bytes();
             process_google_workspace_message(
                 config,
@@ -250,8 +260,24 @@ fn process_ingestion_envelope(
             let raw_payload = envelope.raw_payload_bytes();
             process_whatsapp_event(config, user_store, index_store, &message, &raw_payload)
         }
+Channel::Notion => {
+            // Process Notion comments via API
+            let message = envelope.to_inbound_message();
+            let raw_payload = envelope.raw_payload_bytes();
+            process_notion_message(
+                config,
+                user_store,
+                index_store,
+                account_store,
+                &message,
+                &raw_payload,
+            )
+        }
         Channel::WeChat => {
             let message = envelope.to_inbound_message();
+            if try_quick_response_wechat(config, user_store, message_router, runtime, &message)? {
+                return Ok(());
+            }
             let raw_payload = envelope.raw_payload_bytes();
             process_wechat_event(config, user_store, index_store, &message, &raw_payload)
         }

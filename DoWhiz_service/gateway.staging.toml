@@ -14,6 +14,13 @@ key = "*"
 employee_id = "boiled_egg"
 tenant_id = "staging"
 
+# Notion routing for staging
+[[routes]]
+channel = "notion"
+key = "*"
+employee_id = "boiled_egg"
+tenant_id = "staging"
+
 # Google Workspace routing for staging (using dowhiz@deep-tutor.com account)
 [[routes]]
 channel = "google_docs"
