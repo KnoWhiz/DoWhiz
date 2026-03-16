@@ -213,6 +213,115 @@
   word-break: break-word;
 }
 
+.intake-chat-shell {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.intake-chat-feed {
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: #fbfdff;
+  padding: 0.75rem;
+  max-height: 430px;
+  overflow-y: auto;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.intake-chat-message {
+  max-width: min(88%, 680px);
+  padding: 0.6rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+}
+
+.intake-chat-message p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+.intake-chat-message.is-assistant {
+  justify-self: start;
+  background: #fff;
+  color: var(--text-primary);
+}
+
+.intake-chat-message.is-user {
+  justify-self: end;
+  background: #eaf3ff;
+  border-color: #c7dbfb;
+  color: #1b3f7d;
+}
+
+.intake-chat-composer {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.intake-chat-input {
+  flex: 1;
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text-primary);
+  font: inherit;
+  padding: 0.62rem 0.85rem;
+}
+
+.intake-chat-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--brand-primary) 40%, transparent);
+  outline-offset: 1px;
+}
+
+.intake-chat-send-btn {
+  white-space: nowrap;
+}
+
+.intake-chat-options {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.intake-chat-option {
+  text-align: left;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 0.68rem 0.75rem;
+  display: grid;
+  gap: 0.2rem;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.intake-chat-option span {
+  font-weight: 600;
+}
+
+.intake-chat-option small {
+  color: var(--text-secondary);
+}
+
+.intake-chat-option:hover {
+  border-color: color-mix(in srgb, var(--brand-primary) 45%, var(--color-border));
+  background: #f4f8ff;
+}
+
+.intake-conversation-summary {
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.75rem;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .workspace-inline-note {
   border: 1px solid var(--color-border);
   border-radius: 10px;
@@ -377,6 +486,18 @@
 
   .intake-field-full {
     grid-column: auto;
+  }
+
+  .intake-chat-message {
+    max-width: 94%;
+  }
+
+  .intake-chat-composer {
+    flex-direction: column;
+  }
+
+  .intake-chat-send-btn {
+    width: 100%;
   }
 
   .workspace-health-row,
