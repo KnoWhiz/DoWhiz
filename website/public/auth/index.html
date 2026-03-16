@@ -1037,7 +1037,7 @@
                 <section id="section-workspace" class="legal-card dashboard-section">
                   <div class="dashboard-header">
                     <h2>Team Workspace</h2>
-                    <a class="auth-btn auth-btn-oauth" href="/start">Update Team Brief</a>
+                    <a id="update-team-brief-btn" class="auth-btn auth-btn-oauth" href="/start">Update Team Brief</a>
                   </div>
                   <p class="dashboard-overview-copy">
                     Concise team context shared across your channels and task runtime.
@@ -1423,6 +1423,7 @@
       const backToSigninLink = document.getElementById('back-to-signin');
       const forgotPasswordLink = document.getElementById('forgot-password-link');
       const setPasswordLink = document.getElementById('set-password-link');
+      const updateTeamBriefBtn = document.getElementById('update-team-brief-btn');
       const dashboardSidebarLinks = Array.from(document.querySelectorAll('.sidebar-link'));
       const dashboardSidebarTargets = dashboardSidebarLinks
         .map((link) => document.querySelector(link.getAttribute('href')))
@@ -1588,21 +1589,46 @@
           .filter((agent) => agent.role.length > 0);
       }
 
+      function loadWorkspaceBlueprintFromStorage() {
+        const raw = window.localStorage.getItem(STARTUP_BLUEPRINT_STORAGE_KEY);
+        if (!raw) {
+          return null;
+        }
+
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return null;
+        }
+      }
+
+      function hasSavedTeamBrief(blueprint) {
+        if (!blueprint || typeof blueprint !== 'object') {
+          return false;
+        }
+
+        const founderName = normalizeWorkspaceText(blueprint?.founder?.name, '');
+        const thesis = normalizeWorkspaceText(blueprint?.venture?.thesis, '');
+        const goals = normalizeWorkspaceList(blueprint?.goals_30_90_days);
+        return Boolean(founderName) && Boolean(thesis) && goals.length > 0;
+      }
+
+      function updateTeamBriefLinkFromStorage() {
+        if (!updateTeamBriefBtn) {
+          return;
+        }
+        const workspaceBlueprint = loadWorkspaceBlueprintFromStorage();
+        const href = hasSavedTeamBrief(workspaceBlueprint) ? '/start?mode=edit' : '/start';
+        updateTeamBriefBtn.setAttribute('href', href);
+      }
+
       function loadWorkspaceSummaryFromStorage() {
         const container = document.getElementById('workspace-summary-content');
         if (!container) {
           return;
         }
-
-        let workspaceBlueprint = null;
-        const raw = window.localStorage.getItem(STARTUP_BLUEPRINT_STORAGE_KEY);
-        if (raw) {
-          try {
-            workspaceBlueprint = JSON.parse(raw);
-          } catch {
-            workspaceBlueprint = null;
-          }
-        }
+        const workspaceBlueprint = loadWorkspaceBlueprintFromStorage();
+        updateTeamBriefLinkFromStorage();
 
         const workspaceName = normalizeWorkspaceText(
           workspaceBlueprint?.venture?.name,
