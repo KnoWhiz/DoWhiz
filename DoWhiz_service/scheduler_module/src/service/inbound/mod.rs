@@ -23,7 +23,7 @@ pub(super) use notion_email::process_notion_email;
 pub(super) use quick_responses::{
     try_quick_response_bluebubbles, try_quick_response_discord,
     try_quick_response_google_workspace, try_quick_response_slack, try_quick_response_telegram,
-    try_quick_response_whatsapp,
+    try_quick_response_wechat, try_quick_response_whatsapp,
 };
 pub(super) use slack::process_slack_event;
 pub(super) use sms::process_sms_message;
