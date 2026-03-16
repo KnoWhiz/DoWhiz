@@ -52,7 +52,7 @@ model = "gpt-5.4"
 # First address is used as FROM for replies (must be verified in Postmark)
 # Inbound address is kept for routing but code uses first address for reply_from
 # Local Testing inbound: 686c1d907f186223cb465a5105aa43c8@inbound.postmarkapp.com
-addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com", "c9051c2176b203ca4b6da98e0a790e15@inbound.postmarkapp.com", "686c1d907f186223cb465a5105aa43c8@inbound.postmarkapp.com"]
+addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com", "dowhiz@deep-tutor.com", "c9051c2176b203ca4b6da98e0a790e15@inbound.postmarkapp.com", "686c1d907f186223cb465a5105aa43c8@inbound.postmarkapp.com"]
 runtime_root = ".workspace/boiled_egg"
 agents_path = "employees/boiled_egg/AGENTS.md"
 claude_path = "employees/boiled_egg/CLAUDE.md"
