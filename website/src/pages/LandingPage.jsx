@@ -1054,12 +1054,20 @@ function LandingPage() {
   ];
 
   const heroPrimaryCtaHref = '/start';
+  const oliverContactHref = 'mailto:oliver@dowhiz.com';
 
   const handleHeroCtaClick = () => {
     trackAnalyticsEvent('secondary_cta_click', {
       cta_location: 'hero_primary',
       cta_text: 'Create your agent team',
       cta_text_legacy: 'Try DoWhiz service today'
+    });
+  };
+
+  const handleHeroContactCtaClick = () => {
+    trackAnalyticsEvent('secondary_cta_click', {
+      cta_location: 'hero_secondary',
+      cta_text: 'Try our agent Oliver for free'
     });
   };
 
@@ -1106,7 +1114,7 @@ function LandingPage() {
                     <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
                   </svg>
                 </a>
-                <a className="btn-small" href="mailto:admin@dowhiz.com" aria-label="Contact">
+                <a className="btn-small" href={oliverContactHref} aria-label="Contact Oliver">
                   <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
                     <polyline points="22,6 12,13 2,6"></polyline>
@@ -1199,6 +1207,13 @@ function LandingPage() {
                 onClick={handleHeroCtaClick}
               >
                 Create your agent team
+              </a>
+              <a
+                className="btn btn-secondary"
+                href={oliverContactHref}
+                onClick={handleHeroContactCtaClick}
+              >
+                Try our agent Oliver for free
               </a>
             </div>
           </div>
@@ -1883,7 +1898,7 @@ function LandingPage() {
                 <a href="/solutions/slack-task-automation/" className="footer-link">Slack Task Automation</a>
                 <a href="/solutions/email-task-automation/" className="footer-link">Email Task Automation</a>
                 <a href="/solutions/google-docs-automation/" className="footer-link">Google Docs Automation</a>
-                <a href="mailto:admin@dowhiz.com" className="footer-link">Contact</a>
+                <a href={`mailto:${SUPPORT_EMAIL}`} className="footer-link">Contact</a>
               </div>
             </div>
           </div>

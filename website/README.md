@@ -69,7 +69,8 @@ If you are using a dedicated API subdomain (example: `api.dowhiz.com`) for the R
 
 ## Core route map
 - `/`: Landing page.
-- `/start`: Conversational founder intake for creating/updating your agent-team blueprint (default launch or custom tool-by-category setup).
+- `/start`: GPT-5.4 conversational founder intake for first-time setup (or fallback when no saved brief exists).
+- `/start?mode=edit`: Questionnaire editor for updating an already-saved team brief.
 - `/workspace`: Lightweight handoff route to the unified dashboard workspace section.
 - `/auth/index.html`: Unified team + personal dashboard (channels, tasks, memo, settings).
 

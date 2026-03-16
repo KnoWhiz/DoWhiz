@@ -1037,7 +1037,7 @@
                 <section id="section-workspace" class="legal-card dashboard-section">
                   <div class="dashboard-header">
                     <h2>Team Workspace</h2>
-                    <a class="auth-btn auth-btn-oauth" href="/start">Update Team Brief</a>
+                    <a id="update-team-brief-btn" class="auth-btn auth-btn-oauth" href="/start">Update Team Brief</a>
                   </div>
                   <p class="dashboard-overview-copy">
                     Concise team context shared across your channels and task runtime.
@@ -1130,11 +1130,18 @@
                           </svg>
                           Connect GitHub
                         </button>
+                        <button id="notion-oauth-btn" class="auth-btn auth-btn-oauth" style="display: flex; align-items: center; gap: 0.5rem;">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L18.4 2.297c-.466-.373-.98-.56-2.055-.466L3.525 3.033c-.466.047-.56.28-.373.466l1.307.709zM5.252 7.27v14.083c0 .793.466 1.073 1.446.933l14.008-.793c.98-.14 1.073-.606 1.073-1.306V6.29c0-.7-.28-1.026-.933-.933l-14.615.84c-.653.094-.98.467-.98 1.073zm13.868.84c.14.653 0 1.306-.653 1.353l-.7.14v10.41c-.606.327-1.166.514-1.632.514-.746 0-.933-.234-1.493-.933l-4.666-7.334v7.1l1.446.327s0 1.306-1.819 1.306l-5.006.28c-.14-.28 0-.98.466-1.12l1.213-.327V9.476L4.679 9.29c-.14-.653.234-1.586 1.306-1.68l5.359-.327 4.852 7.428V8.083l-1.213-.14c-.14-.793.42-1.353 1.12-1.4l5.016-.326z"/>
+                          </svg>
+                          Connect Notion
+                        </button>
                       </div>
                       <div class="settings-status-stack">
                         <span id="discord-oauth-status"></span>
                         <span id="slack-oauth-status"></span>
                         <span id="github-connect-status"></span>
+                        <span id="notion-oauth-status"></span>
                       </div>
                     </div>
 
@@ -1416,6 +1423,7 @@
       const backToSigninLink = document.getElementById('back-to-signin');
       const forgotPasswordLink = document.getElementById('forgot-password-link');
       const setPasswordLink = document.getElementById('set-password-link');
+      const updateTeamBriefBtn = document.getElementById('update-team-brief-btn');
       const dashboardSidebarLinks = Array.from(document.querySelectorAll('.sidebar-link'));
       const dashboardSidebarTargets = dashboardSidebarLinks
         .map((link) => document.querySelector(link.getAttribute('href')))
@@ -1581,21 +1589,46 @@
           .filter((agent) => agent.role.length > 0);
       }
 
+      function loadWorkspaceBlueprintFromStorage() {
+        const raw = window.localStorage.getItem(STARTUP_BLUEPRINT_STORAGE_KEY);
+        if (!raw) {
+          return null;
+        }
+
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return null;
+        }
+      }
+
+      function hasSavedTeamBrief(blueprint) {
+        if (!blueprint || typeof blueprint !== 'object') {
+          return false;
+        }
+
+        const founderName = normalizeWorkspaceText(blueprint?.founder?.name, '');
+        const thesis = normalizeWorkspaceText(blueprint?.venture?.thesis, '');
+        const goals = normalizeWorkspaceList(blueprint?.goals_30_90_days);
+        return Boolean(founderName) && Boolean(thesis) && goals.length > 0;
+      }
+
+      function updateTeamBriefLinkFromStorage() {
+        if (!updateTeamBriefBtn) {
+          return;
+        }
+        const workspaceBlueprint = loadWorkspaceBlueprintFromStorage();
+        const href = hasSavedTeamBrief(workspaceBlueprint) ? '/start?mode=edit' : '/start';
+        updateTeamBriefBtn.setAttribute('href', href);
+      }
+
       function loadWorkspaceSummaryFromStorage() {
         const container = document.getElementById('workspace-summary-content');
         if (!container) {
           return;
         }
-
-        let workspaceBlueprint = null;
-        const raw = window.localStorage.getItem(STARTUP_BLUEPRINT_STORAGE_KEY);
-        if (raw) {
-          try {
-            workspaceBlueprint = JSON.parse(raw);
-          } catch {
-            workspaceBlueprint = null;
-          }
-        }
+        const workspaceBlueprint = loadWorkspaceBlueprintFromStorage();
+        updateTeamBriefLinkFromStorage();
 
         const workspaceName = normalizeWorkspaceText(
           workspaceBlueprint?.venture?.name,
@@ -2457,6 +2490,56 @@
           const reason = urlParams.get('reason') || 'unknown error';
           githubStatus.textContent = `Failed to connect GitHub: ${reason}`;
           githubStatus.style.color = '#ef4444';
+        }
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      // Notion OAuth button
+      document.getElementById('notion-oauth-btn').addEventListener('click', async () => {
+        const notionStatus = document.getElementById('notion-oauth-status');
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (!session) {
+          notionStatus.textContent = 'Please sign in first';
+          notionStatus.style.color = '#ef4444';
+          return;
+        }
+
+        notionStatus.textContent = 'Redirecting to Notion...';
+        notionStatus.style.color = 'var(--text-muted, #888)';
+
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/auth/notion`, {
+            headers: { 'Authorization': `Bearer ${session.access_token}` }
+          });
+
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to start Notion OAuth');
+          }
+
+          const data = await res.json();
+          // Redirect to Notion OAuth page
+          window.location.href = data.redirect_url;
+        } catch (err) {
+          console.error('Notion OAuth error:', err);
+          notionStatus.textContent = `Error: ${err.message}`;
+          notionStatus.style.color = '#ef4444';
+        }
+      });
+
+      // Check for Notion OAuth callback result
+      const notionResult = urlParams.get('notion');
+      if (notionResult) {
+        const notionStatus = document.getElementById('notion-oauth-status');
+        if (notionResult === 'success') {
+          notionStatus.textContent = 'Notion connected successfully!';
+          notionStatus.style.color = '#22c55e';
+        } else if (notionResult === 'error') {
+          const reason = urlParams.get('reason') || 'unknown error';
+          notionStatus.textContent = `Failed to connect Notion: ${reason}`;
+          notionStatus.style.color = '#ef4444';
         }
         // Clean up URL
         window.history.replaceState({}, document.title, window.location.pathname);
