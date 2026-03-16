@@ -255,6 +255,9 @@ pub struct PostmarkInboundPayload {
     pub headers: Option<Vec<PostmarkHeader>>,
     #[serde(rename = "Attachments")]
     pub attachments: Option<Vec<PostmarkAttachment>>,
+    /// Original recipient address when using inbound forwarding
+    #[serde(rename = "OriginalRecipient")]
+    pub original_recipient: Option<String>,
 }
 
 impl PostmarkInboundPayload {

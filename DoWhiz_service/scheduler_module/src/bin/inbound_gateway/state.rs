@@ -102,6 +102,10 @@ pub(super) fn collect_service_address_candidates(
             candidates.push(Some(entry.email.as_str()));
         }
     }
+    // Check Postmark's OriginalRecipient field (used when forwarding is configured)
+    if let Some(value) = payload.original_recipient.as_deref() {
+        candidates.push(Some(value));
+    }
     for header in [
         "X-Original-To",
         "Delivered-To",

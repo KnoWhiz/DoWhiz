@@ -76,7 +76,14 @@ pub(super) async fn ingest_postmark(
 
     let address = find_service_address(&payload, &state.employee_directory.service_addresses);
     let Some(address) = address else {
-        info!("gateway no service address found in postmark payload");
+        info!(
+            "gateway no service address found in postmark payload: to={:?}, cc={:?}, bcc={:?}, original_recipient={:?}, from={:?}",
+            payload.to,
+            payload.cc,
+            payload.bcc,
+            payload.original_recipient,
+            payload.from
+        );
         return (StatusCode::OK, Json(json!({"status": "no_route"})));
     };
 
