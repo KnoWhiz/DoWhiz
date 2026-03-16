@@ -760,6 +760,53 @@
         color: var(--text-muted, #888);
       }
 
+      .workspace-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.75rem;
+      }
+
+      .workspace-summary-card {
+        padding: 0.75rem;
+        border-radius: 0.7rem;
+        border: 1px solid var(--border, #333);
+        background: color-mix(in srgb, var(--surface, #1a1a1a) 82%, transparent);
+      }
+
+      .workspace-summary-card h3 {
+        margin: 0 0 0.45rem;
+        font-size: 0.92rem;
+      }
+
+      .workspace-summary-meta {
+        margin: 0.3rem 0 0;
+        font-size: 0.88rem;
+        color: var(--text-muted, #888);
+      }
+
+      .workspace-summary-meta strong {
+        color: var(--text, #fff);
+        font-weight: 600;
+      }
+
+      .workspace-summary-list {
+        margin: 0;
+        padding-left: 1rem;
+        list-style: disc;
+        display: grid;
+        gap: 0.3rem;
+        color: var(--text-muted, #888);
+        font-size: 0.9rem;
+      }
+
+      .workspace-summary-empty {
+        grid-column: 1 / -1;
+        padding: 0.8rem;
+        border-radius: 0.7rem;
+        border: 1px dashed var(--border, #333);
+        color: var(--text-muted, #888);
+      }
+
       .settings-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -821,6 +868,7 @@
 
       @media (max-width: 780px) {
         .account-grid,
+        .workspace-summary-grid,
         .settings-grid {
           grid-template-columns: 1fr;
         }
@@ -853,7 +901,7 @@
           <div class="eyebrow">Account</div>
           <h1 id="page-title">Sign in to DoWhiz</h1>
           <p class="lead" id="page-subtitle">
-            Open your account dashboard to manage channels, tasks, and settings in one place.
+            Open one unified dashboard for team workspace context and personal account controls.
           </p>
         </section>
 
@@ -945,11 +993,12 @@
           <div id="dashboard-container" class="hidden">
             <div class="dashboard-shell">
               <aside class="dashboard-sidebar">
-                <p class="sidebar-eyebrow">Dashboard</p>
-                <h2 class="sidebar-title">Workspace Settings</h2>
-                <p class="sidebar-description">Navigate quickly to channels, tasks, memo, and account controls.</p>
+                <p class="sidebar-eyebrow">Unified Dashboard</p>
+                <h2 class="sidebar-title">Team + Personal</h2>
+                <p class="sidebar-description">One page for workspace context, channels, tasks, memo, and account controls.</p>
                 <nav class="sidebar-nav" aria-label="Dashboard Sections">
                   <a class="sidebar-link is-active" href="#section-overview">Overview</a>
+                  <a class="sidebar-link" href="#section-workspace">Team Workspace</a>
                   <a class="sidebar-link" href="#section-channels">Channels</a>
                   <a class="sidebar-link" href="#section-tasks">Tasks</a>
                   <a class="sidebar-link" href="#section-memo">Memo</a>
@@ -967,12 +1016,12 @@
               <div class="dashboard-main">
                 <section id="section-overview" class="legal-card dashboard-section">
                   <div class="dashboard-header">
-                    <h2>Account Overview</h2>
+                    <h2>Personal Overview</h2>
                     <button id="info-btn" class="auth-btn auth-btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;">
                       Add Employee Hours
                     </button>
                   </div>
-                  <p class="dashboard-overview-copy">Your core dashboard identity and billing controls.</p>
+                  <p class="dashboard-overview-copy">Your personal identity and billing controls.</p>
                   <div class="account-grid">
                     <div class="account-meta-item">
                       <p class="account-meta-label">Account ID</p>
@@ -982,6 +1031,19 @@
                       <p class="account-meta-label">Primary Email</p>
                       <code id="user-email">Loading...</code>
                     </div>
+                  </div>
+                </section>
+
+                <section id="section-workspace" class="legal-card dashboard-section">
+                  <div class="dashboard-header">
+                    <h2>Team Workspace</h2>
+                    <a class="auth-btn auth-btn-oauth" href="/start">Update Team Brief</a>
+                  </div>
+                  <p class="dashboard-overview-copy">
+                    Concise team context shared across your channels and task runtime.
+                  </p>
+                  <div id="workspace-summary-content" class="workspace-summary-grid">
+                    <div class="workspace-summary-empty">Loading workspace summary...</div>
                   </div>
                 </section>
 
@@ -1180,6 +1242,7 @@
       const ANALYTICS_ANON_KEY = 'dowhiz_analytics_anonymous_id';
       const ANALYTICS_SESSION_KEY = 'dowhiz_analytics_session_id';
       const ANALYTICS_ATTRIBUTION_KEY = 'dowhiz_analytics_attribution';
+      const STARTUP_BLUEPRINT_STORAGE_KEY = 'dowhiz_startup_workspace_blueprint_v1';
 
       function analyticsGenerateId(prefix) {
         if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -1490,6 +1553,114 @@
           return 'Password must be at least 6 characters.';
         }
         return message;
+      }
+
+      function normalizeWorkspaceText(value, fallback = 'Not set') {
+        const normalized = String(value || '').trim();
+        return normalized || fallback;
+      }
+
+      function normalizeWorkspaceList(value) {
+        if (!Array.isArray(value)) {
+          return [];
+        }
+        return value
+          .map((item) => String(item || '').trim())
+          .filter(Boolean);
+      }
+
+      function normalizeWorkspaceAgents(value) {
+        if (!Array.isArray(value)) {
+          return [];
+        }
+        return value
+          .map((agent) => ({
+            role: String(agent?.role || '').trim(),
+            owner: String(agent?.owner || '').trim()
+          }))
+          .filter((agent) => agent.role.length > 0);
+      }
+
+      function loadWorkspaceSummaryFromStorage() {
+        const container = document.getElementById('workspace-summary-content');
+        if (!container) {
+          return;
+        }
+
+        let workspaceBlueprint = null;
+        const raw = window.localStorage.getItem(STARTUP_BLUEPRINT_STORAGE_KEY);
+        if (raw) {
+          try {
+            workspaceBlueprint = JSON.parse(raw);
+          } catch {
+            workspaceBlueprint = null;
+          }
+        }
+
+        const workspaceName = normalizeWorkspaceText(
+          workspaceBlueprint?.venture?.name,
+          'Personal Workspace'
+        );
+        const founderName = normalizeWorkspaceText(
+          workspaceBlueprint?.founder?.name,
+          'Add your founder name'
+        );
+        const stage = normalizeWorkspaceText(workspaceBlueprint?.venture?.stage, 'Not set');
+        const thesis = normalizeWorkspaceText(
+          workspaceBlueprint?.venture?.thesis,
+          'Add a short founder thesis to personalize your team context.'
+        );
+
+        const goals = normalizeWorkspaceList(workspaceBlueprint?.goals_30_90_days).slice(0, 3);
+        const channels = normalizeWorkspaceList(workspaceBlueprint?.preferred_channels).slice(0, 5);
+        const agents = normalizeWorkspaceAgents(workspaceBlueprint?.requested_agents).slice(0, 4);
+
+        const goalItems = goals.length
+          ? goals.map((goal) => `<li>${escapeHtml(goal)}</li>`).join('')
+          : '<li>Add your top goals in founder intake.</li>';
+
+        const channelItems = channels.length
+          ? channels.map((channel) => `<li>${escapeHtml(channel)}</li>`).join('')
+          : '<li>No channels selected yet.</li>';
+
+        const agentItems = agents.length
+          ? agents.map((agent) => {
+            const owner = agent.owner ? ` (${escapeHtml(agent.owner)})` : '';
+            return `<li>${escapeHtml(agent.role)}${owner}</li>`;
+          }).join('')
+          : '<li>No agent roles defined yet.</li>';
+
+        container.innerHTML = `
+          <article class="workspace-summary-card">
+            <h3>Snapshot</h3>
+            <p class="workspace-summary-meta"><strong>${escapeHtml(workspaceName)}</strong></p>
+            <p class="workspace-summary-meta">Founder: <strong>${escapeHtml(founderName)}</strong></p>
+            <p class="workspace-summary-meta">Stage: <strong>${escapeHtml(stage)}</strong></p>
+            <p class="workspace-summary-meta">${escapeHtml(thesis)}</p>
+          </article>
+          <article class="workspace-summary-card">
+            <h3>Top Goals</h3>
+            <ul class="workspace-summary-list">${goalItems}</ul>
+          </article>
+          <article class="workspace-summary-card">
+            <h3>Team + Channels</h3>
+            <p class="workspace-summary-meta">Agents</p>
+            <ul class="workspace-summary-list">${agentItems}</ul>
+            <p class="workspace-summary-meta">Channels</p>
+            <ul class="workspace-summary-list">${channelItems}</ul>
+          </article>
+        `;
+      }
+
+      function scrollToDashboardHashTarget() {
+        const hash = window.location.hash;
+        if (!hash || !hash.startsWith('#section-')) {
+          return;
+        }
+        const target = document.querySelector(hash);
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
       }
 
       async function sendPasswordReset(email) {
@@ -1948,10 +2119,11 @@
         hideExistingAccountOptions();
         dashboardContainer.classList.remove('hidden');
         pageTitle.textContent = 'Your Dashboard';
-        pageSubtitle.textContent = 'Manage channels, tasks, memo, and settings from one unified dashboard.';
+        pageSubtitle.textContent = 'Manage team workspace context and personal account operations from one dashboard.';
 
         document.getElementById('account-id').textContent = accountData.account_id;
         document.getElementById('user-email').textContent = session.user.email;
+        loadWorkspaceSummaryFromStorage();
 
         // Load identifiers, memo, and tasks in parallel
         await Promise.all([
@@ -1963,6 +2135,7 @@
         // Start polling for task updates
         startTaskPolling();
         updateSidebarNavigation();
+        window.setTimeout(scrollToDashboardHashTarget, 80);
       }
 
       // Load linked identifiers
@@ -2785,7 +2958,11 @@
 
         // Clean up loggedIn parameter from URL
         if (expectingDashboard) {
-          window.history.replaceState({}, document.title, window.location.pathname);
+          window.history.replaceState(
+            {},
+            document.title,
+            `${window.location.pathname}${window.location.hash || ''}`
+          );
         }
 
         if (session) {
