@@ -70,6 +70,10 @@
   width: min(1200px, 100%);
 }
 
+.route-card-workspace-compact {
+  width: min(940px, 100%);
+}
+
 .route-card-intake {
   width: min(980px, 100%);
 }
@@ -160,6 +164,29 @@
   margin: 0;
 }
 
+.intake-advanced {
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.7rem 0.8rem;
+}
+
+.intake-advanced summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.intake-advanced[open] summary {
+  margin-bottom: 0.7rem;
+}
+
+.intake-advanced-grid {
+  margin-top: 0.2rem;
+}
+
 .intake-errors h2 {
   margin-bottom: 0.5rem;
 }
@@ -223,6 +250,24 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.85rem;
+}
+
+.workspace-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.workspace-quick-card {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.8rem;
+}
+
+.workspace-quick-card h2 {
+  margin: 0 0 0.6rem;
+  font-size: 0.98rem;
 }
 
 .workspace-card {
@@ -335,7 +380,8 @@
   }
 
   .workspace-health-row,
-  .workspace-grid {
+  .workspace-grid,
+  .workspace-quick-grid {
     grid-template-columns: 1fr;
   }
 

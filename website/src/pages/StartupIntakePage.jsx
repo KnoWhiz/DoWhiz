@@ -2,9 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   CHANNEL_OPTIONS,
-  PLAN_HORIZON_OPTIONS,
   REPO_PROVIDER_OPTIONS,
-  STAGE_OPTIONS,
   createFounderIntakeDefaults,
   createValidatedWorkspaceBlueprintFromIntake,
   saveWorkspaceBlueprint
@@ -70,10 +68,9 @@ function StartupIntakePage() {
     <main className="route-shell route-shell-intake">
       <div className="route-card route-card-intake">
         <p className="route-kicker">Founder Intake</p>
-        <h1>Create Your Startup Workspace Blueprint</h1>
+        <h1>Create Your Agent Team</h1>
         <p>
-          Define your startup objective, channels, stack status, and desired digital founding team. This generates a
-          canonical workspace blueprint object.
+          Share the core brief once. We will generate your workspace blueprint and use it in your unified dashboard.
         </p>
 
         <form className="intake-form" onSubmit={handleSubmit} noValidate>
@@ -91,17 +88,6 @@ function StartupIntakePage() {
             </div>
 
             <div className="intake-field">
-              <label htmlFor="founder_email">Founder email (optional)</label>
-              <input
-                id="founder_email"
-                type="email"
-                value={intake.founder_email}
-                onChange={updateField('founder_email')}
-                placeholder="jane@startup.com"
-              />
-            </div>
-
-            <div className="intake-field">
               <label htmlFor="venture_name">Company / project name</label>
               <input
                 id="venture_name"
@@ -110,17 +96,6 @@ function StartupIntakePage() {
                 onChange={updateField('venture_name')}
                 placeholder="Acme AI"
               />
-            </div>
-
-            <div className="intake-field">
-              <label htmlFor="venture_stage">Stage</label>
-              <select id="venture_stage" value={intake.venture_stage} onChange={updateField('venture_stage')}>
-                {STAGE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
             </div>
 
             <div className="intake-field intake-field-full">
@@ -134,23 +109,8 @@ function StartupIntakePage() {
               />
             </div>
 
-            <div className="intake-field">
-              <label htmlFor="plan_horizon_days">Planning horizon</label>
-              <select
-                id="plan_horizon_days"
-                value={intake.plan_horizon_days}
-                onChange={updateField('plan_horizon_days')}
-              >
-                {PLAN_HORIZON_OPTIONS.map((days) => (
-                  <option key={days} value={String(days)}>
-                    {days} days
-                  </option>
-                ))}
-              </select>
-            </div>
-
             <div className="intake-field intake-field-full">
-              <label htmlFor="goals_text">Goals for the next 30-90 days (one per line)</label>
+              <label htmlFor="goals_text">Top goals (one per line)</label>
               <textarea
                 id="goals_text"
                 value={intake.goals_text}
@@ -159,21 +119,11 @@ function StartupIntakePage() {
                 required
               />
             </div>
-
-            <div className="intake-field intake-field-full">
-              <label htmlFor="assets_text">Current assets (one per line)</label>
-              <textarea
-                id="assets_text"
-                value={intake.assets_text}
-                onChange={updateField('assets_text')}
-                placeholder="Pitch deck\nCustomer interviews\nLanding page"
-              />
-            </div>
           </section>
 
           <section className="route-section">
             <h2>Preferred Channels</h2>
-            <p>Select where your agents should trigger and coordinate work.</p>
+            <p>Select where your team should receive and execute requests.</p>
             <div className="intake-chip-grid">
               {CHANNEL_OPTIONS.map((channel) => {
                 const checked = intake.preferred_channels.includes(channel);
@@ -192,6 +142,16 @@ function StartupIntakePage() {
           </section>
 
           <section className="route-section intake-grid">
+            <div className="intake-field intake-field-full">
+              <label htmlFor="requested_agents_text">Agent roles (one per line, optional owner via role:owner)</label>
+              <textarea
+                id="requested_agents_text"
+                value={intake.requested_agents_text}
+                onChange={updateField('requested_agents_text')}
+                placeholder="Builder\nGTM Strategist\nChief of Staff:Founder"
+              />
+            </div>
+
             <div className="intake-field intake-field-checkbox">
               <label>
                 <input
@@ -201,22 +161,6 @@ function StartupIntakePage() {
                 />
                 <span>Existing code repository</span>
               </label>
-            </div>
-
-            <div className="intake-field">
-              <label htmlFor="primary_repo_provider">Primary repo provider</label>
-              <select
-                id="primary_repo_provider"
-                value={intake.primary_repo_provider}
-                onChange={updateField('primary_repo_provider')}
-                disabled={!intake.has_existing_repo}
-              >
-                {REPO_PROVIDER_OPTIONS.map((provider) => (
-                  <option key={provider} value={provider}>
-                    {provider}
-                  </option>
-                ))}
-              </select>
             </div>
 
             <div className="intake-field intake-field-checkbox">
@@ -230,15 +174,74 @@ function StartupIntakePage() {
               </label>
             </div>
 
-            <div className="intake-field intake-field-full">
-              <label htmlFor="requested_agents_text">Desired founding-team agents (one per line, optional owner via role:owner)</label>
-              <textarea
-                id="requested_agents_text"
-                value={intake.requested_agents_text}
-                onChange={updateField('requested_agents_text')}
-                placeholder="Builder\nGTM Strategist\nChief of Staff:Founder"
-              />
-            </div>
+            {intake.has_existing_repo ? (
+              <div className="intake-field">
+                <label htmlFor="primary_repo_provider">Primary repo provider</label>
+                <select
+                  id="primary_repo_provider"
+                  value={intake.primary_repo_provider}
+                  onChange={updateField('primary_repo_provider')}
+                >
+                  {REPO_PROVIDER_OPTIONS.map((provider) => (
+                    <option key={provider} value={provider}>
+                      {provider}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="route-section">
+            <details className="intake-advanced">
+              <summary>Advanced details (optional)</summary>
+              <div className="intake-grid intake-advanced-grid">
+                <div className="intake-field">
+                  <label htmlFor="founder_email">Founder email</label>
+                  <input
+                    id="founder_email"
+                    type="email"
+                    value={intake.founder_email}
+                    onChange={updateField('founder_email')}
+                    placeholder="jane@startup.com"
+                  />
+                </div>
+
+                <div className="intake-field">
+                  <label htmlFor="venture_stage">Stage</label>
+                  <select id="venture_stage" value={intake.venture_stage} onChange={updateField('venture_stage')}>
+                    <option value="idea">Idea</option>
+                    <option value="prototype">Prototype</option>
+                    <option value="mvp">MVP</option>
+                    <option value="post_mvp">Post-MVP</option>
+                    <option value="growth">Growth</option>
+                  </select>
+                </div>
+
+                <div className="intake-field">
+                  <label htmlFor="plan_horizon_days">Planning horizon</label>
+                  <select
+                    id="plan_horizon_days"
+                    value={intake.plan_horizon_days}
+                    onChange={updateField('plan_horizon_days')}
+                  >
+                    <option value="30">30 days</option>
+                    <option value="60">60 days</option>
+                    <option value="90">90 days</option>
+                  </select>
+                </div>
+
+                <div className="intake-field intake-field-full">
+                  <label htmlFor="assets_text">Current assets (one per line)</label>
+                  <textarea
+                    id="assets_text"
+                    value={intake.assets_text}
+                    onChange={updateField('assets_text')}
+                    placeholder="Pitch deck\nCustomer interviews\nLanding page"
+                  />
+                </div>
+              </div>
+            </details>
           </section>
 
           {errors.length ? (
@@ -254,11 +257,11 @@ function StartupIntakePage() {
 
           <div className="route-actions">
             <button type="submit" className="btn btn-primary">
-              Generate workspace blueprint
+              Save team blueprint
             </button>
-            <Link className="btn btn-secondary" to="/workspace">
-              Open workspace home
-            </Link>
+            <a className="btn btn-secondary" href="/auth/index.html?loggedIn=true#section-workspace">
+              Open dashboard
+            </a>
             <Link className="btn btn-secondary" to="/">
               Back to landing
             </Link>
@@ -267,11 +270,14 @@ function StartupIntakePage() {
 
         {blueprint ? (
           <section className="route-section">
-            <h2>Generated Canonical Blueprint</h2>
+            <h2>Blueprint saved</h2>
             <p>
-              This object is saved locally and mirrored to backend schema fields for validation and bootstrap planning.
+              Your team blueprint is saved locally and now appears in your dashboard workspace section.
             </p>
-            <pre className="intake-blueprint-preview">{blueprintJson}</pre>
+            <details className="intake-advanced">
+              <summary>View blueprint JSON</summary>
+              <pre className="intake-blueprint-preview">{blueprintJson}</pre>
+            </details>
           </section>
         ) : null}
       </div>
