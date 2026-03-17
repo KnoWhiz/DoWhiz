@@ -92,7 +92,37 @@ pub fn process_inbound_payload(
         requester.identifier_type, requester.identifier
     );
 
-    let user = if let Some(acct_id) = account_id {
+    // The frontend sends auth_user_id (from session.user.id), not account_id.
+    // We need to resolve it to the actual account first.
+    let resolved_account_id = if let Some(auth_user_id) = account_id {
+        match account_store.get_account_by_auth_user(auth_user_id) {
+            Ok(Some(account)) => {
+                info!(
+                    "resolved auth_user_id={} to account_id={}",
+                    auth_user_id, account.id
+                );
+                Some(account.id)
+            }
+            Ok(None) => {
+                warn!(
+                    "no account found for auth_user_id={}, falling back to requester",
+                    auth_user_id
+                );
+                None
+            }
+            Err(err) => {
+                warn!(
+                    "failed to look up account for auth_user_id={}: {}, falling back to requester",
+                    auth_user_id, err
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let user = if let Some(acct_id) = resolved_account_id {
         match account_store.list_identifiers(acct_id) {
             Ok(identifiers) => {
                 let email_ident = identifiers.iter().find(|i| i.identifier_type == "email");
