@@ -63,7 +63,11 @@ pub(super) async fn ingest_postmark(
 
     let payload: PostmarkInboundPayload = match serde_json::from_slice(&body) {
         Ok(payload) => payload,
-        Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"}))),
+        Err(e) => {
+            let body_preview = String::from_utf8_lossy(&body[..body.len().min(500)]);
+            warn!("gateway failed to parse postmark payload: {} - body preview: {}", e, body_preview);
+            return (StatusCode::BAD_REQUEST, Json(json!({"status": "bad_json"})));
+        }
     };
 
     if payload_contains_no_reply_marker(&payload) {
@@ -76,13 +80,16 @@ pub(super) async fn ingest_postmark(
 
     let address = find_service_address(&payload, &state.employee_directory.service_addresses);
     let Some(address) = address else {
+        let body_preview = String::from_utf8_lossy(&body[..body.len().min(1000)]);
         info!(
-            "gateway no service address found in postmark payload: to={:?}, cc={:?}, bcc={:?}, original_recipient={:?}, from={:?}",
+            "gateway no service address found in postmark payload: to={:?}, cc={:?}, bcc={:?}, original_recipient={:?}, from={:?}, subject={:?}, body_preview={}",
             payload.to,
             payload.cc,
             payload.bcc,
             payload.original_recipient,
-            payload.from
+            payload.from,
+            payload.subject,
+            body_preview
         );
         return (StatusCode::OK, Json(json!({"status": "no_route"})));
     };
