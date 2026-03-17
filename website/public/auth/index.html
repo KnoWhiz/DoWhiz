@@ -1858,7 +1858,7 @@
             },
             body: JSON.stringify({
               founder_name: blueprint.founder?.name || '',
-              founder_email: blueprint.founder?.email || '',
+              founder_email: session?.user?.email || blueprint.founder?.email || '',
               venture_name: blueprint.venture?.name || null,
               thesis: blueprint.venture?.thesis || null,
               stage: blueprint.venture?.stage || null,
