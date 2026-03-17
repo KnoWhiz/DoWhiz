@@ -1046,22 +1046,37 @@ Use the google-docs skill to create and share the document."#,
         assets_text = assets_text,
     );
 
-    // Build InboundMessage with the prompt
+    // Build InboundMessage with the prompt using Email channel
+    let message_id = format!("<workspace-brief-{}@dowhiz.com>", Uuid::new_v4());
+    let recipient_email = format!("{}@dowhiz.com", employee_id);
+    let subject = format!("Create Workspace Brief for {}", venture_name);
+
     let message = InboundMessage {
-        channel: Channel::GoogleDocs,
+        channel: Channel::Email,
         sender: request.founder_email.clone(),
         sender_name: Some(request.founder_name.clone()),
-        recipient: format!("{}@dowhiz.com", employee_id),
-        subject: Some(format!("Create Workspace Brief for {}", venture_name)),
-        text_body: Some(prompt),
+        recipient: recipient_email.clone(),
+        subject: Some(subject.clone()),
+        text_body: Some(prompt.clone()),
         html_body: None,
-        thread_id: format!("workspace-brief:{}", Uuid::new_v4()),
-        message_id: Some(format!("workspace-brief-{}", Uuid::new_v4())),
+        thread_id: message_id.clone(),
+        message_id: Some(message_id.clone()),
         attachments: Vec::new(),
         reply_to: vec![request.founder_email.clone()],
         raw_payload: Vec::new(),
         metadata: ChannelMetadata::default(),
     };
+
+    // Build synthetic Postmark-style email payload
+    let email_payload = json!({
+        "From": format!("{} <{}>", request.founder_name, request.founder_email),
+        "To": recipient_email,
+        "ReplyTo": request.founder_email,
+        "Subject": subject,
+        "TextBody": prompt,
+        "MessageID": message_id
+    });
+    let raw_payload = serde_json::to_vec(&email_payload).unwrap_or_default();
 
     let route = RouteDecision {
         tenant_id,
@@ -1071,10 +1086,10 @@ Use the google-docs skill to create and share the document."#,
     let external_message_id = message.message_id.clone();
     let envelope = match build_envelope(
         route,
-        Channel::GoogleDocs,
+        Channel::Email,
         external_message_id,
         &message,
-        &[],
+        &raw_payload,
     )
     .await
     {
