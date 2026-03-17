@@ -18,6 +18,7 @@ mod verify;
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use axum::Router;
+use tower_http::cors::{Any, CorsLayer};
 use std::env;
 use std::sync::Arc;
 use tokio::task;
@@ -222,7 +223,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .with_state(state)
         .merge(auth_router(auth_state))
         .merge(agent_market_router(agent_market_state))
-        .layer(DefaultBodyLimit::max(max_body_bytes));
+        .layer(DefaultBodyLimit::max(max_body_bytes))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        );
 
     let addr: std::net::SocketAddr = format!("{}:{}", host, port).parse()?;
     info!("ingestion gateway listening on {}", addr);
