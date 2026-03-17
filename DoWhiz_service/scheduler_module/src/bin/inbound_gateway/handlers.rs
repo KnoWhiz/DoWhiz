@@ -1048,7 +1048,14 @@ Use the google-docs skill to create and share the document."#,
 
     // Build InboundMessage with the prompt using Email channel
     let message_id = format!("<workspace-brief-{}@dowhiz.com>", Uuid::new_v4());
-    let recipient_email = format!("{}@dowhiz.com", employee_id);
+    let recipient_email = state
+        .employee_directory
+        .employees
+        .iter()
+        .find(|e| e.id == employee_id)
+        .and_then(|e| e.address_set.iter().next())
+        .cloned()
+        .unwrap_or_else(|| format!("{}@dowhiz.com", employee_id));
     let subject = format!("Create Workspace Brief for {}", venture_name);
 
     let message = InboundMessage {
