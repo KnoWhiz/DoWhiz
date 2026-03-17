@@ -105,10 +105,10 @@ pub(crate) fn process_notion_email(
     // Try to get Notion OAuth token
     // First check environment variable, then try MongoDB by workspace_name fuzzy match
     let access_token = std::env::var("NOTION_API_TOKEN").ok().or_else(|| {
-        // Try to find a token by workspace_name fuzzy match
-        if let Some(ref ws_name) = notification.workspace_name {
-            match NotionStore::new() {
-                Ok(store) => {
+        match NotionStore::new() {
+            Ok(store) => {
+                // Try to find a token by workspace_name fuzzy match first
+                if let Some(ref ws_name) = notification.workspace_name {
                     info!("Looking for Notion token for workspace: {}", ws_name);
                     match store.get_credential_by_workspace_name_fuzzy(ws_name) {
                         Ok(credential) => {
@@ -124,9 +124,24 @@ pub(crate) fn process_notion_email(
                         }
                     }
                 }
-                Err(e) => {
-                    warn!("Failed to connect to NotionStore: {}", e);
+                // Fallback: if no workspace_name or no match, try to get any available credential
+                // This handles cases where Notion email doesn't contain extractable workspace info
+                info!("Trying fallback: looking for any available Notion credential");
+                match store.get_any_credential() {
+                    Ok(credential) => {
+                        info!(
+                            "Found fallback Notion token (workspace: {:?})",
+                            credential.workspace_name
+                        );
+                        return Some(credential.access_token);
+                    }
+                    Err(e) => {
+                        warn!("No fallback Notion credential available: {}", e);
+                    }
                 }
+            }
+            Err(e) => {
+                warn!("Failed to connect to NotionStore: {}", e);
             }
         }
         None
