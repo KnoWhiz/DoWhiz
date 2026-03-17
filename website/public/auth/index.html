@@ -766,6 +766,49 @@
         gap: 0.75rem;
       }
 
+      .next-steps-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .next-step-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1rem;
+        border-radius: 0.7rem;
+        border: 1px solid var(--border, #333);
+        background: color-mix(in srgb, var(--surface, #1a1a1a) 82%, transparent);
+      }
+
+      .next-step-info {
+        flex: 1;
+      }
+
+      .next-step-title {
+        font-weight: 600;
+        margin: 0 0 0.25rem;
+      }
+
+      .next-step-description {
+        font-size: 0.85rem;
+        color: var(--text-muted, #888);
+        margin: 0;
+      }
+
+      .next-step-action {
+        margin-left: 1rem;
+      }
+
+      .next-step-complete {
+        color: #22c55e;
+        font-size: 0.85rem;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+      }
+
       .workspace-summary-card {
         padding: 0.75rem;
         border-radius: 0.7rem;
@@ -1044,6 +1087,13 @@
                   </p>
                   <div id="workspace-summary-content" class="workspace-summary-grid">
                     <div class="workspace-summary-empty">Loading workspace summary...</div>
+                  </div>
+
+                  <div id="workspace-next-steps" class="workspace-next-steps" style="margin-top: 2rem;">
+                    <h3 style="margin-bottom: 1rem;">Next Steps</h3>
+                    <div id="next-steps-list" class="next-steps-list">
+                      <p style="color: var(--text-muted, #888);">Loading next steps...</p>
+                    </div>
                   </div>
                 </section>
 
@@ -1683,6 +1733,162 @@
             <ul class="workspace-summary-list">${channelItems}</ul>
           </article>
         `;
+
+        // Render next steps with current cached identifiers
+        renderNextSteps(cachedIdentifiers || []);
+      }
+
+      // Next Steps configuration
+      const NEXT_STEP_TASKS = [
+        {
+          id: 'create-brief',
+          title: 'Create Startup Brief',
+          description: 'Generate a Google Doc summarizing your startup goals, thesis, and action plan.',
+          checkComplete: () => localStorage.getItem('workspace_brief_created') === 'true',
+          actionType: 'button',
+          actionLabel: 'Get Started',
+          action: 'createBrief'
+        },
+        {
+          id: 'connect-github',
+          title: 'Connect GitHub',
+          description: 'Link your GitHub account to enable code repository management.',
+          checkComplete: (identifiers) => identifiers.some(id => id.identifier_type === 'github'),
+          actionType: 'oauth',
+          actionLabel: 'Connect',
+          oauthButtonId: 'github-connect-btn'
+        },
+        {
+          id: 'connect-slack',
+          title: 'Connect Slack',
+          description: 'Connect Slack for team communication and agent interactions.',
+          checkComplete: (identifiers) => identifiers.some(id => id.identifier_type === 'slack'),
+          actionType: 'oauth',
+          actionLabel: 'Connect',
+          oauthButtonId: 'slack-oauth-btn'
+        },
+        {
+          id: 'connect-discord',
+          title: 'Connect Discord',
+          description: 'Connect Discord for real-time messaging with your AI agents.',
+          checkComplete: (identifiers) => identifiers.some(id => id.identifier_type === 'discord'),
+          actionType: 'oauth',
+          actionLabel: 'Connect',
+          oauthButtonId: 'discord-oauth-btn'
+        },
+        {
+          id: 'connect-notion',
+          title: 'Connect Notion',
+          description: 'Link Notion to sync documents and knowledge bases.',
+          checkComplete: (identifiers) => identifiers.some(id => id.identifier_type === 'notion'),
+          actionType: 'oauth',
+          actionLabel: 'Connect',
+          oauthButtonId: 'notion-oauth-btn'
+        }
+      ];
+
+      async function createBrief() {
+        const blueprint = loadWorkspaceBlueprintFromStorage();
+        if (!blueprint) {
+          showMessage('Please complete your team brief first.');
+          return;
+        }
+
+        const btn = document.querySelector('[data-action="createBrief"]');
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Creating...';
+        }
+
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const accessToken = session?.access_token;
+
+          const response = await fetch(`${DOWHIZ_API_URL}/api/workspace/create-brief`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {})
+            },
+            body: JSON.stringify({
+              founder_name: blueprint.founder?.name || '',
+              founder_email: blueprint.founder?.email || '',
+              venture_name: blueprint.venture?.name || null,
+              thesis: blueprint.venture?.thesis || null,
+              stage: blueprint.venture?.stage || null,
+              goals: blueprint.goals_30_90_days || [],
+              current_assets: blueprint.current_assets || null,
+              plan_horizon_days: blueprint.plan_horizon_days || null
+            })
+          });
+
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to create brief');
+          }
+
+          localStorage.setItem('workspace_brief_created', 'true');
+          showMessage('Brief creation started! Check your Google Docs shortly.', 'success');
+          renderNextSteps(cachedIdentifiers);
+        } catch (err) {
+          console.error('Failed to create brief:', err);
+          showMessage(err.message || 'Failed to create brief. Please try again.');
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Get Started';
+          }
+        }
+      }
+
+      function renderNextSteps(identifiers = []) {
+        const container = document.getElementById('next-steps-list');
+        if (!container) return;
+
+        const blueprint = loadWorkspaceBlueprintFromStorage();
+        const preferredChannels = (blueprint?.preferred_channels || []).map(c => c.toLowerCase());
+
+        // Filter tasks: show create-brief always, show channel tasks only if in preferred channels
+        const relevantTasks = NEXT_STEP_TASKS.filter(task => {
+          if (task.id === 'create-brief') return true;
+          if (task.id === 'connect-github') return preferredChannels.some(c => c.includes('github'));
+          if (task.id === 'connect-slack') return preferredChannels.some(c => c.includes('slack'));
+          if (task.id === 'connect-discord') return preferredChannels.some(c => c.includes('discord'));
+          if (task.id === 'connect-notion') return preferredChannels.some(c => c.includes('notion'));
+          return false;
+        });
+
+        if (relevantTasks.length === 0) {
+          container.innerHTML = '<p style="color: var(--text-muted, #888);">No next steps available. Update your team brief to get started.</p>';
+          return;
+        }
+
+        const html = relevantTasks.map(task => {
+          const isComplete = task.checkComplete(identifiers);
+
+          let actionHtml;
+          if (isComplete) {
+            actionHtml = `<span class="next-step-complete"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg> Complete</span>`;
+          } else if (task.actionType === 'button') {
+            actionHtml = `<button class="auth-btn auth-btn-primary" data-action="${task.action}" onclick="${task.action}()">${task.actionLabel}</button>`;
+          } else if (task.actionType === 'oauth') {
+            actionHtml = `<button class="auth-btn auth-btn-oauth" onclick="document.getElementById('${task.oauthButtonId}').click()">${task.actionLabel}</button>`;
+          }
+
+          return `
+            <div class="next-step-item" data-task-id="${task.id}">
+              <div class="next-step-info">
+                <p class="next-step-title">${escapeHtml(task.title)}</p>
+                <p class="next-step-description">${escapeHtml(task.description)}</p>
+              </div>
+              <div class="next-step-action">
+                ${actionHtml}
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        container.innerHTML = html;
       }
 
       function scrollToDashboardHashTarget() {
@@ -2210,6 +2416,9 @@
           } else {
             list.innerHTML = '<li class="identifier-item">No channels linked yet.</li>';
           }
+
+          // Render next steps based on connected channels
+          renderNextSteps(cachedIdentifiers);
         } catch (err) {
           console.error('Failed to load identifiers:', err);
         }
