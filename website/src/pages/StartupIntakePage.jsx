@@ -14,6 +14,8 @@ import {
 } from '../domain/workspaceBlueprint';
 
 const DASHBOARD_PATH = '/auth/index.html?loggedIn=true#section-workspace';
+const DASHBOARD_POPUP_AUTH_PATH = '/auth/index.html?loggedIn=true&popupAuth=1#section-workspace';
+const AUTH_POPUP_SUCCESS_EVENT = 'dowhiz-auth-popup-success';
 const INTAKE_CHAT_API_PATH = '/api/startup-workspace/intake-chat';
 const EDIT_MODE_QUERY_VALUE = 'edit';
 
@@ -271,7 +273,7 @@ function openDashboardAuthPopup() {
   const top = Math.max(0, window.screenY + Math.round((window.outerHeight - height) / 2));
 
   return window.open(
-    DASHBOARD_PATH,
+    DASHBOARD_POPUP_AUTH_PATH,
     'dowhiz_auth',
     `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
   );
@@ -347,6 +349,30 @@ function StartupIntakePage() {
     return () => {
       isMounted = false;
       authStateChange?.subscription?.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handlePopupAuthSuccess = (event) => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+
+      if (event.data?.type !== AUTH_POPUP_SUCCESS_EVENT) {
+        return;
+      }
+
+      setHasActiveSession(true);
+      setMessages((prev) => [
+        ...prev,
+        createMessage('assistant', 'Signed in successfully. Opening Team Workspace now.')
+      ]);
+      window.location.assign(DASHBOARD_PATH);
+    };
+
+    window.addEventListener('message', handlePopupAuthSuccess);
+    return () => {
+      window.removeEventListener('message', handlePopupAuthSuccess);
     };
   }, []);
 
@@ -514,6 +540,20 @@ function StartupIntakePage() {
     }
   };
 
+  const handleChatComposerKeyDown = (event) => {
+    if (event.key !== 'Enter' || event.isComposing) {
+      return;
+    }
+
+    // Keep multiline authoring available with modifier+Enter (Cmd on macOS, Ctrl on Windows/Linux).
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  };
+
   const handleCreateBlueprint = () => {
     setErrors([]);
     setRequestError('');
@@ -556,7 +596,7 @@ function StartupIntakePage() {
     if (authPopup) {
       authPopup.focus();
       addAssistantMessage(
-        'Blueprint saved. Sign in or sign up in the popup. After auth, Team Workspace will reflect your blueprint.'
+        'Blueprint saved. Sign in or sign up in the popup. It will close automatically after success.'
       );
       return;
     }
@@ -834,13 +874,14 @@ function StartupIntakePage() {
           </div>
 
           <form className="intake-chat-composer" onSubmit={handleTextSubmit}>
-            <input
-              type="text"
+            <textarea
               className="intake-chat-input"
               value={inputValue}
               onChange={(event) => setInputValue(event.target.value)}
-              placeholder="Share project details or answer the latest question..."
+              onKeyDown={handleChatComposerKeyDown}
+              placeholder="Share project details or answer the latest question... (Enter to send, Cmd+Enter for new line)"
               disabled={isSending}
+              rows={2}
             />
             <button type="submit" className="btn btn-primary intake-chat-send-btn" disabled={isSending}>
               {isSending ? 'Thinking...' : 'Send'}
