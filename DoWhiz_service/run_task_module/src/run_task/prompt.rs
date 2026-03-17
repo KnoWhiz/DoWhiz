@@ -188,7 +188,14 @@ See `.agents/skills/google-*/SKILL.md` for detailed command references.
 
 fn build_web_auth_capabilities_section() -> &'static str {
     r#"Web Workspace Auth (Notion / Google web pages):
-- For private Notion/Google pages, use browser automation (for example `playwright-cli`) instead of plain HTTP fetches.
+- ALWAYS prefer CLI tools when available:
+  - For Google Docs/Sheets/Slides operations (create, edit, share, read), use `google-docs`, `google-sheets`, `google-slides` CLI tools.
+  - For Notion operations, use `notion` CLI tool if available.
+- Only use browser automation (`playwright-cli`) as a FALLBACK when:
+  - No CLI tool exists for the service, OR
+  - You need to scrape/read a private page that has no API access, OR
+  - The CLI tool explicitly fails and browser is the only option.
+- For plain HTTP fetches of public content, prefer `curl` or similar over browser automation.
 - Complete sign-in only through the active browser session when needed.
 - Do not assume pre-bootstrapped auth state exists in the workspace.
 - If browser launch fails before sign-in:
