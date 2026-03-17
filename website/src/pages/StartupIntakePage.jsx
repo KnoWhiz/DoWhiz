@@ -514,6 +514,20 @@ function StartupIntakePage() {
     }
   };
 
+  const handleChatComposerKeyDown = (event) => {
+    if (event.key !== 'Enter' || event.isComposing) {
+      return;
+    }
+
+    // Keep multiline authoring available with modifier+Enter (Cmd on macOS, Ctrl on Windows/Linux).
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  };
+
   const handleCreateBlueprint = () => {
     setErrors([]);
     setRequestError('');
@@ -834,13 +848,14 @@ function StartupIntakePage() {
           </div>
 
           <form className="intake-chat-composer" onSubmit={handleTextSubmit}>
-            <input
-              type="text"
+            <textarea
               className="intake-chat-input"
               value={inputValue}
               onChange={(event) => setInputValue(event.target.value)}
-              placeholder="Share project details or answer the latest question..."
+              onKeyDown={handleChatComposerKeyDown}
+              placeholder="Share project details or answer the latest question... (Enter to send, Cmd+Enter for new line)"
               disabled={isSending}
+              rows={2}
             />
             <button type="submit" className="btn btn-primary intake-chat-send-btn" disabled={isSending}>
               {isSending ? 'Thinking...' : 'Send'}

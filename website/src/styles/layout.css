@@ -264,11 +264,15 @@
   flex: 1;
   width: 100%;
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: 14px;
   background: #fff;
   color: var(--text-primary);
   font: inherit;
+  line-height: 1.45;
+  min-height: 44px;
+  max-height: 180px;
   padding: 0.62rem 0.85rem;
+  resize: vertical;
 }
 
 .intake-chat-input:focus {
