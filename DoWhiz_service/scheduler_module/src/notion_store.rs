@@ -149,21 +149,67 @@ impl NotionStore {
     }
 
     /// Get credential by workspace_id (for incoming webhooks).
+    ///
+    /// This method handles both UUID formats:
+    /// - With dashes: `2be6a52c-d8a0-812a-8684-0003b0ffbf46`
+    /// - Without dashes: `2be6a52cd8a0812a86840003b0ffbf46`
     pub fn get_credential_by_workspace(
         &self,
         workspace_id: &str,
     ) -> Result<NotionCredential, NotionStoreError> {
-        let doc = self
-            .credentials
-            .find_one(
-                doc! {
-                    "workspace_id": workspace_id,
-                },
-                None,
-            )?
-            .ok_or_else(|| NotionStoreError::NotFound(workspace_id.to_string()))?;
+        // Normalize to canonical UUID format with dashes
+        let normalized_id = Self::normalize_workspace_id(workspace_id);
 
-        Self::doc_to_credential(doc)
+        // Try with normalized (dashed) format first
+        if let Some(doc) = self.credentials.find_one(
+            doc! { "workspace_id": &normalized_id },
+            None,
+        )? {
+            return Self::doc_to_credential(doc);
+        }
+
+        // Try with original format as fallback
+        if normalized_id != workspace_id {
+            if let Some(doc) = self.credentials.find_one(
+                doc! { "workspace_id": workspace_id },
+                None,
+            )? {
+                return Self::doc_to_credential(doc);
+            }
+        }
+
+        // Try without dashes as last resort
+        let no_dashes = workspace_id.replace('-', "");
+        if no_dashes != workspace_id && no_dashes != normalized_id {
+            if let Some(doc) = self.credentials.find_one(
+                doc! { "workspace_id": &no_dashes },
+                None,
+            )? {
+                return Self::doc_to_credential(doc);
+            }
+        }
+
+        Err(NotionStoreError::NotFound(workspace_id.to_string()))
+    }
+
+    /// Normalize workspace_id to canonical UUID format with dashes.
+    /// Converts `2be6a52cd8a0812a86840003b0ffbf46` to `2be6a52c-d8a0-812a-8684-0003b0ffbf46`
+    fn normalize_workspace_id(id: &str) -> String {
+        let clean = id.replace('-', "");
+        if clean.len() == 32 {
+            // Standard UUID: 8-4-4-4-12
+            format!(
+                "{}-{}-{}-{}-{}",
+                &clean[0..8],
+                &clean[8..12],
+                &clean[12..16],
+                &clean[16..20],
+                &clean[20..32]
+            )
+        } else {
+            // Not a standard UUID, return as-is
+            id.to_string()
+        }
     }
 
     /// Get credential by workspace_name with fuzzy matching.
