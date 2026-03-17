@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { supabase } from '../app/supabaseClient';
 import { getDoWhizApiBaseUrl } from '../analytics';
 import {
   CHANNEL_OPTIONS,
@@ -259,6 +260,23 @@ function serializeMessagesForApi(messages) {
   }));
 }
 
+function openDashboardAuthPopup() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const width = 540;
+  const height = 760;
+  const left = Math.max(0, window.screenX + Math.round((window.outerWidth - width) / 2));
+  const top = Math.max(0, window.screenY + Math.round((window.outerHeight - height) / 2));
+
+  return window.open(
+    DASHBOARD_PATH,
+    'dowhiz_auth',
+    `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+  );
+}
+
 function StartupIntakePage() {
   const location = useLocation();
   const savedBlueprint = useMemo(() => loadWorkspaceBlueprint(), []);
@@ -282,6 +300,7 @@ function StartupIntakePage() {
   const [missingFields, setMissingFields] = useState([]);
   const [readyForBlueprint, setReadyForBlueprint] = useState(false);
   const [requestError, setRequestError] = useState('');
+  const [hasActiveSession, setHasActiveSession] = useState(false);
   const chatFeedRef = useRef(null);
 
   const blueprintJson = useMemo(
@@ -307,6 +326,29 @@ function StartupIntakePage() {
     }
     node.scrollTop = node.scrollHeight;
   }, [messages]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!isMounted) {
+        return;
+      }
+      setHasActiveSession(Boolean(data?.session));
+    });
+
+    const { data: authStateChange } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!isMounted) {
+        return;
+      }
+      setHasActiveSession(Boolean(session));
+    });
+
+    return () => {
+      isMounted = false;
+      authStateChange?.subscription?.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     if (shouldShowQuestionnaire) {
@@ -501,11 +543,28 @@ function StartupIntakePage() {
     }
 
     saveWorkspaceBlueprint(result.blueprint);
-    setBlueprint(result.blueprint);
+    setBlueprint(null);
     setErrors([]);
+
+    if (hasActiveSession) {
+      addAssistantMessage('Blueprint saved. Opening Team Workspace now.');
+      window.location.assign(DASHBOARD_PATH);
+      return;
+    }
+
+    const authPopup = openDashboardAuthPopup();
+    if (authPopup) {
+      authPopup.focus();
+      addAssistantMessage(
+        'Blueprint saved. Sign in or sign up in the popup. After auth, Team Workspace will reflect your blueprint.'
+      );
+      return;
+    }
+
     addAssistantMessage(
-      'Blueprint saved. Open your dashboard workspace section to continue setup.'
+      'Blueprint saved. Popup was blocked, so redirecting to sign in. After auth, Team Workspace will reflect your blueprint.'
     );
+    window.location.assign(DASHBOARD_PATH);
   };
 
   if (shouldShowQuestionnaire) {
