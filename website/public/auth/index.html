@@ -1549,11 +1549,21 @@
       let recoverySession = null;
       let lastEmailActionAt = 0;
       const EMAIL_ACTION_COOLDOWN_MS = 30000;
+      const AUTH_POPUP_SUCCESS_EVENT = 'dowhiz-auth-popup-success';
 
       // Check if user came from logged-in state (expecting dashboard)
-      const expectingDashboard = new URLSearchParams(window.location.search).get('loggedIn') === 'true';
-      const authRedirectUrlWithIntent = expectingDashboard
-        ? `${authRedirectUrl}?loggedIn=true`
+      const authQueryParams = new URLSearchParams(window.location.search);
+      const expectingDashboard = authQueryParams.get('loggedIn') === 'true';
+      const popupAuthFlow = authQueryParams.get('popupAuth') === '1';
+      const authIntentParams = new URLSearchParams();
+      if (expectingDashboard) {
+        authIntentParams.set('loggedIn', 'true');
+      }
+      if (popupAuthFlow) {
+        authIntentParams.set('popupAuth', '1');
+      }
+      const authRedirectUrlWithIntent = authIntentParams.toString()
+        ? `${authRedirectUrl}?${authIntentParams.toString()}`
         : authRedirectUrl;
       // If expecting dashboard, keep everything hidden until ready
       // If not, show sign-in form immediately
@@ -1603,6 +1613,43 @@
 
       function setDashboardMode(enabled) {
         document.body.classList.toggle('dashboard-mode', enabled);
+      }
+
+      function completePopupAuthIfNeeded(session, accountData) {
+        if (!popupAuthFlow || !window.opener || window.opener.closed) {
+          return false;
+        }
+
+        try {
+          window.opener.postMessage(
+            {
+              type: AUTH_POPUP_SUCCESS_EVENT,
+              account_id: accountData?.account_id || null,
+              email: session?.user?.email || null
+            },
+            window.location.origin
+          );
+        } catch (err) {
+          console.warn('Failed to notify opener window after auth success:', err);
+        }
+
+        window.close();
+        if (window.closed) {
+          return true;
+        }
+
+        // Fallback: keep popup lightweight and ask the user to return to the parent tab.
+        setDashboardMode(false);
+        loadingContainer.classList.add('hidden');
+        signinFormContainer.classList.add('hidden');
+        signupFormContainer.classList.add('hidden');
+        passwordResetContainer.classList.add('hidden');
+        dashboardContainer.classList.add('hidden');
+        hideExistingAccountOptions();
+        pageTitle.textContent = 'Sign-in complete';
+        pageSubtitle.textContent = 'Return to the original tab to continue.';
+        showMessage('Signed in. You can close this popup and continue in the original tab.', 'success');
+        return true;
       }
 
       function updateSidebarNavigation() {
@@ -2470,6 +2517,11 @@
               eventKey: `first_authenticated_session:${accountData.account_id}`
             }
           );
+
+          if (completePopupAuthIfNeeded(session, accountData)) {
+            return;
+          }
+
           showDashboard(session, accountData);
         } catch (err) {
           // On error, show sign-in form with error message
