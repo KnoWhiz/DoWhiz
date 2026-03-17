@@ -149,6 +149,7 @@ fn process_ingestion_envelope(
                 account_store,
                 &payload,
                 &raw_payload,
+                envelope.account_id,
             )
         }
         Channel::Slack => {
@@ -412,6 +413,7 @@ mod tests {
                 },
             },
             raw_payload_ref: None,
+            account_id: None,
         };
 
         let (payload, raw) =
@@ -462,5 +464,62 @@ mod tests {
         ));
         assert!(!is_human_approval_gate_subject("Re: Project update"));
         assert!(!is_human_approval_gate_subject(""));
+    }
+
+    #[test]
+    fn ingestion_envelope_serializes_with_account_id() {
+        let account_id = Uuid::new_v4();
+        let envelope = IngestionEnvelope {
+            envelope_id: Uuid::new_v4(),
+            received_at: Utc::now(),
+            tenant_id: Some("test".to_string()),
+            employee_id: "little_bear".to_string(),
+            channel: Channel::Email,
+            external_message_id: None,
+            dedupe_key: "dedupe".to_string(),
+            payload: IngestionPayload {
+                sender: "sender@example.com".to_string(),
+                sender_name: None,
+                recipient: "oliver@dowhiz.com".to_string(),
+                subject: None,
+                text_body: Some("test".to_string()),
+                html_body: None,
+                thread_id: "thread".to_string(),
+                message_id: None,
+                attachments: vec![],
+                reply_to: vec![],
+                metadata: ChannelMetadata::default(),
+            },
+            raw_payload_ref: None,
+            account_id: Some(account_id),
+        };
+
+        let json = serde_json::to_string(&envelope).expect("serialize");
+        assert!(json.contains(&account_id.to_string()));
+
+        let deserialized: IngestionEnvelope = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized.account_id, Some(account_id));
+    }
+
+    #[test]
+    fn ingestion_envelope_deserializes_without_account_id() {
+        let json = r#"{
+            "envelope_id": "00000000-0000-0000-0000-000000000001",
+            "received_at": "2026-03-17T00:00:00Z",
+            "tenant_id": "test",
+            "employee_id": "little_bear",
+            "channel": "email",
+            "external_message_id": null,
+            "dedupe_key": "dedupe",
+            "payload": {
+                "sender": "sender@example.com",
+                "recipient": "oliver@dowhiz.com",
+                "thread_id": "thread"
+            },
+            "raw_payload_ref": null
+        }"#;
+
+        let envelope: IngestionEnvelope = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(envelope.account_id, None);
     }
 }

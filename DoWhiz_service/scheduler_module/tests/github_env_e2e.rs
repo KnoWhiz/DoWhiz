@@ -390,6 +390,7 @@ fn email_flow_injects_github_env() {
         &account_store,
         &payload,
         inbound_raw.as_bytes(),
+        None,
     )
     .expect("process inbound");
 
@@ -531,6 +532,7 @@ fn email_flow_injects_employee_github_env() {
         &account_store,
         &payload,
         inbound_raw.as_bytes(),
+        None,
     )
     .expect("process inbound");
 
@@ -682,6 +684,7 @@ fn email_flow_injects_x402_env() {
         &account_store,
         &payload,
         inbound_raw.as_bytes(),
+        None,
     )
     .expect("process inbound");
 
@@ -844,6 +847,7 @@ fn email_flow_injects_employee_prefixed_x402_env() {
         &account_store,
         &payload,
         inbound_raw.as_bytes(),
+        None,
     )
     .expect("process inbound");
 

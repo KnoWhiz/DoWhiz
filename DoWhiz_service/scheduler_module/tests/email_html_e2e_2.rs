@@ -208,6 +208,7 @@ fn process_payload_and_load_html(
         account_store,
         &payload,
         inbound_raw.as_bytes(),
+        None,
     )?;
 
     let user = user_store.get_or_create_user("email", requester_email)?;

@@ -175,6 +175,7 @@ fn inbound_email_html_is_sanitized() -> Result<(), Box<dyn std::error::Error + S
         &account_store,
         &payload,
         inbound_raw.as_bytes(),
+        None,
     )?;
 
     let user = user_store.get_or_create_user("email", "alice@example.com")?;

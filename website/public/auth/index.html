@@ -1936,7 +1936,8 @@
               stage: blueprint.venture?.stage || null,
               goals: blueprint.goals_30_90_days || [],
               current_assets: blueprint.current_assets || null,
-              plan_horizon_days: blueprint.plan_horizon_days || null
+              plan_horizon_days: blueprint.plan_horizon_days || null,
+              account_id: session?.user?.id || null
             })
           });
 

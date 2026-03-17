@@ -274,6 +274,7 @@ fn thread_latest_epoch_end_to_end() {
         &account_store,
         &payload_1,
         inbound_raw_1.as_bytes(),
+        None,
     )
     .expect("process inbound 1");
 
@@ -312,6 +313,7 @@ fn thread_latest_epoch_end_to_end() {
         &account_store,
         &payload_2,
         inbound_raw_2.as_bytes(),
+        None,
     )
     .expect("process inbound 2");
 

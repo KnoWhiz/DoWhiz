@@ -82,6 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 metadata: ChannelMetadata::default(),
             },
             raw_payload_ref: None,
+            account_id: None,
         };
 
         queue.enqueue(&envelope)?;

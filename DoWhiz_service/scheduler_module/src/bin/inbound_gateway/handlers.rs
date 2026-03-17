@@ -46,6 +46,7 @@ pub(super) struct CreateWorkspaceBriefRequest {
     pub goals: Vec<String>,
     pub current_assets: Option<Vec<String>>,
     pub plan_horizon_days: Option<i32>,
+    pub account_id: Option<Uuid>,
 }
 
 pub(super) async fn health() -> impl IntoResponse {
@@ -960,6 +961,7 @@ pub(super) async fn build_envelope(
         dedupe_key,
         payload: queue_payload,
         raw_payload_ref,
+        account_id: None,
     })
 }
 
@@ -1091,7 +1093,7 @@ Use the google-docs skill to create and share the document."#,
     };
 
     let external_message_id = message.message_id.clone();
-    let envelope = match build_envelope(
+    let mut envelope = match build_envelope(
         route,
         Channel::Email,
         external_message_id,
@@ -1109,6 +1111,8 @@ Use the google-docs skill to create and share the document."#,
             );
         }
     };
+
+    envelope.account_id = request.account_id;
 
     let task_id = envelope.envelope_id.to_string();
     let result = enqueue_envelope(state.queue.clone(), envelope).await;
@@ -1409,5 +1413,6 @@ pub(super) fn build_envelope_blocking(
         dedupe_key,
         payload: queue_payload,
         raw_payload_ref,
+        account_id: None,
     })
 }
