@@ -809,6 +809,34 @@
         gap: 0.25rem;
       }
 
+      .next-step-pending {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.5rem;
+      }
+
+      .next-step-pending-text {
+        color: #f59e0b;
+        font-size: 0.85rem;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+      }
+
+      .next-step-checkbox-label {
+        font-size: 0.8rem;
+        color: var(--text-muted, #888);
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        cursor: pointer;
+      }
+
+      .next-step-checkbox-label input {
+        cursor: pointer;
+      }
+
       .workspace-summary-card {
         padding: 0.75rem;
         border-radius: 0.7rem;
@@ -1281,6 +1309,11 @@
         : isStaging
           ? 'https://api.staging.dowhiz.com/service'
           : 'https://api.production1.dowhiz.com/service';
+      const DOWHIZ_GATEWAY_URL = window.location.hostname === 'localhost'
+        ? 'http://localhost:9100'
+        : isStaging
+          ? 'https://api.staging.dowhiz.com'
+          : 'https://api.production1.dowhiz.com';
       const CN_PATH_PREFIX = '/cn';
       const isCnPath = window.location.pathname === CN_PATH_PREFIX
         || window.location.pathname === `${CN_PATH_PREFIX}/`
@@ -1744,7 +1777,7 @@
           id: 'create-brief',
           title: 'Create Startup Brief',
           description: 'Generate a Google Doc summarizing your startup goals, thesis, and action plan.',
-          checkComplete: () => localStorage.getItem('workspace_brief_created') === 'true',
+          checkStatus: () => localStorage.getItem('workspace_brief_status') || 'not_started',
           actionType: 'button',
           actionLabel: 'Get Started',
           action: 'createBrief'
@@ -1804,7 +1837,7 @@
           const { data: { session } } = await supabase.auth.getSession();
           const accessToken = session?.access_token;
 
-          const response = await fetch(`${DOWHIZ_API_URL}/api/workspace/create-brief`, {
+          const response = await fetch(`${DOWHIZ_GATEWAY_URL}/api/workspace/create-brief`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -1834,8 +1867,10 @@
             throw new Error(errorMsg);
           }
 
-          localStorage.setItem('workspace_brief_created', 'true');
-          showMessage('Brief creation started! Check your Google Docs shortly.', 'success');
+          const result = await response.json();
+          localStorage.setItem('workspace_brief_task_id', result.task_id || '');
+          localStorage.setItem('workspace_brief_status', 'pending');
+          showMessage('Our AI employees are working hard to create your briefing doc! Please check your Google Docs in a few moments.', 'success');
           renderNextSteps(cachedIdentifiers);
         } catch (err) {
           console.error('Failed to create brief:', err);
@@ -1849,6 +1884,17 @@
       }
 
       window.createBrief = createBrief;
+
+      function markBriefComplete(checked) {
+        if (checked) {
+          localStorage.setItem('workspace_brief_status', 'complete');
+        } else {
+          localStorage.setItem('workspace_brief_status', 'pending');
+        }
+        renderNextSteps(cachedIdentifiers);
+      }
+
+      window.markBriefComplete = markBriefComplete;
 
       function renderNextSteps(identifiers = []) {
         const container = document.getElementById('next-steps-list');
@@ -1873,11 +1919,27 @@
         }
 
         const html = relevantTasks.map(task => {
-          const isComplete = task.checkComplete(identifiers);
+          const status = task.checkStatus ? task.checkStatus() : (task.checkComplete?.(identifiers) ? 'complete' : 'not_started');
 
           let actionHtml;
-          if (isComplete) {
-            actionHtml = `<span class="next-step-complete"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg> Complete</span>`;
+          if (status === 'complete' || status === 'pending') {
+            const isComplete = status === 'complete';
+            const statusIcon = isComplete
+              ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>`
+              : `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 6v6l4 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+            const statusText = isComplete ? 'Complete' : 'In Progress';
+            const statusClass = isComplete ? 'next-step-complete' : 'next-step-pending-text';
+            actionHtml = `
+              <div class="next-step-pending">
+                <span class="${statusClass}">
+                  ${statusIcon}
+                  ${statusText}
+                </span>
+                <label class="next-step-checkbox-label">
+                  <input type="checkbox" ${isComplete ? 'checked' : ''} onchange="markBriefComplete(this.checked)">
+                  ${isComplete ? 'Completed' : 'Mark as complete'}
+                </label>
+              </div>`;
           } else if (task.actionType === 'button') {
             actionHtml = `<button class="auth-btn auth-btn-primary" data-action="${task.action}" onclick="${task.action}()">${task.actionLabel}</button>`;
           } else if (task.actionType === 'oauth') {
