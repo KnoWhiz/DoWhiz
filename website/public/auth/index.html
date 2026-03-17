@@ -1823,8 +1823,15 @@
           });
 
           if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Failed to create brief');
+            const text = await response.text();
+            let errorMsg = 'Failed to create brief';
+            try {
+              const error = JSON.parse(text);
+              errorMsg = error.error || errorMsg;
+            } catch {
+              if (response.status === 404) errorMsg = 'Endpoint not found. Backend may not be deployed.';
+            }
+            throw new Error(errorMsg);
           }
 
           localStorage.setItem('workspace_brief_created', 'true');
