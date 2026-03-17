@@ -851,6 +851,26 @@
         color: var(--text-primary, #fff);
       }
 
+      .next-step-section {
+        margin-bottom: 1.5rem;
+      }
+
+      .next-step-subheader {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text-muted, #888);
+        margin: 0 0 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .next-step-empty {
+        font-size: 0.85rem;
+        color: var(--text-muted, #666);
+        margin: 0;
+        padding: 0.5rem 0;
+      }
+
       .workspace-summary-card {
         padding: 0.75rem;
         border-radius: 0.7rem;
@@ -1785,8 +1805,8 @@
         renderNextSteps(cachedIdentifiers || []);
       }
 
-      // Workflow tasks - manual completion workflow with status tracking
-      const WORKFLOW_TASKS = [
+      // Product tasks - manual completion workflow with status tracking
+      const PRODUCT_TASKS = [
         {
           id: 'create-brief',
           title: 'Create Startup Brief',
@@ -1832,6 +1852,9 @@
           oauthButtonId: 'notion-oauth-btn'
         }
       ];
+
+      // Admin tasks - reserved for future admin operations
+      const ADMIN_TASKS = [];
 
       async function createBrief() {
         const blueprint = loadWorkspaceBlueprintFromStorage();
@@ -1929,18 +1952,10 @@
           preferredChannels.some(c => c.includes(task.channelKey))
         );
 
-        // Combine workflow tasks (always shown) + relevant OAuth tasks
-        const allTasks = [...WORKFLOW_TASKS, ...relevantOAuthTasks];
-
-        if (allTasks.length === 0) {
-          container.innerHTML = '<p style="color: var(--text-muted, #888);">No next steps available. Update your team brief to get started.</p>';
-          return;
-        }
-
-        const html = allTasks.map(task => {
+        // Helper to render a single task item
+        function renderTaskItem(task) {
           let actionHtml;
 
-          // Check if this is a workflow task (has storageKey)
           if (task.storageKey) {
             const status = localStorage.getItem(task.storageKey) || 'not_started';
 
@@ -1967,7 +1982,6 @@
               actionHtml = `<button class="auth-btn auth-btn-primary" data-action="${task.action}" onclick="${task.action}()">${task.actionLabel}</button>`;
             }
           } else {
-            // OAuth task
             const isComplete = identifiers.some(id => id.identifier_type === task.identifierType);
             if (isComplete) {
               actionHtml = `<span class="next-step-complete"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg> Connected</span>`;
@@ -1987,7 +2001,27 @@
               </div>
             </div>
           `;
-        }).join('');
+        }
+
+        // Helper to render a section with subheader
+        function renderSection(title, tasks, emptyMessage) {
+          const tasksHtml = tasks.length > 0
+            ? tasks.map(renderTaskItem).join('')
+            : `<p class="next-step-empty">${emptyMessage}</p>`;
+          return `
+            <div class="next-step-section">
+              <h4 class="next-step-subheader">${title}</h4>
+              ${tasksHtml}
+            </div>
+          `;
+        }
+
+        let html = '';
+        html += renderSection('Product', PRODUCT_TASKS, 'No product tasks available.');
+        html += renderSection('Integrations', relevantOAuthTasks, 'No integrations selected. Update your team brief to add channels.');
+        if (ADMIN_TASKS.length > 0) {
+          html += renderSection('Admin', ADMIN_TASKS, 'No admin tasks available.');
+        }
 
         container.innerHTML = html;
       }
