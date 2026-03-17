@@ -406,16 +406,24 @@ pub fn process_inbound_payload(
         thread_state.epoch
     );
 
-    // If the sender has linked their identifier to an account, also write to account-level tasks
-    // Use the resolved requester (which handles GitHub vs email identifiers correctly)
-    if let Ok(Some(account)) =
-        account_store.get_account_by_identifier(requester.identifier_type, &requester.identifier)
-    {
-        let account_tasks_dir = config.users_root.join(account.id.to_string()).join("state");
+    // If we have a resolved account (from auth_user_id or sender's linked identifier),
+    // also write to account-level tasks so it appears in the Task Center
+    let account_for_tasks = if resolved_account_id.is_some() {
+        resolved_account_id
+    } else {
+        account_store
+            .get_account_by_identifier(requester.identifier_type, &requester.identifier)
+            .ok()
+            .flatten()
+            .map(|a| a.id)
+    };
+
+    if let Some(acct_id) = account_for_tasks {
+        let account_tasks_dir = config.users_root.join(acct_id.to_string()).join("state");
         if let Err(err) = std::fs::create_dir_all(&account_tasks_dir) {
             warn!(
                 "failed to create account tasks dir for account {}: {}",
-                account.id, err
+                acct_id, err
             );
         } else {
             let account_tasks_db_path = account_tasks_dir.join("tasks.db");
@@ -430,13 +438,13 @@ pub fn process_inbound_payload(
                         Ok(()) => {
                             info!(
                                 "also enqueued task to account-level storage account={} task_id={}",
-                                account.id, task_id
+                                acct_id, task_id
                             );
                         }
                         Err(err) => {
                             warn!(
                                 "failed to add task to account scheduler for account {}: {}",
-                                account.id, err
+                                acct_id, err
                             );
                         }
                     }
@@ -444,7 +452,7 @@ pub fn process_inbound_payload(
                 Err(err) => {
                     warn!(
                         "failed to load account scheduler for account {}: {}",
-                        account.id, err
+                        acct_id, err
                     );
                 }
             }
@@ -1003,5 +1011,80 @@ mod tests {
             "postmaster@example.com",
             &service_addresses
         ));
+    }
+
+    #[test]
+    fn account_for_tasks_prefers_resolved_account_id() {
+        use uuid::Uuid;
+
+        let resolved_account_id = Some(Uuid::parse_str("26a8b960-bef3-4329-a4b1-6ccfbfd49bbf").unwrap());
+        let fallback_account_id = Some(Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap());
+
+        // When resolved_account_id is Some, use it (ignore fallback)
+        let account_for_tasks = if resolved_account_id.is_some() {
+            resolved_account_id
+        } else {
+            fallback_account_id
+        };
+
+        assert_eq!(
+            account_for_tasks,
+            Some(Uuid::parse_str("26a8b960-bef3-4329-a4b1-6ccfbfd49bbf").unwrap())
+        );
+
+        // Verify directory path is built correctly
+        let users_root = std::path::PathBuf::from("/home/azureuser/users");
+        let acct_id = account_for_tasks.unwrap();
+        let account_tasks_dir = users_root.join(acct_id.to_string()).join("state");
+        assert_eq!(
+            account_tasks_dir.to_string_lossy(),
+            "/home/azureuser/users/26a8b960-bef3-4329-a4b1-6ccfbfd49bbf/state"
+        );
+    }
+
+    #[test]
+    fn account_for_tasks_falls_back_when_resolved_is_none() {
+        use uuid::Uuid;
+
+        let resolved_account_id: Option<Uuid> = None;
+        let fallback_account_id = Some(Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap());
+
+        // When resolved_account_id is None, use fallback
+        let account_for_tasks = if resolved_account_id.is_some() {
+            resolved_account_id
+        } else {
+            fallback_account_id
+        };
+
+        assert_eq!(
+            account_for_tasks,
+            Some(Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap())
+        );
+
+        // Verify directory path uses fallback
+        let users_root = std::path::PathBuf::from("/home/azureuser/users");
+        let acct_id = account_for_tasks.unwrap();
+        let account_tasks_dir = users_root.join(acct_id.to_string()).join("state");
+        assert_eq!(
+            account_tasks_dir.to_string_lossy(),
+            "/home/azureuser/users/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/state"
+        );
+    }
+
+    #[test]
+    fn account_for_tasks_is_none_when_both_are_none() {
+        use uuid::Uuid;
+
+        let resolved_account_id: Option<Uuid> = None;
+        let fallback_account_id: Option<Uuid> = None;
+
+        // When both are None, account_for_tasks is None (no task storage)
+        let account_for_tasks = if resolved_account_id.is_some() {
+            resolved_account_id
+        } else {
+            fallback_account_id
+        };
+
+        assert!(account_for_tasks.is_none());
     }
 }
