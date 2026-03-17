@@ -19,7 +19,8 @@ export const CHANNEL_OPTIONS = [
   'GitHub',
   'Google Docs',
   'Google Sheets',
-  'Google Slides'
+  'Google Slides',
+  'Notion'
 ];
 
 export const REPO_PROVIDER_OPTIONS = ['github', 'gitlab', 'bitbucket', 'other'];
