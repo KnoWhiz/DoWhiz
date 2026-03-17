@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   getOrCreateSessionId,
   persistAttributionFromLocation,
@@ -19,6 +19,7 @@ import {
   getThemeForLocalTime,
   shouldEnableMouseField
 } from '../components/landing/mouseFieldUtils';
+import { loadWorkspaceBlueprint } from '../domain/workspaceBlueprint';
 
 const SITE_URL = 'https://dowhiz.com';
 const LOGO_URL = `${SITE_URL}/assets/DoWhiz.svg`;
@@ -1053,7 +1054,8 @@ function LandingPage() {
     }
   ];
 
-  const heroPrimaryCtaHref = '/start';
+  const hasSavedTeamBrief = useMemo(() => Boolean(loadWorkspaceBlueprint()), []);
+  const heroPrimaryCtaHref = hasSavedTeamBrief ? '/start?mode=edit' : '/start';
   const oliverContactHref = 'mailto:oliver@dowhiz.com';
 
   const handleHeroCtaClick = () => {
