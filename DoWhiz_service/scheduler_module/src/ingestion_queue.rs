@@ -626,6 +626,7 @@ mod tests {
             dedupe_key: dedupe_key.to_string(),
             payload: IngestionPayload::from_inbound(&message),
             raw_payload_ref: None,
+            account_id: None,
         }
     }
 

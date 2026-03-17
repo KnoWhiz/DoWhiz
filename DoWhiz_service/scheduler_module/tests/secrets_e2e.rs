@@ -374,6 +374,7 @@ fn secrets_persist_across_workspaces_and_load(
         &account_store,
         &payload,
         inbound_raw.as_bytes(),
+        None,
     )?;
 
     let user = user_store.get_or_create_user("email", "alice@example.com")?;
@@ -406,6 +407,7 @@ fn secrets_persist_across_workspaces_and_load(
         &account_store,
         &follow_up,
         follow_up_raw.as_bytes(),
+        None,
     )?;
 
     let mut scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;

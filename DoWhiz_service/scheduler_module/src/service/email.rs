@@ -7,6 +7,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use chrono::Utc;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 use crate::account_store::AccountStore;
 use crate::artifact_extractor::extract_artifacts_from_email;
@@ -41,6 +42,7 @@ pub fn process_inbound_payload(
     account_store: &AccountStore,
     payload: &PostmarkInbound,
     raw_payload: &[u8],
+    account_id: Option<Uuid>,
 ) -> Result<(), BoxError> {
     info!("processing inbound payload into workspace");
 
@@ -89,14 +91,58 @@ pub fn process_inbound_payload(
         "resolved inbound requester identifier_type={} identifier={}",
         requester.identifier_type, requester.identifier
     );
-    let user = user_store
-        .get_or_create_user(requester.identifier_type, &requester.identifier)
-        .map_err(|err| {
-            io::Error::other(format!(
-                "get_or_create_user failed identifier_type={} identifier={} error={}",
-                requester.identifier_type, requester.identifier, err
-            ))
-        })?;
+
+    let user = if let Some(acct_id) = account_id {
+        match account_store.list_identifiers(acct_id) {
+            Ok(identifiers) => {
+                let email_ident = identifiers.iter().find(|i| i.identifier_type == "email");
+                if let Some(ident) = email_ident {
+                    info!(
+                        "using account_id={} linked email={} for user lookup",
+                        acct_id, ident.identifier
+                    );
+                    user_store
+                        .get_or_create_user(&ident.identifier_type, &ident.identifier)
+                        .map_err(|err| {
+                            io::Error::other(format!(
+                                "get_or_create_user failed for account {} error={}",
+                                acct_id, err
+                            ))
+                        })?
+                } else {
+                    info!("account_id={} has no email identifier, using requester", acct_id);
+                    user_store
+                        .get_or_create_user(requester.identifier_type, &requester.identifier)
+                        .map_err(|err| {
+                            io::Error::other(format!(
+                                "get_or_create_user failed identifier_type={} identifier={} error={}",
+                                requester.identifier_type, requester.identifier, err
+                            ))
+                        })?
+                }
+            }
+            Err(err) => {
+                warn!("failed to list identifiers for account_id={}: {}, using requester", acct_id, err);
+                user_store
+                    .get_or_create_user(requester.identifier_type, &requester.identifier)
+                    .map_err(|err| {
+                        io::Error::other(format!(
+                            "get_or_create_user failed identifier_type={} identifier={} error={}",
+                            requester.identifier_type, requester.identifier, err
+                        ))
+                    })?
+            }
+        }
+    } else {
+        user_store
+            .get_or_create_user(requester.identifier_type, &requester.identifier)
+            .map_err(|err| {
+                io::Error::other(format!(
+                    "get_or_create_user failed identifier_type={} identifier={} error={}",
+                    requester.identifier_type, requester.identifier, err
+                ))
+            })?
+    };
     let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
     user_store.ensure_user_dirs(&user_paths).map_err(|err| {
         io::Error::other(format!(
