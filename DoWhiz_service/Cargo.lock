@@ -3821,6 +3821,7 @@ dependencies = [
  "crossbeam-channel",
  "dirs",
  "dotenvy",
+ "flate2",
  "futures",
  "hex",
  "hmac",

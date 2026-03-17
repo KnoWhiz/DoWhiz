@@ -103,30 +103,65 @@ pub(crate) fn process_notion_email(
     let thread_state = bump_thread_state(&thread_state_path, &thread_key, message_id.clone())?;
 
     // Try to get Notion OAuth token
-    // First check environment variable, then try MongoDB by workspace_name fuzzy match
+    // Priority: 1) env var, 2) workspace_id (from tracking URL), 3) workspace_name fuzzy, 4) any credential
     let access_token = std::env::var("NOTION_API_TOKEN").ok().or_else(|| {
-        // Try to find a token by workspace_name fuzzy match
-        if let Some(ref ws_name) = notification.workspace_name {
-            match NotionStore::new() {
-                Ok(store) => {
-                    info!("Looking for Notion token for workspace: {}", ws_name);
+        match NotionStore::new() {
+            Ok(store) => {
+                // Try #1: workspace_id from decoded tracking URL (most reliable)
+                if let Some(ref ws_id) = notification.workspace_id {
+                    info!("Looking for Notion token by workspace_id: {}", ws_id);
+                    match store.get_credential_by_workspace(ws_id) {
+                        Ok(credential) => {
+                            info!(
+                                "Found Notion token by workspace_id '{}' (workspace_name: {:?})",
+                                ws_id,
+                                credential.workspace_name
+                            );
+                            return Some(credential.access_token);
+                        }
+                        Err(e) => {
+                            warn!("No Notion token found for workspace_id '{}': {}", ws_id, e);
+                        }
+                    }
+                }
+
+                // Try #2: workspace_name fuzzy match (from direct URLs)
+                if let Some(ref ws_name) = notification.workspace_name {
+                    info!("Looking for Notion token by workspace_name: {}", ws_name);
                     match store.get_credential_by_workspace_name_fuzzy(ws_name) {
                         Ok(credential) => {
                             info!(
-                                "Found Notion token for workspace '{}' (matched: {:?})",
+                                "Found Notion token for workspace_name '{}' (matched: {:?})",
                                 ws_name,
                                 credential.workspace_name
                             );
                             return Some(credential.access_token);
                         }
                         Err(e) => {
-                            warn!("No Notion token found for workspace '{}': {}", ws_name, e);
+                            warn!("No Notion token found for workspace_name '{}': {}", ws_name, e);
                         }
                     }
                 }
-                Err(e) => {
-                    warn!("Failed to connect to NotionStore: {}", e);
+
+                // Fallback #3: try to get any available credential
+                // This handles cases where neither workspace_id nor workspace_name is available
+                info!("Trying fallback: looking for any available Notion credential");
+                match store.get_any_credential() {
+                    Ok(credential) => {
+                        info!(
+                            "Found fallback Notion token (workspace_id: {}, workspace_name: {:?})",
+                            credential.workspace_id,
+                            credential.workspace_name
+                        );
+                        return Some(credential.access_token);
+                    }
+                    Err(e) => {
+                        warn!("No fallback Notion credential available: {}", e);
+                    }
                 }
+            }
+            Err(e) => {
+                warn!("Failed to connect to NotionStore: {}", e);
             }
         }
         None
@@ -464,6 +499,7 @@ mod tests {
             actor_name: Some("Alice".to_string()),
             page_url: Some("https://notion.so/workspace/Page-abc123".to_string()),
             page_id: Some("abc123".to_string()),
+            workspace_id: None,
             workspace_name: None,
             page_title: Some("Test Page".to_string()),
             comment_preview: None,

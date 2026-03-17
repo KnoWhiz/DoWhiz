@@ -9,10 +9,14 @@
 //! By detecting these emails, we can trigger Notion-related tasks without
 //! needing to poll the Notion inbox via browser automation.
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use flate2::read::ZlibDecoder;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::sync::LazyLock;
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Detected Notion email notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +29,8 @@ pub struct NotionEmailNotification {
     pub page_url: Option<String>,
     /// Notion page ID extracted from the URL
     pub page_id: Option<String>,
+    /// Workspace ID (space_id) extracted from tracking URL metadata
+    pub workspace_id: Option<String>,
     /// Workspace name (if detectable)
     pub workspace_name: Option<String>,
     /// Page title (from email subject or body)
@@ -85,6 +91,12 @@ static NOTION_SITE_URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 static NOTION_COMMENT_URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"https://(?:www\.)?notion\.so/[^\s]*[?&]d=([a-f0-9-]+)")
         .expect("valid regex")
+});
+
+/// Pattern to detect Notion tracking URLs (e.g., https://mg.mail.notion.so/c/eJx...)
+/// These URLs contain base64url-encoded, zlib-compressed metadata including space_id
+static NOTION_TRACKING_URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"https://mg\.mail\.notion\.so/c/([a-zA-Z0-9_-]+)"#).expect("valid regex")
 });
 
 /// Pattern to extract actor name from "X mentioned you" style text (English)
@@ -152,8 +164,25 @@ pub fn detect_notion_email(
                 .map(|m| m.as_str().trim().to_string())
         });
 
-    // Extract page URL and ID
-    let (page_url, page_id) = extract_notion_page_info(&combined_text);
+    // Extract page URL and ID - first try direct URLs, then tracking URLs
+    let (mut page_url, mut page_id) = extract_notion_page_info(&combined_text);
+
+    // If no direct URL found, try to decode tracking URL
+    if page_url.is_none() {
+        if let Some(decoded_url) = decode_tracking_url_page_url(&combined_text) {
+            debug!("Decoded page URL from tracking URL: {}", decoded_url);
+            // Re-extract page info from the decoded URL
+            let (decoded_page_url, decoded_page_id) = extract_notion_page_info(&decoded_url);
+            page_url = decoded_page_url.or(Some(decoded_url));
+            page_id = decoded_page_id.or(page_id);
+        }
+    }
+
+    // Extract workspace_id from tracking URL metadata (most reliable method)
+    let workspace_id = decode_tracking_url_workspace_id(&combined_text);
+    if workspace_id.is_some() {
+        debug!("Extracted workspace_id from tracking URL: {:?}", workspace_id);
+    }
 
     // Extract comment URL if present
     let comment_url = NOTION_COMMENT_URL_PATTERN
@@ -170,7 +199,7 @@ pub fn detect_notion_email(
     // Extract comment preview from text body
     let comment_preview = extract_comment_preview(text_body);
 
-    // Extract workspace name from URL or email
+    // Extract workspace name from URL or email (fallback if workspace_id not found)
     let workspace_name = extract_workspace_name(&combined_text);
 
     Some(NotionEmailNotification {
@@ -178,6 +207,7 @@ pub fn detect_notion_email(
         actor_name,
         page_url,
         page_id,
+        workspace_id,
         workspace_name,
         page_title,
         comment_preview,
@@ -364,6 +394,140 @@ fn extract_workspace_name(text: &str) -> Option<String> {
     None
 }
 
+/// Decode Notion tracking URL and extract workspace_id (space_id) from metadata.
+///
+/// Notion emails use tracking URLs like `https://mg.mail.notion.so/c/eJx...`
+/// These contain base64url-encoded, zlib-compressed data with metadata including:
+/// - `l`: the actual Notion page URL
+/// - `metadata`: JSON with `space_id` (workspace_id)
+///
+/// Returns the space_id if successfully decoded.
+fn decode_tracking_url_workspace_id(text: &str) -> Option<String> {
+    // Find all tracking URLs and try to decode each
+    for cap in NOTION_TRACKING_URL_PATTERN.captures_iter(text) {
+        let encoded = cap.get(1)?.as_str();
+
+        if let Some(space_id) = decode_single_tracking_url(encoded) {
+            return Some(space_id);
+        }
+    }
+    None
+}
+
+/// Decode a single tracking URL payload and extract space_id.
+fn decode_single_tracking_url(encoded: &str) -> Option<String> {
+    // Convert base64url to standard base64
+    let encoded_std: String = encoded.chars().map(|c| match c {
+        '-' => '+',
+        '_' => '/',
+        c => c,
+    }).collect();
+
+    // Add padding if needed
+    let padding_needed = (4 - encoded_std.len() % 4) % 4;
+    let encoded_padded = format!("{}{}", encoded_std, "=".repeat(padding_needed));
+
+    // Decode base64
+    let decoded_bytes = match URL_SAFE_NO_PAD.decode(&encoded_std) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            // Try with padding
+            match base64::engine::general_purpose::STANDARD.decode(&encoded_padded) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    warn!("Failed to decode tracking URL base64: {}", e);
+                    return None;
+                }
+            }
+        }
+    };
+
+    // Decompress with zlib
+    let mut decoder = ZlibDecoder::new(&decoded_bytes[..]);
+    let mut decompressed = String::new();
+    if let Err(e) = decoder.read_to_string(&mut decompressed) {
+        warn!("Failed to decompress tracking URL: {}", e);
+        return None;
+    }
+
+    debug!("Decoded tracking URL payload: {}", decompressed);
+
+    // Parse URL-encoded query string to find metadata
+    // Format: key=value&key2=value2...
+    // We're looking for: metadata={"space_id":"..."}
+    for param in decompressed.split('&') {
+        if param.starts_with("metadata=") {
+            let metadata_encoded = &param[9..]; // Skip "metadata="
+            // URL decode the metadata JSON
+            if let Ok(metadata_json) = urlencoding::decode(metadata_encoded) {
+                // Parse JSON to extract space_id
+                if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&metadata_json) {
+                    if let Some(space_id) = metadata.get("space_id").and_then(|v| v.as_str()) {
+                        debug!("Extracted workspace_id (space_id) from tracking URL: {}", space_id);
+                        return Some(space_id.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract actual Notion page URL from tracking URL payload.
+/// Returns the decoded page URL (the `l` parameter).
+pub fn decode_tracking_url_page_url(text: &str) -> Option<String> {
+    for cap in NOTION_TRACKING_URL_PATTERN.captures_iter(text) {
+        let encoded = cap.get(1)?.as_str();
+
+        if let Some(page_url) = decode_single_tracking_url_page(encoded) {
+            return Some(page_url);
+        }
+    }
+    None
+}
+
+/// Decode a single tracking URL payload and extract the actual page URL.
+fn decode_single_tracking_url_page(encoded: &str) -> Option<String> {
+    // Convert base64url to standard base64
+    let encoded_std: String = encoded.chars().map(|c| match c {
+        '-' => '+',
+        '_' => '/',
+        c => c,
+    }).collect();
+
+    let padding_needed = (4 - encoded_std.len() % 4) % 4;
+    let encoded_padded = format!("{}{}", encoded_std, "=".repeat(padding_needed));
+
+    let decoded_bytes = match URL_SAFE_NO_PAD.decode(&encoded_std) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            match base64::engine::general_purpose::STANDARD.decode(&encoded_padded) {
+                Ok(bytes) => bytes,
+                Err(_) => return None,
+            }
+        }
+    };
+
+    let mut decoder = ZlibDecoder::new(&decoded_bytes[..]);
+    let mut decompressed = String::new();
+    if decoder.read_to_string(&mut decompressed).is_err() {
+        return None;
+    }
+
+    // Find the `l` parameter (actual page URL)
+    for param in decompressed.split('&') {
+        if param.starts_with("l=") {
+            let url_encoded = &param[2..];
+            if let Ok(url) = urlencoding::decode(url_encoded) {
+                return Some(url.to_string());
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -487,5 +651,56 @@ mod tests {
         // Should match the actual page URL
         assert!(url_str.contains("My-Page"));
         assert!(page_id.is_some());
+    }
+
+    #[test]
+    fn test_decode_tracking_url_workspace_id() {
+        // Real tracking URL payload from Notion email (base64url + zlib compressed)
+        // Contains: metadata={"space_id":"2be6a52cd8a0812a86840003b0ffbf46"}
+        let encoded = "eJxMkE2OIyEMhU8Du0RgqoBesJhRKcu5QsmA6SClfhRMop7Tj5KOJr30-yzre85BueEDtKSgnTNOa-O1pAXrZe695iDcb-EmeQ44mOjGaJMpEb0lTUYNGjylXMgRyRpAgVVGO6WNBX0krW0sxRc_-BEwiUE97h7Xjeu2HtsmL-HMvDdhfgk4CTjd7_c3FXCatvu5_j0wNa7r58HoD4sjpOxReYUuGjcWyBkSAqLOwpxWYaZv-723swD7CDBxvVX-mtO2LLTyK6Zced7xk2aufCEBdr81YSYlF2LMyPhsD9B2TDTXLACeqgCR3iIa0Fs_KKVMVKXEMtjHopvkNeRnATGoTLQfuPN2PaZtkRy-JVuP_LWTMNNLjfJ_9gKN1vxn41pqwsdnZF9bjy1da6QgYPwxzv16ETDKW4B_AQAA__9RipZd";
+
+        let text = format!("https://mg.mail.notion.so/c/{}", encoded);
+        let workspace_id = decode_tracking_url_workspace_id(&text);
+
+        assert!(workspace_id.is_some(), "Should decode workspace_id from tracking URL");
+        assert_eq!(workspace_id.unwrap(), "2be6a52cd8a0812a86840003b0ffbf46");
+    }
+
+    #[test]
+    fn test_decode_tracking_url_page_url() {
+        // Same tracking URL payload
+        let encoded = "eJxMkE2OIyEMhU8Du0RgqoBesJhRKcu5QsmA6SClfhRMop7Tj5KOJr30-yzre85BueEDtKSgnTNOa-O1pAXrZe695iDcb-EmeQ44mOjGaJMpEb0lTUYNGjylXMgRyRpAgVVGO6WNBX0krW0sxRc_-BEwiUE97h7Xjeu2HtsmL-HMvDdhfgk4CTjd7_c3FXCatvu5_j0wNa7r58HoD4sjpOxReYUuGjcWyBkSAqLOwpxWYaZv-723swD7CDBxvVX-mtO2LLTyK6Zced7xk2aufCEBdr81YSYlF2LMyPhsD9B2TDTXLACeqgCR3iIa0Fs_KKVMVKXEMtjHopvkNeRnATGoTLQfuPN2PaZtkRy-JVuP_LWTMNNLjfJ_9gKN1vxn41pqwsdnZF9bjy1da6QgYPwxzv16ETDKW4B_AQAA__9RipZd";
+
+        let text = format!("https://mg.mail.notion.so/c/{}", encoded);
+        let page_url = decode_tracking_url_page_url(&text);
+
+        assert!(page_url.is_some(), "Should decode page URL from tracking URL");
+        let url = page_url.unwrap();
+        assert!(url.contains("notion.so"), "Page URL should be a notion.so URL");
+        assert!(url.contains("Dowhiz-testing"), "Page URL should contain page title");
+    }
+
+    #[test]
+    fn test_detect_notion_email_with_tracking_url() {
+        // Test that detect_notion_email extracts workspace_id from tracking URLs
+        let html_body = r#"<a href="https://mg.mail.notion.so/c/eJxMkE2OIyEMhU8Du0RgqoBesJhRKcu5QsmA6SClfhRMop7Tj5KOJr30-yzre85BueEDtKSgnTNOa-O1pAXrZe695iDcb-EmeQ44mOjGaJMpEb0lTUYNGjylXMgRyRpAgVVGO6WNBX0krW0sxRc_-BEwiUE97h7Xjeu2HtsmL-HMvDdhfgk4CTjd7_c3FXCatvu5_j0wNa7r58HoD4sjpOxReYUuGjcWyBkSAqLOwpxWYaZv-723swD7CDBxvVX-mtO2LLTyK6Zced7xk2aufCEBdr81YSYlF2LMyPhsD9B2TDTXLACeqgCR3iIa0Fs_KKVMVKXEMtjHopvkNeRnATGoTLQfuPN2PaZtkRy-JVuP_LWTMNNLjfJ_9gKN1vxn41pqwsdnZF9bjy1da6QgYPwxzv16ETDKW4B_AQAA__9RipZd">Click</a>"#;
+
+        let notification = detect_notion_email(
+            "notify@mail.notion.so",
+            "Liu Xintong 在 Dowhiz testing 发表了评论",
+            Some("@Proto-DoWhiz populate the page"),
+            Some(html_body),
+        );
+
+        assert!(notification.is_some());
+        let n = notification.unwrap();
+
+        // Should have extracted workspace_id from tracking URL
+        assert_eq!(n.workspace_id, Some("2be6a52cd8a0812a86840003b0ffbf46".to_string()));
+
+        // Should also have decoded the page URL
+        assert!(n.page_url.is_some());
+        let page_url = n.page_url.unwrap();
+        assert!(page_url.contains("notion.so"));
     }
 }

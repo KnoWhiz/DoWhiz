@@ -202,6 +202,21 @@ impl NotionStore {
         )))
     }
 
+    /// Get any available credential (fallback when workspace_name is unknown).
+    /// Returns the first credential found in the collection.
+    pub fn get_any_credential(&self) -> Result<NotionCredential, NotionStoreError> {
+        let cursor = self.credentials.find(doc! {}, None)?;
+
+        for result in cursor {
+            let doc = result?;
+            return Self::doc_to_credential(doc);
+        }
+
+        Err(NotionStoreError::NotFound(
+            "no credentials available".to_string(),
+        ))
+    }
+
     /// Normalize a workspace name for comparison.
     /// Converts to lowercase, removes spaces and special characters.
     fn normalize_workspace_name(name: &str) -> String {
