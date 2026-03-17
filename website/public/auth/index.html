@@ -1785,51 +1785,50 @@
         renderNextSteps(cachedIdentifiers || []);
       }
 
-      // Next Steps configuration
-      const NEXT_STEP_TASKS = [
+      // Workflow tasks - manual completion workflow with status tracking
+      const WORKFLOW_TASKS = [
         {
           id: 'create-brief',
           title: 'Create Startup Brief',
           description: 'Generate a Google Doc summarizing your startup goals, thesis, and action plan.',
-          checkStatus: () => localStorage.getItem('workspace_brief_status') || 'not_started',
-          actionType: 'button',
+          storageKey: 'workspace_brief_status',
           actionLabel: 'Get Started',
           action: 'createBrief'
-        },
+        }
+      ];
+
+      // OAuth tasks - completion determined by connected identifiers
+      const OAUTH_TASKS = [
         {
           id: 'connect-github',
           title: 'Connect GitHub',
           description: 'Link your GitHub account to enable code repository management.',
-          checkComplete: (identifiers) => identifiers.some(id => id.identifier_type === 'github'),
-          actionType: 'oauth',
-          actionLabel: 'Connect',
+          identifierType: 'github',
+          channelKey: 'github',
           oauthButtonId: 'github-connect-btn'
         },
         {
           id: 'connect-slack',
           title: 'Connect Slack',
           description: 'Connect Slack for team communication and agent interactions.',
-          checkComplete: (identifiers) => identifiers.some(id => id.identifier_type === 'slack'),
-          actionType: 'oauth',
-          actionLabel: 'Connect',
+          identifierType: 'slack',
+          channelKey: 'slack',
           oauthButtonId: 'slack-oauth-btn'
         },
         {
           id: 'connect-discord',
           title: 'Connect Discord',
           description: 'Connect Discord for real-time messaging with your AI agents.',
-          checkComplete: (identifiers) => identifiers.some(id => id.identifier_type === 'discord'),
-          actionType: 'oauth',
-          actionLabel: 'Connect',
+          identifierType: 'discord',
+          channelKey: 'discord',
           oauthButtonId: 'discord-oauth-btn'
         },
         {
           id: 'connect-notion',
           title: 'Connect Notion',
           description: 'Link Notion to sync documents and knowledge bases.',
-          checkComplete: (identifiers) => identifiers.some(id => id.identifier_type === 'notion'),
-          actionType: 'oauth',
-          actionLabel: 'Connect',
+          identifierType: 'notion',
+          channelKey: 'notion',
           oauthButtonId: 'notion-oauth-btn'
         }
       ];
@@ -1899,24 +1898,24 @@
 
       window.createBrief = createBrief;
 
-      function markBriefComplete(checked) {
+      function markWorkflowTaskComplete(storageKey, checked) {
         if (checked) {
-          localStorage.setItem('workspace_brief_status', 'complete');
+          localStorage.setItem(storageKey, 'complete');
         } else {
-          localStorage.setItem('workspace_brief_status', 'pending');
+          localStorage.setItem(storageKey, 'pending');
         }
         renderNextSteps(cachedIdentifiers);
       }
 
-      window.markBriefComplete = markBriefComplete;
+      window.markWorkflowTaskComplete = markWorkflowTaskComplete;
 
-      function resetBriefStatus() {
-        localStorage.removeItem('workspace_brief_status');
-        localStorage.removeItem('workspace_brief_task_id');
+      function resetWorkflowTask(storageKey) {
+        localStorage.removeItem(storageKey);
+        localStorage.removeItem(storageKey.replace('_status', '_task_id'));
         renderNextSteps(cachedIdentifiers);
       }
 
-      window.resetBriefStatus = resetBriefStatus;
+      window.resetWorkflowTask = resetWorkflowTask;
 
       function renderNextSteps(identifiers = []) {
         const container = document.getElementById('next-steps-list');
@@ -1925,48 +1924,56 @@
         const blueprint = loadWorkspaceBlueprintFromStorage();
         const preferredChannels = (blueprint?.preferred_channels || []).map(c => c.toLowerCase());
 
-        // Filter tasks: show create-brief always, show channel tasks only if in preferred channels
-        const relevantTasks = NEXT_STEP_TASKS.filter(task => {
-          if (task.id === 'create-brief') return true;
-          if (task.id === 'connect-github') return preferredChannels.some(c => c.includes('github'));
-          if (task.id === 'connect-slack') return preferredChannels.some(c => c.includes('slack'));
-          if (task.id === 'connect-discord') return preferredChannels.some(c => c.includes('discord'));
-          if (task.id === 'connect-notion') return preferredChannels.some(c => c.includes('notion'));
-          return false;
-        });
+        // Filter OAuth tasks based on preferred channels
+        const relevantOAuthTasks = OAUTH_TASKS.filter(task =>
+          preferredChannels.some(c => c.includes(task.channelKey))
+        );
 
-        if (relevantTasks.length === 0) {
+        // Combine workflow tasks (always shown) + relevant OAuth tasks
+        const allTasks = [...WORKFLOW_TASKS, ...relevantOAuthTasks];
+
+        if (allTasks.length === 0) {
           container.innerHTML = '<p style="color: var(--text-muted, #888);">No next steps available. Update your team brief to get started.</p>';
           return;
         }
 
-        const html = relevantTasks.map(task => {
-          const status = task.checkStatus ? task.checkStatus() : (task.checkComplete?.(identifiers) ? 'complete' : 'not_started');
-
+        const html = allTasks.map(task => {
           let actionHtml;
-          if (status === 'complete' || status === 'pending') {
-            const isComplete = status === 'complete';
-            const statusIcon = isComplete
-              ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>`
-              : `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 6v6l4 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
-            const statusText = isComplete ? 'Complete' : 'In Progress';
-            const statusClass = isComplete ? 'next-step-complete' : 'next-step-pending-text';
-            actionHtml = `
-              <div class="next-step-pending">
-                <span class="${statusClass}">
-                  ${statusIcon}
-                  ${statusText}
-                </span>
-                <label class="next-step-checkbox-label">
-                  <input type="checkbox" ${isComplete ? 'checked' : ''} onchange="markBriefComplete(this.checked)">
-                  ${isComplete ? 'Completed' : 'Mark as complete'}
-                </label>
-                <button class="next-step-reset-btn" onclick="resetBriefStatus()">Reset</button>
-              </div>`;
-          } else if (task.actionType === 'button') {
-            actionHtml = `<button class="auth-btn auth-btn-primary" data-action="${task.action}" onclick="${task.action}()">${task.actionLabel}</button>`;
-          } else if (task.actionType === 'oauth') {
-            actionHtml = `<button class="auth-btn auth-btn-oauth" onclick="document.getElementById('${task.oauthButtonId}').click()">${task.actionLabel}</button>`;
+
+          // Check if this is a workflow task (has storageKey)
+          if (task.storageKey) {
+            const status = localStorage.getItem(task.storageKey) || 'not_started';
+
+            if (status === 'complete' || status === 'pending') {
+              const isComplete = status === 'complete';
+              const statusIcon = isComplete
+                ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>`
+                : `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 6v6l4 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+              const statusText = isComplete ? 'Complete' : 'In Progress';
+              const statusClass = isComplete ? 'next-step-complete' : 'next-step-pending-text';
+              actionHtml = `
+                <div class="next-step-pending">
+                  <span class="${statusClass}">
+                    ${statusIcon}
+                    ${statusText}
+                  </span>
+                  <label class="next-step-checkbox-label">
+                    <input type="checkbox" ${isComplete ? 'checked' : ''} onchange="markWorkflowTaskComplete('${task.storageKey}', this.checked)">
+                    ${isComplete ? 'Completed' : 'Mark as complete'}
+                  </label>
+                  <button class="next-step-reset-btn" onclick="resetWorkflowTask('${task.storageKey}')">Reset</button>
+                </div>`;
+            } else {
+              actionHtml = `<button class="auth-btn auth-btn-primary" data-action="${task.action}" onclick="${task.action}()">${task.actionLabel}</button>`;
+            }
+          } else {
+            // OAuth task
+            const isComplete = identifiers.some(id => id.identifier_type === task.identifierType);
+            if (isComplete) {
+              actionHtml = `<span class="next-step-complete"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg> Connected</span>`;
+            } else {
+              actionHtml = `<button class="auth-btn auth-btn-oauth" onclick="document.getElementById('${task.oauthButtonId}').click()">Connect</button>`;
+            }
           }
 
           return `
