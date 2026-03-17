@@ -1354,7 +1354,6 @@
         || window.location.pathname.startsWith(`${CN_PATH_PREFIX}/`);
       const localizePath = (path) => `${isCnPath ? CN_PATH_PREFIX : ''}${path === '/' ? '' : path}`;
       const authRedirectUrl = `${window.location.origin}${localizePath('/auth/index.html')}`;
-      const homeRedirectPath = localizePath('/');
 
       const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
@@ -1553,6 +1552,9 @@
 
       // Check if user came from logged-in state (expecting dashboard)
       const expectingDashboard = new URLSearchParams(window.location.search).get('loggedIn') === 'true';
+      const authRedirectUrlWithIntent = expectingDashboard
+        ? `${authRedirectUrl}?loggedIn=true`
+        : authRedirectUrl;
       // If expecting dashboard, keep everything hidden until ready
       // If not, show sign-in form immediately
       if (!expectingDashboard) {
@@ -2047,7 +2049,7 @@
           return;
         }
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: authRedirectUrl
+          redirectTo: authRedirectUrlWithIntent
         });
         if (error) {
           showMessage(normalizeAuthError(error) || error.message);
@@ -2068,7 +2070,7 @@
         const { error } = await supabase.auth.signInWithOtp({
           email,
           options: {
-            emailRedirectTo: authRedirectUrl,
+            emailRedirectTo: authRedirectUrlWithIntent,
             shouldCreateUser: false
           }
         });
@@ -2199,7 +2201,7 @@
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: authRedirectUrl }
+          options: { emailRedirectTo: authRedirectUrlWithIntent }
         });
         if (error) {
           trackAnalyticsEvent('auth_error', {
@@ -2237,7 +2239,7 @@
         });
         const { error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
-          options: { redirectTo: authRedirectUrl }
+          options: { redirectTo: authRedirectUrlWithIntent }
         });
         if (error) {
           trackAnalyticsEvent('auth_error', {
@@ -3315,58 +3317,24 @@
               authMethod: flowType === 'magiclink' ? 'magic_link' : 'email_confirmation',
               flow: flowType
             });
-            window.history.replaceState({}, document.title, window.location.pathname);
+            window.history.replaceState(
+              {},
+              document.title,
+              `${window.location.pathname}${expectingDashboard ? '#section-workspace' : ''}`
+            );
             return true;
           }
 
           // Assume OAuth flow if no explicit type is provided
-          try {
-            const res = await fetch(`${DOWHIZ_API_URL}/auth/signup`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${data.session.access_token}`,
-                'x-dowhiz-auth-method': 'oauth_google'
-              }
-            });
-            console.log('DoWhiz signup response:', res.status);
-            if (res.ok) {
-              const accountData = await res.json();
-              trackAnalyticsEvent(
-                'login_completed',
-                {
-                  auth_method: 'oauth_google',
-                  flow: 'oauth_callback',
-                  account_created: Boolean(accountData.created)
-                },
-                {
-                  accessToken: data.session.access_token
-                }
-              );
-              trackAnalyticsEvent(
-                'first_authenticated_session',
-                {
-                  auth_method: 'oauth_google',
-                  flow: 'oauth_callback',
-                  workspace_id: accountData.account_id
-                },
-                {
-                  accessToken: data.session.access_token,
-                  eventKey: `first_authenticated_session:${accountData.account_id}`
-                }
-              );
-            }
-          } catch (err) {
-            console.error('Failed to create DoWhiz account:', err);
-            trackAnalyticsEvent('auth_error', {
-              auth_method: 'oauth_google',
-              flow: 'oauth_callback',
-              error_type: 'post_auth_signup_failed',
-              error: err.message
-            });
-          }
-
-          // Redirect to home page after OAuth
-          window.location.href = homeRedirectPath;
+          await handleAuthSuccess(data.session, {
+            authMethod: 'oauth_google',
+            flow: expectingDashboard ? 'oauth_callback_dashboard' : 'oauth_callback'
+          });
+          window.history.replaceState(
+            {},
+            document.title,
+            `${window.location.pathname}${expectingDashboard ? '#section-workspace' : ''}`
+          );
           return true;
         }
 
