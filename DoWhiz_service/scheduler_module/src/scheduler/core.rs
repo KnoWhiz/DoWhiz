@@ -441,12 +441,15 @@ fn sync_task_status_to_user_storage(
         return;
     }
 
-    // Look up the account using requester info if available, otherwise fall back to channel/reply_to
-    let account_id = if let (Some(id_type), Some(id_value)) = (
+    // Use pre-resolved account_id if available, otherwise fall back to lookup
+    let account_id = if let Some(id) = task.account_id {
+        // Use the account_id that was resolved when the task was created
+        id
+    } else if let (Some(id_type), Some(id_value)) = (
         task.requester_identifier_type.as_ref(),
         task.requester_identifier.as_ref(),
     ) {
-        // Use explicit requester info (handles GitHub notifications via email correctly)
+        // Fall back to requester info lookup for older tasks without account_id
         match lookup_account_by_identifier(id_type, id_value) {
             Some(id) => id,
             None => {

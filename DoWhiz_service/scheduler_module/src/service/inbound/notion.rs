@@ -138,6 +138,7 @@ pub(crate) fn process_notion_message(
         employee_id: Some(config.employee_profile.id.clone()),
         requester_identifier_type: Some("notion_user".to_string()),
         requester_identifier: Some(user_email.clone()),
+        account_id: None,
     };
 
     let run_task_for_account = run_task.clone();

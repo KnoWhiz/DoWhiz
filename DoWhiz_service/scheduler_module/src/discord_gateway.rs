@@ -409,6 +409,7 @@ fn process_discord_message(
         employee_id: Some(config.employee_id.clone()),
         requester_identifier_type: None,
         requester_identifier: None,
+        account_id: None,
     };
 
     // Schedule the task using user-based scheduler
