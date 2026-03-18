@@ -1,6 +1,6 @@
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Redirect};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use base64::Engine;
@@ -20,9 +20,12 @@ use crate::user_store::UserStore;
 use crate::{load_tasks_with_status, TaskStatusSummary};
 
 use super::startup_workspace::{
-    derive_provider_capabilities, derive_provider_connections,
-    generate_startup_intake_chat_response, LinkedIdentifierSnapshot, ProviderCapabilityInputs,
+    derive_provider_capabilities, derive_provider_connections, evaluate_workspace_recommendations,
+    generate_startup_intake_chat_response, LinkedIdentifierSnapshot, ProactivityLevel,
+    ProviderCapabilityInputs, RecommendationFeedbackKind, RecommendationFeedbackSnapshot,
     StartupIntakeChatRequest, WorkspaceProviderRuntimeState,
+    WorkspaceRecommendationFeedbackRequest, WorkspaceRecommendationPreferences,
+    WorkspaceRecommendationPreferencesUpdateRequest, WorkspaceRecommendationRequest,
 };
 
 /// State for auth routes
@@ -205,6 +208,178 @@ fn track_auth_event(
         properties,
     };
     store.record_analytics_event_detached(insert, "auth");
+}
+
+fn json_error_response(status: StatusCode, message: &str) -> Response {
+    (
+        status,
+        Json(serde_json::json!({
+            "error": message
+        })),
+    )
+        .into_response()
+}
+
+async fn load_account_for_auth_user(
+    state: &AuthState,
+    auth_user_id: Uuid,
+) -> Result<crate::account_store::Account, Response> {
+    let store = state.account_store.clone();
+    let account_result = task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id))
+        .await
+        .map_err(|e| {
+            error!("spawn_blocking panicked: {}", e);
+            json_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal error")
+        })?;
+
+    match account_result {
+        Ok(Some(account)) => Ok(account),
+        Err(e) => {
+            error!("Failed to get account: {}", e);
+            Err(json_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error",
+            ))
+        }
+        Ok(None) => Err(json_error_response(
+            StatusCode::NOT_FOUND,
+            "Account not found. Please sign up first.",
+        )),
+    }
+}
+
+async fn load_account_identifiers(
+    state: &AuthState,
+    account_id: Uuid,
+) -> Result<Vec<crate::account_store::AccountIdentifier>, Response> {
+    let store = state.account_store.clone();
+    let identifiers_result = task::spawn_blocking(move || store.list_identifiers(account_id))
+        .await
+        .map_err(|e| {
+            error!("spawn_blocking panicked: {}", e);
+            json_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal error")
+        })?;
+
+    identifiers_result.map_err(|e| {
+        error!("Failed to list identifiers: {}", e);
+        json_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+    })
+}
+
+fn provider_capabilities_from_state(
+    state: &AuthState,
+) -> crate::service::startup_workspace::ProviderCapabilitySnapshot {
+    derive_provider_capabilities(&ProviderCapabilityInputs {
+        github_oauth_ready: oauth_ready(
+            &state.github_client_id,
+            &state.github_client_secret,
+            &state.github_redirect_uri,
+        ),
+        google_docs_runtime_ready: env_flag_enabled("GOOGLE_DOCS_ENABLED")
+            || GoogleAuthConfig::from_env().is_valid(),
+        email_outbound_ready: env_has_value("POSTMARK_SERVER_TOKEN"),
+        slack_oauth_ready: oauth_ready(
+            &state.slack_client_id,
+            &state.slack_client_secret,
+            &state.slack_redirect_uri,
+        ),
+        slack_bot_ready: env_has_value("SLACK_BOT_TOKEN"),
+        discord_oauth_ready: oauth_ready(
+            &state.discord_client_id,
+            &state.discord_client_secret,
+            &state.discord_redirect_uri,
+        ),
+        discord_bot_ready: env_has_value("DISCORD_BOT_TOKEN"),
+    })
+}
+
+fn provider_runtime_from_identifiers(
+    state: &AuthState,
+    identifiers: &[crate::account_store::AccountIdentifier],
+) -> WorkspaceProviderRuntimeState {
+    let identifier_snapshots = identifiers
+        .iter()
+        .map(|identifier| LinkedIdentifierSnapshot {
+            identifier_type: identifier.identifier_type.clone(),
+            identifier: identifier.identifier.clone(),
+            verified: identifier.verified,
+        })
+        .collect::<Vec<_>>();
+
+    WorkspaceProviderRuntimeState {
+        has_account: true,
+        capabilities: provider_capabilities_from_state(state),
+        connected: derive_provider_connections(&identifier_snapshots),
+    }
+}
+
+async fn try_load_unified_account_tasks(
+    state: &AuthState,
+    account_id: Uuid,
+) -> Vec<TaskStatusSummary> {
+    let (Some(user_store), Some(users_root)) = (&state.user_store, &state.users_root) else {
+        return Vec::new();
+    };
+
+    let account_tasks_db_path = users_root
+        .join(account_id.to_string())
+        .join("state")
+        .join("tasks.db");
+
+    let mut tasks = load_tasks_with_status(&account_tasks_db_path);
+
+    let store_for_identifiers = state.account_store.clone();
+    let identifiers_result =
+        task::spawn_blocking(move || store_for_identifiers.list_identifiers(account_id)).await;
+
+    if let Ok(Ok(identifiers)) = identifiers_result {
+        let slack_identifiers: Vec<_> = identifiers
+            .iter()
+            .filter(|id| id.identifier_type == "slack" && id.verified)
+            .collect();
+
+        for slack_identifier in slack_identifiers {
+            let user_store_clone = user_store.clone();
+            let identifier = slack_identifier.identifier.clone();
+            let user_result = task::spawn_blocking(move || {
+                user_store_clone.get_user_by_identifier("slack", &identifier)
+            })
+            .await;
+
+            if let Ok(Ok(Some(user_record))) = user_result {
+                let user_paths = user_store.user_paths(users_root, &user_record.user_id);
+                let legacy_tasks = load_tasks_with_status(&user_paths.tasks_db_path);
+
+                for legacy_task in legacy_tasks {
+                    if let Some(existing_idx) =
+                        tasks.iter().position(|task| task.id == legacy_task.id)
+                    {
+                        if legacy_task.execution_status.is_some()
+                            && tasks[existing_idx].execution_status.is_none()
+                        {
+                            tasks[existing_idx] = legacy_task;
+                        } else if legacy_task.execution_status.is_some() {
+                            let legacy_status =
+                                legacy_task.execution_status.as_deref().unwrap_or("");
+                            let existing_status = tasks[existing_idx]
+                                .execution_status
+                                .as_deref()
+                                .unwrap_or("");
+                            if (existing_status == "pending" || existing_status == "running")
+                                && (legacy_status == "success" || legacy_status == "failed")
+                            {
+                                tasks[existing_idx] = legacy_task;
+                            }
+                        }
+                    } else {
+                        tasks.push(legacy_task);
+                    }
+                }
+            }
+        }
+    }
+
+    tasks
 }
 
 // ============================================================================
@@ -563,6 +738,11 @@ pub struct WorkspaceProviderStateResponse {
     pub identifiers: Vec<IdentifierResponse>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct WorkspaceRecommendationFeedbackResponse {
+    pub recorded: bool,
+}
+
 /// GET /api/workspace/provider-state
 /// Returns runtime provider capabilities and connected provider state
 /// from verified account identifiers.
@@ -707,6 +887,333 @@ pub async fn get_workspace_provider_state(
                     verified: i.verified,
                 })
                 .collect(),
+        }),
+    )
+        .into_response()
+}
+
+/// GET /api/workspace/recommendation-preferences
+/// Returns the persisted proactivity level for the authenticated account.
+pub async fn get_workspace_recommendation_preferences(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let token = match extract_bearer_token(&headers) {
+        Some(t) => t,
+        None => {
+            return json_error_response(StatusCode::UNAUTHORIZED, "Missing Authorization header")
+        }
+    };
+
+    let auth_user = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(user) => user,
+        Err((status, msg)) => return json_error_response(status, &msg),
+    };
+
+    let account = match load_account_for_auth_user(&state, auth_user.id).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
+
+    let store = state.account_store.clone();
+    let account_id = account.id;
+    let preference_result =
+        task::spawn_blocking(move || store.get_recommendation_preference(account_id))
+            .await
+            .map_err(|e| {
+                error!("spawn_blocking panicked: {}", e);
+                json_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal error")
+            });
+
+    let preference = match preference_result {
+        Ok(Ok(value)) => value,
+        Ok(Err(e)) => {
+            error!("Failed to load recommendation preference: {}", e);
+            return json_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+        Err(response) => return response,
+    };
+
+    let proactivity_level = preference
+        .as_ref()
+        .map(|value| ProactivityLevel::from_storage_value(&value.proactivity_level))
+        .unwrap_or_default();
+
+    (
+        StatusCode::OK,
+        Json(WorkspaceRecommendationPreferences {
+            proactivity_level,
+            effective_proactivity_level: proactivity_level,
+        }),
+    )
+        .into_response()
+}
+
+/// POST /api/workspace/recommendation
+/// Returns the highest-confidence proactive recommendation for the authenticated account.
+pub async fn get_workspace_recommendation(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    Json(request): Json<WorkspaceRecommendationRequest>,
+) -> impl IntoResponse {
+    let token = match extract_bearer_token(&headers) {
+        Some(t) => t,
+        None => {
+            return json_error_response(StatusCode::UNAUTHORIZED, "Missing Authorization header")
+        }
+    };
+
+    let auth_user = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(user) => user,
+        Err((status, msg)) => return json_error_response(status, &msg),
+    };
+
+    let account = match load_account_for_auth_user(&state, auth_user.id).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
+
+    let blueprint = request.blueprint.normalize();
+    if let Err(error) = blueprint.validate() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": error.to_string()
+            })),
+        )
+            .into_response();
+    }
+
+    let identifiers = match load_account_identifiers(&state, account.id).await {
+        Ok(identifiers) => identifiers,
+        Err(response) => return response,
+    };
+
+    let provider_runtime = provider_runtime_from_identifiers(&state, &identifiers);
+    let recent_tasks = try_load_unified_account_tasks(&state, account.id).await;
+
+    let store = state.account_store.clone();
+    let account_id = account.id;
+    let preference_result =
+        task::spawn_blocking(move || store.get_recommendation_preference(account_id))
+            .await
+            .map_err(|e| {
+                error!("spawn_blocking panicked: {}", e);
+                json_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal error")
+            });
+
+    let preference = match preference_result {
+        Ok(Ok(value)) => value,
+        Ok(Err(e)) => {
+            error!("Failed to load recommendation preference: {}", e);
+            return json_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+        Err(response) => return response,
+    };
+
+    let store = state.account_store.clone();
+    let account_id = account.id;
+    let feedback_result =
+        task::spawn_blocking(move || store.list_recent_recommendation_feedback(account_id, 50))
+            .await
+            .map_err(|e| {
+                error!("spawn_blocking panicked: {}", e);
+                json_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal error")
+            });
+
+    let feedback_snapshots = match feedback_result {
+        Ok(Ok(records)) => records
+            .into_iter()
+            .filter_map(|record| {
+                RecommendationFeedbackKind::from_storage_value(&record.feedback).map(|feedback| {
+                    RecommendationFeedbackSnapshot {
+                        recommendation_key: record.recommendation_key,
+                        state_signature: record.state_signature,
+                        feedback,
+                        created_at: record.created_at,
+                    }
+                })
+            })
+            .collect::<Vec<_>>(),
+        Ok(Err(e)) => {
+            error!("Failed to load recommendation feedback: {}", e);
+            return json_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+        Err(response) => return response,
+    };
+
+    let proactivity_level = preference
+        .as_ref()
+        .map(|value| ProactivityLevel::from_storage_value(&value.proactivity_level))
+        .unwrap_or_default();
+
+    let response = evaluate_workspace_recommendations(
+        crate::service::startup_workspace::WorkspaceRecommendationContext {
+            account_created_at: account.created_at,
+            blueprint: &blueprint,
+            provider_runtime: &provider_runtime,
+            recent_tasks: &recent_tasks,
+            proactivity_level,
+            recent_feedback: &feedback_snapshots,
+            now: Utc::now(),
+        },
+    );
+
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+/// POST /api/workspace/recommendation-feedback
+/// Records user feedback for recommendation cooldown and analytics.
+pub async fn record_workspace_recommendation_feedback(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    Json(payload): Json<WorkspaceRecommendationFeedbackRequest>,
+) -> impl IntoResponse {
+    let token = match extract_bearer_token(&headers) {
+        Some(t) => t,
+        None => {
+            return json_error_response(StatusCode::UNAUTHORIZED, "Missing Authorization header")
+        }
+    };
+
+    let auth_user = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(user) => user,
+        Err((status, msg)) => return json_error_response(status, &msg),
+    };
+
+    if payload.recommendation_key.trim().is_empty() || payload.state_signature.trim().is_empty() {
+        return json_error_response(
+            StatusCode::BAD_REQUEST,
+            "recommendation_key and state_signature are required",
+        );
+    }
+
+    let account = match load_account_for_auth_user(&state, auth_user.id).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
+
+    let recommendation_key = payload.recommendation_key.trim().to_string();
+    let state_signature = payload.state_signature.trim().to_string();
+    let feedback = payload.feedback.as_storage_value().to_string();
+    let store = state.account_store.clone();
+    let account_id = account.id;
+    let feedback_result = task::spawn_blocking(move || {
+        store.record_recommendation_feedback(
+            account_id,
+            &recommendation_key,
+            &state_signature,
+            &feedback,
+            &serde_json::json!({}),
+        )
+    })
+    .await
+    .map_err(|e| {
+        error!("spawn_blocking panicked: {}", e);
+        json_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal error")
+    });
+
+    match feedback_result {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => {
+            error!("Failed to store recommendation feedback: {}", e);
+            return json_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+        Err(response) => return response,
+    }
+
+    track_auth_event(
+        &state.account_store,
+        &format!("recommendation_{}", payload.feedback.as_storage_value()),
+        Some(account.id),
+        Some(auth_user.id),
+        Some(format!(
+            "recommendation_feedback:{}:{}:{}",
+            account.id,
+            payload.feedback.as_storage_value(),
+            payload.recommendation_key
+        )),
+        Some("/api/workspace/recommendation-feedback"),
+        serde_json::json!({
+            "recommendation_key": payload.recommendation_key,
+            "state_signature": payload.state_signature,
+            "feedback": payload.feedback.as_storage_value()
+        }),
+    );
+
+    (
+        StatusCode::OK,
+        Json(WorkspaceRecommendationFeedbackResponse { recorded: true }),
+    )
+        .into_response()
+}
+
+/// POST /api/workspace/recommendation-preferences
+/// Updates the persisted proactivity level for the authenticated account.
+pub async fn update_workspace_recommendation_preferences(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    Json(payload): Json<WorkspaceRecommendationPreferencesUpdateRequest>,
+) -> impl IntoResponse {
+    let token = match extract_bearer_token(&headers) {
+        Some(t) => t,
+        None => {
+            return json_error_response(StatusCode::UNAUTHORIZED, "Missing Authorization header")
+        }
+    };
+
+    let auth_user = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(user) => user,
+        Err((status, msg)) => return json_error_response(status, &msg),
+    };
+
+    let account = match load_account_for_auth_user(&state, auth_user.id).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
+
+    let proactivity_level = payload.proactivity_level;
+    let store = state.account_store.clone();
+    let account_id = account.id;
+    let preference_result = task::spawn_blocking(move || {
+        store.upsert_recommendation_preference(account_id, proactivity_level.as_storage_value())
+    })
+    .await
+    .map_err(|e| {
+        error!("spawn_blocking panicked: {}", e);
+        json_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal error")
+    });
+
+    match preference_result {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => {
+            error!("Failed to update recommendation preference: {}", e);
+            return json_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+        Err(response) => return response,
+    }
+
+    track_auth_event(
+        &state.account_store,
+        "recommendation_preference_updated",
+        Some(account.id),
+        Some(auth_user.id),
+        Some(format!(
+            "recommendation_preference_updated:{}:{}",
+            account.id,
+            payload.proactivity_level.as_storage_value()
+        )),
+        Some("/api/workspace/recommendation-preferences"),
+        serde_json::json!({
+            "proactivity_level": payload.proactivity_level.as_storage_value()
+        }),
+    );
+
+    (
+        StatusCode::OK,
+        Json(WorkspaceRecommendationPreferences {
+            proactivity_level: payload.proactivity_level,
+            effective_proactivity_level: payload.proactivity_level,
         }),
     )
         .into_response()
@@ -3435,6 +3942,19 @@ pub fn auth_router(state: AuthState) -> Router {
         .route(
             "/api/workspace/provider-state",
             get(get_workspace_provider_state),
+        )
+        .route(
+            "/api/workspace/recommendation",
+            post(get_workspace_recommendation),
+        )
+        .route(
+            "/api/workspace/recommendation-feedback",
+            post(record_workspace_recommendation_feedback),
+        )
+        .route(
+            "/api/workspace/recommendation-preferences",
+            get(get_workspace_recommendation_preferences)
+                .post(update_workspace_recommendation_preferences),
         )
         .route("/api/tasks", get(get_tasks))
         .route("/api/account/tasks", get(get_account_tasks))
