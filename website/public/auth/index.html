@@ -3106,13 +3106,15 @@
           // Sort by created_at descending (newest first)
           allTasks.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-          // Auto-complete "Get Started" when a "Create Workspace Brief" task completes
+          // Auto-complete "Get Started" when a new "Create Workspace Brief" task completes
           if (localStorage.getItem('workspace_brief_status') === 'pending') {
-            const completedBrief = allTasks.find(t =>
+            const completedCount = allTasks.filter(t =>
               (t.request_summary || '').toLowerCase().includes('workspace brief') &&
               t.execution_status === 'completed'
-            );
-            if (completedBrief) {
+            ).length;
+            const consumedCount = Number(localStorage.getItem('workspace_brief_consumed_count') || 0);
+            if (completedCount > consumedCount) {
+              localStorage.setItem('workspace_brief_consumed_count', completedCount);
               localStorage.setItem('workspace_brief_status', 'complete');
               localStorage.removeItem('workspace_brief_message');
               renderNextSteps(cachedIdentifiers);
