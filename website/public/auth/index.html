@@ -824,6 +824,18 @@
         gap: 0.25rem;
       }
 
+      .next-step-inline-message {
+        background: rgba(34, 197, 94, 0.1);
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        border-radius: 6px;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.8rem;
+        color: #22c55e;
+        margin: 0;
+        text-align: right;
+        max-width: 280px;
+      }
+
       .next-step-checkbox-label {
         font-size: 0.8rem;
         color: var(--text-muted, #888);
@@ -1956,7 +1968,7 @@
           const result = await response.json();
           localStorage.setItem('workspace_brief_task_id', result.task_id || '');
           localStorage.setItem('workspace_brief_status', 'pending');
-          showMessage('Our AI employees are working hard to create your briefing doc! Please check your Google Docs in a few moments.', 'success');
+          localStorage.setItem('workspace_brief_message', 'Our AI employees are working hard to create your briefing doc! Please check your Google Docs in a few moments.');
           renderNextSteps(cachedIdentifiers);
         } catch (err) {
           console.error('Failed to create brief:', err);
@@ -1985,6 +1997,7 @@
       function resetWorkflowTask(storageKey) {
         localStorage.removeItem(storageKey);
         localStorage.removeItem(storageKey.replace('_status', '_task_id'));
+        localStorage.removeItem(storageKey.replace('_status', '_message'));
         renderNextSteps(cachedIdentifiers);
       }
 
@@ -2016,12 +2029,16 @@
                 : `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 6v6l4 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
               const statusText = isComplete ? 'Complete' : 'In Progress';
               const statusClass = isComplete ? 'next-step-complete' : 'next-step-pending-text';
+              // Get stored message for this task (if any)
+              const messageKey = task.storageKey.replace('_status', '_message');
+              const storedMessage = !isComplete ? localStorage.getItem(messageKey) : null;
               actionHtml = `
                 <div class="next-step-pending">
                   <span class="${statusClass}">
                     ${statusIcon}
                     ${statusText}
                   </span>
+                  ${storedMessage ? `<p class="next-step-inline-message">${escapeHtml(storedMessage)}</p>` : ''}
                   <label class="next-step-checkbox-label">
                     <input type="checkbox" ${isComplete ? 'checked' : ''} onchange="markWorkflowTaskComplete('${task.storageKey}', this.checked)">
                     ${isComplete ? 'Completed' : 'Mark as complete'}
