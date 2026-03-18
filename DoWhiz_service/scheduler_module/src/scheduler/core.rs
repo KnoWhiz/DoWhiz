@@ -334,26 +334,45 @@ impl<E: TaskExecutor> Scheduler<E> {
                 if matches!(self.tasks[index].schedule, Schedule::OneShot { .. }) {
                     let mut disable_task = true;
                     if let TaskKind::RunTask(task) = &self.tasks[index].kind {
+                        let task = task.clone();
                         let task_id_str = task_id.to_string();
                         let retry_count = self.store.increment_retry_count(&task_id_str)?;
+                        let failure_class = classify_run_task_failure(&message);
                         if retry_count < RUN_TASK_FAILURE_LIMIT {
                             disable_task = false;
-                            let delay = run_task_retry_delay(retry_count, &message);
+                            let delay = run_task_retry_delay(retry_count, failure_class);
                             if let Schedule::OneShot { run_at } = &mut self.tasks[index].schedule {
                                 *run_at = executed_at + delay;
                             }
                             let updated_task = self.tasks[index].clone();
                             self.store.update_task(&updated_task)?;
-                            warn!(
-                                "run_task one-shot {} failed (attempt {}/{}), retrying in {}s: {}",
+                            if let Err(err) = notify_run_task_retry(
                                 task_id,
+                                &task,
+                                retry_count,
+                                delay,
+                                failure_class,
+                                &message,
+                            ) {
+                                warn!("failed to send run_task retry alert: {}", err);
+                            }
+                            warn!(
+                                "run_task one-shot {} failed (class={}, attempt {}/{}), retrying in {}s: {}",
+                                task_id,
+                                failure_class.label(),
                                 retry_count,
                                 RUN_TASK_FAILURE_LIMIT,
                                 delay.num_seconds(),
                                 message
                             );
                         } else {
-                            if let Err(err) = notify_run_task_failure(task_id, task, &message) {
+                            if let Err(err) = notify_run_task_failure(
+                                task_id,
+                                &task,
+                                retry_count,
+                                failure_class,
+                                &message,
+                            ) {
                                 warn!("failed to notify run_task failure: {}", err);
                             }
                             if let Err(err) = self.store.reset_retry_count(&task_id_str) {
@@ -538,24 +557,77 @@ fn sync_task_status_to_user_storage(
     }
 }
 
+const RUN_TASK_TRANSIENT_FAILURE_NOTICE: &str =
+    "We hit a temporary execution issue while working on your request. Please send your message again if you'd like us to retry.";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunTaskFailureClass {
+    Generic,
+    AciCapacity,
+    CodexStreamDisconnected,
+    CodexCapacity,
+}
+
+impl RunTaskFailureClass {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Generic => "generic",
+            Self::AciCapacity => "aci_capacity_quota",
+            Self::CodexStreamDisconnected => "codex_stream_disconnected",
+            Self::CodexCapacity => "codex_capacity_limited",
+        }
+    }
+
+    fn uses_extended_backoff(self) -> bool {
+        matches!(
+            self,
+            Self::AciCapacity | Self::CodexStreamDisconnected | Self::CodexCapacity
+        )
+    }
+
+    fn user_notice(self) -> &'static str {
+        if self.uses_extended_backoff() {
+            RUN_TASK_TRANSIENT_FAILURE_NOTICE
+        } else {
+            RUN_TASK_FAILURE_NOTICE
+        }
+    }
+}
+
+fn classify_run_task_failure(error_message: &str) -> RunTaskFailureClass {
+    let lowered = error_message.to_ascii_lowercase();
+    if is_aci_capacity_error_text(&lowered) {
+        RunTaskFailureClass::AciCapacity
+    } else if is_codex_stream_disconnect_error_text(&lowered) {
+        RunTaskFailureClass::CodexStreamDisconnected
+    } else if is_codex_capacity_error_text(&lowered) {
+        RunTaskFailureClass::CodexCapacity
+    } else {
+        RunTaskFailureClass::Generic
+    }
+}
+
 fn notify_run_task_failure(
     task_id: Uuid,
     task: &RunTaskTask,
+    retry_count: u32,
+    failure_class: RunTaskFailureClass,
     error_message: &str,
 ) -> Result<(), SchedulerError> {
     let failure_dir = task.workspace_dir.join(RUN_TASK_FAILURE_DIR);
     std::fs::create_dir_all(&failure_dir)?;
 
     let is_slack = matches!(task.channel, Channel::Slack);
+    let user_notice = failure_class.user_notice();
     let (notice_path, notice_body) = if is_slack {
         (
             failure_dir.join(format!("task_failure_{}.txt", task_id)),
-            RUN_TASK_FAILURE_NOTICE.to_string(),
+            user_notice.to_string(),
         )
     } else {
         (
             failure_dir.join(format!("task_failure_{}.html", task_id)),
-            format!("<p>{}</p>", RUN_TASK_FAILURE_NOTICE),
+            format!("<p>{}</p>", user_notice),
         )
     };
     std::fs::write(&notice_path, notice_body)?;
@@ -570,7 +642,7 @@ fn notify_run_task_failure(
                 .or_else(|| slack_thread_ts_from_thread_key(task.thread_id.as_deref()));
             let send_task = SendReplyTask {
                 channel: Channel::Slack,
-                subject: RUN_TASK_FAILURE_NOTICE.to_string(),
+                subject: user_notice.to_string(),
                 html_path: notice_path.clone(),
                 attachments_dir: notice_attachments.clone(),
                 from: None,
@@ -598,7 +670,7 @@ fn notify_run_task_failure(
                     )
                 })?;
             let params = send_emails_module::SendEmailParams {
-                subject: RUN_TASK_FAILURE_NOTICE.to_string(),
+                subject: user_notice.to_string(),
                 html_path: notice_path.clone(),
                 attachments_dir: notice_attachments.clone(),
                 from: Some(from),
@@ -616,52 +688,156 @@ fn notify_run_task_failure(
         warn!("no reply_to recipients for task failure notice {}", task_id);
     }
 
-    let admin_email = std::env::var("ADMIN_EMAIL")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    if let Some(admin_email) = admin_email {
-        let report_dir = std::env::temp_dir().join(RUN_TASK_FAILURE_REPORT_DIR);
-        std::fs::create_dir_all(&report_dir)?;
-        let report_path = report_dir.join(format!("task_failure_{}.html", task_id));
-        let report_body = format!(
-            "<p>{}</p><p>Task ID: {}</p><pre>{}</pre>",
-            RUN_TASK_FAILURE_NOTICE, task_id, error_message
-        );
-        std::fs::write(&report_path, report_body)?;
-
-        let report_attachments = report_dir.join(format!("attachments_{}", task_id));
-        std::fs::create_dir_all(&report_attachments)?;
-        let params = send_emails_module::SendEmailParams {
-            subject: format!("Task failure: {}", task_id),
-            html_path: report_path,
-            attachments_dir: report_attachments,
-            from: Some(admin_email.clone()),
-            to: vec![admin_email],
-            cc: vec![],
-            bcc: vec![],
-            in_reply_to: None,
-            references: None,
-            reply_to: None,
-        };
-        send_emails_module::send_email(&params)
-            .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
-    } else {
-        warn!("ADMIN_EMAIL not set; skipping failure report {}", task_id);
-    }
+    let report_body = build_run_task_report_html(
+        user_notice,
+        task_id,
+        task,
+        failure_class,
+        retry_count,
+        None,
+        error_message,
+    );
+    send_admin_report(
+        format!("task_failure_{}.html", task_id),
+        format!("Task failure: {} [{}]", task_id, failure_class.label()),
+        report_body,
+        &format!("failure report {}", task_id),
+    )?;
 
     Ok(())
 }
 
-fn run_task_retry_delay(retry_count: u32, error_message: &str) -> chrono::Duration {
+fn notify_run_task_retry(
+    task_id: Uuid,
+    task: &RunTaskTask,
+    retry_count: u32,
+    delay: chrono::Duration,
+    failure_class: RunTaskFailureClass,
+    error_message: &str,
+) -> Result<(), SchedulerError> {
+    if !failure_class.uses_extended_backoff() {
+        return Ok(());
+    }
+
+    let report_body = build_run_task_report_html(
+        "Retry scheduled after a transient execution issue.",
+        task_id,
+        task,
+        failure_class,
+        retry_count,
+        Some(delay),
+        error_message,
+    );
+    send_admin_report(
+        format!("task_retry_alert_{}_attempt_{}.html", task_id, retry_count),
+        format!("Task retry alert: {} [{}]", task_id, failure_class.label()),
+        report_body,
+        &format!("retry alert {} attempt {}", task_id, retry_count),
+    )
+}
+
+fn build_run_task_report_html(
+    headline: &str,
+    task_id: Uuid,
+    task: &RunTaskTask,
+    failure_class: RunTaskFailureClass,
+    retry_count: u32,
+    retry_delay: Option<chrono::Duration>,
+    error_message: &str,
+) -> String {
+    let attempts_html = if let Some(delay) = retry_delay {
+        format!(
+            "<p>Failed attempt: {}/{}</p><p>Next attempt: {}/{} in {} seconds</p>",
+            retry_count,
+            RUN_TASK_FAILURE_LIMIT,
+            retry_count + 1,
+            RUN_TASK_FAILURE_LIMIT,
+            delay.num_seconds()
+        )
+    } else {
+        format!(
+            "<p>Failed attempt: {}/{}</p><p>Retry status: retries exhausted</p>",
+            retry_count, RUN_TASK_FAILURE_LIMIT
+        )
+    };
+
+    format!(
+        "<p>{}</p><p>Task ID: {}</p><p>Failure class: {}</p>{}<p>Channel: {}</p><p>Runner: {}</p><p>Model: {}</p><p>Workspace: {}</p><pre>{}</pre>",
+        escape_html(headline),
+        escape_html(&task_id.to_string()),
+        escape_html(failure_class.label()),
+        attempts_html,
+        escape_html(&task.channel.to_string()),
+        escape_html(&task.runner),
+        escape_html(&task.model_name),
+        escape_html(&task.workspace_dir.display().to_string()),
+        escape_html(error_message),
+    )
+}
+
+fn send_admin_report(
+    report_file_name: String,
+    subject: String,
+    html_body: String,
+    log_label: &str,
+) -> Result<(), SchedulerError> {
+    let admin_email = std::env::var("ADMIN_EMAIL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let Some(admin_email) = admin_email else {
+        warn!("ADMIN_EMAIL not set; skipping {}", log_label);
+        return Ok(());
+    };
+
+    let report_dir = std::env::temp_dir().join(RUN_TASK_FAILURE_REPORT_DIR);
+    std::fs::create_dir_all(&report_dir)?;
+    let report_path = report_dir.join(&report_file_name);
+    std::fs::write(&report_path, html_body)?;
+
+    let report_stem = report_file_name.trim_end_matches(".html");
+    let report_attachments = report_dir.join(format!("attachments_{}", report_stem));
+    std::fs::create_dir_all(&report_attachments)?;
+    let params = send_emails_module::SendEmailParams {
+        subject,
+        html_path: report_path,
+        attachments_dir: report_attachments,
+        from: Some(admin_email.clone()),
+        to: vec![admin_email],
+        cc: vec![],
+        bcc: vec![],
+        in_reply_to: None,
+        references: None,
+        reply_to: None,
+    };
+    send_emails_module::send_email(&params)
+        .map_err(|err| SchedulerError::TaskFailed(err.to_string()))?;
+    Ok(())
+}
+
+fn escape_html(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn run_task_retry_delay(retry_count: u32, failure_class: RunTaskFailureClass) -> chrono::Duration {
     const GENERIC_BASE_DELAY_SECS: i64 = 30;
     const GENERIC_MAX_DELAY_SECS: i64 = 300;
-    const ACI_QUOTA_BASE_DELAY_SECS: i64 = 180;
-    const ACI_QUOTA_MAX_DELAY_SECS: i64 = 1800;
+    const CAPACITY_BASE_DELAY_SECS: i64 = 180;
+    const CAPACITY_MAX_DELAY_SECS: i64 = 1800;
 
-    let is_aci_quota = is_aci_capacity_error(error_message);
-    let (base_secs, max_secs) = if is_aci_quota {
-        (ACI_QUOTA_BASE_DELAY_SECS, ACI_QUOTA_MAX_DELAY_SECS)
+    let (base_secs, max_secs) = if failure_class.uses_extended_backoff() {
+        (CAPACITY_BASE_DELAY_SECS, CAPACITY_MAX_DELAY_SECS)
     } else {
         (GENERIC_BASE_DELAY_SECS, GENERIC_MAX_DELAY_SECS)
     };
@@ -671,12 +847,46 @@ fn run_task_retry_delay(retry_count: u32, error_message: &str) -> chrono::Durati
     chrono::Duration::seconds(secs.max(1))
 }
 
-fn is_aci_capacity_error(error_message: &str) -> bool {
-    let lowered = error_message.to_ascii_lowercase();
+fn is_aci_capacity_error_text(lowered: &str) -> bool {
     lowered.contains("containergroupquotareached")
         || (lowered.contains("container group quota")
             && lowered.contains("microsoft.containerinstance/containergroups"))
         || lowered.contains("resource quota of container groups")
+}
+
+#[cfg(test)]
+fn is_codex_stream_disconnect_error(error_message: &str) -> bool {
+    is_codex_stream_disconnect_error_text(&error_message.to_ascii_lowercase())
+}
+
+fn is_codex_stream_disconnect_error_text(lowered: &str) -> bool {
+    contains_any(
+        lowered,
+        &[
+            "stream disconnected before completion",
+            "response.failed event received",
+        ],
+    )
+}
+
+#[cfg(test)]
+fn is_codex_capacity_error(error_message: &str) -> bool {
+    is_codex_capacity_error_text(&error_message.to_ascii_lowercase())
+}
+
+fn is_codex_capacity_error_text(lowered: &str) -> bool {
+    contains_any(
+        lowered,
+        &[
+            "the system is currently experiencing high demand",
+            "maximum usage size allowed during peak load",
+            "provisioned throughput",
+        ],
+    )
+}
+
+fn contains_any(haystack: &str, patterns: &[&str]) -> bool {
+    patterns.iter().any(|pattern| haystack.contains(pattern))
 }
 
 fn slack_thread_ts_from_thread_key(thread_key: Option<&str>) -> Option<String> {
@@ -763,6 +973,50 @@ mod tests {
 
         assert_eq!(channel_to_identifier_type(&Channel::Discord), "discord");
         assert_eq!(channel_to_identifier_type(&Channel::Slack), "slack");
+    }
+
+    #[test]
+    fn classify_run_task_failure_detects_codex_stream_disconnect() {
+        let message = "stream disconnected before completion: response.failed event received";
+        assert_eq!(
+            classify_run_task_failure(message),
+            RunTaskFailureClass::CodexStreamDisconnected
+        );
+        assert!(is_codex_stream_disconnect_error(message));
+    }
+
+    #[test]
+    fn classify_run_task_failure_detects_codex_capacity_message() {
+        let message = "The system is currently experiencing high demand and exceeds the maximum usage size allowed during peak load. Consider provisioned throughput.";
+        assert_eq!(
+            classify_run_task_failure(message),
+            RunTaskFailureClass::CodexCapacity
+        );
+        assert!(is_codex_capacity_error(message));
+    }
+
+    #[test]
+    fn run_task_retry_delay_uses_extended_backoff_for_codex_disconnects() {
+        assert_eq!(
+            run_task_retry_delay(1, RunTaskFailureClass::CodexStreamDisconnected),
+            chrono::Duration::seconds(180)
+        );
+        assert_eq!(
+            run_task_retry_delay(2, RunTaskFailureClass::CodexStreamDisconnected),
+            chrono::Duration::seconds(360)
+        );
+    }
+
+    #[test]
+    fn run_task_retry_delay_uses_generic_backoff_for_non_transient_failures() {
+        assert_eq!(
+            run_task_retry_delay(1, RunTaskFailureClass::Generic),
+            chrono::Duration::seconds(30)
+        );
+        assert_eq!(
+            run_task_retry_delay(2, RunTaskFailureClass::Generic),
+            chrono::Duration::seconds(60)
+        );
     }
 
     #[test]
