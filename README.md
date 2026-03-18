@@ -36,6 +36,17 @@ Current product model:
 - Workspace-first operating surface for resources, tasks, artifacts, approvals, and memory.
 - Multi-channel execution across email, Slack/Discord, GitHub, Google Docs, and related surfaces.
 
+Primary web routes:
+- `/`: public landing
+- `/start`: founder intake -> canonical startup workspace blueprint
+- `/workspace`: workspace home (brief/resources/agents/tasks/artifacts/approvals)
+- `/dashboard`: internal analytics/supporting page
+
+Startup workspace backend layer:
+- `DoWhiz_service/scheduler_module/src/domain/*`
+- `DoWhiz_service/scheduler_module/src/service/startup_workspace/*`
+- `DoWhiz_service/scheduler_module/src/service/workspace.rs` (persist bootstrap artifacts in workspace)
+
 Current production model:
 - `inbound_gateway` handles ingress (email/webhooks/chat events) and enqueue.
 - `rust_service` workers consume queue items and execute tasks.
@@ -95,6 +106,7 @@ Inbound message
 - Service docs: [`DoWhiz_service/README.md`](DoWhiz_service/README.md)
 - Operations runbook: [`DoWhiz_service/OPERATIONS.md`](DoWhiz_service/OPERATIONS.md)
 - Deployment policy: [`DoWhiz_service/docs/staging_production_deploy.md`](DoWhiz_service/docs/staging_production_deploy.md)
+- Product spec: [`docs/proactive-chief-of-staff-v1.md`](docs/proactive-chief-of-staff-v1.md)
 - Test checklist: [`reference_documentation/test_plans/DoWhiz_service_tests.md`](reference_documentation/test_plans/DoWhiz_service_tests.md)
 - Vision: [`reference_documentation/vision.md`](reference_documentation/vision.md)
 

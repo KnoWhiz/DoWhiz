@@ -4,7 +4,8 @@
   <img src="public/assets/DoWhiz.svg" alt="Do icon" width="96" />
 </p>
 
-Product website for DoWhiz, built with Vite + React.
+Workspace-first product shell for DoWhiz, built with Vite + React.
+The web app handles founder onboarding (`/start`), workspace home (`/workspace`), and supporting internal analytics (`/dashboard`).
 
 ## Prerequisites
 - Node.js 18+ (20+ recommended).
@@ -24,6 +25,7 @@ Open the local URL shown in the terminal (defaults to http://localhost:5173).
 - Lint: `npm run lint`
 - Production build: `npm run build`
 - Preview production build: `npm run preview`
+- Responsive audit: `npm run test:responsive`
 - SEO crawl report: `npm run seo:crawl`
 
 Build output goes to `website/dist/`.
@@ -61,21 +63,30 @@ server {
 If you are using a dedicated API subdomain (example: `api.dowhiz.com`) for the Rust service, you can keep the website hosted on Vercel and only run the API on the VM.
 
 ## Project structure
-- `website/src/`: React components and app code.
-- `website/public/`: Static assets copied as-is.
-- `website/index.html`: App entry HTML.
-- `website/vite.config.js`: Vite configuration.
-- `website/eslint.config.js`: Lint rules (source of truth).
+- `website/src/app/`: app-level router and shared clients.
+- `website/src/pages/`: page-level route components (`LandingPage`, `StartupIntakePage`, `WorkspaceHomePage`, internal dashboard wrapper).
+- `website/src/domain/`: canonical startup workspace models (`workspaceBlueprint`, `resourceModel`, `workspaceHomeModel`, provider runtime overlay logic).
+- `website/src/components/`: reusable UI blocks for landing/workspace sections.
+- `website/src/styles/`: modular style layers (`tokens`, `base`, `landing`, `layout`, `responsive`).
+- `website/public/`: static pages and assets copied as-is.
+- `website/vercel.json`: hosting redirects/rewrites for Vercel deployment.
 
 ## Core route map
 - `/`: Landing page.
-- `/start`: GPT-5.4 conversational founder intake for first-time setup (or fallback when no saved brief exists).
-- `/start?mode=edit`: Questionnaire editor for updating an already-saved team brief.
-- `/workspace`: Lightweight handoff route to the unified dashboard workspace section.
+- `/start`: Founder intake form that produces a canonical startup workspace blueprint object.
+- `/workspace`: Workspace home showing startup brief, resources, agents, tasks, artifacts, approvals, and next actions.
+- `/dashboard`: Internal analytics dashboard (supporting page, not the primary product home).
 - `/auth/index.html`: Unified team + personal dashboard (channels, tasks, memo, settings).
+- `/cn`: Localized landing path.
+
+## Routing and hosting notes
+- SPA routing uses `BrowserRouter`, so direct deep links require host rewrites to `/index.html`.
+- On Vercel, rewrite coverage is defined in `website/vercel.json`, including `/start`, `/workspace`, and `/dashboard`.
+- On VM/Nginx hosting, `try_files $uri /index.html;` is required for SPA routes.
 
 ## Environment variables
-No `.env` file is required for local development at the moment.
+No website `.env` file is required for local development at the moment.
+Provider-runtime overlays gracefully degrade when the user is not authenticated.
 
 ## Troubleshooting
 - Port 5173 in use: run `npm run dev -- --port 5174` or stop the other process.
