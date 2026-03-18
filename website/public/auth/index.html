@@ -3110,7 +3110,7 @@
           const briefStatus = localStorage.getItem('workspace_brief_status');
           const completedCount = allTasks.filter(t =>
             (t.request_summary || '').toLowerCase().includes('workspace brief') &&
-            t.execution_status === 'completed'
+            t.execution_status === 'success'
           ).length;
           const consumedCount = Number(localStorage.getItem('workspace_brief_consumed_count') || 0);
           console.log('[workspace_brief] status:', briefStatus, 'completedCount:', completedCount, 'consumedCount:', consumedCount);
