@@ -99,6 +99,7 @@ mod tests {
             employee_id: None,
             requester_identifier_type: None,
             requester_identifier: None,
+            account_id: None,
         }
     }
 

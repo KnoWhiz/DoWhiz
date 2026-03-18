@@ -62,6 +62,7 @@ fn base_run_task(workspace: &Path, mail_root: &Path) -> RunTaskTask {
         employee_id: None,
         requester_identifier_type: None,
         requester_identifier: None,
+        account_id: None,
     }
 }
 
@@ -557,6 +558,7 @@ fn discord_run_task(workspace: &Path) -> RunTaskTask {
         employee_id: Some("test_employee".to_string()),
         requester_identifier_type: None,
         requester_identifier: None,
+        account_id: None,
     }
 }
 
@@ -583,6 +585,7 @@ fn slack_run_task(workspace: &Path) -> RunTaskTask {
         employee_id: Some("test_employee".to_string()),
         requester_identifier_type: None,
         requester_identifier: None,
+        account_id: None,
     }
 }
 
