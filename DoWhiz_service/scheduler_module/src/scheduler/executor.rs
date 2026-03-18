@@ -80,9 +80,8 @@ fn sync_blob_memo_to_workspace(account_id: Uuid, workspace_memory_dir: &Path) ->
 
 use super::outbound::{
     execute_bluebubbles_send, execute_discord_send, execute_email_send, execute_google_docs_send,
-execute_notion_send, execute_slack_send, execute_sms_send, execute_telegram_send,
-    execute_wechat_send,
-    execute_whatsapp_send,
+    execute_notion_send, execute_slack_send, execute_sms_send, execute_telegram_send,
+    execute_wechat_send, execute_whatsapp_send,
 };
 use super::types::{SchedulerError, SendReplyTask, TaskExecution, TaskKind};
 use super::utils::load_google_access_token_from_service_env;
@@ -1070,7 +1069,7 @@ impl TaskExecutor for ModuleExecutor {
     fn execute(&self, task: &TaskKind) -> Result<TaskExecution, SchedulerError> {
         match task {
             TaskKind::SendReply(task) => {
-dispatch_send_reply_task(task)?;
+                dispatch_send_reply_task(task)?;
                 Ok(TaskExecution::empty())
             }
             TaskKind::RunTask(task) => {
@@ -1417,6 +1416,7 @@ mod tests {
             employee_id: Some("little_bear".to_string()),
             requester_identifier_type: None,
             requester_identifier: None,
+            account_id: None,
         }
     }
 
@@ -1441,6 +1441,7 @@ mod tests {
             employee_id: None,
             requester_identifier_type: None,
             requester_identifier: None,
+            account_id: None,
         }
     }
 

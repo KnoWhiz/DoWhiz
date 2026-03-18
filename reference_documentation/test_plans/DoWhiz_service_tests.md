@@ -35,8 +35,8 @@ Status legend:
 | AUTO-SCH-08 | `cargo test -p scheduler_module --test scheduler_followups` | scheduled follow-up persistence | follow-up/scheduler action changes |
 | AUTO-SCH-09 | `cargo test -p scheduler_module --test scheduler_concurrency` | scheduler concurrency behavior | concurrency/throughput changes |
 | AUTO-SCH-10 | `cargo test -p scheduler_module --test send_reply_outbound_e2e` | multi-channel outbound adapters (mocked) | outbound adapter changes |
-| AUTO-SCH-11 | `cargo test -p scheduler_module --test scheduler_retry_notifications_e2e` | retry + notification behavior | retry/notification changes |
-| AUTO-SCH-12 | `cargo test -p scheduler_module --test scheduler_retry_notifications_slack_e2e` | Slack retry notifications | slack retry changes |
+| AUTO-SCH-11 | `cargo test -p scheduler_module --test scheduler_retry_notifications_e2e` | retry + notification behavior, including transient Codex retry alerts | retry/notification changes (`MONGODB_URI` required) |
+| AUTO-SCH-12 | `cargo test -p scheduler_module --test scheduler_retry_notifications_slack_e2e` | Slack retry notifications | slack retry changes (`MONGODB_URI` required) |
 | AUTO-SCH-13 | `cargo test -p scheduler_module --test scheduler_x402_env_e2e` | scheduler x402 env bridge | x402/env bridge changes |
 | AUTO-SCH-14 | `cargo test -p scheduler_module --test thread_latest_epoch_e2e` | stale-thread cancellation, latest-epoch rule | thread state / email race changes |
 | AUTO-SCH-15 | `cargo test -p scheduler_module` | broad scheduler_module sweep (includes unit + integration with env-gated skips) | major scheduler/gateway refactors |

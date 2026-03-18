@@ -49,6 +49,16 @@ Inbound (email/slack/discord/sms/telegram/whatsapp/google workspace/bluebubbles)
 - Raw payload storage defaults to Supabase; Azure Blob backend is recommended for gateway production.
 - Scheduler/user/index state is Mongo-backed.
 
+### 1.4 Startup workspace product layer
+
+Startup workspace orchestration lives in `scheduler_module` (not `run_task_module`) and is split into:
+- `scheduler_module/src/domain/*`: canonical blueprint/resource/task/agent/artifact models
+- `scheduler_module/src/service/startup_workspace/*`: intake normalization, bootstrap planning, resource/provisioning mapping, provider runtime-state snapshots
+- `scheduler_module/src/service/workspace.rs`: bootstrap artifact persistence under each workspace (`startup_workspace/*.json`)
+
+Runtime provider visibility endpoint:
+- `GET /api/workspace/provider-state` (implemented in `scheduler_module/src/service/auth.rs`)
+
 ## 2) Components and Binaries
 
 Cargo workspace members:

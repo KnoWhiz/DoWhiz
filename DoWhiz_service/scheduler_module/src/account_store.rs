@@ -136,6 +136,24 @@ pub struct AnalyticsEventRecord {
     pub properties: Value,
 }
 
+#[derive(Debug, Clone)]
+pub struct RecommendationPreferenceRecord {
+    pub account_id: Uuid,
+    pub proactivity_level: String,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecommendationFeedbackRecord {
+    pub id: Uuid,
+    pub account_id: Uuid,
+    pub recommendation_key: String,
+    pub state_signature: String,
+    pub feedback: String,
+    pub metadata: Value,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum AccountStoreError {
     #[error("postgres error: {0}")]
@@ -375,6 +393,27 @@ impl AccountStore {
             CREATE UNIQUE INDEX IF NOT EXISTS analytics_events_event_key_idx
                 ON analytics_events (event_name, event_key)
                 WHERE event_key IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS account_recommendation_preferences (
+                account_id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+                proactivity_level TEXT NOT NULL DEFAULT 'minimal',
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS account_recommendation_feedback (
+                id UUID PRIMARY KEY,
+                account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                recommendation_key TEXT NOT NULL,
+                state_signature TEXT NOT NULL,
+                feedback TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            CREATE INDEX IF NOT EXISTS account_recommendation_feedback_account_time_idx
+                ON account_recommendation_feedback (account_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS account_recommendation_feedback_key_state_time_idx
+                ON account_recommendation_feedback (account_id, recommendation_key, state_signature, created_at DESC);
             ",
         )?;
         Ok(())
@@ -916,6 +955,124 @@ impl AccountStore {
                     os: row.get(22),
                     event_key: row.get(23),
                     properties,
+                }
+            })
+            .collect())
+    }
+
+    pub fn get_recommendation_preference(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Option<RecommendationPreferenceRecord>, AccountStoreError> {
+        let mut conn = self.conn()?;
+        let row = conn.query_opt(
+            "SELECT account_id, proactivity_level, updated_at
+             FROM account_recommendation_preferences
+             WHERE account_id = $1",
+            &[&account_id],
+        )?;
+
+        Ok(row.map(|value| RecommendationPreferenceRecord {
+            account_id: value.get(0),
+            proactivity_level: value.get(1),
+            updated_at: value.get(2),
+        }))
+    }
+
+    pub fn upsert_recommendation_preference(
+        &self,
+        account_id: Uuid,
+        proactivity_level: &str,
+    ) -> Result<RecommendationPreferenceRecord, AccountStoreError> {
+        let mut conn = self.conn()?;
+        let row = conn.query_one(
+            "INSERT INTO account_recommendation_preferences (account_id, proactivity_level, updated_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (account_id)
+             DO UPDATE SET proactivity_level = EXCLUDED.proactivity_level, updated_at = NOW()
+             RETURNING account_id, proactivity_level, updated_at",
+            &[&account_id, &proactivity_level],
+        )?;
+
+        Ok(RecommendationPreferenceRecord {
+            account_id: row.get(0),
+            proactivity_level: row.get(1),
+            updated_at: row.get(2),
+        })
+    }
+
+    pub fn record_recommendation_feedback(
+        &self,
+        account_id: Uuid,
+        recommendation_key: &str,
+        state_signature: &str,
+        feedback: &str,
+        metadata: &Value,
+    ) -> Result<RecommendationFeedbackRecord, AccountStoreError> {
+        let mut conn = self.conn()?;
+        let id = Uuid::new_v4();
+        let metadata_json = serde_json::to_string(metadata).unwrap_or_else(|_| "{}".to_string());
+        let row = conn.query_one(
+            "INSERT INTO account_recommendation_feedback (
+                id,
+                account_id,
+                recommendation_key,
+                state_signature,
+                feedback,
+                metadata_json,
+                created_at
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, NOW())
+             RETURNING id, account_id, recommendation_key, state_signature, feedback, metadata_json, created_at",
+            &[
+                &id,
+                &account_id,
+                &recommendation_key,
+                &state_signature,
+                &feedback,
+                &metadata_json,
+            ],
+        )?;
+
+        let metadata_json: String = row.get(5);
+        Ok(RecommendationFeedbackRecord {
+            id: row.get(0),
+            account_id: row.get(1),
+            recommendation_key: row.get(2),
+            state_signature: row.get(3),
+            feedback: row.get(4),
+            metadata: serde_json::from_str(&metadata_json).unwrap_or(Value::Null),
+            created_at: row.get(6),
+        })
+    }
+
+    pub fn list_recent_recommendation_feedback(
+        &self,
+        account_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<RecommendationFeedbackRecord>, AccountStoreError> {
+        let mut conn = self.conn()?;
+        let rows = conn.query(
+            "SELECT id, account_id, recommendation_key, state_signature, feedback, metadata_json, created_at
+             FROM account_recommendation_feedback
+             WHERE account_id = $1
+             ORDER BY created_at DESC
+             LIMIT $2",
+            &[&account_id, &limit],
+        )?;
+
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let metadata_json: String = row.get(5);
+                RecommendationFeedbackRecord {
+                    id: row.get(0),
+                    account_id: row.get(1),
+                    recommendation_key: row.get(2),
+                    state_signature: row.get(3),
+                    feedback: row.get(4),
+                    metadata: serde_json::from_str(&metadata_json).unwrap_or(Value::Null),
+                    created_at: row.get(6),
                 }
             })
             .collect())
