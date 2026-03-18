@@ -406,7 +406,7 @@
         display: flex;
       }
       .task-modal {
-        background: var(--bg-secondary, #16213e);
+        background: var(--surface, #1a1a1a);
         border-radius: 12px;
         padding: 1.5rem;
         max-width: 500px;
@@ -426,7 +426,7 @@
       .task-modal-title {
         font-size: 1.1rem;
         font-weight: 600;
-        color: var(--text-primary, #fff);
+        color: var(--text, #fff);
       }
       .task-modal-close {
         background: transparent;
@@ -437,13 +437,13 @@
         line-height: 1;
       }
       .task-modal-close:hover {
-        color: var(--text-primary, #fff);
+        color: var(--text, #fff);
       }
       .task-modal-row {
         display: flex;
         justify-content: space-between;
         padding: 0.5rem 0;
-        border-bottom: 1px solid var(--border-color, #333);
+        border-bottom: 1px solid var(--border, #333);
       }
       .task-modal-row:last-child {
         border-bottom: none;
@@ -453,7 +453,7 @@
         font-size: 0.9rem;
       }
       .task-modal-value {
-        color: var(--text-primary, #fff);
+        color: var(--text, #fff);
         font-size: 0.9rem;
         text-align: right;
         word-break: break-all;
@@ -3107,18 +3107,18 @@
           allTasks.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
           // Auto-complete "Get Started" when a new "Create Workspace Brief" task completes
-          if (localStorage.getItem('workspace_brief_status') === 'pending') {
-            const completedCount = allTasks.filter(t =>
-              (t.request_summary || '').toLowerCase().includes('workspace brief') &&
-              t.execution_status === 'completed'
-            ).length;
-            const consumedCount = Number(localStorage.getItem('workspace_brief_consumed_count') || 0);
-            if (completedCount > consumedCount) {
-              localStorage.setItem('workspace_brief_consumed_count', completedCount);
-              localStorage.setItem('workspace_brief_status', 'complete');
-              localStorage.removeItem('workspace_brief_message');
-              renderNextSteps(cachedIdentifiers);
-            }
+          const briefStatus = localStorage.getItem('workspace_brief_status');
+          const completedCount = allTasks.filter(t =>
+            (t.request_summary || '').toLowerCase().includes('workspace brief') &&
+            t.execution_status === 'completed'
+          ).length;
+          const consumedCount = Number(localStorage.getItem('workspace_brief_consumed_count') || 0);
+          console.log('[workspace_brief] status:', briefStatus, 'completedCount:', completedCount, 'consumedCount:', consumedCount);
+          if (briefStatus === 'pending' && completedCount > consumedCount) {
+            localStorage.setItem('workspace_brief_consumed_count', completedCount);
+            localStorage.setItem('workspace_brief_status', 'complete');
+            localStorage.removeItem('workspace_brief_message');
+            renderNextSteps(cachedIdentifiers);
           }
 
           if (allTasks.length === 0) {
