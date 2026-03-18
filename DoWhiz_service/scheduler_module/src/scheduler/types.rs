@@ -91,6 +91,9 @@ pub struct RunTaskTask {
     /// Used for account lookup during status sync
     #[serde(default)]
     pub requester_identifier: Option<String>,
+    /// The resolved account ID for this task (avoids re-lookup during status sync)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<Uuid>,
 }
 
 fn default_runner() -> String {
