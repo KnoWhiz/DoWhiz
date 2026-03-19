@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getOrCreateSessionId,
   persistAttributionFromLocation,
@@ -19,7 +19,7 @@ import {
   getThemeForLocalTime,
   shouldEnableMouseField
 } from '../components/landing/mouseFieldUtils';
-import { loadWorkspaceBlueprint } from '../domain/workspaceBlueprint';
+import StartupIntakeConversation from '../components/intake/StartupIntakeConversation';
 
 const SITE_URL = 'https://dowhiz.com';
 const LOGO_URL = `${SITE_URL}/assets/DoWhiz.svg`;
@@ -768,19 +768,47 @@ function LandingPage() {
     }
   ];
 
-  const hasSavedTeamBrief = useMemo(() => Boolean(loadWorkspaceBlueprint()), []);
-  const heroPrimaryCtaHref = hasSavedTeamBrief ? '/start?mode=edit' : '/start';
   const oliverContactHref = 'mailto:oliver@dowhiz.com';
 
-  const handleHeroCtaClick = () => {
-    trackAnalyticsEvent('secondary_cta_click', {
-      cta_location: 'hero_primary',
-      cta_text: 'Create your agent team',
-      cta_text_legacy: 'Try DoWhiz service today'
+  const handleHeroIntakeViewed = useCallback(() => {
+    const sessionId = getOrCreateSessionId();
+    trackAnalyticsEvent(
+      'hero_intake_viewed',
+      {
+        intake_location: 'homepage_hero'
+      },
+      {
+        eventKey: `hero_intake_viewed:${sessionId}:${window.location.pathname}`
+      }
+    );
+  }, []);
+
+  const handleHeroIntakeStarted = useCallback(() => {
+    trackAnalyticsEvent('hero_intake_started', {
+      intake_location: 'homepage_hero'
     });
-  };
+  }, []);
+
+  const handleHeroIntakeSubmitted = useCallback((properties = {}) => {
+    trackAnalyticsEvent('hero_intake_submitted', {
+      intake_location: 'homepage_hero',
+      ...properties
+    });
+  }, []);
+
+  const handleHeroIntakeHandoff = useCallback((properties = {}) => {
+    trackAnalyticsEvent('hero_intake_handoff', {
+      intake_location: 'homepage_hero',
+      ...properties
+    });
+  }, []);
 
   const handleHeroContactCtaClick = () => {
+    trackAnalyticsEvent('hero_secondary_cta_clicked', {
+      cta_location: 'hero_secondary',
+      cta_text: 'Try our agent Oliver for free',
+      cta_destination: oliverContactHref
+    });
     trackAnalyticsEvent('secondary_cta_click', {
       cta_location: 'hero_secondary',
       cta_text: 'Try our agent Oliver for free'
@@ -905,32 +933,48 @@ function LandingPage() {
         <section className="hero-section">
           {enableMouseField ? <MouseField theme={theme} /> : null}
           <div className="halo-effect"></div>
-          <div className="container hero-content">
-            <h1 className="hero-title">
-              <span className="hero-title-line hero-title-line-primary">One-click setup of a one-person company</span>
-            </h1>
-            <p className="hero-subtitle hero-subtitle-desktop">
-              Start from a founder brief, generate a workspace, and coordinate <a href="#roles" className="role-link">specialized agents</a> across build, docs, research, and GTM. Email, Slack, Discord, GitHub, and Google Workspace stay execution surfaces while your workspace is the product home.
-            </p>
-            <p className="hero-subtitle hero-subtitle-mobile">
-              Create a workspace first, then run your digital founding team across existing channels with shared memory and approvals.
-            </p>
-            <div className="hero-cta">
-              <a
-                className="btn btn-primary"
-                href={heroPrimaryCtaHref}
-                onClick={handleHeroCtaClick}
-              >
-                Create your agent team
-              </a>
-              <a
-                className="btn btn-secondary"
-                href={oliverContactHref}
-                onClick={handleHeroContactCtaClick}
-              >
-                Try our agent Oliver for free
-              </a>
+          <div className="container hero-content hero-content-split">
+            <div className="hero-copy">
+              <h1 className="hero-title">
+                <span className="hero-title-line hero-title-line-primary">One-click setup of a one-person company</span>
+              </h1>
+              <p className="hero-subtitle hero-subtitle-desktop">
+                Start from a founder brief, generate a workspace, and coordinate{' '}
+                <a href="#roles" className="role-link">specialized agents</a> across build, docs, research, and GTM.
+                Email, Slack, Discord, GitHub, and Google Workspace stay execution surfaces while your workspace is
+                the product home.
+              </p>
+              <p className="hero-subtitle hero-subtitle-mobile">
+                Create a workspace first, then run your digital founding team across existing channels with shared
+                memory and approvals.
+              </p>
+              <div className="hero-secondary-cta-wrap">
+                <a
+                  className="btn btn-secondary hero-secondary-cta"
+                  href={oliverContactHref}
+                  onClick={handleHeroContactCtaClick}
+                >
+                  Try our agent Oliver for free
+                </a>
+                <p className="hero-secondary-note">Secondary option: email Oliver directly for ad-hoc tasks.</p>
+              </div>
             </div>
+            <aside className="hero-intake-panel" aria-label="Start your team brief intake in the hero">
+              <div className="hero-intake-header">
+                <p className="hero-intake-kicker">Start your intake here</p>
+                <h2>Tell DoWhiz about your project</h2>
+                <p>The same initial intake flow from /start now runs directly in the hero.</p>
+              </div>
+              <StartupIntakeConversation
+                variant="hero"
+                showDraftDetails={false}
+                showBlueprintDetails={false}
+                onViewed={handleHeroIntakeViewed}
+                onStarted={handleHeroIntakeStarted}
+                onSubmitted={handleHeroIntakeSubmitted}
+                onHandoff={handleHeroIntakeHandoff}
+              />
+            </aside>
           </div>
         </section>
 
