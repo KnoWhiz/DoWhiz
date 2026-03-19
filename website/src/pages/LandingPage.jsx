@@ -803,15 +803,27 @@ function LandingPage() {
     });
   }, []);
 
+  const handleHeroStartCtaClick = () => {
+    trackAnalyticsEvent('hero_primary_cta_clicked', {
+      cta_location: 'hero_primary',
+      cta_text: 'Open full Team Brief',
+      cta_destination: '/start'
+    });
+    trackAnalyticsEvent('primary_cta_click', {
+      cta_location: 'hero_primary',
+      cta_text: 'Open full Team Brief'
+    });
+  };
+
   const handleHeroContactCtaClick = () => {
     trackAnalyticsEvent('hero_secondary_cta_clicked', {
       cta_location: 'hero_secondary',
-      cta_text: 'Try our agent Oliver for free',
+      cta_text: 'Email Oliver directly',
       cta_destination: oliverContactHref
     });
     trackAnalyticsEvent('secondary_cta_click', {
       cta_location: 'hero_secondary',
-      cta_text: 'Try our agent Oliver for free'
+      cta_text: 'Email Oliver directly'
     });
   };
 
@@ -935,35 +947,50 @@ function LandingPage() {
           <div className="halo-effect"></div>
           <div className="container hero-content hero-content-split">
             <div className="hero-copy">
+              <p className="hero-kicker">Conversational Team Brief Setup</p>
               <h1 className="hero-title">
-                <span className="hero-title-line hero-title-line-primary">One-click setup of a one-person company</span>
+                Describe your company once. Launch your digital team in minutes.
               </h1>
-              <p className="hero-subtitle hero-subtitle-desktop">
-                Start from a founder brief, generate a workspace, and coordinate{' '}
-                <a href="#roles" className="role-link">specialized agents</a> across build, docs, research, and GTM.
-                Email, Slack, Discord, GitHub, and Google Workspace stay execution surfaces while your workspace is
-                the product home.
+              <p className="hero-subtitle">
+                Tell DoWhiz your goals, channels, and constraints in a live conversation. We convert that into a saved
+                Team Brief blueprint so your workspace and agents start from the same source of truth.
               </p>
-              <p className="hero-subtitle hero-subtitle-mobile">
-                Create a workspace first, then run your digital founding team across existing channels with shared
-                memory and approvals.
-              </p>
-              <div className="hero-secondary-cta-wrap">
+              <div className="hero-action-strip" role="list" aria-label="Conversational setup actions">
+                <div className="hero-action-chip" role="listitem">
+                  <strong>1</strong>
+                  <span>Share your context</span>
+                </div>
+                <div className="hero-action-chip" role="listitem">
+                  <strong>2</strong>
+                  <span>Answer clarifying prompts</span>
+                </div>
+                <div className="hero-action-chip" role="listitem">
+                  <strong>3</strong>
+                  <span>Create your blueprint</span>
+                </div>
+              </div>
+              <div className="hero-primary-actions">
+                <a
+                  className="btn btn-primary hero-primary-cta"
+                  href="/start"
+                  onClick={handleHeroStartCtaClick}
+                >
+                  Open full Team Brief
+                </a>
                 <a
                   className="btn btn-secondary hero-secondary-cta"
                   href={oliverContactHref}
                   onClick={handleHeroContactCtaClick}
                 >
-                  Try our agent Oliver for free
+                  Email Oliver directly
                 </a>
-                <p className="hero-secondary-note">Secondary option: email Oliver directly for ad-hoc tasks.</p>
               </div>
             </div>
-            <aside className="hero-intake-panel" aria-label="Start your team brief intake in the hero">
+            <aside className="hero-intake-panel" aria-label="Start your team brief intake conversation">
               <div className="hero-intake-header">
-                <p className="hero-intake-kicker">Start your intake here</p>
+                <p className="hero-intake-kicker">Live intake</p>
                 <h2>Tell DoWhiz about your project</h2>
-                <p>The same initial intake flow from /start now runs directly in the hero.</p>
+                <p>Run the same conversational Team Brief flow directly from the homepage.</p>
               </div>
               <StartupIntakeConversation
                 variant="hero"
