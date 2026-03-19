@@ -3362,9 +3362,7 @@
         let html = '';
         html += renderSection('Product', productTasks, 'No product tasks available.');
         html += renderSection('Integrations', relevantOAuthTasks, 'No integrations selected. Update your team brief to add channels.');
-        if (relevantAdminTasks.length > 0) {
-          html += renderSection('Admin', relevantAdminTasks, 'No admin tasks available.');
-        }
+        html += renderSection('Admin', relevantAdminTasks, 'No admin tasks at this moment.');
 
         container.innerHTML = html;
       }
