@@ -2249,6 +2249,9 @@
         if (actionKind === 'trigger_create_brief') {
           return 'Create Startup Brief';
         }
+        if (actionKind === 'trigger_create_plan') {
+          return 'Create Action Plan';
+        }
         if (actionKind === 'update_team_brief') {
           return 'Update Team Brief';
         }
@@ -3032,6 +3035,13 @@
 
         if (actionKind === 'trigger_create_brief') {
           await createBrief({
+            source: 'workspace_recommendation'
+          });
+          return;
+        }
+
+        if (actionKind === 'trigger_create_plan') {
+          await create90DayPlan({
             source: 'workspace_recommendation'
           });
           return;
