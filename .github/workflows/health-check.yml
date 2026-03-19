@@ -196,10 +196,10 @@ jobs:
             CONTAINERS=$(az container list --resource-group "$RESOURCE_GROUP" --output json 2>/dev/null || echo "[]")
 
             TOTAL=$(echo "$CONTAINERS" | jq 'length')
-            RUNNING=$(echo "$CONTAINERS" | jq '[.[] | select(.instanceView.state == "Running")] | length')
-            FAILED=$(echo "$CONTAINERS" | jq '[.[] | select(.instanceView.state == "Failed")] | length')
-            SUCCEEDED=$(echo "$CONTAINERS" | jq '[.[] | select(.instanceView.state == "Succeeded")] | length')
-            OTHER=$(echo "$CONTAINERS" | jq "[.[] | select(.instanceView.state != \"Running\" and .instanceView.state != \"Failed\" and .instanceView.state != \"Succeeded\")] | length")
+            RUNNING=$(echo "$CONTAINERS" | jq '[.[] | select(.provisioningState == "Running")] | length')
+            FAILED=$(echo "$CONTAINERS" | jq '[.[] | select(.provisioningState == "Failed")] | length')
+            SUCCEEDED=$(echo "$CONTAINERS" | jq '[.[] | select(.provisioningState == "Succeeded")] | length')
+            OTHER=$(echo "$CONTAINERS" | jq "[.[] | select(.provisioningState != \"Running\" and .provisioningState != \"Failed\" and .provisioningState != \"Succeeded\")] | length")
 
             echo "| Status | Count |"
             echo "|--------|-------|"
