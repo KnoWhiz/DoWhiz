@@ -164,12 +164,12 @@
   gap: 0.9rem;
   justify-items: center;
   text-align: center;
-  max-width: 760px;
+  max-width: min(100%, 980px);
   margin: 0 auto;
 }
 
 .hero-title {
-  font-size: clamp(2.4rem, 5.2vw, 3.45rem);
+  font-size: clamp(2.4rem, 5vw, 3.3rem);
   margin: 0;
   line-height: 1.06;
   letter-spacing: -0.045em;
