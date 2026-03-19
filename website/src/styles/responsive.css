@@ -71,18 +71,6 @@
     grid-template-columns: 1fr 1fr;
   }
 
-  .deployment-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .deployment-field-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .deployment-upload-grid {
-    grid-template-columns: 1fr;
-  }
-
   .faq-grid {
     grid-template-columns: 1fr;
   }
@@ -304,7 +292,6 @@
   .blog-grid,
   .explore-grid,
   .roles-grid,
-  .deployment-grid,
   .security-grid {
     grid-template-columns: 1fr;
     gap: 1.5rem;
@@ -350,10 +337,6 @@
   .blog-card,
   .explore-card,
   .role-card,
-  .deployment-card,
-  .deployment-cta-card,
-  .deployment-form-card,
-  .deployment-upload-box,
   .security-card {
     padding: 1rem;
   }
@@ -429,28 +412,6 @@
     text-align: center;
   }
 
-  .deployment-actions .btn-secondary {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .deployment-env-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .deployment-env-row {
-    grid-template-columns: 1fr;
-  }
-
-  .deployment-mini-btn {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .deployment-submit-row .btn {
-    width: 100%;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

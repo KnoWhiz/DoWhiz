@@ -161,7 +161,7 @@ Examples:
 
 1. Latest task failed.
 2. A task is waiting on a required approval.
-3. A manual setup step blocks progress.
+3. A required workspace connection step blocks progress.
 
 ### 8.4 Continuation opportunity
 
@@ -357,7 +357,7 @@ Suggested first technical step:
 
 Suggested first UI step:
 
-1. Replace the static-feeling "Next Steps" block in `website/public/auth/index.html` with a recommendation-driven component model while preserving manual setup visibility elsewhere on the page.
+1. Replace the static-feeling "Next Steps" block in `website/public/auth/index.html` with a recommendation-driven component model while preserving setup-blocker visibility elsewhere on the page.
 
 Suggested first analytics step:
 
