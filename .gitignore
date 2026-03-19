@@ -54,3 +54,5 @@ DoWhiz_service/.env.prod
 DoWhiz_service/.env.staging
 /.deploy
 URL_AND_EMAIL.md
+*.json
+.env-*
