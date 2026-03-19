@@ -11,6 +11,7 @@ use crate::account_store::AccountStore;
 use crate::channel::Channel;
 use crate::index_store::IndexStore;
 use crate::notion_browser::models::NotionMention;
+use crate::notion_store::NotionStore;
 use crate::user_store::{extract_emails, UserStore};
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
 
@@ -100,6 +101,33 @@ pub(crate) fn process_notion_message(
 
     // Write Notion context to workspace for agent
     write_notion_context_to_workspace(&workspace, &mention, page_id, page_title)?;
+
+    // Look up OAuth token by workspace_id and write to .notion_env
+    if workspace_id != "unknown" {
+        match NotionStore::new() {
+            Ok(store) => {
+                match store.get_credential_by_workspace(workspace_id) {
+                    Ok(cred) => {
+                        let env_path = workspace.join(".notion_env");
+                        if let Err(e) = std::fs::write(&env_path, format!("NOTION_API_TOKEN={}\n", cred.access_token)) {
+                            warn!("Failed to write .notion_env: {}", e);
+                        } else {
+                            info!("Wrote Notion OAuth token to workspace for workspace_id={}", workspace_id);
+                        }
+                    }
+                    Err(crate::notion_store::NotionStoreError::NotFound(_)) => {
+                        warn!("No OAuth credential found for Notion workspace_id={}", workspace_id);
+                    }
+                    Err(e) => {
+                        warn!("Failed to look up Notion credential: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to connect to NotionStore: {}", e);
+            }
+        }
+    }
 
     // Determine model
     let model_name = match config.employee_profile.model.clone() {
