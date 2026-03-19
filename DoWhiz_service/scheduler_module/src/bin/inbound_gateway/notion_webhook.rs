@@ -242,6 +242,37 @@ async fn handle_comment_created(
     event: &NotionWebhookEvent,
     _raw_body: &[u8],
 ) -> (StatusCode, Json<serde_json::Value>) {
+    // Check if the comment author is a bot (integration's own comment)
+    // This prevents self-trigger loops where bot's reply triggers another task
+    if let Some(authors) = &event.authors {
+        if let Some(first_author) = authors.first() {
+            // Skip if author is a bot
+            if first_author.author_type.as_deref() == Some("bot") {
+                info!(
+                    "Skipping comment.created from bot author (self-trigger prevention): author_id={:?}",
+                    first_author.id
+                );
+                return (
+                    StatusCode::OK,
+                    Json(json!({"status": "skipped", "reason": "bot_author"})),
+                );
+            }
+            // Also check if author ID matches integration_id (double check)
+            if let (Some(author_id), Some(integration_id)) = (&first_author.id, &event.integration_id) {
+                if author_id == integration_id {
+                    info!(
+                        "Skipping comment.created from integration itself: integration_id={}",
+                        integration_id
+                    );
+                    return (
+                        StatusCode::OK,
+                        Json(json!({"status": "skipped", "reason": "self_integration"})),
+                    );
+                }
+            }
+        }
+    }
+
     // Extract comment ID from entity
     let comment_id = match event.entity.as_ref() {
         Some(entity) => entity.id.clone(),
