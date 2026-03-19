@@ -236,16 +236,18 @@ async fn handle_comment_created(
 ) -> (StatusCode, Json<serde_json::Value>) {
     // Parse comment data
     let comment_data: NotionCommentData = match event.data.as_ref() {
-        Some(data) => match serde_json::from_value(data.clone()) {
+        Some(data) => {
+            debug!("Notion comment.created data: {}", serde_json::to_string_pretty(data).unwrap_or_default());
+            match serde_json::from_value(data.clone()) {
             Ok(c) => c,
             Err(e) => {
-                warn!("Failed to parse comment data: {}", e);
+                warn!("Failed to parse comment data: {} - raw data: {:?}", e, data);
                 return (
                     StatusCode::OK,
                     Json(json!({"status": "parse_error", "error": e.to_string()})),
                 );
             }
-        },
+        }},
         None => {
             warn!("comment.created event missing data field");
             return (
