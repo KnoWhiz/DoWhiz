@@ -2655,6 +2655,27 @@ pub struct SlackCallbackQuery {
     pub state: String,
 }
 
+/// Query params for Slack bot installation callback
+#[derive(Debug, Deserialize)]
+pub struct SlackBotCallbackQuery {
+    pub code: String,
+    pub state: String,
+}
+
+/// Slack bot OAuth response (for bot installation)
+#[derive(Debug, Deserialize)]
+struct SlackBotOAuthResponse {
+    ok: bool,
+    error: Option<String>,
+    team: Option<SlackTeam>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlackTeam {
+    id: String,
+    name: Option<String>,
+}
+
 /// Slack OAuth token response
 #[derive(Debug, Deserialize)]
 struct SlackTokenResponse {
@@ -2946,6 +2967,129 @@ pub async fn slack_oauth_callback(
             redirect_to("/auth/index.html?slack=error&reason=internal_error")
         }
     }
+}
+
+/// GET /auth/slack/bot-callback
+/// Handles Slack bot installation callback - exchanges code for team info, records event.
+pub async fn slack_bot_callback(
+    State(state): State<AuthState>,
+    Query(params): Query<SlackBotCallbackQuery>,
+) -> impl IntoResponse {
+    let frontend_url = state.frontend_url.clone();
+    let redirect_to = |path: &str| -> axum::response::Response {
+        Redirect::to(&format!("{}{}", frontend_url, path)).into_response()
+    };
+
+    // Check if Slack OAuth is configured
+    let (client_id, client_secret) = match (&state.slack_client_id, &state.slack_client_secret) {
+        (Some(id), Some(secret)) => (id.clone(), secret.clone()),
+        _ => {
+            return redirect_to("/auth/index.html?slack_bot=error&reason=not_configured");
+        }
+    };
+
+    // Decode state to get the Supabase token
+    let token = match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&params.state) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(t) => t,
+            Err(_) => {
+                return redirect_to("/auth/index.html?slack_bot=error&reason=invalid_state");
+            }
+        },
+        Err(_) => {
+            return redirect_to("/auth/index.html?slack_bot=error&reason=invalid_state");
+        }
+    };
+
+    // Validate Supabase token and get user
+    let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(user) => user.id,
+        Err(_) => {
+            return redirect_to("/auth/index.html?slack_bot=error&reason=invalid_token");
+        }
+    };
+
+    // Look up the account for this auth user
+    let store = state.account_store.clone();
+    let account_result =
+        task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id)).await;
+
+    let account = match account_result {
+        Ok(Ok(Some(acc))) => acc,
+        Ok(Ok(None)) => {
+            return redirect_to("/auth/index.html?slack_bot=error&reason=account_not_found");
+        }
+        Ok(Err(e)) => {
+            error!("Failed to lookup account: {}", e);
+            return redirect_to("/auth/index.html?slack_bot=error&reason=internal_error");
+        }
+        Err(e) => {
+            error!("spawn_blocking panicked: {}", e);
+            return redirect_to("/auth/index.html?slack_bot=error&reason=internal_error");
+        }
+    };
+
+    // Exchange code for access token to get team info
+    let redirect_uri = format!("{}/auth/slack/bot-callback",
+        std::env::var("DOWHIZ_API_URL").unwrap_or_else(|_| "https://api.production1.dowhiz.com/service".to_string()));
+
+    let client = reqwest::Client::new();
+    let token_res = client
+        .post("https://slack.com/api/oauth.v2.access")
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("code", params.code.as_str()),
+            ("redirect_uri", redirect_uri.as_str()),
+        ])
+        .send()
+        .await;
+
+    let team_id = match token_res {
+        Ok(res) if res.status().is_success() => {
+            match res.json::<SlackBotOAuthResponse>().await {
+                Ok(data) if data.ok => {
+                    data.team.map(|t| t.id).unwrap_or_else(|| "unknown".to_string())
+                }
+                Ok(data) => {
+                    error!("Slack OAuth failed: {:?}", data.error);
+                    return redirect_to("/auth/index.html?slack_bot=error&reason=oauth_failed");
+                }
+                Err(e) => {
+                    error!("Failed to parse Slack response: {}", e);
+                    return redirect_to("/auth/index.html?slack_bot=error&reason=parse_error");
+                }
+            }
+        }
+        Ok(res) => {
+            error!("Slack token exchange failed: {}", res.status());
+            return redirect_to("/auth/index.html?slack_bot=error&reason=token_exchange_failed");
+        }
+        Err(e) => {
+            error!("Slack token request failed: {}", e);
+            return redirect_to("/auth/index.html?slack_bot=error&reason=request_failed");
+        }
+    };
+
+    // Record the bot installation event
+    track_auth_event(
+        &state.account_store,
+        "slack_bot_installed",
+        Some(account.id),
+        Some(account.auth_user_id),
+        Some(format!("slack_bot_installed:{}:{}", account.id, team_id)),
+        Some("/auth/slack/bot-callback"),
+        serde_json::json!({
+            "team_id": team_id,
+        }),
+    );
+
+    info!(
+        "Slack bot installed for account {} in team {}",
+        account.id, team_id
+    );
+
+    redirect_to("/auth/index.html?slack_bot=success")
 }
 
 // ============================================================================
@@ -4014,6 +4158,7 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/auth/discord/bot-callback", get(discord_bot_callback))
         .route("/auth/slack", get(slack_oauth_start))
         .route("/auth/slack/callback", get(slack_oauth_callback))
+        .route("/auth/slack/bot-callback", get(slack_bot_callback))
         .route("/auth/github", get(github_oauth_start))
         .route("/auth/github/callback", get(github_oauth_callback))
         .route("/auth/notion", get(notion_oauth_start))

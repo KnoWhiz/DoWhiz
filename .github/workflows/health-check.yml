@@ -330,4 +330,3 @@ jobs:
           echo "MongoDB: ${{ steps.mongodb.outputs.mongo_healthy }}"
           echo "Azure ACI: ${{ steps.aci_containers.outputs.aci_status }}"
           exit 1
-
