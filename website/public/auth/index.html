@@ -4158,6 +4158,17 @@
       const discordBotResult = urlParams.get('discord_bot');
       if (discordBotResult) {
         if (discordBotResult === 'success') {
+          // Restore session from fragment (more secure than query param)
+          const hashParams = new URLSearchParams(window.location.hash.substring(1));
+          const encodedToken = hashParams.get('access_token');
+          if (encodedToken) {
+            try {
+              const accessToken = atob(encodedToken.replace(/-/g, '+').replace(/_/g, '/'));
+              await supabase.auth.setSession({ access_token: accessToken, refresh_token: '' });
+            } catch (e) {
+              console.error('Failed to restore session:', e);
+            }
+          }
           showMessage('Oliver has been added to your Discord server!', 'success');
           // Mark task as completed in local storage
           const completedTasks = JSON.parse(localStorage.getItem('dw_completed_admin_tasks') || '[]');
@@ -4171,7 +4182,7 @@
           const reason = urlParams.get('reason') || 'unknown error';
           showMessage(`Failed to add Oliver to Discord: ${reason}`, 'error');
         }
-        // Clean up URL
+        // Clean up URL (removes both query params and hash)
         window.history.replaceState({}, document.title, window.location.pathname + '?loggedIn=true');
       }
 
@@ -4197,6 +4208,17 @@
       const slackBotResult = urlParams.get('slack_bot');
       if (slackBotResult) {
         if (slackBotResult === 'success') {
+          // Restore session from fragment (more secure than query param)
+          const hashParams = new URLSearchParams(window.location.hash.substring(1));
+          const encodedToken = hashParams.get('access_token');
+          if (encodedToken) {
+            try {
+              const accessToken = atob(encodedToken.replace(/-/g, '+').replace(/_/g, '/'));
+              await supabase.auth.setSession({ access_token: accessToken, refresh_token: '' });
+            } catch (e) {
+              console.error('Failed to restore session:', e);
+            }
+          }
           showMessage('Oliver has been added to your Slack workspace!', 'success');
           // Mark task as completed in local storage
           const completedTasks = JSON.parse(localStorage.getItem('dw_completed_admin_tasks') || '[]');
@@ -4210,7 +4232,7 @@
           const reason = urlParams.get('reason') || 'unknown error';
           showMessage(`Failed to add Oliver to Slack: ${reason}`, 'error');
         }
-        // Clean up URL
+        // Clean up URL (removes both query params and hash)
         window.history.replaceState({}, document.title, window.location.pathname + '?loggedIn=true');
       }
 
