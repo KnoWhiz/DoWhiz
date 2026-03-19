@@ -49,6 +49,19 @@ pub(super) struct CreateWorkspaceBriefRequest {
     pub account_id: Option<Uuid>,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct Create90DayPlanRequest {
+    pub founder_name: String,
+    pub founder_email: String,
+    pub venture_name: Option<String>,
+    pub thesis: Option<String>,
+    pub stage: Option<String>,
+    pub goals: Vec<String>,
+    pub current_assets: Option<Vec<String>>,
+    pub plan_horizon_days: Option<i32>,
+    pub account_id: Option<Uuid>,
+}
+
 pub(super) async fn health() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
@@ -1129,6 +1142,169 @@ Use the google-docs skill to create and share the document."#,
     }
 }
 
+pub(super) async fn create_90_day_plan(
+    State(state): State<Arc<GatewayState>>,
+    Json(request): Json<Create90DayPlanRequest>,
+) -> impl IntoResponse {
+    info!(
+        "90-day plan request: founder={} email={}",
+        request.founder_name, request.founder_email
+    );
+
+    let employee_id = state
+        .config
+        .defaults
+        .employee_id
+        .clone()
+        .unwrap_or_else(|| "oliver".to_string());
+
+    let tenant_id = state
+        .config
+        .defaults
+        .tenant_id
+        .clone()
+        .unwrap_or_else(|| "default".to_string());
+
+    let venture_name = request.venture_name.as_deref().unwrap_or("Startup");
+    let thesis = request.thesis.as_deref().unwrap_or("Building something great");
+    let stage = request.stage.as_deref().unwrap_or("idea");
+    let horizon = request.plan_horizon_days.unwrap_or(90);
+    let goals_text = if request.goals.is_empty() {
+        "- Define initial goals".to_string()
+    } else {
+        request.goals.iter().map(|g| format!("- {}", g)).collect::<Vec<_>>().join("\n")
+    };
+    let assets_text = request
+        .current_assets
+        .as_ref()
+        .filter(|a| !a.is_empty())
+        .map(|a| a.iter().map(|x| format!("- {}", x)).collect::<Vec<_>>().join("\n"))
+        .unwrap_or_else(|| "- None listed yet".to_string());
+
+    let prompt = format!(
+        r#"Create a professional, well-formatted {horizon}-Day Action Plan Google Doc for this founder and share it with them.
+
+## Founder Information
+- **Name:** {founder_name}
+- **Email:** {founder_email}
+- **Venture Name:** {venture_name}
+- **Thesis:** {thesis}
+- **Stage:** {stage}
+
+## Goals
+{goals_text}
+
+## Current Assets
+{assets_text}
+
+## Instructions
+1. Create a new Google Doc titled "{horizon}-Day Action Plan - {venture_name}"
+2. Use professional formatting throughout:
+   - Clear heading hierarchy (Title, H1, H2, H3)
+   - Consistent spacing and indentation
+   - Bullet points and numbered lists where appropriate
+   - Bold text for key terms and deadlines
+   - Tables for weekly breakdowns if helpful
+3. Structure the document with:
+   - Executive Summary (1 paragraph synthesizing the goals and timeline)
+   - Week-by-week breakdown for {horizon} days ({weeks} weeks total)
+   - Each week should have 2-3 concrete, actionable tasks derived from the goals
+   - Milestones section marking key checkpoints at day 30, 60, and 90
+   - Success Metrics (specific, measurable criteria for each goal)
+   - Resources Needed (based on current assets and identified gaps)
+4. Share the document with {founder_email} as a writer
+5. Send an email to {founder_email} with the document link
+
+Use the google-docs skill to create and share the document."#,
+        founder_name = request.founder_name,
+        founder_email = request.founder_email,
+        venture_name = venture_name,
+        thesis = thesis,
+        stage = stage,
+        horizon = horizon,
+        weeks = horizon / 7,
+        goals_text = goals_text,
+        assets_text = assets_text,
+    );
+
+    let message_id = format!("<90-day-plan-{}@dowhiz.com>", Uuid::new_v4());
+    let recipient_email = state
+        .employee_directory
+        .employees
+        .iter()
+        .find(|e| e.id == employee_id)
+        .and_then(|e| e.address_set.iter().next())
+        .cloned()
+        .unwrap_or_else(|| format!("{}@dowhiz.com", employee_id));
+    let subject = format!("Create {}-Day Action Plan for {}", horizon, venture_name);
+
+    let message = InboundMessage {
+        channel: Channel::Email,
+        sender: request.founder_email.clone(),
+        sender_name: Some(request.founder_name.clone()),
+        recipient: recipient_email.clone(),
+        subject: Some(subject.clone()),
+        text_body: Some(prompt.clone()),
+        html_body: None,
+        thread_id: message_id.clone(),
+        message_id: Some(message_id.clone()),
+        attachments: Vec::new(),
+        reply_to: vec![request.founder_email.clone()],
+        raw_payload: Vec::new(),
+        metadata: ChannelMetadata::default(),
+    };
+
+    let email_payload = json!({
+        "From": format!("{} <{}>", request.founder_name, request.founder_email),
+        "To": recipient_email,
+        "ReplyTo": request.founder_email,
+        "Subject": subject,
+        "TextBody": prompt,
+        "MessageID": message_id
+    });
+    let raw_payload = serde_json::to_vec(&email_payload).unwrap_or_default();
+
+    let route = RouteDecision {
+        tenant_id,
+        employee_id,
+    };
+
+    let external_message_id = message.message_id.clone();
+    let mut envelope = match build_envelope(
+        route,
+        Channel::Email,
+        external_message_id,
+        &message,
+        &raw_payload,
+    )
+    .await
+    {
+        Ok(envelope) => envelope,
+        Err(err) => {
+            error!("failed to build 90-day plan envelope: {}", err);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"status": "envelope_build_failed", "error": err.to_string()})),
+            );
+        }
+    };
+
+    envelope.account_id = request.account_id;
+
+    let task_id = envelope.envelope_id.to_string();
+    let result = enqueue_envelope(state.queue.clone(), envelope).await;
+
+    match result {
+        (StatusCode::OK, Json(mut body)) => {
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert("task_id".to_string(), json!(task_id));
+            }
+            (StatusCode::OK, Json(body))
+        }
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1364,6 +1540,69 @@ mod tests {
         // Missing goals
         let json = r#"{"founder_name": "Test", "founder_email": "test@example.com"}"#;
         let result: Result<CreateWorkspaceBriefRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn create_90_day_plan_request_parses_full_payload() {
+        let json = r#"{
+            "founder_name": "Dylan Tang",
+            "founder_email": "dylan@example.com",
+            "venture_name": "Acme Labs",
+            "thesis": "Building AI tools for productivity",
+            "stage": "mvp",
+            "goals": ["Launch MVP", "Get 3 pilot customers", "Raise seed round"],
+            "current_assets": ["Landing page", "Figma mockups"],
+            "plan_horizon_days": 90
+        }"#;
+
+        let request: Create90DayPlanRequest =
+            serde_json::from_str(json).expect("should parse");
+
+        assert_eq!(request.founder_name, "Dylan Tang");
+        assert_eq!(request.founder_email, "dylan@example.com");
+        assert_eq!(request.venture_name.as_deref(), Some("Acme Labs"));
+        assert_eq!(request.thesis.as_deref(), Some("Building AI tools for productivity"));
+        assert_eq!(request.stage.as_deref(), Some("mvp"));
+        assert_eq!(request.goals.len(), 3);
+        assert_eq!(request.goals[0], "Launch MVP");
+        assert_eq!(request.current_assets.as_ref().map(|a| a.len()), Some(2));
+        assert_eq!(request.plan_horizon_days, Some(90));
+    }
+
+    #[test]
+    fn create_90_day_plan_request_parses_minimal_payload() {
+        let json = r#"{
+            "founder_name": "Jane Doe",
+            "founder_email": "jane@example.com",
+            "goals": []
+        }"#;
+
+        let request: Create90DayPlanRequest =
+            serde_json::from_str(json).expect("should parse");
+
+        assert_eq!(request.founder_name, "Jane Doe");
+        assert_eq!(request.founder_email, "jane@example.com");
+        assert!(request.venture_name.is_none());
+        assert!(request.thesis.is_none());
+        assert!(request.stage.is_none());
+        assert!(request.goals.is_empty());
+        assert!(request.current_assets.is_none());
+        assert!(request.plan_horizon_days.is_none());
+    }
+
+    #[test]
+    fn create_90_day_plan_request_rejects_missing_required_fields() {
+        let json = r#"{"founder_name": "Test", "goals": []}"#;
+        let result: Result<Create90DayPlanRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+
+        let json = r#"{"founder_email": "test@example.com", "goals": []}"#;
+        let result: Result<Create90DayPlanRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+
+        let json = r#"{"founder_name": "Test", "founder_email": "test@example.com"}"#;
+        let result: Result<Create90DayPlanRequest, _> = serde_json::from_str(json);
         assert!(result.is_err());
     }
 }
