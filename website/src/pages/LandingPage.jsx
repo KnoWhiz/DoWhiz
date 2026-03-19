@@ -803,27 +803,15 @@ function LandingPage() {
     });
   }, []);
 
-  const handleHeroStartCtaClick = () => {
-    trackAnalyticsEvent('hero_primary_cta_clicked', {
-      cta_location: 'hero_primary',
-      cta_text: 'Open full Team Brief',
-      cta_destination: '/start'
-    });
-    trackAnalyticsEvent('primary_cta_click', {
-      cta_location: 'hero_primary',
-      cta_text: 'Open full Team Brief'
-    });
-  };
-
   const handleHeroContactCtaClick = () => {
     trackAnalyticsEvent('hero_secondary_cta_clicked', {
       cta_location: 'hero_secondary',
-      cta_text: 'Email Oliver directly',
+      cta_text: 'Try our agent Oliver',
       cta_destination: oliverContactHref
     });
     trackAnalyticsEvent('secondary_cta_click', {
       cta_location: 'hero_secondary',
-      cta_text: 'Email Oliver directly'
+      cta_text: 'Try our agent Oliver'
     });
   };
 
@@ -945,46 +933,14 @@ function LandingPage() {
         <section className="hero-section">
           {enableMouseField ? <MouseField theme={theme} /> : null}
           <div className="halo-effect"></div>
-          <div className="container hero-content hero-content-split">
+          <div className="container hero-content">
             <div className="hero-copy">
-              <p className="hero-kicker">Conversational Team Brief Setup</p>
               <h1 className="hero-title">
-                Describe your company once. Launch your digital team in minutes.
+                One-click setup of a one-person company
               </h1>
               <p className="hero-subtitle">
-                Tell DoWhiz your goals, channels, and constraints in a live conversation. We convert that into a saved
-                Team Brief blueprint so your workspace and agents start from the same source of truth.
+                Tell us your goals, and we build the right team for you.
               </p>
-              <div className="hero-action-strip" role="list" aria-label="Conversational setup actions">
-                <div className="hero-action-chip" role="listitem">
-                  <strong>1</strong>
-                  <span>Share your context</span>
-                </div>
-                <div className="hero-action-chip" role="listitem">
-                  <strong>2</strong>
-                  <span>Answer clarifying prompts</span>
-                </div>
-                <div className="hero-action-chip" role="listitem">
-                  <strong>3</strong>
-                  <span>Create your blueprint</span>
-                </div>
-              </div>
-              <div className="hero-primary-actions">
-                <a
-                  className="btn btn-primary hero-primary-cta"
-                  href="/start"
-                  onClick={handleHeroStartCtaClick}
-                >
-                  Open full Team Brief
-                </a>
-                <a
-                  className="btn btn-secondary hero-secondary-cta"
-                  href={oliverContactHref}
-                  onClick={handleHeroContactCtaClick}
-                >
-                  Email Oliver directly
-                </a>
-              </div>
             </div>
             <aside className="hero-intake-panel" aria-label="Start your team brief intake conversation">
               <div className="hero-intake-header">
@@ -1002,6 +958,15 @@ function LandingPage() {
                 onHandoff={handleHeroIntakeHandoff}
               />
             </aside>
+            <div className="hero-secondary-actions">
+              <a
+                className="btn btn-secondary hero-secondary-cta"
+                href={oliverContactHref}
+                onClick={handleHeroContactCtaClick}
+              >
+                Try our agent Oliver
+              </a>
+            </div>
           </div>
         </section>
 
