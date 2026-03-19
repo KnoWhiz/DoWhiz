@@ -2711,7 +2711,9 @@ pub async fn discord_bot_callback(
         account.id, guild_id
     );
 
-    redirect_to("/auth/index.html?discord_bot=success")
+    // Include the token in fragment so frontend can restore the session
+    let encoded_token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(token.as_bytes());
+    Redirect::to(&format!("{}/auth/index.html?discord_bot=success#access_token={}", frontend_url, encoded_token)).into_response()
 }
 
 // ============================================================================
@@ -3159,7 +3161,9 @@ pub async fn slack_bot_callback(
         account.id, team_id
     );
 
-    redirect_to("/auth/index.html?slack_bot=success")
+    // Include the token in fragment so frontend can restore the session
+    let encoded_token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(token.as_bytes());
+    Redirect::to(&format!("{}/auth/index.html?slack_bot=success#access_token={}", frontend_url, encoded_token)).into_response()
 }
 
 // ============================================================================
