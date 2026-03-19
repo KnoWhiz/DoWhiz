@@ -4187,7 +4187,7 @@
         // Base64 encode the access token as state (URL-safe, no padding)
         const state = btoa(session.access_token).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         const redirectUri = encodeURIComponent(`${DOWHIZ_API_URL}/auth/discord/bot-callback`);
-        const discordBotUrl = `https://discord.com/oauth2/authorize?client_id=1475574666830680175&permissions=68608&integration_type=0&scope=bot&redirect_uri=${redirectUri}&state=${state}`;
+        const discordBotUrl = `https://discord.com/oauth2/authorize?client_id=1475574666830680175&permissions=68608&scope=bot&response_type=code&redirect_uri=${redirectUri}&state=${state}`;
 
         window.location.href = discordBotUrl;
       }

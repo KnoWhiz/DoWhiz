@@ -106,8 +106,13 @@ Keep your reply concise and helpful. Do not pretend the job has been done withou
     let human_approval_gate_section = build_human_approval_gate_section();
 
     // Build registration prompt section if user doesn't have a unified account
-    // and we haven't prompted them yet in this thread
-    let registration_section = if !has_unified_account && !has_prompted_registration(workspace_dir)
+    // and we haven't prompted them yet in this thread.
+    // Skip for Notion channel since Notion users can't easily link accounts from there,
+    // and the webhook sender identity doesn't map to DoWhiz accounts.
+    let is_notion_channel = channel.eq_ignore_ascii_case("notion");
+    let registration_section = if !has_unified_account
+        && !has_prompted_registration(workspace_dir)
+        && !is_notion_channel
     {
         // Mark that we've prompted so we don't repeat
         mark_registration_prompted(workspace_dir);
