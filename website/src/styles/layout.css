@@ -359,7 +359,8 @@
 }
 
 .startup-intake-conversation-hero .intake-chat-feed {
-  max-height: 290px;
+  max-height: none;
+  overflow-y: visible;
 }
 
 .startup-intake-conversation-hero .intake-chat-message {
