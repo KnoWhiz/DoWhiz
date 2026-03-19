@@ -51,14 +51,14 @@ pub(crate) fn process_notion_message(
         .as_deref()
         .unwrap_or("Untitled");
 
-    // Try to get the linked account from NotionCredential first (for webhook flow)
-    // This allows us to use the account's real email instead of synthetic one
-    let notion_linked_account = if workspace_id != "unknown" {
+    // Try to get the Notion credential for OAuth token (needed for API calls)
+    // Also try to get the linked account for email attribution (optional)
+    let (notion_credential, notion_linked_account) = if workspace_id != "unknown" {
         match NotionStore::new() {
             Ok(store) => match store.get_credential_by_workspace(workspace_id) {
                 Ok(cred) => {
-                    // Found credential - look up the linked account
-                    match account_store.get_account(cred.account_id) {
+                    // Found credential - try to look up the linked account (optional)
+                    let linked_account = match account_store.get_account(cred.account_id) {
                         Ok(Some(account)) => {
                             // Get the account's email identifier to use as reply_to
                             let account_email = account_store
@@ -73,41 +73,42 @@ pub(crate) fn process_notion_message(
                                 "Found linked DoWhiz account {} for Notion workspace {} (email: {:?})",
                                 account.id, workspace_id, account_email
                             );
-                            Some((cred, account, account_email))
+                            Some((account, account_email))
                         }
                         Ok(None) => {
                             warn!(
-                                "NotionCredential references account {} but account not found",
+                                "NotionCredential references account {} but account not found (will still use OAuth token)",
                                 cred.account_id
                             );
                             None
                         }
                         Err(e) => {
-                            warn!("Failed to look up account {}: {}", cred.account_id, e);
+                            warn!("Failed to look up account {}: {} (will still use OAuth token)", cred.account_id, e);
                             None
                         }
-                    }
+                    };
+                    (Some(cred), linked_account)
                 }
                 Err(crate::notion_store::NotionStoreError::NotFound(_)) => {
                     info!("No OAuth credential found for Notion workspace_id={}", workspace_id);
-                    None
+                    (None, None)
                 }
                 Err(e) => {
                     warn!("Failed to look up Notion credential: {}", e);
-                    None
+                    (None, None)
                 }
             },
             Err(e) => {
                 warn!("Failed to connect to NotionStore: {}", e);
-                None
+                (None, None)
             }
         }
     } else {
-        None
+        (None, None)
     };
 
     // Determine user email: prefer linked account's email, fall back to extracted/synthetic
-    let user_email = if let Some((_, _, Some(ref email))) = notion_linked_account {
+    let user_email = if let Some((_, Some(ref email))) = notion_linked_account {
         email.clone()
     } else {
         let extracted_email = extract_emails(&message.sender).into_iter().next();
@@ -161,8 +162,8 @@ pub(crate) fn process_notion_message(
     // Write Notion context to workspace for agent
     write_notion_context_to_workspace(&workspace, &mention, page_id, page_title)?;
 
-    // Write OAuth token to .notion_env if we have a credential
-    if let Some((ref cred, _, _)) = notion_linked_account {
+    // Write OAuth token to .notion_env if we have a credential (even if account not found)
+    if let Some(ref cred) = notion_credential {
         let env_path = workspace.join(".notion_env");
         if let Err(e) = std::fs::write(&env_path, format!("NOTION_API_TOKEN={}\n", cred.access_token)) {
             warn!("Failed to write .notion_env: {}", e);
@@ -187,6 +188,11 @@ pub(crate) fn process_notion_message(
         }
     };
 
+    // Get account_id from linked account if available
+    let resolved_account_id = notion_linked_account
+        .as_ref()
+        .map(|(account, _)| account.id);
+
     // Create RunTask
     let run_task = RunTaskTask {
         workspace_dir: workspace.clone(),
@@ -208,7 +214,7 @@ pub(crate) fn process_notion_message(
         employee_id: Some(config.employee_profile.id.clone()),
         requester_identifier_type: Some("notion_user".to_string()),
         requester_identifier: Some(user_email.clone()),
-        account_id: None,
+        account_id: resolved_account_id,
     };
 
     let run_task_for_account = run_task.clone();
@@ -228,7 +234,7 @@ pub(crate) fn process_notion_message(
     );
 
     // Check for linked account - prefer the one we already found from NotionCredential
-    let linked_account = if let Some((_, account, _)) = notion_linked_account {
+    let linked_account = if let Some((account, _)) = notion_linked_account {
         Some(account)
     } else {
         // Fall back to email-based lookup
