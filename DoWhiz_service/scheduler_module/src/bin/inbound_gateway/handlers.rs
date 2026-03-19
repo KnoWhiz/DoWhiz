@@ -1182,7 +1182,7 @@ pub(super) async fn create_90_day_plan(
         .unwrap_or_else(|| "- None listed yet".to_string());
 
     let prompt = format!(
-        r#"Create a professional, well-formatted {horizon}-Day Action Plan Google Doc for this founder and share it with them.
+        r#"Create a professional, well-formatted {horizon}-Day Plan Google Doc for this founder and share it with them.
 
 ## Founder Information
 - **Name:** {founder_name}
@@ -1198,7 +1198,7 @@ pub(super) async fn create_90_day_plan(
 {assets_text}
 
 ## Instructions
-1. Create a new Google Doc titled "{horizon}-Day Action Plan - {venture_name}"
+1. Create a new Google Doc titled "{horizon}-Day Plan - {venture_name}"
 2. Use professional formatting throughout:
    - Clear heading hierarchy (Title, H1, H2, H3)
    - Consistent spacing and indentation
@@ -1236,7 +1236,7 @@ Use the google-docs skill to create and share the document."#,
         .and_then(|e| e.address_set.iter().next())
         .cloned()
         .unwrap_or_else(|| format!("{}@dowhiz.com", employee_id));
-    let subject = format!("Create {}-Day Action Plan for {}", horizon, venture_name);
+    let subject = format!("Create {}-Day Plan for {}", horizon, venture_name);
 
     let message = InboundMessage {
         channel: Channel::Email,
