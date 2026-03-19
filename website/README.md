@@ -5,7 +5,7 @@
 </p>
 
 Workspace-first product shell for DoWhiz, built with Vite + React.
-The web app handles founder onboarding (`/start`), workspace home (`/workspace`), and supporting internal analytics (`/dashboard`).
+The web app handles founder onboarding (inline hero intake on `/` plus `/start`), workspace home (`/workspace`), and supporting internal analytics (`/dashboard`).
 
 ## Prerequisites
 - Node.js 18+ (20+ recommended).
@@ -72,8 +72,8 @@ If you are using a dedicated API subdomain (example: `api.dowhiz.com`) for the R
 - `website/vercel.json`: hosting redirects/rewrites for Vercel deployment.
 
 ## Core route map
-- `/`: Landing page.
-- `/start`: Founder intake form that produces a canonical startup workspace blueprint object.
+- `/`: Landing page with inline conversational startup intake in the hero.
+- `/start`: Backward-compatible founder intake route (same conversational flow + edit questionnaire mode).
 - `/workspace`: Workspace home showing startup brief, resources, agents, tasks, artifacts, approvals, and next actions.
 - `/dashboard`: Internal analytics dashboard (supporting page, not the primary product home).
 - `/auth/index.html`: Unified team + personal dashboard (channels, tasks, memo, settings).
