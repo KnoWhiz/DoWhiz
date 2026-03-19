@@ -176,7 +176,7 @@ pub(super) async fn handle_notion_webhook(
     // Try to parse as verification request first
     if let Ok(verification) = serde_json::from_slice::<NotionVerificationRequest>(&body) {
         if let Some(token) = verification.verification_token {
-            info!("Notion webhook verification request received");
+            info!("Notion webhook verification token received: {}", token);
             // Return the token for manual verification in Notion UI
             // Note: Notion expects you to paste this token in their UI
             return (
