@@ -54,34 +54,34 @@ pub enum NotionEventType {
     Unknown,
 }
 
-/// Parent object in Notion event.
+/// Entity reference in Notion webhook event.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct NotionParent {
+pub struct NotionEntity {
+    pub id: String,
     #[serde(rename = "type")]
-    pub parent_type: String,
-    pub page_id: Option<String>,
-    pub block_id: Option<String>,
-    pub workspace_id: Option<String>,
+    pub entity_type: Option<String>,
 }
 
-/// Author information in Notion event.
+/// Parent reference in Notion webhook data.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct NotionAuthor {
+pub struct NotionDataParent {
     pub id: Option<String>,
-    pub name: Option<String>,
+    #[serde(rename = "type")]
+    pub parent_type: Option<String>,
+}
+
+/// Data payload for webhook events (sparse - only contains parent reference).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct NotionWebhookData {
+    pub parent: Option<NotionDataParent>,
+}
+
+/// Author in webhook event.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct NotionWebhookAuthor {
+    pub id: Option<String>,
     #[serde(rename = "type")]
     pub author_type: Option<String>,
-}
-
-/// Data payload for comment.created event.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct NotionCommentData {
-    pub id: String,
-    pub parent: Option<NotionParent>,
-    pub discussion_id: Option<String>,
-    pub created_time: Option<String>,
-    pub created_by: Option<NotionAuthor>,
-    pub rich_text: Option<Vec<serde_json::Value>>,
 }
 
 /// Generic Notion webhook event payload.
@@ -89,12 +89,13 @@ pub struct NotionCommentData {
 pub struct NotionWebhookEvent {
     #[serde(rename = "type")]
     pub event_type: NotionEventType,
-    pub data: Option<serde_json::Value>,
-    pub entity: Option<serde_json::Value>,
+    pub data: Option<NotionWebhookData>,
+    pub entity: Option<NotionEntity>,
     pub timestamp: Option<String>,
     pub workspace_id: Option<String>,
     pub subscription_id: Option<String>,
     pub integration_id: Option<String>,
+    pub authors: Option<Vec<NotionWebhookAuthor>>,
 }
 
 /// Verification request from Notion during webhook setup.
@@ -232,79 +233,55 @@ pub(super) async fn handle_notion_webhook(
 async fn handle_comment_created(
     state: Arc<GatewayState>,
     event: &NotionWebhookEvent,
-    raw_body: &[u8],
+    _raw_body: &[u8],
 ) -> (StatusCode, Json<serde_json::Value>) {
-    // Parse comment data
-    let comment_data: NotionCommentData = match event.data.as_ref() {
-        Some(data) => match serde_json::from_value(data.clone()) {
-            Ok(c) => c,
-            Err(e) => {
-                warn!("Failed to parse comment data: {}", e);
-                return (
-                    StatusCode::OK,
-                    Json(json!({"status": "parse_error", "error": e.to_string()})),
-                );
-            }
-        },
+    // Extract comment ID from entity
+    let comment_id = match event.entity.as_ref() {
+        Some(entity) => entity.id.clone(),
         None => {
-            warn!("comment.created event missing data field");
+            warn!("comment.created event missing entity field");
             return (
                 StatusCode::OK,
-                Json(json!({"status": "missing_data"})),
+                Json(json!({"status": "missing_entity"})),
             );
         }
     };
 
-    // Extract page_id from parent
-    let page_id = comment_data
-        .parent
+    // Extract page_id from data.parent
+    let page_id = event
+        .data
         .as_ref()
-        .and_then(|p| p.page_id.clone().or(p.block_id.clone()));
+        .and_then(|d| d.parent.as_ref())
+        .and_then(|p| p.id.clone());
 
     let Some(page_id) = page_id else {
-        warn!("comment.created event missing page_id in parent");
+        warn!("comment.created event missing page_id in data.parent");
         return (
             StatusCode::OK,
             Json(json!({"status": "missing_page_id"})),
         );
     };
 
-    // Extract workspace_id
-    let workspace_id = event.workspace_id.clone().or_else(|| {
-        comment_data
-            .parent
-            .as_ref()
-            .and_then(|p| p.workspace_id.clone())
-    });
+    // Extract workspace_id from event
+    let workspace_id = event.workspace_id.clone();
 
-    // Extract author info
-    let author_name = comment_data
-        .created_by
+    // Extract author ID from authors array
+    let author_id = event
+        .authors
         .as_ref()
-        .and_then(|a| a.name.clone());
-    let author_id = comment_data
-        .created_by
-        .as_ref()
+        .and_then(|authors| authors.first())
         .and_then(|a| a.id.clone());
 
-    // Extract comment text
-    let comment_text = comment_data
-        .rich_text
-        .as_ref()
-        .map(|rt| extract_plain_text(rt))
-        .unwrap_or_default();
+    // Note: Notion webhooks use sparse payloads - we don't have comment text here
+    // The agent will need to fetch the comment via API using the comment_id
 
     info!(
-        "Notion comment.created: page_id={} author={:?} workspace_id={:?} text_preview={}",
+        "Notion comment.created: comment_id={} page_id={} author_id={:?} workspace_id={:?}",
+        comment_id,
         page_id,
-        author_name,
-        workspace_id,
-        &comment_text[..comment_text.len().min(100)]
+        author_id,
+        workspace_id
     );
-
-    // Check if this comment mentions our bot (look for @mentions in text)
-    // For now, we process all comments - the agent can decide relevance
-    // In the future, we could filter by checking if the bot is mentioned
 
     // Find employee to route to
     // For Notion webhooks, we use workspace_id or a default employee
@@ -319,15 +296,15 @@ async fn handle_comment_created(
     };
 
     // Build ingestion envelope
+    // Note: comment_text is empty - agent will fetch via Notion API
     let envelope = build_notion_envelope(
         &employee_id,
         &page_id,
         workspace_id.as_deref(),
-        author_name.as_deref(),
+        None, // author_name not available in sparse payload
         author_id.as_deref(),
-        &comment_text,
-        &comment_data.id,
-        raw_body,
+        "", // comment_text not available - agent fetches via API
+        &comment_id,
     )
     .await;
 
@@ -347,7 +324,7 @@ async fn handle_comment_created(
         Ok(_result) => {
             info!(
                 "Notion webhook enqueued: employee={} page_id={} comment_id={}",
-                employee_id, page_id, comment_data.id
+                employee_id, page_id, comment_id
             );
             (
                 StatusCode::OK,
@@ -355,7 +332,7 @@ async fn handle_comment_created(
                     "status": "enqueued",
                     "employee_id": employee_id,
                     "page_id": page_id,
-                    "comment_id": comment_data.id
+                    "comment_id": comment_id
                 })),
             )
         }
@@ -409,7 +386,6 @@ async fn build_notion_envelope(
     author_id: Option<&str>,
     comment_text: &str,
     comment_id: &str,
-    _raw_body: &[u8],
 ) -> Result<IngestionEnvelope, Box<dyn std::error::Error + Send + Sync>> {
     let envelope_id = Uuid::new_v4();
     let now = Utc::now();
