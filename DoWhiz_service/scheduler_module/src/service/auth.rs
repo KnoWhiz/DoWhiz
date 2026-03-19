@@ -2250,6 +2250,14 @@ pub struct DiscordCallbackQuery {
     pub state: String,
 }
 
+/// Query params for Discord bot installation callback
+#[derive(Debug, Deserialize)]
+pub struct DiscordBotCallbackQuery {
+    pub guild_id: String,
+    pub permissions: Option<String>,
+    pub state: String,
+}
+
 /// Discord token response
 #[derive(Debug, Deserialize)]
 struct DiscordTokenResponse {
@@ -2560,6 +2568,80 @@ pub async fn discord_oauth_callback(
             redirect_to("/auth/index.html?discord=error&reason=internal_error")
         }
     }
+}
+
+/// GET /auth/discord/bot-callback
+/// Handles Discord bot installation callback - records bot installation event and redirects.
+pub async fn discord_bot_callback(
+    State(state): State<AuthState>,
+    Query(params): Query<DiscordBotCallbackQuery>,
+) -> impl IntoResponse {
+    let frontend_url = state.frontend_url.clone();
+    let redirect_to = |path: &str| -> axum::response::Response {
+        Redirect::to(&format!("{}{}", frontend_url, path)).into_response()
+    };
+
+    // Decode state to get the Supabase token
+    let token = match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&params.state) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(t) => t,
+            Err(_) => {
+                return redirect_to("/auth/index.html?discord_bot=error&reason=invalid_state");
+            }
+        },
+        Err(_) => {
+            return redirect_to("/auth/index.html?discord_bot=error&reason=invalid_state");
+        }
+    };
+
+    // Validate Supabase token and get user
+    let auth_user_id = match validate_supabase_token(&state.supabase_url, &token).await {
+        Ok(user) => user.id,
+        Err(_) => {
+            return redirect_to("/auth/index.html?discord_bot=error&reason=invalid_token");
+        }
+    };
+
+    // Look up the account for this auth user
+    let store = state.account_store.clone();
+    let account_result =
+        task::spawn_blocking(move || store.get_account_by_auth_user(auth_user_id)).await;
+
+    let account = match account_result {
+        Ok(Ok(Some(acc))) => acc,
+        Ok(Ok(None)) => {
+            return redirect_to("/auth/index.html?discord_bot=error&reason=account_not_found");
+        }
+        Ok(Err(e)) => {
+            error!("Failed to lookup account: {}", e);
+            return redirect_to("/auth/index.html?discord_bot=error&reason=internal_error");
+        }
+        Err(e) => {
+            error!("spawn_blocking panicked: {}", e);
+            return redirect_to("/auth/index.html?discord_bot=error&reason=internal_error");
+        }
+    };
+
+    // Record the bot installation event for frontend complete task
+    track_auth_event(
+        &state.account_store,
+        "discord_bot_installed",
+        Some(account.id),
+        Some(account.auth_user_id),
+        Some(format!("discord_bot_installed:{}:{}", account.id, params.guild_id)),
+        Some("/auth/discord/bot-callback"),
+        serde_json::json!({
+            "guild_id": params.guild_id,
+            "permissions": params.permissions,
+        }),
+    );
+
+    info!(
+        "Discord bot installed for account {} in guild {}",
+        account.id, params.guild_id
+    );
+
+    redirect_to("/auth/index.html?discord_bot=success")
 }
 
 // ============================================================================
@@ -3929,6 +4011,7 @@ pub fn auth_router(state: AuthState) -> Router {
         .route("/auth/memo", get(get_memo).post(update_memo))
         .route("/auth/discord", get(discord_oauth_start))
         .route("/auth/discord/callback", get(discord_oauth_callback))
+        .route("/auth/discord/bot-callback", get(discord_bot_callback))
         .route("/auth/slack", get(slack_oauth_start))
         .route("/auth/slack/callback", get(slack_oauth_callback))
         .route("/auth/github", get(github_oauth_start))
