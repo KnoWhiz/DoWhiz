@@ -813,6 +813,14 @@ function LandingPage() {
 
   const blogPosts = [
     {
+      tag: 'Product Update',
+      title: 'Startup workspace for founders: March 2026 product update',
+      date: 'March 19, 2026',
+      excerpt:
+        'The new product focus: Team Brief onboarding, Team Workspace, and AI chief of staff recommendations for founders.',
+      link: '/blog/startup-workspace-for-founders-product-update/'
+    },
+    {
       tag: 'SEO Guide',
       title: 'AI workflow automation checklist for lean teams',
       date: 'February 26, 2026',
@@ -833,13 +841,6 @@ function LandingPage() {
       date: 'February 26, 2026',
       excerpt: 'How to convert inbound email threads into structured execution, progress updates, and complete deliverables.',
       link: '/blog/email-task-automation-playbook/'
-    },
-    {
-      tag: 'SEO Guide',
-      title: 'AI employee trust, safety, and governance framework',
-      date: 'February 26, 2026',
-      excerpt: 'Governance essentials for permission scopes, audit trails, and escalation paths for high-confidence execution.',
-      link: '/blog/ai-employee-trust-safety-governance/'
     }
   ];
 
