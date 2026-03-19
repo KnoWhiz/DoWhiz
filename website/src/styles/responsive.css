@@ -63,6 +63,37 @@
     font-size: clamp(2.15rem, 7vw, 2.75rem);
   }
 
+  .hero-content-split {
+    grid-template-columns: 1fr;
+    max-width: 760px;
+    text-align: center;
+  }
+
+  .hero-copy {
+    justify-items: center;
+    text-align: center;
+    padding-top: 0;
+  }
+
+  .hero-copy .hero-subtitle {
+    margin: 0 auto;
+  }
+
+  .hero-secondary-cta-wrap {
+    justify-items: center;
+    width: 100%;
+  }
+
+  .hero-secondary-cta {
+    align-self: center;
+  }
+
+  .hero-intake-panel {
+    width: min(620px, 100%);
+    margin: 0 auto;
+    text-align: left;
+  }
+
   .hero-title-line {
     white-space: normal;
   }
@@ -149,6 +180,33 @@
   .hero-cta .btn {
     width: 100%;
     max-width: 260px;
+  }
+
+  .hero-content-split {
+    gap: 1rem;
+    max-width: 100%;
+  }
+
+  .hero-copy {
+    gap: 0.85rem;
+  }
+
+  .hero-secondary-cta {
+    width: 100%;
+    max-width: 280px;
+  }
+
+  .hero-intake-panel {
+    padding: 0.85rem;
+    border-radius: 1rem;
+  }
+
+  .hero-intake-header h2 {
+    font-size: 1.08rem;
+  }
+
+  .hero-intake-header p {
+    font-size: 0.84rem;
   }
 
   .section-title {
@@ -284,6 +342,14 @@
     line-height: 1.55;
     margin: 0 auto 1.8rem;
     padding: 0 1rem;
+  }
+
+  .hero-content-split {
+    text-align: center;
+  }
+
+  .hero-intake-panel {
+    text-align: left;
   }
 
   /* Card Spacing */
