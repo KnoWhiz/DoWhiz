@@ -41,11 +41,16 @@ use super::state::GatewayState;
 type HmacSha256 = Hmac<Sha256>;
 
 /// Notion webhook event types we handle.
+/// See: https://developers.notion.com/reference/webhooks-events-delivery
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum NotionEventType {
     #[serde(rename = "comment.created")]
     CommentCreated,
+    #[serde(rename = "comment.updated")]
+    CommentUpdated,
+    #[serde(rename = "comment.deleted")]
+    CommentDeleted,
     #[serde(rename = "page.created")]
     PageCreated,
     #[serde(rename = "page.content_updated")]
@@ -144,15 +149,6 @@ fn verify_notion_signature(headers: &HeaderMap, body: &[u8]) -> Result<(), &'sta
     Ok(())
 }
 
-/// Extract plain text from Notion rich_text array.
-fn extract_plain_text(rich_text: &[serde_json::Value]) -> String {
-    rich_text
-        .iter()
-        .filter_map(|item| item.get("plain_text").and_then(|v| v.as_str()))
-        .collect::<Vec<_>>()
-        .join("")
-}
-
 /// Handle incoming Notion webhook.
 pub(super) async fn handle_notion_webhook(
     State(state): State<Arc<GatewayState>>,
@@ -216,6 +212,17 @@ pub(super) async fn handle_notion_webhook(
     match event.event_type {
         NotionEventType::CommentCreated => {
             handle_comment_created(state, &event, &body).await
+        }
+        NotionEventType::CommentUpdated => {
+            // For now, treat updated comments the same as created
+            // This allows the agent to respond to edits that add @mentions
+            info!("Notion comment.updated event, processing as new mention");
+            handle_comment_created(state, &event, &body).await
+        }
+        NotionEventType::CommentDeleted => {
+            // Acknowledge but don't process deleted comments
+            info!("Notion comment.deleted event acknowledged");
+            (StatusCode::OK, Json(json!({"status": "acknowledged", "event": "comment.deleted"})))
         }
         NotionEventType::PageCreated | NotionEventType::PageContentUpdated => {
             // Acknowledge but don't process page events for now
@@ -319,9 +326,12 @@ async fn handle_comment_created(
         }
     };
 
-    // Enqueue for processing
-    match state.queue.enqueue(&envelope) {
-        Ok(_result) => {
+    // Enqueue for processing - use spawn_blocking because ServiceBusIngestionQueue::enqueue
+    // uses block_on internally, which cannot be called from within an async context
+    let queue = state.queue.clone();
+    let result = tokio::task::spawn_blocking(move || queue.enqueue(&envelope)).await;
+    match result {
+        Ok(Ok(_)) => {
             info!(
                 "Notion webhook enqueued: employee={} page_id={} comment_id={}",
                 employee_id, page_id, comment_id
@@ -336,11 +346,18 @@ async fn handle_comment_created(
                 })),
             )
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             error!("Failed to enqueue Notion webhook: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"status": "enqueue_failed", "error": format!("{}", e)})),
+            )
+        }
+        Err(e) => {
+            error!("Failed to spawn enqueue task: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"status": "spawn_error", "error": format!("{}", e)})),
             )
         }
     }
@@ -378,6 +395,9 @@ fn resolve_notion_employee(state: &GatewayState, workspace_id: Option<&str>) -> 
 }
 
 /// Build an ingestion envelope for a Notion comment event.
+///
+/// Note: Notion webhooks use sparse payloads - they don't include the actual comment text.
+/// The agent needs to fetch the comment content via the Notion API using the comment_id.
 async fn build_notion_envelope(
     employee_id: &str,
     page_id: &str,
@@ -389,6 +409,13 @@ async fn build_notion_envelope(
 ) -> Result<IngestionEnvelope, Box<dyn std::error::Error + Send + Sync>> {
     let envelope_id = Uuid::new_v4();
     let now = Utc::now();
+
+    // For sparse webhook payloads, add instruction for agent to fetch comment via API
+    let effective_comment_text = if comment_text.is_empty() {
+        "[Webhook notification - use notion_api_cli to fetch comment content]".to_string()
+    } else {
+        comment_text.to_string()
+    };
 
     // Build a NotionMention JSON structure that the worker expects
     // This matches the NotionMention struct in notion_browser/models.rs
@@ -402,7 +429,7 @@ async fn build_notion_envelope(
         "comment_id": comment_id,
         "sender_name": author_name.unwrap_or("Unknown Notion User"),
         "sender_id": author_id,
-        "comment_text": comment_text,
+        "comment_text": effective_comment_text,
         "thread_context": [],
         "url": format!("https://notion.so/{}", page_id.replace('-', "")),
         "detected_at": now.to_rfc3339()
@@ -440,7 +467,7 @@ async fn build_notion_envelope(
         sender_name: author_name.map(String::from),
         recipient: employee_id.to_string(),
         subject: Some(format!("Notion comment on page {}", page_id)),
-        text_body: Some(comment_text.to_string()),
+        text_body: Some(effective_comment_text.clone()),
         html_body: None,
         thread_id: format!("notion:page:{}", page_id),
         message_id: Some(comment_id.to_string()),
