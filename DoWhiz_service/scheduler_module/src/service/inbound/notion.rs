@@ -51,13 +51,72 @@ pub(crate) fn process_notion_message(
         .as_deref()
         .unwrap_or("Untitled");
 
-    // Extract sender email, with fallbacks
-    let extracted_email = extract_emails(&message.sender).into_iter().next();
-    let user_email = match extracted_email {
-        Some(email) if email != "unknown@unknown.com" => email,
-        _ => {
-            // Use sender name or ID as fallback
-            format!("notion_{}@local", message.sender.replace(' ', "_"))
+    // Try to get the linked account from NotionCredential first (for webhook flow)
+    // This allows us to use the account's real email instead of synthetic one
+    let notion_linked_account = if workspace_id != "unknown" {
+        match NotionStore::new() {
+            Ok(store) => match store.get_credential_by_workspace(workspace_id) {
+                Ok(cred) => {
+                    // Found credential - look up the linked account
+                    match account_store.get_account(cred.account_id) {
+                        Ok(Some(account)) => {
+                            // Get the account's email identifier to use as reply_to
+                            let account_email = account_store
+                                .list_identifiers(account.id)
+                                .ok()
+                                .and_then(|ids| {
+                                    ids.into_iter()
+                                        .find(|id| id.identifier_type == "email" && id.verified)
+                                        .map(|id| id.identifier)
+                                });
+                            info!(
+                                "Found linked DoWhiz account {} for Notion workspace {} (email: {:?})",
+                                account.id, workspace_id, account_email
+                            );
+                            Some((cred, account, account_email))
+                        }
+                        Ok(None) => {
+                            warn!(
+                                "NotionCredential references account {} but account not found",
+                                cred.account_id
+                            );
+                            None
+                        }
+                        Err(e) => {
+                            warn!("Failed to look up account {}: {}", cred.account_id, e);
+                            None
+                        }
+                    }
+                }
+                Err(crate::notion_store::NotionStoreError::NotFound(_)) => {
+                    info!("No OAuth credential found for Notion workspace_id={}", workspace_id);
+                    None
+                }
+                Err(e) => {
+                    warn!("Failed to look up Notion credential: {}", e);
+                    None
+                }
+            },
+            Err(e) => {
+                warn!("Failed to connect to NotionStore: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Determine user email: prefer linked account's email, fall back to extracted/synthetic
+    let user_email = if let Some((_, _, Some(ref email))) = notion_linked_account {
+        email.clone()
+    } else {
+        let extracted_email = extract_emails(&message.sender).into_iter().next();
+        match extracted_email {
+            Some(email) if email != "unknown@unknown.com" => email,
+            _ => {
+                // Use sender name or ID as fallback
+                format!("notion_{}@local", message.sender.replace(' ', "_"))
+            }
         }
     };
 
@@ -102,30 +161,13 @@ pub(crate) fn process_notion_message(
     // Write Notion context to workspace for agent
     write_notion_context_to_workspace(&workspace, &mention, page_id, page_title)?;
 
-    // Look up OAuth token by workspace_id and write to .notion_env
-    if workspace_id != "unknown" {
-        match NotionStore::new() {
-            Ok(store) => {
-                match store.get_credential_by_workspace(workspace_id) {
-                    Ok(cred) => {
-                        let env_path = workspace.join(".notion_env");
-                        if let Err(e) = std::fs::write(&env_path, format!("NOTION_API_TOKEN={}\n", cred.access_token)) {
-                            warn!("Failed to write .notion_env: {}", e);
-                        } else {
-                            info!("Wrote Notion OAuth token to workspace for workspace_id={}", workspace_id);
-                        }
-                    }
-                    Err(crate::notion_store::NotionStoreError::NotFound(_)) => {
-                        warn!("No OAuth credential found for Notion workspace_id={}", workspace_id);
-                    }
-                    Err(e) => {
-                        warn!("Failed to look up Notion credential: {}", e);
-                    }
-                }
-            }
-            Err(e) => {
-                warn!("Failed to connect to NotionStore: {}", e);
-            }
+    // Write OAuth token to .notion_env if we have a credential
+    if let Some((ref cred, _, _)) = notion_linked_account {
+        let env_path = workspace.join(".notion_env");
+        if let Err(e) = std::fs::write(&env_path, format!("NOTION_API_TOKEN={}\n", cred.access_token)) {
+            warn!("Failed to write .notion_env: {}", e);
+        } else {
+            info!("Wrote Notion OAuth token to workspace for workspace_id={}", workspace_id);
         }
     }
 
@@ -184,60 +226,67 @@ pub(crate) fn process_notion_message(
         thread_state.epoch
     );
 
-    // Check for linked account
-    match account_store.get_account_by_identifier("email", &user_email) {
-        Ok(Some(account)) => {
-            info!("Found account {} for Notion user {}", account.id, user_email);
-            let account_tasks_dir = config.users_root.join(account.id.to_string()).join("state");
-            if let Err(err) = std::fs::create_dir_all(&account_tasks_dir) {
+    // Check for linked account - prefer the one we already found from NotionCredential
+    let linked_account = if let Some((_, account, _)) = notion_linked_account {
+        Some(account)
+    } else {
+        // Fall back to email-based lookup
+        match account_store.get_account_by_identifier("email", &user_email) {
+            Ok(account) => account,
+            Err(err) => {
                 warn!(
-                    "failed to create account tasks dir for account {}: {}",
-                    account.id, err
+                    "Failed to look up account for Notion user '{}': {}",
+                    user_email, err
                 );
-            } else {
-                let account_tasks_db_path = account_tasks_dir.join("tasks.db");
-                match Scheduler::load(&account_tasks_db_path, ModuleExecutor::default()) {
-                    Ok(mut account_scheduler) => {
-                        match account_scheduler.add_one_shot_in_with_id(
-                            task_id,
-                            Duration::from_secs(0),
-                            TaskKind::RunTask(run_task_for_account),
-                        ) {
-                            Ok(()) => {
-                                info!(
-                                    "also enqueued task to account-level storage account={} task_id={} channel=Notion",
-                                    account.id, task_id
-                                );
-                            }
-                            Err(err) => {
-                                warn!(
-                                    "failed to add task to account scheduler for account {}: {}",
-                                    account.id, err
-                                );
-                            }
+                None
+            }
+        }
+    };
+
+    if let Some(account) = linked_account {
+        info!("Found account {} for Notion user {}", account.id, user_email);
+        let account_tasks_dir = config.users_root.join(account.id.to_string()).join("state");
+        if let Err(err) = std::fs::create_dir_all(&account_tasks_dir) {
+            warn!(
+                "failed to create account tasks dir for account {}: {}",
+                account.id, err
+            );
+        } else {
+            let account_tasks_db_path = account_tasks_dir.join("tasks.db");
+            match Scheduler::load(&account_tasks_db_path, ModuleExecutor::default()) {
+                Ok(mut account_scheduler) => {
+                    match account_scheduler.add_one_shot_in_with_id(
+                        task_id,
+                        Duration::from_secs(0),
+                        TaskKind::RunTask(run_task_for_account),
+                    ) {
+                        Ok(()) => {
+                            info!(
+                                "also enqueued task to account-level storage account={} task_id={} channel=Notion",
+                                account.id, task_id
+                            );
+                        }
+                        Err(err) => {
+                            warn!(
+                                "failed to add task to account scheduler for account {}: {}",
+                                account.id, err
+                            );
                         }
                     }
-                    Err(err) => {
-                        warn!(
-                            "failed to load account scheduler for account {}: {}",
-                            account.id, err
-                        );
-                    }
+                }
+                Err(err) => {
+                    warn!(
+                        "failed to load account scheduler for account {}: {}",
+                        account.id, err
+                    );
                 }
             }
         }
-        Ok(None) => {
-            info!(
-                "No account linked for Notion user '{}', skipping account-level task",
-                user_email
-            );
-        }
-        Err(err) => {
-            warn!(
-                "Failed to look up account for Notion user '{}': {}",
-                user_email, err
-            );
-        }
+    } else {
+        info!(
+            "No account linked for Notion user '{}', skipping account-level task",
+            user_email
+        );
     }
 
     Ok(())
