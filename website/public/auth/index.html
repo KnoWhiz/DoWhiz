@@ -3005,8 +3005,8 @@
         },
         {
           id: 'create-90-day-plan',
-          title: 'Create 90-Day Action Plan',
-          description: 'Generate a week-by-week action plan with milestones and success metrics.',
+          title: 'Create 90-Day Plan',
+          description: 'Generate a week-by-week plan with milestones and success metrics.',
           storageKey: 'workspace_90day_plan_status',
           actionLabel: 'Get Started',
           action: 'create90DayPlan',
@@ -3181,7 +3181,7 @@
           const result = await response.json();
           localStorage.setItem('workspace_90day_plan_task_id', result.task_id || '');
           localStorage.setItem('workspace_90day_plan_status', 'pending');
-          localStorage.setItem('workspace_90day_plan_message', 'Our AI employees are creating your 90-day action plan! Please check your Google Docs in a few moments.');
+          localStorage.setItem('workspace_90day_plan_message', 'Our AI employees are creating your 90-day plan! Please check your Google Docs in a few moments.');
           renderNextSteps(cachedIdentifiers);
           await loadTasks(accessToken, { refreshRecommendation: true });
         } catch (err) {
@@ -4399,6 +4399,21 @@
             localStorage.setItem('workspace_brief_consumed_count', completedCount);
             localStorage.setItem('workspace_brief_status', 'complete');
             localStorage.removeItem('workspace_brief_message');
+            renderNextSteps(cachedIdentifiers);
+          }
+
+          // Auto-complete when a new "90-Day Plan" task completes
+          const planStatus = localStorage.getItem('workspace_90day_plan_status');
+          const planCompletedCount = allTasks.filter(t =>
+            (t.request_summary || '').toLowerCase().includes('90-day plan') &&
+            t.execution_status === 'success'
+          ).length;
+          const planConsumedCount = Number(localStorage.getItem('workspace_90day_plan_consumed_count') || 0);
+          console.log('[workspace_90day_plan] status:', planStatus, 'completedCount:', planCompletedCount, 'consumedCount:', planConsumedCount);
+          if (planStatus === 'pending' && planCompletedCount > planConsumedCount) {
+            localStorage.setItem('workspace_90day_plan_consumed_count', planCompletedCount);
+            localStorage.setItem('workspace_90day_plan_status', 'complete');
+            localStorage.removeItem('workspace_90day_plan_message');
             renderNextSteps(cachedIdentifiers);
           }
 
