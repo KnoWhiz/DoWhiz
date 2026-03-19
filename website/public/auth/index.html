@@ -152,6 +152,12 @@
       .hidden {
         display: none !important;
       }
+      .dashboard-title-wrap {
+        display: block;
+      }
+      .dashboard-home-link {
+        display: none;
+      }
       .dashboard-section {
         margin-top: 2rem;
       }
@@ -635,6 +641,56 @@
         padding-right: 0;
       }
 
+      .dashboard-mode .page {
+        padding-top: 2.2rem;
+      }
+
+      .dashboard-mode .page-header {
+        display: none;
+      }
+
+      .dashboard-mode .navbar {
+        display: none;
+      }
+
+      .dashboard-mode .legal-hero {
+        margin-bottom: 1.5rem;
+      }
+
+      .dashboard-mode .dashboard-title-wrap {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        flex-wrap: wrap;
+      }
+
+      .dashboard-mode .dashboard-title-wrap h1 {
+        margin-bottom: 0;
+      }
+
+      .dashboard-mode .dashboard-home-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.48rem 0.92rem;
+        border: 1px solid var(--border, #333);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--surface, #1a1a1a) 88%, transparent);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+        color: var(--text, #fff);
+        font-size: 1rem;
+        white-space: nowrap;
+      }
+
+      .dashboard-mode .dashboard-home-link:hover {
+        border-color: color-mix(in srgb, var(--accent, #38bdf8) 35%, var(--border, #333));
+        background: color-mix(in srgb, var(--accent, #38bdf8) 10%, var(--surface, #1a1a1a));
+      }
+
+      .dashboard-mode .legal-hero .lead {
+        margin-top: 0.75rem;
+      }
+
       .dashboard-shell {
         display: grid;
         grid-template-columns: 260px minmax(0, 1fr);
@@ -733,6 +789,14 @@
       .dashboard-section {
         margin-top: 0;
         scroll-margin-top: 8.2rem;
+      }
+
+      .dashboard-mode .dashboard-sidebar {
+        top: 1.5rem;
+      }
+
+      .dashboard-mode .dashboard-section {
+        scroll-margin-top: 1.5rem;
       }
 
       .dashboard-overview-copy {
@@ -1208,9 +1272,9 @@
 
     <div class="page">
       <header class="page-header">
-        <a class="brand" href="/">Do<span class="accent">Whiz</span></a>
+        <a class="brand" href="../">Do<span class="accent">Whiz</span></a>
         <nav class="header-links">
-          <a href="/user-guide/">User Guide</a>
+          <a href="../user-guide/">User Guide</a>
           <a href="mailto:admin@dowhiz.com">Contact</a>
         </nav>
       </header>
@@ -1218,7 +1282,12 @@
       <main>
         <section class="legal-hero">
           <div class="eyebrow">Account</div>
-          <h1 id="page-title">Sign in to DoWhiz</h1>
+          <div class="dashboard-title-wrap">
+            <a class="brand dashboard-home-link" href="../" aria-label="Back to the DoWhiz landing page">
+              Do<span class="accent">Whiz</span>
+            </a>
+            <h1 id="page-title">Sign in to DoWhiz</h1>
+          </div>
           <p class="lead" id="page-subtitle">
             Open one unified dashboard for team workspace context and personal account controls.
           </p>
@@ -1560,7 +1629,7 @@
       </main>
 
       <footer class="page-footer">
-        <a class="back-link" href="/">Back to DoWhiz</a>
+        <a class="back-link" href="../">Back to DoWhiz</a>
         <span>Need help? Contact admin@dowhiz.com.</span>
       </footer>
     </div>
@@ -2179,6 +2248,9 @@
         }
         if (actionKind === 'trigger_create_brief') {
           return 'Create Startup Brief';
+        }
+        if (actionKind === 'trigger_create_plan') {
+          return 'Create Action Plan';
         }
         if (actionKind === 'update_team_brief') {
           return 'Update Team Brief';
@@ -2968,6 +3040,13 @@
           return;
         }
 
+        if (actionKind === 'trigger_create_plan') {
+          await create90DayPlan({
+            source: 'workspace_recommendation'
+          });
+          return;
+        }
+
         if (actionKind === 'update_team_brief') {
           window.location.href = updateTeamBriefBtn?.getAttribute('href') || '/start';
           return;
@@ -3362,9 +3441,7 @@
         let html = '';
         html += renderSection('Product', productTasks, 'No product tasks available.');
         html += renderSection('Integrations', relevantOAuthTasks, 'No integrations selected. Update your team brief to add channels.');
-        if (relevantAdminTasks.length > 0) {
-          html += renderSection('Admin', relevantAdminTasks, 'No admin tasks available.');
-        }
+        html += renderSection('Admin', relevantAdminTasks, 'No admin tasks at this moment.');
 
         container.innerHTML = html;
       }

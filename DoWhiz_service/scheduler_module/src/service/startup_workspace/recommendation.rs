@@ -122,6 +122,7 @@ pub enum WorkspaceRecommendationAction {
     ConnectProvider { provider: String },
     OpenDashboardSection { section: String },
     TriggerCreateBrief,
+    TriggerCreatePlan,
     UpdateTeamBrief,
 }
 
@@ -218,6 +219,10 @@ fn build_candidates(context: &WorkspaceRecommendationContext<'_>) -> Vec<Candida
     }
 
     if let Some(candidate) = build_create_brief_candidate(context) {
+        candidates.push(candidate);
+    }
+
+    if let Some(candidate) = build_create_plan_candidate(context) {
         candidates.push(candidate);
     }
 
@@ -364,6 +369,32 @@ fn build_create_brief_candidate(
             state_signature: "first_value_gap:create_brief:no_success_task".to_string(),
             action: WorkspaceRecommendationAction::TriggerCreateBrief,
         },
+        priority: 65,
+    })
+}
+
+fn build_create_plan_candidate(
+    context: &WorkspaceRecommendationContext<'_>,
+) -> Option<CandidateRecommendation> {
+    if !has_workspace_brief_task(context.recent_tasks) || has_workspace_plan_task(context.recent_tasks) {
+        return None;
+    }
+
+    let horizon_days = context.blueprint.plan_horizon_days;
+    Some(CandidateRecommendation {
+        recommendation: WorkspaceRecommendation {
+            recommendation_key: "continuation_opportunity:create_plan".to_string(),
+            trigger_type: "continuation_opportunity".to_string(),
+            title: format!("Create {}-day action plan", horizon_days),
+            why_now:
+                "Your startup brief is ready. Now you can generate a concrete action plan with milestones."
+                    .to_string(),
+            outcome:
+                "This gives you a structured roadmap to guide execution over the coming weeks."
+                    .to_string(),
+            state_signature: "continuation_opportunity:create_plan:brief_exists".to_string(),
+            action: WorkspaceRecommendationAction::TriggerCreatePlan,
+        },
         priority: 60,
     })
 }
@@ -437,6 +468,18 @@ fn has_workspace_brief_task(tasks: &[TaskStatusSummary]) -> bool {
                     .trim()
                     .to_ascii_lowercase()
                     .starts_with("create workspace brief")
+            })
+            .unwrap_or(false)
+    })
+}
+
+fn has_workspace_plan_task(tasks: &[TaskStatusSummary]) -> bool {
+    tasks.iter().any(|task| {
+        task.request_summary
+            .as_deref()
+            .map(|summary| {
+                let lower = summary.trim().to_ascii_lowercase();
+                lower.contains("day plan") || lower.contains("day action plan")
             })
             .unwrap_or(false)
     })
@@ -661,5 +704,72 @@ mod tests {
 
         assert!(response.recommendation.is_none());
         assert!(response.alternatives.is_empty());
+    }
+
+    #[test]
+    fn recommends_create_plan_when_brief_exists_but_no_plan() {
+        let blueprint = base_blueprint();
+        let runtime = runtime();
+        let tasks = vec![
+            task("task-1", Some("success"), Some("Create workspace brief for Acme")),
+        ];
+
+        let response =
+            evaluate_workspace_recommendations(make_context(&blueprint, &runtime, &tasks, &[]));
+
+        let recommendation = response.recommendation.expect("recommendation");
+        assert_eq!(recommendation.recommendation_key, "continuation_opportunity:create_plan");
+        assert!(matches!(
+            recommendation.action,
+            WorkspaceRecommendationAction::TriggerCreatePlan
+        ));
+    }
+
+    #[test]
+    fn does_not_recommend_plan_when_no_brief_exists() {
+        let blueprint = base_blueprint();
+        let runtime = runtime();
+        // No tasks - no brief created yet
+
+        let response =
+            evaluate_workspace_recommendations(make_context(&blueprint, &runtime, &[], &[]));
+
+        let recommendation = response.recommendation.expect("recommendation");
+        // Should recommend create_brief, not create_plan
+        assert_eq!(recommendation.recommendation_key, "first_value_gap:create_brief");
+    }
+
+    #[test]
+    fn does_not_recommend_plan_when_plan_already_exists() {
+        let blueprint = base_blueprint();
+        let runtime = runtime();
+        let tasks = vec![
+            task("task-1", Some("success"), Some("Create workspace brief for Acme")),
+            task("task-2", Some("success"), Some("Create 90-day action plan")),
+        ];
+
+        let response =
+            evaluate_workspace_recommendations(make_context(&blueprint, &runtime, &tasks, &[]));
+
+        // Should not recommend create_plan since it already exists
+        assert!(
+            response.recommendation.as_ref()
+                .map(|r| r.recommendation_key.as_str())
+                != Some("continuation_opportunity:create_plan")
+        );
+    }
+
+    #[test]
+    fn create_brief_outranks_create_plan() {
+        let blueprint = base_blueprint();
+        let runtime = runtime();
+        // No tasks - both brief and plan candidates could theoretically be generated
+        // but brief has priority 65, plan has 60
+
+        let response =
+            evaluate_workspace_recommendations(make_context(&blueprint, &runtime, &[], &[]));
+
+        let recommendation = response.recommendation.expect("recommendation");
+        assert_eq!(recommendation.recommendation_key, "first_value_gap:create_brief");
     }
 }
