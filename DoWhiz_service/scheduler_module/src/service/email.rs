@@ -63,7 +63,12 @@ pub fn process_inbound_payload(
 
     // Check if this is a Notion email notification
     // If so, route to the specialized Notion email handler
-    if is_notion_sender(sender) {
+    // Can be disabled via NOTION_EMAIL_DETECTION_DISABLED=1 when using webhooks instead
+    let notion_email_disabled = std::env::var("NOTION_EMAIL_DETECTION_DISABLED")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
+    if !notion_email_disabled && is_notion_sender(sender) {
         if let Some(notification) = detect_notion_email(
             sender,
             payload.subject.as_deref().unwrap_or(""),
@@ -84,6 +89,8 @@ pub fn process_inbound_payload(
                 &notification,
             );
         }
+    } else if notion_email_disabled && is_notion_sender(sender) {
+        info!("Notion email detection disabled (NOTION_EMAIL_DETECTION_DISABLED=1), skipping");
     }
 
     let requester = resolve_inbound_requester(payload, raw_payload)?;
