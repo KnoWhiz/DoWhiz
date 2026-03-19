@@ -36,6 +36,96 @@ const formatCurrency = (value) => {
   }).format(value);
 };
 
+const METRIC_HELP = {
+  unique_visitors: 'Distinct identities that triggered landing_page_view in the selected window.',
+  signup_conversion: 'signup_completed identities / unique visitor identities.',
+  activation_rate: 'Identities with first successful task / identities with signup_completed.',
+  activation_to_paid: 'Paid identities (payment_succeeded or subscription_activated) / activated identities.',
+  time_to_first_value: 'Median hours from signup_completed to first_task_succeeded.',
+  d7_retention: 'Eligible signup_completed identities with a usage event 7-8 days later.',
+  active_workspaces: 'Distinct workspace/account ids associated with tracked identities in the selected window.',
+  paid_accounts_30d: 'Distinct accounts with at least one payment in the 30 days ending at window end.',
+  revenue_range: 'Sum of successful payment amounts (USD) recorded in the selected window.',
+  funnel_step_conversion: 'Current step identities / previous funnel step identities.',
+  funnel_overall_conversion: 'Current step identities / first funnel step identities.',
+  pricing_page_views: 'Count of pricing_page_view events.',
+  upgrade_clicks: 'Count of upgrade_clicked events.',
+  paywall_views: 'Count of upgrade_viewed_or_paywall_seen and paywall_seen events.',
+  checkout_starts: 'Count of checkout_started events (includes fallback interpretation in funnel sequencing).',
+  checkout_abandon_rate:
+    'checkout_abandoned / checkout_started when available; otherwise max(checkout_started - payment_succeeded, 0) / checkout_started.',
+  payment_succeeded: 'Count of payment_succeeded events.',
+  subscription_activated: 'Count of subscription_activated events.',
+  subscription_renewals: 'Count of subscription_renewed events.',
+  subscription_canceled: 'Count of subscription_canceled events.',
+  agent_or_workflow_creation_rate:
+    'Signup_completed identities with first_agent_or_workflow_created / signup_completed identities.',
+  multi_channel_connection_rate:
+    'Signup_completed identities connected to 2+ channel/tool types / signup_completed identities.',
+  d1_retention: 'Eligible signup_completed identities with a usage event 1-2 days later.',
+  d30_retention: 'Eligible signup_completed identities with a usage event 30-31 days later.',
+  repeat_successful_task_rate:
+    'Identities with second_successful_task within 7 days of first_task_succeeded / identities with first_task_succeeded.',
+  dau_wau: 'Distinct active users today / distinct active users in trailing 7 days.',
+  dau_mau: 'Distinct active users today / distinct active users in trailing 30 days.',
+  active_users_trend: 'Daily count of active identities based on usage events.',
+  active_workspaces_trend: 'Daily count of active workspaces based on usage events.',
+  task_success_rate: 'task_succeeded / (task_succeeded + task_failed).',
+  api_error_rate: 'api_error / api_request, when api_request telemetry is present.',
+  integration_failure_rate:
+    '(channel_connect_failed + tool_connect_failed + integration_error) / connection attempts, when attempts telemetry is present.',
+  checkout_failure_rate: 'checkout_error / checkout_started, when checkout_started > 0.',
+  avg_latency_ms: 'Average latency in milliseconds across latency_metric_logged events for each endpoint/workflow.',
+  p95_latency_ms: '95th percentile latency in milliseconds across latency_metric_logged events for each endpoint/workflow.',
+  cohort_users: 'Number of signup_completed identities in the cohort week.',
+  retention_rate_col: 'Retention rate for that cohort at the given day marker.',
+  breakdown_count: 'Identity count for this segment in the selected window.',
+  breakdown_rate: 'Segment count / segment denominator for this table.'
+};
+
+const FUNNEL_STEP_HELP = {
+  landing_page_view: 'Visitor identity generated landing_page_view.',
+  primary_cta_click:
+    'Visitor clicked the landing-page primary CTA. This can be lower than later signup steps when users enter directly on auth pages.',
+  signup_started:
+    'Identities with signup_started. To prevent instrumentation undercount, signup_completed is also treated as a fallback signal for this step.',
+  signup_completed: 'Account signup completed successfully (created or backfilled account creation within the window).',
+  first_authenticated_session: 'First authenticated app session for the identity.',
+  workspace_created: 'Initial account workspace provisioned.',
+  first_channel_or_tool_connected: 'First successful external channel/tool connection.',
+  first_agent_or_workflow_created: 'First agent or workflow creation event.',
+  first_task_started:
+    'First task start event. Success events are accepted as fallback to avoid impossible success-without-start ordering.',
+  first_task_succeeded:
+    'First successful task event. second_successful_task is accepted as fallback for ordering consistency.',
+  second_successful_task: 'Second successful task event for the identity.',
+  upgrade_viewed_or_paywall_seen:
+    'Upgrade/paywall intent event. In-app upgrade surfaces can vary by route and entrypoint.',
+  checkout_started:
+    'Checkout initiated. payment_succeeded/subscription_activated are accepted as fallback signals for ordering consistency.',
+  payment_succeeded: 'Successful payment event.',
+  subscription_activated: 'Subscription or paid credit state activated.'
+};
+
+function MetricHeading({ label, help }) {
+  if (!help) {
+    return <>{label}</>;
+  }
+  return (
+    <span className="dash-metric-heading">
+      <span>{label}</span>
+      <span className="dash-help-wrap">
+        <button type="button" className="dash-help-btn" aria-label={`${label}. ${help}`}>
+          ?
+        </button>
+        <span className="dash-help-tooltip" role="tooltip">
+          {help}
+        </span>
+      </span>
+    </span>
+  );
+}
+
 function Section({ title, subtitle, children }) {
   return (
     <section className="dash-section">
@@ -52,7 +142,15 @@ function EmptyState({ label }) {
   return <div className="dash-empty">{label}</div>;
 }
 
-function BreakdownTable({ rows, firstCol, secondCol = 'Count', rateCol = 'Rate' }) {
+function BreakdownTable({
+  rows,
+  firstCol,
+  firstColHelp,
+  secondCol = 'Count',
+  secondColHelp = METRIC_HELP.breakdown_count,
+  rateCol = 'Rate',
+  rateColHelp = METRIC_HELP.breakdown_rate
+}) {
   if (!rows?.length) {
     return <EmptyState label="No data in selected range." />;
   }
@@ -62,9 +160,15 @@ function BreakdownTable({ rows, firstCol, secondCol = 'Count', rateCol = 'Rate' 
       <table className="dash-table">
         <thead>
           <tr>
-            <th>{firstCol}</th>
-            <th>{secondCol}</th>
-            <th>{rateCol}</th>
+            <th>
+              <MetricHeading label={firstCol} help={firstColHelp} />
+            </th>
+            <th>
+              <MetricHeading label={secondCol} help={secondColHelp} />
+            </th>
+            <th>
+              <MetricHeading label={rateCol} help={rateColHelp} />
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -84,7 +188,12 @@ function BreakdownTable({ rows, firstCol, secondCol = 'Count', rateCol = 'Rate' 
 function AcquisitionTable({ rows, title }) {
   return (
     <div className="dash-card">
-      <h3>{title}</h3>
+      <h3>
+        <MetricHeading
+          label={title}
+          help="Segmented acquisition funnel: visitors, signups, activated, and paid identities grouped by this dimension."
+        />
+      </h3>
       {!rows?.length ? (
         <EmptyState label="No data in selected range." />
       ) : (
@@ -93,13 +202,33 @@ function AcquisitionTable({ rows, title }) {
             <thead>
               <tr>
                 <th>Segment</th>
-                <th>Visitors</th>
-                <th>Signups</th>
-                <th>Activated</th>
-                <th>Paid</th>
-                <th>Signup CVR</th>
-                <th>Activation</th>
-                <th>Paid CVR</th>
+                <th>
+                  <MetricHeading label="Visitors" help="Distinct identities with landing_page_view in this segment." />
+                </th>
+                <th>
+                  <MetricHeading label="Signups" help="Distinct identities with signup_completed in this segment." />
+                </th>
+                <th>
+                  <MetricHeading
+                    label="Activated"
+                    help="Distinct identities with first_task_succeeded or task_succeeded in this segment."
+                  />
+                </th>
+                <th>
+                  <MetricHeading
+                    label="Paid"
+                    help="Distinct identities with payment_succeeded or subscription_activated in this segment."
+                  />
+                </th>
+                <th>
+                  <MetricHeading label="Signup CVR" help="Signups / Visitors for this segment." />
+                </th>
+                <th>
+                  <MetricHeading label="Activation" help="Activated / Signups for this segment." />
+                </th>
+                <th>
+                  <MetricHeading label="Paid CVR" help="Paid / Signups for this segment." />
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -123,11 +252,13 @@ function AcquisitionTable({ rows, title }) {
   );
 }
 
-function TrendBars({ points, title }) {
+function TrendBars({ points, title, titleHelp }) {
   if (!points?.length) {
     return (
       <div className="dash-card">
-        <h3>{title}</h3>
+        <h3>
+          <MetricHeading label={title} help={titleHelp} />
+        </h3>
         <EmptyState label="No trend data in selected range." />
       </div>
     );
@@ -138,7 +269,9 @@ function TrendBars({ points, title }) {
 
   return (
     <div className="dash-card">
-      <h3>{title}</h3>
+      <h3>
+        <MetricHeading label={title} help={titleHelp} />
+      </h3>
       <div className="dash-bars" role="img" aria-label={title}>
         {trimmed.map((point) => {
           const height = Math.max((point.count / max) * 100, point.count > 0 ? 6 : 2);
@@ -311,39 +444,57 @@ function DashboardPage() {
             <Section title="Executive KPI Row" subtitle="Top-line conversion, activation, paid, and retention indicators.">
               <div className="dash-kpi-grid">
                 <article className="dash-kpi-card">
-                  <h3>Unique visitors</h3>
+                  <h3>
+                    <MetricHeading label="Unique visitors" help={METRIC_HELP.unique_visitors} />
+                  </h3>
                   <p>{formatNumber(dashboard.kpis.unique_visitors)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Signup conversion</h3>
+                  <h3>
+                    <MetricHeading label="Signup conversion" help={METRIC_HELP.signup_conversion} />
+                  </h3>
                   <p>{formatPercent(dashboard.kpis.signup_conversion_rate)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Activation rate</h3>
+                  <h3>
+                    <MetricHeading label="Activation rate" help={METRIC_HELP.activation_rate} />
+                  </h3>
                   <p>{formatPercent(dashboard.kpis.activation_rate)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Paid conversion</h3>
+                  <h3>
+                    <MetricHeading label="Activation -> paid conversion" help={METRIC_HELP.activation_to_paid} />
+                  </h3>
                   <p>{formatPercent(dashboard.kpis.activation_to_paid_rate)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Time to first value</h3>
+                  <h3>
+                    <MetricHeading label="Time to first value" help={METRIC_HELP.time_to_first_value} />
+                  </h3>
                   <p>{formatHours(dashboard.kpis.median_time_to_first_value_hours)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>D7 retention</h3>
+                  <h3>
+                    <MetricHeading label="D7 retention" help={METRIC_HELP.d7_retention} />
+                  </h3>
                   <p>{formatPercent(dashboard.kpis.d7_retention_rate)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Active workspaces</h3>
+                  <h3>
+                    <MetricHeading label="Active workspaces" help={METRIC_HELP.active_workspaces} />
+                  </h3>
                   <p>{formatNumber(dashboard.kpis.active_workspaces)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Paid accounts (30d)</h3>
+                  <h3>
+                    <MetricHeading label="Paid accounts (30d)" help={METRIC_HELP.paid_accounts_30d} />
+                  </h3>
                   <p>{formatNumber(dashboard.kpis.active_paid_accounts_30d)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Revenue (range)</h3>
+                  <h3>
+                    <MetricHeading label="Revenue (range)" help={METRIC_HELP.revenue_range} />
+                  </h3>
                   <p>{formatCurrency(dashboard.kpis.revenue_usd)}</p>
                 </article>
               </div>
@@ -354,10 +505,15 @@ function DashboardPage() {
                 <EmptyState label="No funnel events in selected range." />
               ) : (
                 <div className="dash-funnel">
-                  {dashboard.funnel.steps.map((step) => (
+                  {dashboard.funnel.steps.map((step, stepIndex) => (
                     <article className="dash-funnel-step" key={step.event_name}>
                       <div className="dash-funnel-title-row">
-                        <h3>{step.label}</h3>
+                        <h3>
+                          <MetricHeading
+                            label={step.label}
+                            help={FUNNEL_STEP_HELP[step.event_name] || 'Funnel step count for this event.'}
+                          />
+                        </h3>
                         <span>{formatNumber(step.identities)}</span>
                       </div>
                       <div className="dash-funnel-bar" aria-hidden="true">
@@ -367,8 +523,22 @@ function DashboardPage() {
                         />
                       </div>
                       <div className="dash-funnel-metrics">
-                        <span>Step conversion: {formatPercent(step.step_conversion_rate)}</span>
-                        <span>Overall conversion: {formatPercent(step.overall_conversion_rate)}</span>
+                        <span>
+                          <MetricHeading
+                            label={`Step conversion: ${formatPercent(step.step_conversion_rate)}`}
+                            help={
+                              stepIndex === 0
+                                ? 'For the first funnel step this is fixed at 100%.'
+                                : METRIC_HELP.funnel_step_conversion
+                            }
+                          />
+                        </span>
+                        <span>
+                          <MetricHeading
+                            label={`Overall conversion: ${formatPercent(step.overall_conversion_rate)}`}
+                            help={METRIC_HELP.funnel_overall_conversion}
+                          />
+                        </span>
                       </div>
                     </article>
                   ))}
@@ -394,29 +564,79 @@ function DashboardPage() {
             >
               <div className="dash-grid-2">
                 <div className="dash-card">
-                  <h3>Signup auth method</h3>
-                  <BreakdownTable rows={dashboard.activation?.by_auth_method} firstCol="Auth method" />
+                  <h3>
+                    <MetricHeading
+                      label="Signup auth method"
+                      help="Breakdown of signup_completed identities by auth_method captured at signup."
+                    />
+                  </h3>
+                  <BreakdownTable
+                    rows={dashboard.activation?.by_auth_method}
+                    firstCol="Auth method"
+                    firstColHelp="Authentication method recorded on signup_completed."
+                    rateColHelp="Auth method identities / all signup_completed identities."
+                  />
                 </div>
                 <div className="dash-card">
-                  <h3>Workspace type</h3>
-                  <BreakdownTable rows={dashboard.activation?.by_workspace_type} firstCol="Workspace" />
+                  <h3>
+                    <MetricHeading
+                      label="Workspace type"
+                      help="Breakdown of signup_completed identities by workspace_type from workspace_created."
+                    />
+                  </h3>
+                  <BreakdownTable
+                    rows={dashboard.activation?.by_workspace_type}
+                    firstCol="Workspace"
+                    firstColHelp="Workspace type captured on workspace_created."
+                    rateColHelp="Workspace type identities / all signup_completed identities."
+                  />
                 </div>
                 <div className="dash-card">
-                  <h3>Connected channel / tool type</h3>
-                  <BreakdownTable rows={dashboard.activation?.by_connected_channel_type} firstCol="Channel/Tool" />
+                  <h3>
+                    <MetricHeading
+                      label="Connected channel / tool type"
+                      help="Breakdown of first connected channel/tool type among signup_completed identities."
+                    />
+                  </h3>
+                  <BreakdownTable
+                    rows={dashboard.activation?.by_connected_channel_type}
+                    firstCol="Channel/Tool"
+                    firstColHelp="Channel/tool type captured from connection events."
+                    rateColHelp="Channel/tool identities / all signup_completed identities."
+                  />
                 </div>
                 <div className="dash-card">
-                  <h3>First task type</h3>
-                  <BreakdownTable rows={dashboard.activation?.by_first_task_type} firstCol="Task type" />
+                  <h3>
+                    <MetricHeading
+                      label="First task type"
+                      help="Breakdown of first task type observed among signup_completed identities."
+                    />
+                  </h3>
+                  <BreakdownTable
+                    rows={dashboard.activation?.by_first_task_type}
+                    firstCol="Task type"
+                    firstColHelp="Task type captured on first_task_started or task_started."
+                    rateColHelp="Task-type identities / all signup_completed identities."
+                  />
                 </div>
               </div>
               <div className="dash-rate-row">
                 <article className="dash-kpi-card">
-                  <h3>Agent/workflow creation rate</h3>
+                  <h3>
+                    <MetricHeading
+                      label="Agent/workflow creation rate"
+                      help={METRIC_HELP.agent_or_workflow_creation_rate}
+                    />
+                  </h3>
                   <p>{formatPercent(dashboard.activation?.agent_or_workflow_creation_rate || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Multi-channel connection rate</h3>
+                  <h3>
+                    <MetricHeading
+                      label="Multi-channel connection rate"
+                      help={METRIC_HELP.multi_channel_connection_rate}
+                    />
+                  </h3>
                   <p>{formatPercent(dashboard.activation?.multi_channel_connection_rate || 0)}</p>
                 </article>
               </div>
@@ -425,84 +645,134 @@ function DashboardPage() {
             <Section title="Monetization" subtitle="Upgrade intent, checkout flow, successful payment, and paid state activation.">
               <div className="dash-kpi-grid">
                 <article className="dash-kpi-card">
-                  <h3>Pricing page views</h3>
+                  <h3>
+                    <MetricHeading label="Pricing page views" help={METRIC_HELP.pricing_page_views} />
+                  </h3>
                   <p>{formatNumber(dashboard.monetization?.pricing_page_views || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Upgrade clicks</h3>
+                  <h3>
+                    <MetricHeading label="Upgrade clicks" help={METRIC_HELP.upgrade_clicks} />
+                  </h3>
                   <p>{formatNumber(dashboard.monetization?.upgrade_clicks || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Paywall views</h3>
+                  <h3>
+                    <MetricHeading label="Paywall views" help={METRIC_HELP.paywall_views} />
+                  </h3>
                   <p>{formatNumber(dashboard.monetization?.paywall_views || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Checkout starts</h3>
+                  <h3>
+                    <MetricHeading label="Checkout starts" help={METRIC_HELP.checkout_starts} />
+                  </h3>
                   <p>{formatNumber(dashboard.monetization?.checkout_starts || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Checkout abandon rate</h3>
+                  <h3>
+                    <MetricHeading label="Checkout abandon rate" help={METRIC_HELP.checkout_abandon_rate} />
+                  </h3>
                   <p>{formatPercent(dashboard.monetization?.checkout_abandon_rate || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Payment succeeded</h3>
+                  <h3>
+                    <MetricHeading label="Payment succeeded" help={METRIC_HELP.payment_succeeded} />
+                  </h3>
                   <p>{formatNumber(dashboard.monetization?.payment_succeeded || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Subscription activated</h3>
+                  <h3>
+                    <MetricHeading label="Subscription activated" help={METRIC_HELP.subscription_activated} />
+                  </h3>
                   <p>{formatNumber(dashboard.monetization?.subscription_activated || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Subscription renewals</h3>
+                  <h3>
+                    <MetricHeading label="Subscription renewals" help={METRIC_HELP.subscription_renewals} />
+                  </h3>
                   <p>{formatNumber(dashboard.monetization?.subscription_renewed || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Subscription canceled</h3>
+                  <h3>
+                    <MetricHeading label="Subscription canceled" help={METRIC_HELP.subscription_canceled} />
+                  </h3>
                   <p>{formatNumber(dashboard.monetization?.subscription_canceled || 0)}</p>
                 </article>
               </div>
 
               <div className="dash-card">
-                <h3>Plan mix</h3>
-                <BreakdownTable rows={dashboard.monetization?.plan_mix} firstCol="Plan" />
+                <h3>
+                  <MetricHeading label="Plan mix" help="Distribution of payment/subscription events by plan type." />
+                </h3>
+                <BreakdownTable
+                  rows={dashboard.monetization?.plan_mix}
+                  firstCol="Plan"
+                  firstColHelp="Plan type from payment/subscription events."
+                  rateColHelp="Plan event count / max(payment_succeeded, subscription_activated) events."
+                />
               </div>
             </Section>
 
             <Section title="Retention and Cohorts" subtitle="D1/D7/D30 retention, repeat-value behavior, stickiness, and weekly cohorts.">
               <div className="dash-kpi-grid">
                 <article className="dash-kpi-card">
-                  <h3>D1 retention</h3>
+                  <h3>
+                    <MetricHeading label="D1 retention" help={METRIC_HELP.d1_retention} />
+                  </h3>
                   <p>{formatPercent(dashboard.retention?.d1_retention_rate || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>D7 retention</h3>
+                  <h3>
+                    <MetricHeading label="D7 retention" help={METRIC_HELP.d7_retention} />
+                  </h3>
                   <p>{formatPercent(dashboard.retention?.d7_retention_rate || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>D30 retention</h3>
+                  <h3>
+                    <MetricHeading label="D30 retention" help={METRIC_HELP.d30_retention} />
+                  </h3>
                   <p>{formatPercent(dashboard.retention?.d30_retention_rate || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Repeat successful task rate</h3>
+                  <h3>
+                    <MetricHeading label="Repeat successful task rate" help={METRIC_HELP.repeat_successful_task_rate} />
+                  </h3>
                   <p>{formatPercent(dashboard.retention?.repeat_successful_task_rate || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>DAU / WAU</h3>
+                  <h3>
+                    <MetricHeading label="DAU / WAU" help={METRIC_HELP.dau_wau} />
+                  </h3>
                   <p>{formatPercent(dashboard.retention?.stickiness?.dau_wau_ratio || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>DAU / MAU</h3>
+                  <h3>
+                    <MetricHeading label="DAU / MAU" help={METRIC_HELP.dau_mau} />
+                  </h3>
                   <p>{formatPercent(dashboard.retention?.stickiness?.dau_mau_ratio || 0)}</p>
                 </article>
               </div>
 
               <div className="dash-grid-2">
-                <TrendBars points={dashboard.retention?.active_users_trend} title="Active users trend" />
-                <TrendBars points={dashboard.retention?.active_workspaces_trend} title="Active workspaces trend" />
+                <TrendBars
+                  points={dashboard.retention?.active_users_trend}
+                  title="Active users trend"
+                  titleHelp={METRIC_HELP.active_users_trend}
+                />
+                <TrendBars
+                  points={dashboard.retention?.active_workspaces_trend}
+                  title="Active workspaces trend"
+                  titleHelp={METRIC_HELP.active_workspaces_trend}
+                />
               </div>
 
               <div className="dash-card">
-                <h3>Weekly cohorts</h3>
+                <h3>
+                  <MetricHeading
+                    label="Weekly cohorts"
+                    help="Each row groups users by signup week and shows retention rates at D1, D7, and D30."
+                  />
+                </h3>
                 {!dashboard.retention?.cohorts?.length ? (
                   <EmptyState label="No cohorts in selected range." />
                 ) : (
@@ -511,10 +781,18 @@ function DashboardPage() {
                       <thead>
                         <tr>
                           <th>Cohort week</th>
-                          <th>Users</th>
-                          <th>D1</th>
-                          <th>D7</th>
-                          <th>D30</th>
+                          <th>
+                            <MetricHeading label="Users" help={METRIC_HELP.cohort_users} />
+                          </th>
+                          <th>
+                            <MetricHeading label="D1" help={METRIC_HELP.retention_rate_col} />
+                          </th>
+                          <th>
+                            <MetricHeading label="D7" help={METRIC_HELP.retention_rate_col} />
+                          </th>
+                          <th>
+                            <MetricHeading label="D30" help={METRIC_HELP.retention_rate_col} />
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -537,11 +815,15 @@ function DashboardPage() {
             <Section title="Reliability" subtitle="Task delivery quality, error rates, latency hotspots, and top failure reasons.">
               <div className="dash-kpi-grid">
                 <article className="dash-kpi-card">
-                  <h3>Task success rate</h3>
+                  <h3>
+                    <MetricHeading label="Task success rate" help={METRIC_HELP.task_success_rate} />
+                  </h3>
                   <p>{formatPercent(dashboard.reliability?.task_success_rate || 0)}</p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>API error rate</h3>
+                  <h3>
+                    <MetricHeading label="API error rate" help={METRIC_HELP.api_error_rate} />
+                  </h3>
                   <p>
                     {dashboard.reliability?.api_error_rate === null || dashboard.reliability?.api_error_rate === undefined
                       ? 'N/A'
@@ -549,7 +831,9 @@ function DashboardPage() {
                   </p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Integration failure rate</h3>
+                  <h3>
+                    <MetricHeading label="Integration failure rate" help={METRIC_HELP.integration_failure_rate} />
+                  </h3>
                   <p>
                     {dashboard.reliability?.integration_failure_rate === null ||
                     dashboard.reliability?.integration_failure_rate === undefined
@@ -558,7 +842,9 @@ function DashboardPage() {
                   </p>
                 </article>
                 <article className="dash-kpi-card">
-                  <h3>Checkout failure rate</h3>
+                  <h3>
+                    <MetricHeading label="Checkout failure rate" help={METRIC_HELP.checkout_failure_rate} />
+                  </h3>
                   <p>
                     {dashboard.reliability?.checkout_failure_rate === null ||
                     dashboard.reliability?.checkout_failure_rate === undefined
@@ -570,7 +856,12 @@ function DashboardPage() {
 
               <div className="dash-grid-2">
                 <div className="dash-card">
-                  <h3>Slowest endpoints / workflows</h3>
+                  <h3>
+                    <MetricHeading
+                      label="Slowest endpoints / workflows"
+                      help="Latency summary for endpoints/workflows ranked by highest average latency."
+                    />
+                  </h3>
                   {!dashboard.reliability?.slowest_endpoints_or_workflows?.length ? (
                     <EmptyState label="No latency metrics recorded yet." />
                   ) : (
@@ -579,8 +870,12 @@ function DashboardPage() {
                         <thead>
                           <tr>
                             <th>Endpoint / workflow</th>
-                            <th>Avg latency (ms)</th>
-                            <th>P95 latency (ms)</th>
+                            <th>
+                              <MetricHeading label="Avg latency (ms)" help={METRIC_HELP.avg_latency_ms} />
+                            </th>
+                            <th>
+                              <MetricHeading label="P95 latency (ms)" help={METRIC_HELP.p95_latency_ms} />
+                            </th>
                           </tr>
                         </thead>
                         <tbody>
@@ -598,7 +893,12 @@ function DashboardPage() {
                 </div>
 
                 <div className="dash-card">
-                  <h3>Top failure reasons</h3>
+                  <h3>
+                    <MetricHeading
+                      label="Top failure reasons"
+                      help="Most frequent error reasons aggregated across failure event types in the selected window."
+                    />
+                  </h3>
                   {!dashboard.reliability?.top_failure_reasons?.length ? (
                     <EmptyState label="No failure reasons in selected range." />
                   ) : (
@@ -607,7 +907,9 @@ function DashboardPage() {
                         <thead>
                           <tr>
                             <th>Reason</th>
-                            <th>Count</th>
+                            <th>
+                              <MetricHeading label="Count" help="Number of events mapped to this failure reason." />
+                            </th>
                           </tr>
                         </thead>
                         <tbody>

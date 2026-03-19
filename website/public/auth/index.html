@@ -3311,7 +3311,16 @@
               actionHtml = `<button class="auth-btn auth-btn-primary" data-action="${task.action}" onclick="${task.action}()">${task.actionLabel}</button>`;
             }
           } else if (task.externalUrl) {
-            actionHtml = `<a href="${task.externalUrl}" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-primary">${task.actionLabel}</a>`;
+            // Check if admin task is already completed
+            const completedTasks = JSON.parse(localStorage.getItem('dw_completed_admin_tasks') || '[]');
+            if (completedTasks.includes(task.id)) {
+              actionHtml = `<span class="next-step-complete"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg> Added</span>`;
+            } else if (task.id === 'add-oliver-discord') {
+              // Discord bot install needs dynamic state param for user tracking
+              actionHtml = `<a href="#" class="auth-btn auth-btn-primary" onclick="openDiscordBotAuth(event)">${task.actionLabel}</a>`;
+            } else {
+              actionHtml = `<a href="${task.externalUrl}" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-primary">${task.actionLabel}</a>`;
+            }
           } else {
             const isComplete = identifiers.some(id => id.identifier_type === task.identifierType);
             if (isComplete) {
@@ -4141,6 +4150,45 @@
         // Clean up URL
         window.history.replaceState({}, document.title, window.location.pathname + '?loggedIn=true');
       }
+
+      // Check for Discord bot installation result
+      const discordBotResult = urlParams.get('discord_bot');
+      if (discordBotResult) {
+        if (discordBotResult === 'success') {
+          showMessage('Oliver has been added to your Discord server!', 'success');
+          // Mark task as completed in local storage
+          const completedTasks = JSON.parse(localStorage.getItem('dw_completed_admin_tasks') || '[]');
+          if (!completedTasks.includes('add-oliver-discord')) {
+            completedTasks.push('add-oliver-discord');
+            localStorage.setItem('dw_completed_admin_tasks', JSON.stringify(completedTasks));
+          }
+          // Re-render next steps to show completed state
+          renderNextSteps(cachedIdentifiers || []);
+        } else if (discordBotResult === 'error') {
+          const reason = urlParams.get('reason') || 'unknown error';
+          showMessage(`Failed to add Oliver to Discord: ${reason}`, 'error');
+        }
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname + '?loggedIn=true');
+      }
+
+      // Discord bot installation function
+      async function openDiscordBotAuth(event) {
+        event.preventDefault();
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          showMessage('Please sign in first', 'error');
+          return;
+        }
+
+        // Base64 encode the access token as state (URL-safe, no padding)
+        const state = btoa(session.access_token).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        const redirectUri = encodeURIComponent(`${DOWHIZ_API_URL}/auth/discord/bot-callback`);
+        const discordBotUrl = `https://discord.com/oauth2/authorize?client_id=1475574666830680175&permissions=68608&integration_type=0&scope=bot&redirect_uri=${redirectUri}&state=${state}`;
+
+        window.location.href = discordBotUrl;
+      }
+      window.openDiscordBotAuth = openDiscordBotAuth;
 
       // Slack OAuth button
       document.getElementById('slack-oauth-btn').addEventListener('click', async () => {
