@@ -1848,7 +1848,11 @@ fn funnel_step_definitions() -> Vec<(&'static str, &'static str, Vec<&'static st
             "Primary CTA Click",
             vec!["primary_cta_click"],
         ),
-        ("signup_started", "Signup Started", vec!["signup_started"]),
+        (
+            "signup_started",
+            "Signup Started",
+            vec!["signup_started", "signup_completed"],
+        ),
         (
             "signup_completed",
             "Signup Completed",
@@ -1877,12 +1881,22 @@ fn funnel_step_definitions() -> Vec<(&'static str, &'static str, Vec<&'static st
         (
             "first_task_started",
             "First Task Started",
-            vec!["first_task_started", "task_started"],
+            vec![
+                "first_task_started",
+                "task_started",
+                "first_task_succeeded",
+                "task_succeeded",
+                "second_successful_task",
+            ],
         ),
         (
             "first_task_succeeded",
             "First Task Succeeded",
-            vec!["first_task_succeeded", "task_succeeded"],
+            vec![
+                "first_task_succeeded",
+                "task_succeeded",
+                "second_successful_task",
+            ],
         ),
         (
             "second_successful_task",
@@ -1892,12 +1906,23 @@ fn funnel_step_definitions() -> Vec<(&'static str, &'static str, Vec<&'static st
         (
             "upgrade_viewed_or_paywall_seen",
             "Upgrade Viewed or Paywall Seen",
-            vec!["upgrade_viewed_or_paywall_seen", "paywall_seen"],
+            vec![
+                "upgrade_viewed_or_paywall_seen",
+                "paywall_seen",
+                "upgrade_clicked",
+                "checkout_started",
+                "payment_succeeded",
+                "subscription_activated",
+            ],
         ),
         (
             "checkout_started",
             "Checkout Started",
-            vec!["checkout_started"],
+            vec![
+                "checkout_started",
+                "payment_succeeded",
+                "subscription_activated",
+            ],
         ),
         (
             "payment_succeeded",
@@ -1915,6 +1940,12 @@ fn funnel_step_definitions() -> Vec<(&'static str, &'static str, Vec<&'static st
 fn metric_definitions() -> Vec<MetricDefinition> {
     vec![
         MetricDefinition {
+            metric: "Signup started (funnel step)".to_string(),
+            formula:
+                "(signup_started OR signup_completed) identities. signup_completed is used as fallback for missing start telemetry."
+                    .to_string(),
+        },
+        MetricDefinition {
             metric: "Visit-to-signup conversion".to_string(),
             formula: "signup_completed identities / landing_page_view identities".to_string(),
         },
@@ -1924,11 +1955,15 @@ fn metric_definitions() -> Vec<MetricDefinition> {
         },
         MetricDefinition {
             metric: "Activation-to-paid conversion".to_string(),
-            formula: "payment_succeeded identities / first_task_succeeded identities".to_string(),
+            formula:
+                "(payment_succeeded OR subscription_activated) identities / first_task_succeeded identities"
+                    .to_string(),
         },
         MetricDefinition {
             metric: "Overall visitor-to-paid conversion".to_string(),
-            formula: "payment_succeeded identities / landing_page_view identities".to_string(),
+            formula:
+                "(payment_succeeded OR subscription_activated) identities / landing_page_view identities"
+                    .to_string(),
         },
         MetricDefinition {
             metric: "Activation rate".to_string(),
