@@ -3071,8 +3071,25 @@
         }
       ];
 
-      // Admin tasks - reserved for future admin operations
-      const ADMIN_TASKS = [];
+      // Admin tasks - filtered based on preferred channels
+      const ADMIN_TASKS_CONFIG = [
+        {
+          id: 'add-oliver-slack',
+          title: 'Add Oliver to Slack Workspace',
+          description: 'Invite Oliver to your Slack workspace.',
+          channelKey: 'slack',
+          externalUrl: 'https://slack.com/oauth/v2/authorize?client_id=5584751405762.10556678065461&scope=channels:history,chat:write,groups:history,im:history,mpim:history,users:read,app_mentions:read&user_scope=',
+          actionLabel: 'Add to Slack'
+        },
+        {
+          id: 'add-oliver-discord',
+          title: 'Add Oliver to Discord Server',
+          description: 'Invite Oliver to your Discord server.',
+          channelKey: 'discord',
+          externalUrl: 'https://discord.com/oauth2/authorize?client_id=1475574666830680175&permissions=68608&integration_type=0&scope=bot',
+          actionLabel: 'Add to Discord'
+        }
+      ];
 
       async function createBrief(options = {}) {
         const blueprint = loadWorkspaceBlueprintFromStorage();
@@ -3253,6 +3270,11 @@
           preferredChannels.some(c => c.includes(task.channelKey))
         );
 
+        // Filter Admin tasks based on preferred channels
+        const relevantAdminTasks = ADMIN_TASKS_CONFIG.filter(task =>
+          preferredChannels.some(c => c.includes(task.channelKey))
+        );
+
         // Helper to render a single task item
         function renderTaskItem(task) {
           let actionHtml;
@@ -3288,6 +3310,8 @@
             } else {
               actionHtml = `<button class="auth-btn auth-btn-primary" data-action="${task.action}" onclick="${task.action}()">${task.actionLabel}</button>`;
             }
+          } else if (task.externalUrl) {
+            actionHtml = `<a href="${task.externalUrl}" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-primary">${task.actionLabel}</a>`;
           } else {
             const isComplete = identifiers.some(id => id.identifier_type === task.identifierType);
             if (isComplete) {
@@ -3326,8 +3350,8 @@
         let html = '';
         html += renderSection('Product', productTasks, 'No product tasks available.');
         html += renderSection('Integrations', relevantOAuthTasks, 'No integrations selected. Update your team brief to add channels.');
-        if (ADMIN_TASKS.length > 0) {
-          html += renderSection('Admin', ADMIN_TASKS, 'No admin tasks available.');
+        if (relevantAdminTasks.length > 0) {
+          html += renderSection('Admin', relevantAdminTasks, 'No admin tasks available.');
         }
 
         container.innerHTML = html;
