@@ -4,7 +4,7 @@ As of 2026-03-19, the website repo exposes 21 indexable pages.
 
 1. https://dowhiz.com/
 H1 count: 1
-H1: Describe your company once. Launch your digital team in minutes.
+H1: One-click setup of a one-person company
 H2: How it works, Example workflows, Safety & Access, Meet Your Digital Employee Team, The Digital Employee Stack
 
 2. https://dowhiz.com/blog/
