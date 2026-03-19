@@ -68,6 +68,24 @@ pub(super) fn build_prompt(
             "wechat" => {
                 "2. After finishing the task (step one), write a plain text reply in reply_message.txt in the workspace root. Keep the reply concise and conversational. Do not use HTML or markdown. If there are files to attach, put them in reply_attachments/ and mention them in the reply. Do not pretend the job has been done without actually doing it."
             }
+            "notion" => {
+                r#"2. After finishing the task (step one), you MUST reply directly to the Notion comment using the Notion API.
+
+IMPORTANT: This is a Notion @mention, NOT an email. Do NOT create reply_email_draft.html.
+
+To reply:
+1. First, source the OAuth token: `source .notion_env`
+2. Read the context from .notion_context.json to get page_id and comment_id
+3. Optionally read the page content: `notion_api_cli read-page <page_id>`
+4. Post your reply as a comment: `notion_api_cli create-comment <page_id> "Your reply message here"`
+
+The .notion_env file contains NOTION_API_TOKEN and .notion_context.json has:
+- page_id: The page to comment on
+- comment_id: The comment that mentioned you (for context)
+- url: Link to the Notion page
+
+Keep your reply concise and helpful. Do not pretend the job has been done without actually posting the comment via the API."#
+            }
             _ => {
                 // Default to email (HTML)
                 "2. After finishing the task (step one), make sure you write a proper HTML email draft in reply_email_draft.html in the workspace root. If there are files to attach, put them in reply_email_attachments/ and reference them in the email draft. Do not pretend the job has been done without actually doing it, and do not write the email draft until the task is done. If you are not sure about the task, send another email to ask for clarification (and if any, attach information about why did you fail to get the task done, what is the exact error you encountered)."
