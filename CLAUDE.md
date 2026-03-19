@@ -330,6 +330,33 @@ SCHEDULED_TASKS_JSON_BEGIN
 SCHEDULED_TASKS_JSON_END
 ```
 
+### Proactive Chief of Staff (V1)
+
+DoWhiz 的主动推荐层设计原则。详见 [docs/proactive-chief-of-staff-v1.md](docs/proactive-chief-of-staff-v1.md)。
+
+**核心原则:**
+1. **先建议，再行动** - 敏感操作需用户批准
+2. **一次一条推荐** - 不要同时给多个建议
+3. **宁可有用，不求频繁** - 避免成为话痨
+
+**触发类型 (按优先级):**
+1. Active blocker - 任务失败/卡住
+2. First-value gap - 设置完但没完成首个任务
+3. Setup blocker - 缺少必要集成
+4. Continuation opportunity - 任务完成后有明显下一步
+5. Idle workspace - 配置好但长期闲置
+
+**护栏机制:**
+- 同一推荐 7 天内不重复
+- 用户连续拒绝 2 次后自动降级
+- 每条推荐必须支持"暂不"
+- 不基于弱信号推测，必须有明确状态证据
+
+**实现要点:**
+- Dashboard 卡片每天最多自动刷新一次
+- 任务完成后最多附带一条续接建议
+- 推荐 API 整合 workspace blueprint + provider state + recent tasks
+
 ## Required Environment Variables
 
 Copy `.env.example` to `DoWhiz_service/.env` and configure:

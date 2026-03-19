@@ -188,6 +188,11 @@ pub(crate) fn process_notion_message(
         }
     };
 
+    // Get account_id from linked account if available
+    let resolved_account_id = notion_linked_account
+        .as_ref()
+        .map(|(account, _)| account.id);
+
     // Create RunTask
     let run_task = RunTaskTask {
         workspace_dir: workspace.clone(),
@@ -209,7 +214,7 @@ pub(crate) fn process_notion_message(
         employee_id: Some(config.employee_profile.id.clone()),
         requester_identifier_type: Some("notion_user".to_string()),
         requester_identifier: Some(user_email.clone()),
-        account_id: None,
+        account_id: resolved_account_id,
     };
 
     let run_task_for_account = run_task.clone();
