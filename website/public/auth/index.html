@@ -3002,6 +3002,15 @@
           actionLabel: 'Get Started',
           action: 'createBrief',
           autoTracked: true
+        },
+        {
+          id: 'create-90-day-plan',
+          title: 'Create 90-Day Action Plan',
+          description: 'Generate a week-by-week action plan with milestones and success metrics.',
+          storageKey: 'workspace_90day_plan_status',
+          actionLabel: 'Get Started',
+          action: 'create90DayPlan',
+          autoTracked: true
         }
       ];
 
@@ -3115,6 +3124,78 @@
       }
 
       window.createBrief = createBrief;
+
+      async function create90DayPlan(options) {
+        const blueprint = loadWorkspaceBlueprintFromStorage();
+        if (!blueprint) {
+          showMessage('Please complete your team brief first.');
+          return;
+        }
+
+        const normalizedOptions = typeof options === 'object' && options !== null ? options : {};
+        const btn = normalizedOptions.button || document.querySelector('[data-action="create90DayPlan"]');
+        const originalButtonLabel = btn?.textContent || 'Get Started';
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Creating...';
+        }
+
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const accessToken = session?.access_token;
+          if (!session || !accessToken) {
+            throw new Error('Please sign in first.');
+          }
+
+          const response = await fetch(`${DOWHIZ_GATEWAY_URL}/api/workspace/create-90-day-plan`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${accessToken}`
+            },
+            body: JSON.stringify({
+              founder_name: blueprint.founder?.name || '',
+              founder_email: session?.user?.email || blueprint.founder?.email || '',
+              venture_name: blueprint.venture?.name || null,
+              thesis: blueprint.venture?.thesis || null,
+              stage: blueprint.venture?.stage || null,
+              goals: blueprint.goals_30_90_days || [],
+              current_assets: blueprint.current_assets || null,
+              plan_horizon_days: blueprint.plan_horizon_days || 90,
+              account_id: session?.user?.id || null
+            })
+          });
+
+          if (!response.ok) {
+            const text = await response.text();
+            let errorMsg = 'Failed to create 90-day plan';
+            try {
+              const error = JSON.parse(text);
+              errorMsg = error.error || errorMsg;
+            } catch {
+              if (response.status === 404) errorMsg = 'Endpoint not found. Backend may not be deployed.';
+            }
+            throw new Error(errorMsg);
+          }
+
+          const result = await response.json();
+          localStorage.setItem('workspace_90day_plan_task_id', result.task_id || '');
+          localStorage.setItem('workspace_90day_plan_status', 'pending');
+          localStorage.setItem('workspace_90day_plan_message', 'Our AI employees are creating your 90-day action plan! Please check your Google Docs in a few moments.');
+          renderNextSteps(cachedIdentifiers);
+          await loadTasks(accessToken, { refreshRecommendation: true });
+        } catch (err) {
+          console.error('Failed to create 90-day plan:', err);
+          showMessage(err.message || 'Failed to create 90-day plan. Please try again.');
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalButtonLabel;
+          }
+        }
+      }
+
+      window.create90DayPlan = create90DayPlan;
 
       function markWorkflowTaskComplete(storageKey, checked) {
         if (checked) {
