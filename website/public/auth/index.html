@@ -1808,6 +1808,8 @@
         'section-tasks': 'Open Task Center',
         'section-workspace': 'Open Team Workspace'
       };
+      const WORKSPACE_RECOMMENDATION_CACHE_KEY = 'dowhiz_workspace_recommendation_cache_v2';
+      const WORKSPACE_RECOMMENDATION_SUPPRESSION_KEY = 'dowhiz_workspace_recommendation_suppression_v1';
       const recommendationShownKeys = new Set();
       const recommendationInteractionKeys = new Set();
       let workspaceRecommendationResponse = null;
@@ -1818,6 +1820,8 @@
       let workspaceRecommendationWhyVisible = false;
       let workspaceRecommendationBusy = false;
       let workspaceRecommendationRequestNonce = 0;
+      let workspaceRecommendationLastFetchedAt = null;
+      let workspaceRecommendationDismissedForDay = false;
 
       // Check if user came from logged-in state (expecting dashboard)
       const authQueryParams = new URLSearchParams(window.location.search);
@@ -2242,6 +2246,155 @@
         };
       }
 
+      function workspaceRecommendationDayKey(date = new Date()) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+
+      function hashWorkspaceRecommendationFingerprint(input) {
+        let hash = 2166136261;
+        for (let i = 0; i < input.length; i += 1) {
+          hash ^= input.charCodeAt(i);
+          hash = Math.imul(hash, 16777619);
+        }
+        return (hash >>> 0).toString(16);
+      }
+
+      function workspaceRecommendationFingerprint(requestPayload) {
+        try {
+          return hashWorkspaceRecommendationFingerprint(JSON.stringify({
+            blueprint: requestPayload?.blueprint || null,
+            current_surface: requestPayload?.current_surface || null,
+            proactivity_level: proactivityLevelSelect?.value || 'minimal'
+          }));
+        } catch {
+          return '';
+        }
+      }
+
+      function readJsonStorage(key) {
+        try {
+          const rawValue = localStorage.getItem(key);
+          return rawValue ? JSON.parse(rawValue) : null;
+        } catch {
+          return null;
+        }
+      }
+
+      function writeJsonStorage(key, value) {
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch {
+          // Ignore storage write failures so recommendation rendering still works.
+        }
+      }
+
+      function clearWorkspaceRecommendationCache() {
+        try {
+          localStorage.removeItem(WORKSPACE_RECOMMENDATION_CACHE_KEY);
+        } catch {
+          // Ignore storage clear failures.
+        }
+      }
+
+      function readWorkspaceRecommendationCache(requestFingerprint) {
+        const entry = readJsonStorage(WORKSPACE_RECOMMENDATION_CACHE_KEY);
+        if (!entry) {
+          return null;
+        }
+        if (entry.day_key !== workspaceRecommendationDayKey()) {
+          return null;
+        }
+        if (entry.request_fingerprint !== requestFingerprint) {
+          return null;
+        }
+        return entry;
+      }
+
+      function writeWorkspaceRecommendationCache(requestFingerprint, response, selectedKey, fetchedAt) {
+        writeJsonStorage(WORKSPACE_RECOMMENDATION_CACHE_KEY, {
+          day_key: workspaceRecommendationDayKey(),
+          request_fingerprint: requestFingerprint,
+          fetched_at: fetchedAt,
+          response,
+          selected_key: selectedKey || null
+        });
+      }
+
+      function clearWorkspaceRecommendationSuppression() {
+        workspaceRecommendationDismissedForDay = false;
+        try {
+          localStorage.removeItem(WORKSPACE_RECOMMENDATION_SUPPRESSION_KEY);
+        } catch {
+          // Ignore storage clear failures.
+        }
+      }
+
+      function readWorkspaceRecommendationSuppression(requestFingerprint) {
+        const entry = readJsonStorage(WORKSPACE_RECOMMENDATION_SUPPRESSION_KEY);
+        if (!entry) {
+          return null;
+        }
+        if (entry.day_key !== workspaceRecommendationDayKey()) {
+          return null;
+        }
+        if (entry.request_fingerprint !== requestFingerprint) {
+          return null;
+        }
+        return entry;
+      }
+
+      function suppressWorkspaceRecommendationForDay(requestFingerprint, recommendationIdentityValue) {
+        const dismissedAt = new Date().toISOString();
+        workspaceRecommendationDismissedForDay = true;
+        workspaceRecommendationLastFetchedAt = dismissedAt;
+        writeJsonStorage(WORKSPACE_RECOMMENDATION_SUPPRESSION_KEY, {
+          day_key: workspaceRecommendationDayKey(),
+          request_fingerprint: requestFingerprint,
+          recommendation_identity: recommendationIdentityValue || null,
+          dismissed_at: dismissedAt
+        });
+      }
+
+      function workspaceRecommendationFreshnessMessage() {
+        if (!workspaceRecommendationLastFetchedAt) {
+          return '';
+        }
+        const fetchedAt = new Date(workspaceRecommendationLastFetchedAt);
+        if (Number.isNaN(fetchedAt.getTime())) {
+          return '';
+        }
+        const timeLabel = fetchedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        if (workspaceRecommendationDayKey(fetchedAt) === workspaceRecommendationDayKey()) {
+          return `Updated today at ${timeLabel}`;
+        }
+        return `Updated ${fetchedAt.toLocaleDateString()} at ${timeLabel}`;
+      }
+
+      function applyWorkspaceRecommendationResponse(response, options = {}) {
+        const {
+          fetchedAt = new Date().toISOString(),
+          selectedKey = null,
+          dismissedForDay = false
+        } = options;
+        workspaceRecommendationResponse = response;
+        workspaceRecommendationStatus = 'ready';
+        workspaceRecommendationAlternativesVisible = false;
+        workspaceRecommendationWhyVisible = false;
+        workspaceRecommendationLastFetchedAt = fetchedAt;
+        workspaceRecommendationDismissedForDay = dismissedForDay;
+
+        const effectiveLevel = response?.preferences?.effective_proactivity_level || response?.preferences?.proactivity_level;
+        if (effectiveLevel) {
+          setProactivityLevelUi(effectiveLevel);
+        }
+
+        const defaultRecommendation = response?.recommendation || response?.alternatives?.[0] || null;
+        workspaceRecommendationSelectedKey = selectedKey || recommendationIdentity(defaultRecommendation);
+      }
+
       async function readApiErrorMessage(res, fallbackMessage) {
         try {
           const text = await res.text();
@@ -2324,19 +2477,32 @@
           document.getElementById('workspace-recommendation-retry')?.addEventListener('click', async () => {
             const { data: { session } } = await supabase.auth.getSession();
             if (session) {
-              await loadWorkspaceRecommendation(session.access_token);
+              await loadWorkspaceRecommendation(session.access_token, { force: true });
             }
           });
           return;
         }
 
         if (!current) {
-          const emptyMessage = currentLevel === 'off'
-            ? 'Proactive suggestions are off. Turn them back on in Settings whenever you want a clear “what next?” nudge.'
-            : 'No proactive recommendation right now. As soon as DoWhiz sees a clear next move, it will show up here.';
+          const freshnessMessage = workspaceRecommendationFreshnessMessage();
+          const canManualRefresh = currentLevel !== 'off';
+          const emptyMessage = workspaceRecommendationDismissedForDay
+            ? 'You dismissed today\'s recommendation. Refresh anytime or check back tomorrow.'
+            : currentLevel === 'off'
+              ? 'Proactive suggestions are off. Turn them back on in Settings whenever you want a clear “what next?” nudge.'
+              : 'No proactive recommendation right now. As soon as DoWhiz sees a clear next move, it will show up here.';
           workspaceRecommendationCard.innerHTML = `
             <div class="workspace-recommendation-empty">${escapeHtml(emptyMessage)}</div>
+            ${(canManualRefresh || freshnessMessage) ? `
+              <div class="workspace-recommendation-actions">
+                ${canManualRefresh ? '<button id="workspace-recommendation-refresh" class="auth-btn auth-btn-oauth">Refresh</button>' : ''}
+                <span class="workspace-recommendation-status">${escapeHtml(freshnessMessage || '')}</span>
+              </div>
+            ` : ''}
           `;
+          document.getElementById('workspace-recommendation-refresh')?.addEventListener('click', () => {
+            handleWorkspaceRecommendationManualRefresh();
+          });
           return;
         }
 
@@ -2345,9 +2511,10 @@
         );
         const busyAttribute = workspaceRecommendationBusy ? ' disabled' : '';
         const statusClass = workspaceRecommendationErrorMessage ? 'workspace-recommendation-status is-error' : 'workspace-recommendation-status';
+        const freshnessMessage = workspaceRecommendationFreshnessMessage();
         const statusMessage = workspaceRecommendationBusy
           ? 'Working on this recommendation...'
-          : workspaceRecommendationErrorMessage || '&nbsp;';
+          : workspaceRecommendationErrorMessage || freshnessMessage || '';
         const triggerLabel = RECOMMENDATION_TRIGGER_LABELS[current.trigger_type] || formatRecommendationToken(current.trigger_type);
 
         const alternativesHtml = workspaceRecommendationAlternativesVisible && alternatives.length > 0
@@ -2371,7 +2538,7 @@
           ? `
             <div class="workspace-recommendation-why">
               <p>We only surface one recommendation at a time, using your saved brief, connected tools, and recent task outcomes.</p>
-              <p>This one is showing because it matches the <strong>${escapeHtml(triggerLabel)}</strong> trigger class. Choosing “Not now” cools down this exact suggestion for about a week unless the underlying state changes.</p>
+              <p>This one is showing because it matches the <strong>${escapeHtml(triggerLabel)}</strong> trigger class. Choosing “Not now” hides it for the rest of today unless you manually refresh.</p>
             </div>
           `
           : '';
@@ -2404,19 +2571,24 @@
                   ${workspaceRecommendationAlternativesVisible ? 'Hide options' : `Show ${Math.min(alternatives.length, 2)} options`}
                 </button>
               ` : ''}
+              <button id="workspace-recommendation-refresh" class="workspace-recommendation-text-btn"${busyAttribute}>Refresh</button>
               <button id="workspace-recommendation-defer" class="workspace-recommendation-text-btn"${busyAttribute}>Not now</button>
               <button id="workspace-recommendation-why-btn" class="workspace-recommendation-text-btn"${busyAttribute}>
                 ${workspaceRecommendationWhyVisible ? 'Hide details' : 'Why am I seeing this?'}
               </button>
             </div>
           </div>
-          <div class="${statusClass}">${statusMessage}</div>
+          <div class="${statusClass}">${statusMessage ? escapeHtml(statusMessage) : '&nbsp;'}</div>
           ${whyHtml}
           ${alternativesHtml}
         `;
 
         document.getElementById('workspace-recommendation-primary')?.addEventListener('click', () => {
           handleWorkspaceRecommendationPrimaryAction();
+        });
+
+        document.getElementById('workspace-recommendation-refresh')?.addEventListener('click', () => {
+          handleWorkspaceRecommendationManualRefresh();
         });
 
         document.getElementById('workspace-recommendation-defer')?.addEventListener('click', () => {
@@ -2509,22 +2681,59 @@
         }
       }
 
-      async function loadWorkspaceRecommendation(accessToken) {
+      async function loadWorkspaceRecommendation(accessToken, options = {}) {
+        const { force = false } = options;
         const requestPayload = buildWorkspaceRecommendationRequest();
+        const requestFingerprint = requestPayload ? workspaceRecommendationFingerprint(requestPayload) : '';
         workspaceRecommendationRequestNonce += 1;
         const requestNonce = workspaceRecommendationRequestNonce;
         workspaceRecommendationErrorMessage = '';
 
         if (!requestPayload) {
+          clearWorkspaceRecommendationCache();
+          clearWorkspaceRecommendationSuppression();
           workspaceRecommendationResponse = null;
           workspaceRecommendationSelectedKey = null;
           workspaceRecommendationAlternativesVisible = false;
           workspaceRecommendationWhyVisible = false;
+          workspaceRecommendationLastFetchedAt = null;
+          workspaceRecommendationDismissedForDay = false;
           workspaceRecommendationStatus = 'needs_brief';
           renderWorkspaceRecommendationCard();
           return null;
         }
 
+        if (!force) {
+          const suppressedEntry = readWorkspaceRecommendationSuppression(requestFingerprint);
+          if (suppressedEntry) {
+            workspaceRecommendationResponse = null;
+            workspaceRecommendationSelectedKey = null;
+            workspaceRecommendationAlternativesVisible = false;
+            workspaceRecommendationWhyVisible = false;
+            workspaceRecommendationStatus = 'ready';
+            workspaceRecommendationLastFetchedAt = suppressedEntry.dismissed_at || null;
+            workspaceRecommendationDismissedForDay = true;
+            renderWorkspaceRecommendationCard();
+            return null;
+          }
+
+          const cachedEntry = readWorkspaceRecommendationCache(requestFingerprint);
+          if (cachedEntry) {
+            if (requestNonce !== workspaceRecommendationRequestNonce) {
+              return cachedEntry.response;
+            }
+            applyWorkspaceRecommendationResponse(cachedEntry.response, {
+              fetchedAt: cachedEntry.fetched_at,
+              selectedKey: cachedEntry.selected_key,
+              dismissedForDay: false
+            });
+            renderWorkspaceRecommendationCard();
+            await maybeTrackWorkspaceRecommendationShown(accessToken);
+            return cachedEntry.response;
+          }
+        }
+
+        clearWorkspaceRecommendationSuppression();
         workspaceRecommendationStatus = 'loading';
         renderWorkspaceRecommendationCard();
 
@@ -2547,18 +2756,15 @@
             return data;
           }
 
-          workspaceRecommendationResponse = data;
-          workspaceRecommendationStatus = 'ready';
-          workspaceRecommendationAlternativesVisible = false;
-          workspaceRecommendationWhyVisible = false;
-
-          const effectiveLevel = data?.preferences?.effective_proactivity_level || data?.preferences?.proactivity_level;
-          if (effectiveLevel) {
-            setProactivityLevelUi(effectiveLevel);
-          }
-
           const defaultRecommendation = data?.recommendation || data?.alternatives?.[0] || null;
-          workspaceRecommendationSelectedKey = recommendationIdentity(defaultRecommendation);
+          const selectedKey = recommendationIdentity(defaultRecommendation);
+          const fetchedAt = new Date().toISOString();
+          applyWorkspaceRecommendationResponse(data, {
+            fetchedAt,
+            selectedKey,
+            dismissedForDay: false
+          });
+          writeWorkspaceRecommendationCache(requestFingerprint, data, selectedKey, fetchedAt);
           renderWorkspaceRecommendationCard();
           await maybeTrackWorkspaceRecommendationShown(accessToken);
           return data;
@@ -2684,12 +2890,50 @@
             )
           ]);
           workspaceRecommendationBusy = false;
-          await loadWorkspaceRecommendation(session.access_token);
+          const requestPayload = buildWorkspaceRecommendationRequest();
+          if (requestPayload) {
+            suppressWorkspaceRecommendationForDay(
+              workspaceRecommendationFingerprint(requestPayload),
+              identity
+            );
+          }
+          workspaceRecommendationResponse = null;
+          workspaceRecommendationSelectedKey = null;
+          workspaceRecommendationAlternativesVisible = false;
+          workspaceRecommendationWhyVisible = false;
+          workspaceRecommendationStatus = 'ready';
+          renderWorkspaceRecommendationCard();
         } catch (err) {
           workspaceRecommendationBusy = false;
           workspaceRecommendationErrorMessage = err.message || 'Failed to update recommendation.';
           renderWorkspaceRecommendationCard();
         }
+      }
+
+      async function handleWorkspaceRecommendationManualRefresh() {
+        if (workspaceRecommendationBusy || workspaceRecommendationStatus === 'loading') {
+          return;
+        }
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          showMessage('Please sign in first.');
+          return;
+        }
+
+        workspaceRecommendationErrorMessage = '';
+        clearWorkspaceRecommendationSuppression();
+        await Promise.allSettled([
+          trackAnalyticsEvent(
+            'workspace_recommendation_manual_refresh',
+            {
+              current_surface: 'dashboard',
+              had_recommendation: Boolean(currentWorkspaceRecommendation())
+            },
+            { accessToken: session.access_token }
+          )
+        ]);
+        await loadWorkspaceRecommendation(session.access_token, { force: true });
       }
 
       async function performWorkspaceRecommendationAction(accessToken, recommendation) {
@@ -3403,7 +3647,7 @@
             { accessToken: session.access_token }
           );
 
-          await loadWorkspaceRecommendation(session.access_token);
+          await loadWorkspaceRecommendation(session.access_token, { force: true });
         } catch (err) {
           console.error('Failed to save recommendation preference:', err);
           setProactivityLevelUi(previousLevel);
@@ -4089,7 +4333,7 @@
           taskList.innerHTML = `<li class="task-item" style="text-align: center; color: #ef4444;">Error loading tasks: ${err.message}</li>`;
         } finally {
           if (refreshRecommendation) {
-            await loadWorkspaceRecommendation(accessToken);
+            await loadWorkspaceRecommendation(accessToken, { force: true });
           }
         }
       }
@@ -4283,7 +4527,7 @@
         taskPollingInterval = setInterval(async () => {
           const { data: { session } } = await supabase.auth.getSession();
           if (session) {
-            loadTasks(session.access_token, { refreshRecommendation: true });
+            loadTasks(session.access_token);
           } else {
             // Session expired completely, stop polling
             stopTaskPolling();
@@ -4304,7 +4548,7 @@
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
           document.getElementById('tasks-status').textContent = 'Refreshing...';
-          await loadTasks(session.access_token, { refreshRecommendation: true });
+          await loadTasks(session.access_token);
         }
       });
 
