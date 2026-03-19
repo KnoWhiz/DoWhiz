@@ -2,6 +2,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use mime_guess::MimeGuess;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -264,12 +265,93 @@ fn strip_html_tags(input: &str) -> String {
     out
 }
 
+fn ascii_safe_attachment_name(path: &Path, used_names: &mut HashSet<String>) -> String {
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let mut base = sanitize_ascii_attachment_stem(stem);
+    if base.is_empty() {
+        base = "attachment".to_string();
+    }
+
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(sanitize_ascii_attachment_extension)
+        .filter(|value| !value.is_empty());
+
+    uniquify_attachment_name(base, extension.as_deref(), used_names)
+}
+
+fn sanitize_ascii_attachment_stem(value: &str) -> String {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            current.push(ch);
+        } else if !current.is_empty() {
+            tokens.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    let mut deduped = Vec::new();
+    for token in tokens {
+        let duplicate = deduped
+            .last()
+            .map(|last: &String| last.eq_ignore_ascii_case(&token))
+            .unwrap_or(false);
+        if !duplicate {
+            deduped.push(token);
+        }
+    }
+
+    deduped.join("_")
+}
+
+fn sanitize_ascii_attachment_extension(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect()
+}
+
+fn uniquify_attachment_name(
+    base: String,
+    extension: Option<&str>,
+    used_names: &mut HashSet<String>,
+) -> String {
+    let mut suffix = 1;
+
+    loop {
+        let stem = if suffix == 1 {
+            base.clone()
+        } else {
+            format!("{}_{}", base, suffix)
+        };
+        let candidate = match extension {
+            Some(ext) if !ext.is_empty() => format!("{}.{}", stem, ext),
+            _ => stem,
+        };
+        if used_names.insert(candidate.to_ascii_lowercase()) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
 fn load_attachments(dir: &Path) -> Result<Vec<PostmarkAttachment>, std::io::Error> {
     if !dir.exists() {
         return Ok(Vec::new());
     }
 
     let mut attachments = Vec::new();
+    let mut used_names = HashSet::new();
     let mut entries: Vec<_> = fs::read_dir(dir)?.collect::<Result<_, _>>()?;
     entries.sort_by_key(|entry| entry.path());
 
@@ -284,11 +366,7 @@ fn load_attachments(dir: &Path) -> Result<Vec<PostmarkAttachment>, std::io::Erro
             .essence_str()
             .to_string();
         let attachment = PostmarkAttachment {
-            name: path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
+            name: ascii_safe_attachment_name(&path, &mut used_names),
             content: BASE64_STANDARD.encode(content),
             content_type: mime,
         };
