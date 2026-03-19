@@ -45,9 +45,9 @@ use discord::spawn_discord_gateway;
 use google_drive_webhook::handle_google_drive_webhook;
 use google_workspace::spawn_google_workspace_poller;
 use handlers::{
-    create_workspace_brief, health, ingest_bluebubbles, ingest_postmark, ingest_slack,
-    ingest_sms, ingest_telegram, ingest_wechat, ingest_whatsapp, verify_wechat_webhook,
-    verify_whatsapp_webhook,
+    create_90_day_plan, create_workspace_brief, health, ingest_bluebubbles, ingest_postmark,
+    ingest_slack, ingest_sms, ingest_telegram, ingest_wechat, ingest_whatsapp,
+    verify_wechat_webhook, verify_whatsapp_webhook,
 };
 use notion_webhook::handle_notion_webhook;
 use routes::normalize_routes;
@@ -224,6 +224,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         )
         .route("/webhook/notion", post(handle_notion_webhook))
         .route("/api/workspace/create-brief", post(create_workspace_brief))
+        .route("/api/workspace/create-90-day-plan", post(create_90_day_plan))
         .with_state(state)
         .merge(auth_router(auth_state))
         .merge(agent_market_router(agent_market_state))
