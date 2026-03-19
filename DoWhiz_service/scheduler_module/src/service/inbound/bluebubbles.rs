@@ -114,6 +114,7 @@ pub(crate) fn process_bluebubbles_event(
         employee_id: Some(config.employee_profile.id.clone()),
         requester_identifier_type: None,
         requester_identifier: None,
+        account_id: None,
     };
 
     // Schedule the task

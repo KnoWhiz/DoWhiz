@@ -1,15 +1,20 @@
 mod test_support;
 
+use chrono::Utc;
 use mockito::Matcher;
+use mongodb::bson::{doc, Bson, DateTime as BsonDateTime, Document};
+use mongodb::sync::Client;
 use scheduler_module::{
-    channel::Channel, RunTaskTask, Scheduler, SchedulerError, TaskExecution, TaskExecutor, TaskKind,
+    channel::Channel, RunTaskTask, Schedule, ScheduledTask, Scheduler, SchedulerError,
+    TaskExecution, TaskExecutor, TaskKind,
 };
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 use tempfile::TempDir;
+use uuid::Uuid;
 
 static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
@@ -50,9 +55,107 @@ fn success_body(to: &str) -> String {
     )
 }
 
+fn require_mongodb_uri(test_name: &str) -> Option<String> {
+    match env::var("MONGODB_URI") {
+        Ok(value) if !value.trim().is_empty() => Some(value),
+        _ => {
+            eprintln!("Skipping {test_name}; MONGODB_URI not set.");
+            None
+        }
+    }
+}
+
+fn sanitize_fragment(value: &str) -> String {
+    let mut output = String::new();
+    let mut last_was_underscore = false;
+
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            output.push(ch.to_ascii_lowercase());
+            last_was_underscore = false;
+        } else if !last_was_underscore {
+            output.push('_');
+            last_was_underscore = true;
+        }
+    }
+
+    output.trim_matches('_').to_string()
+}
+
+fn mongo_database_name() -> String {
+    if let Ok(value) = env::var("MONGODB_DATABASE") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    let target = env::var("DEPLOY_TARGET")
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "production".to_string());
+    let employee = env::var("EMPLOYEE_ID")
+        .ok()
+        .map(|value| sanitize_fragment(&value))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "default".to_string());
+    format!("dowhiz_{}_{}", sanitize_fragment(&target), employee)
+}
+
+fn force_one_shot_due(
+    mongo_uri: &str,
+    tasks_db_path: &Path,
+    task_id: Uuid,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::with_uri_str(mongo_uri)?;
+    let db_name = mongo_database_name();
+    let tasks = client.database(&db_name).collection::<Document>("tasks");
+    let owner_id = format!(
+        "{:x}",
+        md5::compute(tasks_db_path.to_string_lossy().as_bytes())
+    );
+    let filter = doc! {
+        "owner_scope.kind": "path_scope",
+        "owner_scope.id": owner_id,
+        "task_id": task_id.to_string(),
+    };
+
+    let task_doc = tasks
+        .find_one(filter.clone(), None)?
+        .ok_or("task document not found")?;
+    let task_json = task_doc.get_str("task_json")?;
+    let mut task: ScheduledTask = serde_json::from_str(task_json)?;
+    let due_at = Utc::now() - chrono::Duration::seconds(1);
+    task.enabled = true;
+    task.schedule = Schedule::OneShot { run_at: due_at };
+    let updated_task_json = serde_json::to_string(&task)?;
+
+    tasks.update_one(
+        filter,
+        doc! {
+            "$set": {
+                "enabled": true,
+                "schedule": {
+                    "type": "one_shot",
+                    "cron_expression": Bson::Null,
+                    "next_run": Bson::Null,
+                    "run_at": BsonDateTime::from_chrono(due_at),
+                },
+                "task_json": updated_task_json,
+            }
+        },
+        None,
+    )?;
+    Ok(())
+}
+
 #[test]
 fn slack_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Error>> {
     let _lock = ENV_MUTEX.lock().unwrap();
+    let Some(mongo_uri) = require_mongodb_uri("slack_failure_retries_and_notifies") else {
+        return Ok(());
+    };
 
     let Some(mut server) = test_support::start_mockito_server("slack_failure_retries_and_notifies")
     else {
@@ -122,15 +225,17 @@ fn slack_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Error>
         employee_id: None,
         requester_identifier_type: None,
         requester_identifier: None,
+        account_id: None,
     };
 
     let db_path = temp.path().join("tasks.db");
     let mut scheduler = Scheduler::load(&db_path, AlwaysFailExecutor)?;
     let task_id = scheduler.add_one_shot_in(Duration::from_secs(0), TaskKind::RunTask(run_task))?;
 
-    for _ in 0..2 {
-        let _ = scheduler.tick();
-    }
+    let _ = scheduler.tick();
+    force_one_shot_due(&mongo_uri, &db_path, task_id)?;
+    scheduler = Scheduler::load(&db_path, AlwaysFailExecutor)?;
+    let _ = scheduler.tick();
 
     let task = scheduler
         .tasks()
@@ -151,6 +256,8 @@ fn slack_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Error>
         );
     }
 
+    force_one_shot_due(&mongo_uri, &db_path, task_id)?;
+    scheduler = Scheduler::load(&db_path, AlwaysFailExecutor)?;
     let _ = scheduler.tick();
 
     let reloaded = Scheduler::load(&db_path, AlwaysFailExecutor)?;
@@ -193,7 +300,9 @@ fn slack_failure_retries_and_notifies() -> Result<(), Box<dyn std::error::Error>
                 .file_name()
                 .and_then(|value| value.to_str())
                 .unwrap_or("");
-            if name.contains(&needle) {
+            if name.contains(&needle)
+                && path.extension().and_then(|ext| ext.to_str()) == Some("html")
+            {
                 report_files.push(path);
             }
         }

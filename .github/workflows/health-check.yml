@@ -196,10 +196,12 @@ jobs:
             CONTAINERS=$(az container list --resource-group "$RESOURCE_GROUP" --output json 2>/dev/null || echo "[]")
 
             TOTAL=$(echo "$CONTAINERS" | jq 'length')
-            RUNNING=$(echo "$CONTAINERS" | jq '[.[] | select(.instanceView.state == "Running")] | length')
-            FAILED=$(echo "$CONTAINERS" | jq '[.[] | select(.instanceView.state == "Failed")] | length')
-            SUCCEEDED=$(echo "$CONTAINERS" | jq '[.[] | select(.instanceView.state == "Succeeded")] | length')
-            OTHER=$(echo "$CONTAINERS" | jq "[.[] | select(.instanceView.state != \"Running\" and .instanceView.state != \"Failed\" and .instanceView.state != \"Succeeded\")] | length")
+            RUNNING=$(echo "$CONTAINERS" | jq '[.[] | select(.provisioningState == "Running")] | length')
+            FAILED=$(echo "$CONTAINERS" | jq '[.[] | select(.provisioningState == "Failed")] | length')
+            SUCCEEDED=$(echo "$CONTAINERS" | jq '[.[] | select(.provisioningState == "Succeeded")] | length')
+            PENDING=$(echo "$CONTAINERS" | jq '[.[] | select(.provisioningState == "Pending")] | length')
+            CREATING=$(echo "$CONTAINERS" | jq '[.[] | select(.provisioningState == "Creating")] | length')
+            DELETING=$(echo "$CONTAINERS" | jq '[.[] | select(.provisioningState == "Deleting")] | length')
 
             echo "| Status | Count |"
             echo "|--------|-------|"
@@ -207,13 +209,20 @@ jobs:
             echo "| Running | $RUNNING |"
             echo "| Succeeded (completed) | $SUCCEEDED |"
             echo "| Failed | $FAILED |"
-            echo "| Other | $OTHER |"
+            echo "| Pending | $PENDING |"
+            echo "| Creating | $CREATING |"
+            echo "| Deleting | $DELETING |"
+
+            # Show all unique provisioningState values for debugging
+            echo ""
+            echo "### All Container States"
+            echo "$CONTAINERS" | jq -r '[.[] | .provisioningState] | group_by(.) | map({state: .[0], count: length}) | .[] | "- \(.state): \(.count)"'
 
             # Check for orphaned containers (older than 1 hour)
             echo ""
             echo "### Containers older than 1 hour"
             ONE_HOUR_AGO=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1H +%Y-%m-%dT%H:%M:%SZ)
-            OLD_CONTAINERS=$(echo "$CONTAINERS" | jq --arg cutoff "$ONE_HOUR_AGO" '[.[] | select(.instanceView.state == "Running") | select(.containers[0].instanceView.currentState.startTime < $cutoff) | {name: .name, state: .instanceView.state, started: .containers[0].instanceView.currentState.startTime}]')
+            OLD_CONTAINERS=$(echo "$CONTAINERS" | jq --arg cutoff "$ONE_HOUR_AGO" '[.[] | select(.provisioningState == "Running") | select(.containers[0].instanceView.currentState.startTime < $cutoff) | {name: .name, state: .provisioningState, started: .containers[0].instanceView.currentState.startTime}]')
             OLD_COUNT=$(echo "$OLD_CONTAINERS" | jq 'length')
 
             if [[ "$OLD_COUNT" -gt 0 ]]; then
@@ -227,7 +236,7 @@ jobs:
             if [[ "$FAILED" -gt 0 ]]; then
               echo ""
               echo "### Failed Containers"
-              echo "$CONTAINERS" | jq -r '.[] | select(.instanceView.state == "Failed") | "- \(.name): \(.containers[0].instanceView.currentState.detailStatus // "unknown error")"' | head -10
+              echo "$CONTAINERS" | jq -r '.[] | select(.provisioningState == "Failed") | "- \(.name): \(.containers[0].instanceView.currentState.detailStatus // "unknown error")"' | head -10
               echo "FAILED_CONTAINERS:$FAILED"
             fi
 
@@ -321,4 +330,3 @@ jobs:
           echo "MongoDB: ${{ steps.mongodb.outputs.mongo_healthy }}"
           echo "Azure ACI: ${{ steps.aci_containers.outputs.aci_status }}"
           exit 1
-

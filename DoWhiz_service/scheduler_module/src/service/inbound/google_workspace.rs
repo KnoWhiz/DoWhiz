@@ -231,6 +231,7 @@ pub(crate) fn process_google_workspace_message(
         employee_id: Some(config.employee_profile.id.clone()),
         requester_identifier_type: None,
         requester_identifier: None,
+        account_id: None,
     };
 
     // Clone run_task before consuming it, in case we need to write to account-level storage

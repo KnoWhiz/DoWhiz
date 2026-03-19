@@ -467,6 +467,7 @@ impl GoogleDocsPoller {
                     employee_id: Some(self.config.employee_id.clone()),
                     requester_identifier_type: None,
                     requester_identifier: None,
+                    account_id: None,
                 };
 
                 // Schedule the task

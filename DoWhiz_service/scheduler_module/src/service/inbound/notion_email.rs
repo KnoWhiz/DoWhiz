@@ -213,6 +213,7 @@ pub(crate) fn process_notion_email(
         employee_id: Some(config.employee_profile.id.clone()),
         requester_identifier_type: Some("notion_actor".to_string()),
         requester_identifier: Some(notion_identifier.clone()),
+        account_id: None,
     };
 
     let run_task_for_account = run_task.clone();

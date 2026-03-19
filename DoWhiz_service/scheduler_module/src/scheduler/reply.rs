@@ -14,6 +14,10 @@ pub(crate) struct ReplyContext {
 struct PostmarkInboundLite {
     #[serde(rename = "Subject")]
     subject: Option<String>,
+    #[serde(rename = "StrippedTextReply")]
+    stripped_text_reply: Option<String>,
+    #[serde(rename = "TextBody")]
+    text_body: Option<String>,
     #[serde(rename = "To")]
     #[allow(dead_code)]
     to: Option<String>,
@@ -49,6 +53,23 @@ impl PostmarkInboundLite {
 
     fn header_message_id(&self) -> Option<&str> {
         self.header_value("message-id")
+    }
+
+    fn reply_subject(&self) -> String {
+        if let Some(subject) = normalized_original_subject(self.subject.as_deref().unwrap_or("")) {
+            return ensure_reply_prefix(&subject);
+        }
+
+        self.stripped_text_reply
+            .as_deref()
+            .and_then(normalize_reply_subject_hint)
+            .or_else(|| {
+                self.text_body
+                    .as_deref()
+                    .and_then(normalize_reply_subject_hint)
+            })
+            .map(|summary| ensure_reply_prefix(&summary))
+            .unwrap_or_else(|| reply_subject(""))
     }
 }
 
@@ -124,8 +145,7 @@ pub(crate) fn load_reply_context(workspace_dir: &Path) -> ReplyContext {
         .and_then(|content| serde_json::from_str::<PostmarkInboundLite>(&content).ok());
 
     if let Some(payload) = payload {
-        let subject_raw = payload.subject.as_deref().unwrap_or("");
-        let subject = reply_subject(subject_raw);
+        let subject = payload.reply_subject();
         let (in_reply_to, references) = reply_headers(&payload);
         ReplyContext {
             subject,
@@ -201,15 +221,116 @@ fn latest_slack_thread_id(incoming_dir: &Path) -> Option<String> {
     None
 }
 
+const REPLY_SUBJECT_FALLBACK: &str = "Your request";
+const REPLY_SUBJECT_HINT_MAX_CHARS: usize = 72;
+
 fn reply_subject(original: &str) -> String {
-    let trimmed = original.trim();
-    if trimmed.is_empty() {
-        "Re: (no subject)".to_string()
-    } else if trimmed.to_lowercase().starts_with("re:") {
+    normalized_original_subject(original)
+        .map(|subject| ensure_reply_prefix(&subject))
+        .unwrap_or_else(|| format!("Re: {}", REPLY_SUBJECT_FALLBACK))
+}
+
+fn ensure_reply_prefix(subject: &str) -> String {
+    let trimmed = subject.trim();
+    if trimmed.to_ascii_lowercase().starts_with("re:") {
         trimmed.to_string()
     } else {
         format!("Re: {}", trimmed)
     }
+}
+
+fn normalized_original_subject(original: &str) -> Option<String> {
+    let trimmed = original.trim();
+    if trimmed.is_empty() || is_placeholder_subject(trimmed) {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_reply_subject_hint(raw: &str) -> Option<String> {
+    let mut body_started = false;
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            body_started = true;
+            continue;
+        }
+
+        if !body_started && is_reply_header_line(trimmed) {
+            continue;
+        }
+
+        return clean_reply_subject_hint(trimmed);
+    }
+
+    None
+}
+
+fn is_reply_header_line(line: &str) -> bool {
+    let lowered = line.to_ascii_lowercase();
+    lowered.starts_with("from:")
+        || lowered.starts_with("date:")
+        || lowered.starts_with("to:")
+        || lowered.starts_with("cc:")
+        || lowered.starts_with("bcc:")
+        || lowered.starts_with("subject:")
+}
+
+fn clean_reply_subject_hint(line: &str) -> Option<String> {
+    let compact = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.is_empty() || is_placeholder_subject(&compact) {
+        return None;
+    }
+    Some(truncate_reply_subject_hint(
+        &compact,
+        REPLY_SUBJECT_HINT_MAX_CHARS,
+    ))
+}
+
+fn truncate_reply_subject_hint(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let mut output = String::new();
+
+    for _ in 0..max_chars {
+        match chars.next() {
+            Some(ch) => output.push(ch),
+            None => return output,
+        }
+    }
+
+    if chars.next().is_some() {
+        output.push_str("...");
+    }
+
+    output
+}
+
+fn is_placeholder_subject(subject: &str) -> bool {
+    let mut remainder = subject.trim();
+    loop {
+        let lowered = remainder.to_ascii_lowercase();
+        if lowered.starts_with("re:") {
+            remainder = remainder[3..].trim_start();
+            continue;
+        }
+        if lowered.starts_with("fw:") {
+            remainder = remainder[3..].trim_start();
+            continue;
+        }
+        if lowered.starts_with("fwd:") {
+            remainder = remainder[4..].trim_start();
+            continue;
+        }
+        break;
+    }
+
+    remainder
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '(' | ')' | '[' | ']'))
+        .trim()
+        .eq_ignore_ascii_case("no subject")
 }
 
 fn reply_headers(payload: &PostmarkInboundLite) -> (Option<String>, Option<String>) {
@@ -315,5 +436,62 @@ mod tests {
         let context = load_reply_context(temp.path());
         assert_eq!(context.subject, "Slack reply");
         assert_eq!(context.in_reply_to.as_deref(), Some("1700000000.002"));
+    }
+
+    #[test]
+    fn load_reply_context_uses_stripped_reply_when_subject_missing() {
+        let temp = TempDir::new().expect("tempdir");
+        let incoming_dir = temp.path().join("incoming_email");
+        fs::create_dir_all(&incoming_dir).expect("incoming_email");
+        fs::write(
+            incoming_dir.join("postmark_payload.json"),
+            r#"{
+                "Subject": "",
+                "StrippedTextReply": "Need help with payroll export\n\n> quoted message",
+                "MessageID": "<msg-456>"
+            }"#,
+        )
+        .expect("payload");
+
+        let context = load_reply_context(temp.path());
+        assert_eq!(context.subject, "Re: Need help with payroll export");
+    }
+
+    #[test]
+    fn load_reply_context_treats_no_subject_placeholder_as_missing() {
+        let temp = TempDir::new().expect("tempdir");
+        let incoming_dir = temp.path().join("incoming_email");
+        fs::create_dir_all(&incoming_dir).expect("incoming_email");
+        fs::write(
+            incoming_dir.join("postmark_payload.json"),
+            r#"{
+                "Subject": "Re: (no subject)",
+                "TextBody": "From: sender@example.com\nSubject: \n\nCan you resend the invoice?\nThanks",
+                "MessageID": "<msg-789>"
+            }"#,
+        )
+        .expect("payload");
+
+        let context = load_reply_context(temp.path());
+        assert_eq!(context.subject, "Re: Can you resend the invoice?");
+    }
+
+    #[test]
+    fn load_reply_context_uses_generic_subject_when_email_has_no_subject_or_body() {
+        let temp = TempDir::new().expect("tempdir");
+        let incoming_dir = temp.path().join("incoming_email");
+        fs::create_dir_all(&incoming_dir).expect("incoming_email");
+        fs::write(
+            incoming_dir.join("postmark_payload.json"),
+            r#"{
+                "Subject": " ",
+                "TextBody": "\n  ",
+                "MessageID": "<msg-999>"
+            }"#,
+        )
+        .expect("payload");
+
+        let context = load_reply_context(temp.path());
+        assert_eq!(context.subject, "Re: Your request");
     }
 }

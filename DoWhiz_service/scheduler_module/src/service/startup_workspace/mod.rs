@@ -3,6 +3,7 @@ pub mod intake;
 pub mod intake_chat;
 pub mod provider_state;
 pub mod provisioning;
+pub mod recommendation;
 pub mod resource_mapping;
 pub mod workspace_home;
 
@@ -18,6 +19,13 @@ pub use provider_state::{
 };
 pub use provisioning::{
     derive_provisioning_snapshot, ProvisioningStepStatus, StartupProvisioningSnapshot,
+};
+pub use recommendation::{
+    evaluate_workspace_recommendations, ProactivityLevel, RecommendationFeedbackKind,
+    RecommendationFeedbackSnapshot, WorkspaceRecommendation, WorkspaceRecommendationAction,
+    WorkspaceRecommendationContext, WorkspaceRecommendationFeedbackRequest,
+    WorkspaceRecommendationPreferences, WorkspaceRecommendationPreferencesUpdateRequest,
+    WorkspaceRecommendationRequest, WorkspaceRecommendationResponse,
 };
 pub use resource_mapping::build_starter_resource_plan;
 pub use workspace_home::{

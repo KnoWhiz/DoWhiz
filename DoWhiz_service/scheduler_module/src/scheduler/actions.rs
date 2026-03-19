@@ -909,7 +909,7 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
         | Channel::Telegram
         | Channel::WhatsApp
         | Channel::Sms
-| Channel::Notion
+        | Channel::Notion
         | Channel::WeChat => ("reply_message.txt", "reply_attachments"),
         Channel::Email | Channel::GoogleDocs | Channel::GoogleSheets | Channel::GoogleSlides => {
             ("reply_email_draft.html", "reply_email_attachments")
@@ -978,7 +978,7 @@ pub(crate) fn schedule_auto_reply<E: TaskExecutor>(
             | Channel::Telegram
             | Channel::WhatsApp
             | Channel::Sms
-| Channel::Notion
+            | Channel::Notion
             | Channel::WeChat => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email
             | Channel::GoogleDocs
@@ -1498,7 +1498,7 @@ mod tests {
             | Channel::Telegram
             | Channel::WhatsApp
             | Channel::Sms
-| Channel::Notion
+            | Channel::Notion
             | Channel::WeChat => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email
             | Channel::GoogleDocs
@@ -1519,7 +1519,7 @@ mod tests {
             | Channel::Telegram
             | Channel::WhatsApp
             | Channel::Sms
-| Channel::Notion
+            | Channel::Notion
             | Channel::WeChat => ("cross_channel_ack.txt", "reply_attachments"),
             Channel::Email
             | Channel::GoogleDocs
@@ -1685,6 +1685,7 @@ addresses = ["proto@dowhiz.com", "boiled-egg@dowhiz.com"]
             employee_id: None,
             requester_identifier_type: None,
             requester_identifier: None,
+            account_id: None,
         }
     }
 

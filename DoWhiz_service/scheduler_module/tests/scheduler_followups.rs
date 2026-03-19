@@ -67,6 +67,7 @@ fn run_task_followups_persist_across_restarts() {
         employee_id: None,
         requester_identifier_type: None,
         requester_identifier: None,
+        account_id: None,
     };
 
     let mut scheduler =

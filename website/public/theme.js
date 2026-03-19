@@ -13,7 +13,6 @@
       workflows: 'Workflows',
       safety: 'Safety',
       features: 'Features',
-      deployment: 'Deployment',
       faq: 'FAQ',
       blog: 'Blog',
       contact: 'Contact',
@@ -26,7 +25,6 @@
       workflows: '工作流',
       safety: '安全',
       features: '功能',
-      deployment: '部署',
       faq: '常见问题',
       blog: '博客',
       contact: '联系',
@@ -201,7 +199,7 @@
     }
 
     if (pathname.startsWith('/agent-market/')) {
-      return getHomeSectionHref('deployment');
+      return getHomeSectionHref('how-it-works');
     }
 
     if (pathname.startsWith('/blog/')) {
@@ -239,7 +237,6 @@
       '    <a href="' + getHomeSectionHref('workflows') + '" class="nav-btn">' + labels.workflows + '</a>',
       '    <a href="' + getHomeSectionHref('safety') + '" class="nav-btn">' + labels.safety + '</a>',
       '    <a href="' + getHomeSectionHref('features') + '" class="nav-btn">' + labels.features + '</a>',
-      '    <a href="' + getHomeSectionHref('deployment') + '" class="nav-btn">' + labels.deployment + '</a>',
       '    <a href="' + getHomeSectionHref('faq') + '" class="nav-btn">' + labels.faq + '</a>',
       '    <a href="' + getHomeSectionHref('blog') + '" class="nav-btn">' + labels.blog + '</a>',
       '  </div>',

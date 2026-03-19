@@ -152,6 +152,12 @@
       .hidden {
         display: none !important;
       }
+      .dashboard-title-wrap {
+        display: block;
+      }
+      .dashboard-home-link {
+        display: none;
+      }
       .dashboard-section {
         margin-top: 2rem;
       }
@@ -406,7 +412,7 @@
         display: flex;
       }
       .task-modal {
-        background: var(--bg-secondary, #16213e);
+        background: var(--surface, #1a1a1a);
         border-radius: 12px;
         padding: 1.5rem;
         max-width: 500px;
@@ -426,7 +432,7 @@
       .task-modal-title {
         font-size: 1.1rem;
         font-weight: 600;
-        color: var(--text-primary, #fff);
+        color: var(--text, #fff);
       }
       .task-modal-close {
         background: transparent;
@@ -437,13 +443,13 @@
         line-height: 1;
       }
       .task-modal-close:hover {
-        color: var(--text-primary, #fff);
+        color: var(--text, #fff);
       }
       .task-modal-row {
         display: flex;
         justify-content: space-between;
         padding: 0.5rem 0;
-        border-bottom: 1px solid var(--border-color, #333);
+        border-bottom: 1px solid var(--border, #333);
       }
       .task-modal-row:last-child {
         border-bottom: none;
@@ -453,7 +459,7 @@
         font-size: 0.9rem;
       }
       .task-modal-value {
-        color: var(--text-primary, #fff);
+        color: var(--text, #fff);
         font-size: 0.9rem;
         text-align: right;
         word-break: break-all;
@@ -635,6 +641,56 @@
         padding-right: 0;
       }
 
+      .dashboard-mode .page {
+        padding-top: 2.2rem;
+      }
+
+      .dashboard-mode .page-header {
+        display: none;
+      }
+
+      .dashboard-mode .navbar {
+        display: none;
+      }
+
+      .dashboard-mode .legal-hero {
+        margin-bottom: 1.5rem;
+      }
+
+      .dashboard-mode .dashboard-title-wrap {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        flex-wrap: wrap;
+      }
+
+      .dashboard-mode .dashboard-title-wrap h1 {
+        margin-bottom: 0;
+      }
+
+      .dashboard-mode .dashboard-home-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.48rem 0.92rem;
+        border: 1px solid var(--border, #333);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--surface, #1a1a1a) 88%, transparent);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+        color: var(--text, #fff);
+        font-size: 1rem;
+        white-space: nowrap;
+      }
+
+      .dashboard-mode .dashboard-home-link:hover {
+        border-color: color-mix(in srgb, var(--accent, #38bdf8) 35%, var(--border, #333));
+        background: color-mix(in srgb, var(--accent, #38bdf8) 10%, var(--surface, #1a1a1a));
+      }
+
+      .dashboard-mode .legal-hero .lead {
+        margin-top: 0.75rem;
+      }
+
       .dashboard-shell {
         display: grid;
         grid-template-columns: 260px minmax(0, 1fr);
@@ -735,8 +791,191 @@
         scroll-margin-top: 8.2rem;
       }
 
+      .dashboard-mode .dashboard-sidebar {
+        top: 1.5rem;
+      }
+
+      .dashboard-mode .dashboard-section {
+        scroll-margin-top: 1.5rem;
+      }
+
       .dashboard-overview-copy {
         margin-bottom: 1rem;
+      }
+
+      .workspace-recommendation-card {
+        display: grid;
+        gap: 0.9rem;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        border-radius: 0.9rem;
+        border: 1px solid color-mix(in srgb, var(--accent, #38bdf8) 35%, var(--border, #333));
+        background:
+          linear-gradient(
+            135deg,
+            color-mix(in srgb, var(--surface, #1a1a1a) 86%, rgba(56, 189, 248, 0.2)),
+            color-mix(in srgb, var(--surface, #1a1a1a) 96%, rgba(15, 23, 42, 0.42))
+          );
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
+      }
+
+      .workspace-recommendation-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+
+      .workspace-recommendation-kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.78rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-muted, #888);
+      }
+
+      .workspace-recommendation-badge {
+        padding: 0.28rem 0.55rem;
+        border-radius: 999px;
+        border: 1px solid rgba(56, 189, 248, 0.28);
+        background: rgba(56, 189, 248, 0.12);
+        color: var(--text, #fff);
+        font-weight: 600;
+      }
+
+      .workspace-recommendation-trigger {
+        color: var(--text-muted, #888);
+      }
+
+      .workspace-recommendation-title {
+        margin: 0;
+        font-size: 1.15rem;
+        line-height: 1.35;
+      }
+
+      .workspace-recommendation-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.75rem;
+      }
+
+      .workspace-recommendation-detail {
+        padding: 0.85rem;
+        border-radius: 0.8rem;
+        border: 1px solid var(--border, #333);
+        background: color-mix(in srgb, var(--surface, #1a1a1a) 82%, transparent);
+      }
+
+      .workspace-recommendation-label {
+        margin: 0 0 0.35rem;
+        font-size: 0.74rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-muted, #888);
+      }
+
+      .workspace-recommendation-copy {
+        margin: 0;
+        font-size: 0.94rem;
+        line-height: 1.5;
+        color: var(--text, #fff);
+      }
+
+      .workspace-recommendation-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+
+      .workspace-recommendation-secondary-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+
+      .workspace-recommendation-text-btn {
+        padding: 0;
+        border: none;
+        background: none;
+        color: var(--text-muted, #888);
+        font-size: 0.9rem;
+        cursor: pointer;
+      }
+
+      .workspace-recommendation-text-btn:hover {
+        color: var(--text, #fff);
+      }
+
+      .workspace-recommendation-empty,
+      .workspace-recommendation-helper,
+      .workspace-recommendation-why {
+        padding: 0.9rem;
+        border-radius: 0.8rem;
+        border: 1px dashed var(--border, #333);
+        color: var(--text-muted, #888);
+        line-height: 1.5;
+      }
+
+      .workspace-recommendation-helper {
+        border-style: solid;
+        background: color-mix(in srgb, var(--surface, #1a1a1a) 82%, transparent);
+      }
+
+      .workspace-recommendation-helper p,
+      .workspace-recommendation-why p {
+        margin: 0;
+      }
+
+      .workspace-recommendation-helper p + p,
+      .workspace-recommendation-why p + p {
+        margin-top: 0.55rem;
+      }
+
+      .workspace-recommendation-alternatives {
+        display: grid;
+        gap: 0.7rem;
+      }
+
+      .workspace-recommendation-alt-item {
+        display: grid;
+        gap: 0.6rem;
+        padding: 0.9rem;
+        border-radius: 0.8rem;
+        border: 1px solid var(--border, #333);
+        background: color-mix(in srgb, var(--surface, #1a1a1a) 82%, transparent);
+      }
+
+      .workspace-recommendation-alt-item h4 {
+        margin: 0;
+        font-size: 0.98rem;
+      }
+
+      .workspace-recommendation-alt-copy {
+        margin: 0;
+        font-size: 0.88rem;
+        color: var(--text-muted, #888);
+        line-height: 1.45;
+      }
+
+      .workspace-recommendation-status {
+        font-size: 0.84rem;
+        color: var(--text-muted, #888);
+      }
+
+      .workspace-recommendation-status.is-success,
+      .settings-inline-status.is-success {
+        color: #22c55e;
+      }
+
+      .workspace-recommendation-status.is-error,
+      .settings-inline-status.is-error {
+        color: #ef4444;
       }
 
       .account-grid {
@@ -822,6 +1061,18 @@
         display: flex;
         align-items: center;
         gap: 0.25rem;
+      }
+
+      .next-step-inline-message {
+        background: rgba(34, 197, 94, 0.1);
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        border-radius: 6px;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.8rem;
+        color: #22c55e;
+        margin: 0;
+        text-align: right;
+        max-width: 280px;
       }
 
       .next-step-checkbox-label {
@@ -939,6 +1190,32 @@
         font-size: 0.88rem;
       }
 
+      .proactivity-settings {
+        display: grid;
+        gap: 0.75rem;
+      }
+
+      .proactivity-settings-label {
+        margin: 0;
+        font-size: 0.78rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--text-muted, #888);
+      }
+
+      .settings-panel-note {
+        margin: 0;
+        font-size: 0.85rem;
+        color: var(--text-muted, #888);
+        line-height: 1.5;
+      }
+
+      .settings-inline-status {
+        min-height: 1.2rem;
+        font-size: 0.84rem;
+        color: var(--text-muted, #888);
+      }
+
       @media (max-width: 1080px) {
         .dashboard-mode .auth-container {
           max-width: 920px;
@@ -973,6 +1250,7 @@
 
       @media (max-width: 780px) {
         .account-grid,
+        .workspace-recommendation-grid,
         .workspace-summary-grid,
         .settings-grid {
           grid-template-columns: 1fr;
@@ -994,9 +1272,9 @@
 
     <div class="page">
       <header class="page-header">
-        <a class="brand" href="/">Do<span class="accent">Whiz</span></a>
+        <a class="brand" href="../">Do<span class="accent">Whiz</span></a>
         <nav class="header-links">
-          <a href="/user-guide/">User Guide</a>
+          <a href="../user-guide/">User Guide</a>
           <a href="mailto:admin@dowhiz.com">Contact</a>
         </nav>
       </header>
@@ -1004,7 +1282,12 @@
       <main>
         <section class="legal-hero">
           <div class="eyebrow">Account</div>
-          <h1 id="page-title">Sign in to DoWhiz</h1>
+          <div class="dashboard-title-wrap">
+            <a class="brand dashboard-home-link" href="../" aria-label="Back to the DoWhiz landing page">
+              Do<span class="accent">Whiz</span>
+            </a>
+            <h1 id="page-title">Sign in to DoWhiz</h1>
+          </div>
           <p class="lead" id="page-subtitle">
             Open one unified dashboard for team workspace context and personal account controls.
           </p>
@@ -1147,6 +1430,9 @@
                   <p class="dashboard-overview-copy">
                     Concise team context shared across your channels and task runtime.
                   </p>
+                  <div id="workspace-recommendation-card" class="workspace-recommendation-card">
+                    <div class="workspace-recommendation-empty">Reviewing your workspace for the next best move...</div>
+                  </div>
                   <div id="workspace-summary-content" class="workspace-summary-grid">
                     <div class="workspace-summary-empty">Loading workspace summary...</div>
                   </div>
@@ -1276,6 +1562,24 @@
                         <div id="link-message" class="auth-message hidden" style="margin-top: 0.5rem; margin-bottom: 0;"></div>
                       </form>
                     </div>
+
+                    <div class="settings-panel">
+                      <h3>Chief of Staff</h3>
+                      <p>Choose how proactive DoWhiz should be when it sees a clear next move.</p>
+                      <div class="proactivity-settings">
+                        <label for="proactivity-level-select" class="proactivity-settings-label">Recommendation mode</label>
+                        <select id="proactivity-level-select" class="auth-input">
+                          <option value="off">Off</option>
+                          <option value="minimal">Minimal</option>
+                          <option value="helpful">Helpful</option>
+                          <option value="hands_on">Hands-on</option>
+                        </select>
+                        <p class="settings-panel-note">
+                          Minimal keeps it to one dashboard suggestion at a time. Helpful and Hands-on are stored now so we can expand them safely later.
+                        </p>
+                        <div id="proactivity-level-status" class="settings-inline-status">Loading saved preference...</div>
+                      </div>
+                    </div>
                   </div>
                 </section>
               </div>
@@ -1325,7 +1629,7 @@
       </main>
 
       <footer class="page-footer">
-        <a class="back-link" href="/">Back to DoWhiz</a>
+        <a class="back-link" href="../">Back to DoWhiz</a>
         <span>Need help? Contact admin@dowhiz.com.</span>
       </footer>
     </div>
@@ -1544,12 +1848,49 @@
       const dashboardSidebarTargets = dashboardSidebarLinks
         .map((link) => document.querySelector(link.getAttribute('href')))
         .filter(Boolean);
+      const workspaceRecommendationCard = document.getElementById('workspace-recommendation-card');
+      const proactivityLevelSelect = document.getElementById('proactivity-level-select');
+      const proactivityLevelStatus = document.getElementById('proactivity-level-status');
 
       let lastSignupEmail = null;
       let recoverySession = null;
       let lastEmailActionAt = 0;
       const EMAIL_ACTION_COOLDOWN_MS = 30000;
       const AUTH_POPUP_SUCCESS_EVENT = 'dowhiz-auth-popup-success';
+      const RECOMMENDATION_TRIGGER_LABELS = {
+        active_blocker: 'Active blocker',
+        first_value_gap: 'First value',
+        setup_blocker: 'Setup blocker',
+        continuation_opportunity: 'Continuation',
+        idle_workspace: 'Idle workspace'
+      };
+      const RECOMMENDATION_PROVIDER_BUTTON_IDS = {
+        discord: 'discord-oauth-btn',
+        github: 'github-connect-btn',
+        notion: 'notion-oauth-btn',
+        slack: 'slack-oauth-btn'
+      };
+      const RECOMMENDATION_SECTION_LABELS = {
+        'section-channels': 'Open Channels',
+        'section-memo': 'Open Memo',
+        'section-settings': 'Open Settings',
+        'section-tasks': 'Open Task Center',
+        'section-workspace': 'Open Team Workspace'
+      };
+      const WORKSPACE_RECOMMENDATION_CACHE_KEY = 'dowhiz_workspace_recommendation_cache_v2';
+      const WORKSPACE_RECOMMENDATION_SUPPRESSION_KEY = 'dowhiz_workspace_recommendation_suppression_v1';
+      const recommendationShownKeys = new Set();
+      const recommendationInteractionKeys = new Set();
+      let workspaceRecommendationResponse = null;
+      let workspaceRecommendationStatus = 'idle';
+      let workspaceRecommendationErrorMessage = '';
+      let workspaceRecommendationSelectedKey = null;
+      let workspaceRecommendationAlternativesVisible = false;
+      let workspaceRecommendationWhyVisible = false;
+      let workspaceRecommendationBusy = false;
+      let workspaceRecommendationRequestNonce = 0;
+      let workspaceRecommendationLastFetchedAt = null;
+      let workspaceRecommendationDismissedForDay = false;
 
       // Check if user came from logged-in state (expecting dashboard)
       const authQueryParams = new URLSearchParams(window.location.search);
@@ -1854,17 +2195,924 @@
         renderNextSteps(cachedIdentifiers || []);
       }
 
-      // Product tasks - manual completion workflow with status tracking
-      const PRODUCT_TASKS = [
+      function recommendationItems(response = workspaceRecommendationResponse) {
+        if (!response) {
+          return [];
+        }
+        const items = [];
+        if (response.recommendation) {
+          items.push(response.recommendation);
+        }
+        return items.concat(Array.isArray(response.alternatives) ? response.alternatives : []);
+      }
+
+      function recommendationIdentity(recommendation) {
+        if (!recommendation) {
+          return null;
+        }
+        return `${recommendation.recommendation_key}::${recommendation.state_signature}`;
+      }
+
+      function currentWorkspaceRecommendation() {
+        const items = recommendationItems();
+        if (items.length === 0) {
+          return null;
+        }
+        return items.find((item) => recommendationIdentity(item) === workspaceRecommendationSelectedKey)
+          || items[0];
+      }
+
+      function recommendationActionKind(recommendation) {
+        return recommendation?.action?.kind || null;
+      }
+
+      function formatRecommendationToken(value, fallback = 'Unknown') {
+        const normalized = String(value || '').trim();
+        if (!normalized) {
+          return fallback;
+        }
+        return normalized
+          .split(/[_\-\s]+/)
+          .filter(Boolean)
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(' ');
+      }
+
+      function recommendationPrimaryActionLabel(recommendation) {
+        const actionKind = recommendationActionKind(recommendation);
+        if (actionKind === 'connect_provider') {
+          return `Connect ${formatRecommendationToken(recommendation?.action?.provider)}`;
+        }
+        if (actionKind === 'open_dashboard_section') {
+          return RECOMMENDATION_SECTION_LABELS[recommendation?.action?.section] || 'Open section';
+        }
+        if (actionKind === 'trigger_create_brief') {
+          return 'Create Startup Brief';
+        }
+        if (actionKind === 'trigger_create_plan') {
+          return 'Create Action Plan';
+        }
+        if (actionKind === 'update_team_brief') {
+          return 'Update Team Brief';
+        }
+        return 'Do it';
+      }
+
+      function recommendationAnalyticsProperties(recommendation, extra = {}) {
+        return {
+          recommendation_key: recommendation?.recommendation_key || null,
+          state_signature: recommendation?.state_signature || null,
+          trigger_type: recommendation?.trigger_type || null,
+          action_kind: recommendationActionKind(recommendation),
+          surface: 'dashboard',
+          ...extra
+        };
+      }
+
+      function setProactivityLevelUi(level) {
+        if (!proactivityLevelSelect) {
+          return;
+        }
+        const normalizedLevel = String(level || 'minimal');
+        proactivityLevelSelect.value = normalizedLevel;
+        proactivityLevelSelect.dataset.currentValue = normalizedLevel;
+      }
+
+      function setProactivityLevelStatus(message, tone = 'muted') {
+        if (!proactivityLevelStatus) {
+          return;
+        }
+        proactivityLevelStatus.textContent = message;
+        proactivityLevelStatus.className = 'settings-inline-status';
+        if (tone === 'error') {
+          proactivityLevelStatus.classList.add('is-error');
+        } else if (tone === 'success') {
+          proactivityLevelStatus.classList.add('is-success');
+        }
+      }
+
+      function describeProactivityLevel(level) {
+        switch (String(level || '').trim()) {
+          case 'off':
+            return 'Off: no dashboard recommendation card until you turn it back on.';
+          case 'helpful':
+            return 'Helpful: saved for your account as we expand beyond the dashboard card.';
+          case 'hands_on':
+            return 'Hands-on: saved for your account for future deeper proactivity.';
+          case 'minimal':
+          default:
+            return 'Minimal: one dashboard recommendation at a time.';
+        }
+      }
+
+      function buildWorkspaceRecommendationRequest() {
+        const blueprint = loadWorkspaceBlueprintFromStorage();
+        if (!hasSavedTeamBrief(blueprint)) {
+          return null;
+        }
+
+        return {
+          blueprint,
+          client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+          current_surface: 'dashboard'
+        };
+      }
+
+      function workspaceRecommendationDayKey(date = new Date()) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+
+      function hashWorkspaceRecommendationFingerprint(input) {
+        let hash = 2166136261;
+        for (let i = 0; i < input.length; i += 1) {
+          hash ^= input.charCodeAt(i);
+          hash = Math.imul(hash, 16777619);
+        }
+        return (hash >>> 0).toString(16);
+      }
+
+      function workspaceRecommendationFingerprint(requestPayload) {
+        try {
+          return hashWorkspaceRecommendationFingerprint(JSON.stringify({
+            blueprint: requestPayload?.blueprint || null,
+            current_surface: requestPayload?.current_surface || null,
+            proactivity_level: proactivityLevelSelect?.value || 'minimal'
+          }));
+        } catch {
+          return '';
+        }
+      }
+
+      function readJsonStorage(key) {
+        try {
+          const rawValue = localStorage.getItem(key);
+          return rawValue ? JSON.parse(rawValue) : null;
+        } catch {
+          return null;
+        }
+      }
+
+      function writeJsonStorage(key, value) {
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch {
+          // Ignore storage write failures so recommendation rendering still works.
+        }
+      }
+
+      function clearWorkspaceRecommendationCache() {
+        try {
+          localStorage.removeItem(WORKSPACE_RECOMMENDATION_CACHE_KEY);
+        } catch {
+          // Ignore storage clear failures.
+        }
+      }
+
+      function readWorkspaceRecommendationCache(requestFingerprint) {
+        const entry = readJsonStorage(WORKSPACE_RECOMMENDATION_CACHE_KEY);
+        if (!entry) {
+          return null;
+        }
+        if (entry.day_key !== workspaceRecommendationDayKey()) {
+          return null;
+        }
+        if (entry.request_fingerprint !== requestFingerprint) {
+          return null;
+        }
+        return entry;
+      }
+
+      function writeWorkspaceRecommendationCache(requestFingerprint, response, selectedKey, fetchedAt) {
+        writeJsonStorage(WORKSPACE_RECOMMENDATION_CACHE_KEY, {
+          day_key: workspaceRecommendationDayKey(),
+          request_fingerprint: requestFingerprint,
+          fetched_at: fetchedAt,
+          response,
+          selected_key: selectedKey || null
+        });
+      }
+
+      function clearWorkspaceRecommendationSuppression() {
+        workspaceRecommendationDismissedForDay = false;
+        try {
+          localStorage.removeItem(WORKSPACE_RECOMMENDATION_SUPPRESSION_KEY);
+        } catch {
+          // Ignore storage clear failures.
+        }
+      }
+
+      function readWorkspaceRecommendationSuppression(requestFingerprint) {
+        const entry = readJsonStorage(WORKSPACE_RECOMMENDATION_SUPPRESSION_KEY);
+        if (!entry) {
+          return null;
+        }
+        if (entry.day_key !== workspaceRecommendationDayKey()) {
+          return null;
+        }
+        if (entry.request_fingerprint !== requestFingerprint) {
+          return null;
+        }
+        return entry;
+      }
+
+      function suppressWorkspaceRecommendationForDay(requestFingerprint, recommendationIdentityValue) {
+        const dismissedAt = new Date().toISOString();
+        workspaceRecommendationDismissedForDay = true;
+        workspaceRecommendationLastFetchedAt = dismissedAt;
+        writeJsonStorage(WORKSPACE_RECOMMENDATION_SUPPRESSION_KEY, {
+          day_key: workspaceRecommendationDayKey(),
+          request_fingerprint: requestFingerprint,
+          recommendation_identity: recommendationIdentityValue || null,
+          dismissed_at: dismissedAt
+        });
+      }
+
+      function workspaceRecommendationFreshnessMessage() {
+        if (!workspaceRecommendationLastFetchedAt) {
+          return '';
+        }
+        const fetchedAt = new Date(workspaceRecommendationLastFetchedAt);
+        if (Number.isNaN(fetchedAt.getTime())) {
+          return '';
+        }
+        const timeLabel = fetchedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        if (workspaceRecommendationDayKey(fetchedAt) === workspaceRecommendationDayKey()) {
+          return `Updated today at ${timeLabel}`;
+        }
+        return `Updated ${fetchedAt.toLocaleDateString()} at ${timeLabel}`;
+      }
+
+      function applyWorkspaceRecommendationResponse(response, options = {}) {
+        const {
+          fetchedAt = new Date().toISOString(),
+          selectedKey = null,
+          dismissedForDay = false
+        } = options;
+        workspaceRecommendationResponse = response;
+        workspaceRecommendationStatus = 'ready';
+        workspaceRecommendationAlternativesVisible = false;
+        workspaceRecommendationWhyVisible = false;
+        workspaceRecommendationLastFetchedAt = fetchedAt;
+        workspaceRecommendationDismissedForDay = dismissedForDay;
+
+        const effectiveLevel = response?.preferences?.effective_proactivity_level || response?.preferences?.proactivity_level;
+        if (effectiveLevel) {
+          setProactivityLevelUi(effectiveLevel);
+        }
+
+        const defaultRecommendation = response?.recommendation || response?.alternatives?.[0] || null;
+        workspaceRecommendationSelectedKey = selectedKey || recommendationIdentity(defaultRecommendation);
+      }
+
+      async function readApiErrorMessage(res, fallbackMessage) {
+        try {
+          const text = await res.text();
+          if (!text) {
+            return fallbackMessage;
+          }
+          try {
+            const parsed = JSON.parse(text);
+            return parsed.error || parsed.message || fallbackMessage;
+          } catch {
+            return text;
+          }
+        } catch {
+          return fallbackMessage;
+        }
+      }
+
+      function openDashboardSection(sectionId) {
+        const normalizedSectionId = String(sectionId || '').replace(/^#/, '');
+        if (!normalizedSectionId) {
+          return false;
+        }
+
+        const target = document.getElementById(normalizedSectionId);
+        if (!target) {
+          return false;
+        }
+
+        window.location.hash = normalizedSectionId;
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        window.setTimeout(updateSidebarNavigation, 150);
+        return true;
+      }
+
+      function renderWorkspaceRecommendationCard() {
+        if (!workspaceRecommendationCard) {
+          return;
+        }
+
+        const current = currentWorkspaceRecommendation();
+        const currentIdentity = recommendationIdentity(current);
+        const currentLevel = proactivityLevelSelect?.value || 'minimal';
+
+        if (workspaceRecommendationStatus === 'loading') {
+          workspaceRecommendationCard.innerHTML = `
+            <div class="workspace-recommendation-empty">
+              Reviewing your saved brief, connected tools, and recent tasks for the clearest next move...
+            </div>
+          `;
+          return;
+        }
+
+        if (workspaceRecommendationStatus === 'needs_brief') {
+          workspaceRecommendationCard.innerHTML = `
+            <div class="workspace-recommendation-helper">
+              <p><strong>Finish your team brief</strong></p>
+              <p>Once your founder thesis and top goals are saved, DoWhiz can start suggesting the next best move here.</p>
+            </div>
+            <div class="workspace-recommendation-actions">
+              <button id="workspace-recommendation-edit-brief" class="auth-btn auth-btn-primary">Open Team Brief</button>
+              <span class="workspace-recommendation-status">Recommendations turn on automatically after your brief is ready.</span>
+            </div>
+          `;
+          document.getElementById('workspace-recommendation-edit-brief')?.addEventListener('click', () => {
+            window.location.href = updateTeamBriefBtn?.getAttribute('href') || '/start';
+          });
+          return;
+        }
+
+        if (workspaceRecommendationStatus === 'error') {
+          workspaceRecommendationCard.innerHTML = `
+            <div class="workspace-recommendation-helper">
+              <p><strong>We could not load a recommendation right now.</strong></p>
+              <p>${escapeHtml(workspaceRecommendationErrorMessage || 'Please try again in a moment.')}</p>
+            </div>
+            <div class="workspace-recommendation-actions">
+              <button id="workspace-recommendation-retry" class="auth-btn auth-btn-primary">Try again</button>
+            </div>
+          `;
+          document.getElementById('workspace-recommendation-retry')?.addEventListener('click', async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+              await loadWorkspaceRecommendation(session.access_token, { force: true });
+            }
+          });
+          return;
+        }
+
+        if (!current) {
+          const freshnessMessage = workspaceRecommendationFreshnessMessage();
+          const canManualRefresh = currentLevel !== 'off';
+          const emptyMessage = workspaceRecommendationDismissedForDay
+            ? 'You dismissed today\'s recommendation. Refresh anytime or check back tomorrow.'
+            : currentLevel === 'off'
+              ? 'Proactive suggestions are off. Turn them back on in Settings whenever you want a clear “what next?” nudge.'
+              : 'No proactive recommendation right now. As soon as DoWhiz sees a clear next move, it will show up here.';
+          workspaceRecommendationCard.innerHTML = `
+            <div class="workspace-recommendation-empty">${escapeHtml(emptyMessage)}</div>
+            ${(canManualRefresh || freshnessMessage) ? `
+              <div class="workspace-recommendation-actions">
+                ${canManualRefresh ? '<button id="workspace-recommendation-refresh" class="auth-btn auth-btn-oauth">Refresh</button>' : ''}
+                <span class="workspace-recommendation-status">${escapeHtml(freshnessMessage || '')}</span>
+              </div>
+            ` : ''}
+          `;
+          document.getElementById('workspace-recommendation-refresh')?.addEventListener('click', () => {
+            handleWorkspaceRecommendationManualRefresh();
+          });
+          return;
+        }
+
+        const alternatives = recommendationItems().filter(
+          (item) => recommendationIdentity(item) !== currentIdentity
+        );
+        const busyAttribute = workspaceRecommendationBusy ? ' disabled' : '';
+        const statusClass = workspaceRecommendationErrorMessage ? 'workspace-recommendation-status is-error' : 'workspace-recommendation-status';
+        const freshnessMessage = workspaceRecommendationFreshnessMessage();
+        const statusMessage = workspaceRecommendationBusy
+          ? 'Working on this recommendation...'
+          : workspaceRecommendationErrorMessage || freshnessMessage || '';
+        const triggerLabel = RECOMMENDATION_TRIGGER_LABELS[current.trigger_type] || formatRecommendationToken(current.trigger_type);
+
+        const alternativesHtml = workspaceRecommendationAlternativesVisible && alternatives.length > 0
+          ? `
+            <div class="workspace-recommendation-alternatives">
+              ${alternatives.map((item) => `
+                <article class="workspace-recommendation-alt-item">
+                  <h4>${escapeHtml(item.title)}</h4>
+                  <p class="workspace-recommendation-alt-copy">${escapeHtml(item.why_now)}</p>
+                  <p class="workspace-recommendation-alt-copy">${escapeHtml(item.outcome)}</p>
+                  <div>
+                    <button class="auth-btn auth-btn-oauth" data-recommendation-select="${escapeHtml(recommendationIdentity(item))}"${busyAttribute}>Use this instead</button>
+                  </div>
+                </article>
+              `).join('')}
+            </div>
+          `
+          : '';
+
+        const whyHtml = workspaceRecommendationWhyVisible
+          ? `
+            <div class="workspace-recommendation-why">
+              <p>We only surface one recommendation at a time, using your saved brief, connected tools, and recent task outcomes.</p>
+              <p>This one is showing because it matches the <strong>${escapeHtml(triggerLabel)}</strong> trigger class. Choosing “Not now” hides it for the rest of today unless you manually refresh.</p>
+            </div>
+          `
+          : '';
+
+        workspaceRecommendationCard.innerHTML = `
+          <div class="workspace-recommendation-header">
+            <div class="workspace-recommendation-kicker">
+              <span class="workspace-recommendation-badge">Chief of Staff</span>
+              <span class="workspace-recommendation-trigger">${escapeHtml(triggerLabel)}</span>
+            </div>
+          </div>
+          <h3 class="workspace-recommendation-title">${escapeHtml(current.title)}</h3>
+          <div class="workspace-recommendation-grid">
+            <div class="workspace-recommendation-detail">
+              <p class="workspace-recommendation-label">Why now</p>
+              <p class="workspace-recommendation-copy">${escapeHtml(current.why_now)}</p>
+            </div>
+            <div class="workspace-recommendation-detail">
+              <p class="workspace-recommendation-label">What this unlocks</p>
+              <p class="workspace-recommendation-copy">${escapeHtml(current.outcome)}</p>
+            </div>
+          </div>
+          <div class="workspace-recommendation-actions">
+            <button id="workspace-recommendation-primary" class="auth-btn auth-btn-primary"${busyAttribute}>
+              ${escapeHtml(recommendationPrimaryActionLabel(current))}
+            </button>
+            <div class="workspace-recommendation-secondary-actions">
+              ${alternatives.length > 0 ? `
+                <button id="workspace-recommendation-toggle-options" class="workspace-recommendation-text-btn"${busyAttribute}>
+                  ${workspaceRecommendationAlternativesVisible ? 'Hide options' : `Show ${Math.min(alternatives.length, 2)} options`}
+                </button>
+              ` : ''}
+              <button id="workspace-recommendation-refresh" class="workspace-recommendation-text-btn"${busyAttribute}>Refresh</button>
+              <button id="workspace-recommendation-defer" class="workspace-recommendation-text-btn"${busyAttribute}>Not now</button>
+              <button id="workspace-recommendation-why-btn" class="workspace-recommendation-text-btn"${busyAttribute}>
+                ${workspaceRecommendationWhyVisible ? 'Hide details' : 'Why am I seeing this?'}
+              </button>
+            </div>
+          </div>
+          <div class="${statusClass}">${statusMessage ? escapeHtml(statusMessage) : '&nbsp;'}</div>
+          ${whyHtml}
+          ${alternativesHtml}
+        `;
+
+        document.getElementById('workspace-recommendation-primary')?.addEventListener('click', () => {
+          handleWorkspaceRecommendationPrimaryAction();
+        });
+
+        document.getElementById('workspace-recommendation-refresh')?.addEventListener('click', () => {
+          handleWorkspaceRecommendationManualRefresh();
+        });
+
+        document.getElementById('workspace-recommendation-defer')?.addEventListener('click', () => {
+          handleWorkspaceRecommendationDefer();
+        });
+
+        document.getElementById('workspace-recommendation-toggle-options')?.addEventListener('click', async () => {
+          workspaceRecommendationAlternativesVisible = !workspaceRecommendationAlternativesVisible;
+          renderWorkspaceRecommendationCard();
+
+          if (workspaceRecommendationAlternativesVisible) {
+            const { data: { session } } = await supabase.auth.getSession();
+            trackAnalyticsEvent(
+              'workspace_recommendation_alternatives_opened',
+              recommendationAnalyticsProperties(current),
+              session ? { accessToken: session.access_token } : {}
+            );
+          }
+        });
+
+        document.getElementById('workspace-recommendation-why-btn')?.addEventListener('click', async () => {
+          workspaceRecommendationWhyVisible = !workspaceRecommendationWhyVisible;
+          renderWorkspaceRecommendationCard();
+
+          if (workspaceRecommendationWhyVisible) {
+            const { data: { session } } = await supabase.auth.getSession();
+            trackAnalyticsEvent(
+              'workspace_recommendation_reason_opened',
+              recommendationAnalyticsProperties(current),
+              session ? { accessToken: session.access_token } : {}
+            );
+          }
+        });
+
+        workspaceRecommendationCard.querySelectorAll('[data-recommendation-select]').forEach((button) => {
+          button.addEventListener('click', async (event) => {
+            const nextKey = event.currentTarget?.getAttribute('data-recommendation-select');
+            if (!nextKey || nextKey === workspaceRecommendationSelectedKey) {
+              return;
+            }
+
+            workspaceRecommendationSelectedKey = nextKey;
+            workspaceRecommendationWhyVisible = false;
+            workspaceRecommendationErrorMessage = '';
+            renderWorkspaceRecommendationCard();
+
+            const selected = currentWorkspaceRecommendation();
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session && selected) {
+              await maybeTrackWorkspaceRecommendationShown(session.access_token);
+              trackAnalyticsEvent(
+                'workspace_recommendation_alternative_selected',
+                recommendationAnalyticsProperties(selected),
+                { accessToken: session.access_token }
+              );
+            }
+          });
+        });
+      }
+
+      async function loadWorkspaceRecommendationPreferences(accessToken) {
+        if (!proactivityLevelSelect) {
+          return null;
+        }
+
+        proactivityLevelSelect.disabled = true;
+        setProactivityLevelStatus('Loading saved preference...');
+
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/api/workspace/recommendation-preferences`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (!res.ok) {
+            throw new Error(await readApiErrorMessage(res, 'Failed to load proactivity setting.'));
+          }
+
+          const data = await res.json();
+          const effectiveLevel = data.effective_proactivity_level || data.proactivity_level || 'minimal';
+          setProactivityLevelUi(effectiveLevel);
+          setProactivityLevelStatus(describeProactivityLevel(effectiveLevel));
+          return data;
+        } catch (err) {
+          console.error('Failed to load recommendation preferences:', err);
+          setProactivityLevelUi('minimal');
+          setProactivityLevelStatus('Using Minimal until your saved preference loads.', 'error');
+          return null;
+        } finally {
+          proactivityLevelSelect.disabled = false;
+        }
+      }
+
+      async function loadWorkspaceRecommendation(accessToken, options = {}) {
+        const { force = false } = options;
+        const requestPayload = buildWorkspaceRecommendationRequest();
+        const requestFingerprint = requestPayload ? workspaceRecommendationFingerprint(requestPayload) : '';
+        workspaceRecommendationRequestNonce += 1;
+        const requestNonce = workspaceRecommendationRequestNonce;
+        workspaceRecommendationErrorMessage = '';
+
+        if (!requestPayload) {
+          clearWorkspaceRecommendationCache();
+          clearWorkspaceRecommendationSuppression();
+          workspaceRecommendationResponse = null;
+          workspaceRecommendationSelectedKey = null;
+          workspaceRecommendationAlternativesVisible = false;
+          workspaceRecommendationWhyVisible = false;
+          workspaceRecommendationLastFetchedAt = null;
+          workspaceRecommendationDismissedForDay = false;
+          workspaceRecommendationStatus = 'needs_brief';
+          renderWorkspaceRecommendationCard();
+          return null;
+        }
+
+        if (!force) {
+          const suppressedEntry = readWorkspaceRecommendationSuppression(requestFingerprint);
+          if (suppressedEntry) {
+            workspaceRecommendationResponse = null;
+            workspaceRecommendationSelectedKey = null;
+            workspaceRecommendationAlternativesVisible = false;
+            workspaceRecommendationWhyVisible = false;
+            workspaceRecommendationStatus = 'ready';
+            workspaceRecommendationLastFetchedAt = suppressedEntry.dismissed_at || null;
+            workspaceRecommendationDismissedForDay = true;
+            renderWorkspaceRecommendationCard();
+            return null;
+          }
+
+          const cachedEntry = readWorkspaceRecommendationCache(requestFingerprint);
+          if (cachedEntry) {
+            if (requestNonce !== workspaceRecommendationRequestNonce) {
+              return cachedEntry.response;
+            }
+            applyWorkspaceRecommendationResponse(cachedEntry.response, {
+              fetchedAt: cachedEntry.fetched_at,
+              selectedKey: cachedEntry.selected_key,
+              dismissedForDay: false
+            });
+            renderWorkspaceRecommendationCard();
+            await maybeTrackWorkspaceRecommendationShown(accessToken);
+            return cachedEntry.response;
+          }
+        }
+
+        clearWorkspaceRecommendationSuppression();
+        workspaceRecommendationStatus = 'loading';
+        renderWorkspaceRecommendationCard();
+
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/api/workspace/recommendation`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestPayload)
+          });
+
+          if (!res.ok) {
+            throw new Error(await readApiErrorMessage(res, 'Failed to load workspace recommendation.'));
+          }
+
+          const data = await res.json();
+          if (requestNonce !== workspaceRecommendationRequestNonce) {
+            return data;
+          }
+
+          const defaultRecommendation = data?.recommendation || data?.alternatives?.[0] || null;
+          const selectedKey = recommendationIdentity(defaultRecommendation);
+          const fetchedAt = new Date().toISOString();
+          applyWorkspaceRecommendationResponse(data, {
+            fetchedAt,
+            selectedKey,
+            dismissedForDay: false
+          });
+          writeWorkspaceRecommendationCache(requestFingerprint, data, selectedKey, fetchedAt);
+          renderWorkspaceRecommendationCard();
+          await maybeTrackWorkspaceRecommendationShown(accessToken);
+          return data;
+        } catch (err) {
+          if (requestNonce !== workspaceRecommendationRequestNonce) {
+            return null;
+          }
+
+          console.error('Failed to load workspace recommendation:', err);
+          workspaceRecommendationResponse = null;
+          workspaceRecommendationSelectedKey = null;
+          workspaceRecommendationStatus = 'error';
+          workspaceRecommendationErrorMessage = err.message || 'Failed to load workspace recommendation.';
+          renderWorkspaceRecommendationCard();
+          return null;
+        }
+      }
+
+      async function recordWorkspaceRecommendationFeedback(accessToken, recommendation, feedback) {
+        const res = await fetch(`${DOWHIZ_API_URL}/api/workspace/recommendation-feedback`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            recommendation_key: recommendation.recommendation_key,
+            state_signature: recommendation.state_signature,
+            feedback
+          })
+        });
+
+        if (!res.ok) {
+          throw new Error(await readApiErrorMessage(res, 'Failed to record recommendation feedback.'));
+        }
+      }
+
+      async function maybeTrackWorkspaceRecommendationShown(accessToken) {
+        const recommendation = currentWorkspaceRecommendation();
+        const identity = recommendationIdentity(recommendation);
+        if (!recommendation || !identity || recommendationShownKeys.has(identity)) {
+          return;
+        }
+
+        recommendationShownKeys.add(identity);
+        await Promise.allSettled([
+          recordWorkspaceRecommendationFeedback(accessToken, recommendation, 'shown'),
+          trackAnalyticsEvent(
+            'workspace_recommendation_shown',
+            recommendationAnalyticsProperties(recommendation),
+            {
+              accessToken,
+              eventKey: `workspace_recommendation_shown:${identity}`
+            }
+          )
+        ]);
+      }
+
+      async function handleWorkspaceRecommendationPrimaryAction() {
+        const recommendation = currentWorkspaceRecommendation();
+        const identity = recommendationIdentity(recommendation);
+        if (!recommendation || !identity || workspaceRecommendationBusy) {
+          return;
+        }
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          showMessage('Please sign in first.');
+          return;
+        }
+
+        workspaceRecommendationBusy = true;
+        workspaceRecommendationErrorMessage = '';
+        renderWorkspaceRecommendationCard();
+
+        recommendationInteractionKeys.add(identity);
+
+        try {
+          await Promise.allSettled([
+            recordWorkspaceRecommendationFeedback(session.access_token, recommendation, 'accepted'),
+            trackAnalyticsEvent(
+              'workspace_recommendation_accepted',
+              recommendationAnalyticsProperties(recommendation),
+              { accessToken: session.access_token }
+            )
+          ]);
+          await performWorkspaceRecommendationAction(session.access_token, recommendation);
+        } catch (err) {
+          workspaceRecommendationErrorMessage = err.message || 'Failed to act on recommendation.';
+          renderWorkspaceRecommendationCard();
+        } finally {
+          workspaceRecommendationBusy = false;
+          renderWorkspaceRecommendationCard();
+        }
+      }
+
+      async function handleWorkspaceRecommendationDefer() {
+        const recommendation = currentWorkspaceRecommendation();
+        const identity = recommendationIdentity(recommendation);
+        if (!recommendation || !identity || workspaceRecommendationBusy) {
+          return;
+        }
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          showMessage('Please sign in first.');
+          return;
+        }
+
+        workspaceRecommendationBusy = true;
+        workspaceRecommendationErrorMessage = '';
+        renderWorkspaceRecommendationCard();
+
+        recommendationInteractionKeys.add(identity);
+
+        try {
+          await Promise.allSettled([
+            recordWorkspaceRecommendationFeedback(session.access_token, recommendation, 'deferred'),
+            trackAnalyticsEvent(
+              'workspace_recommendation_deferred',
+              recommendationAnalyticsProperties(recommendation),
+              { accessToken: session.access_token }
+            )
+          ]);
+          workspaceRecommendationBusy = false;
+          const requestPayload = buildWorkspaceRecommendationRequest();
+          if (requestPayload) {
+            suppressWorkspaceRecommendationForDay(
+              workspaceRecommendationFingerprint(requestPayload),
+              identity
+            );
+          }
+          workspaceRecommendationResponse = null;
+          workspaceRecommendationSelectedKey = null;
+          workspaceRecommendationAlternativesVisible = false;
+          workspaceRecommendationWhyVisible = false;
+          workspaceRecommendationStatus = 'ready';
+          renderWorkspaceRecommendationCard();
+        } catch (err) {
+          workspaceRecommendationBusy = false;
+          workspaceRecommendationErrorMessage = err.message || 'Failed to update recommendation.';
+          renderWorkspaceRecommendationCard();
+        }
+      }
+
+      async function handleWorkspaceRecommendationManualRefresh() {
+        if (workspaceRecommendationBusy || workspaceRecommendationStatus === 'loading') {
+          return;
+        }
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          showMessage('Please sign in first.');
+          return;
+        }
+
+        workspaceRecommendationErrorMessage = '';
+        clearWorkspaceRecommendationSuppression();
+        await Promise.allSettled([
+          trackAnalyticsEvent(
+            'workspace_recommendation_manual_refresh',
+            {
+              current_surface: 'dashboard',
+              had_recommendation: Boolean(currentWorkspaceRecommendation())
+            },
+            { accessToken: session.access_token }
+          )
+        ]);
+        await loadWorkspaceRecommendation(session.access_token, { force: true });
+      }
+
+      async function performWorkspaceRecommendationAction(accessToken, recommendation) {
+        const actionKind = recommendationActionKind(recommendation);
+
+        if (actionKind === 'connect_provider') {
+          const provider = String(recommendation?.action?.provider || '').toLowerCase();
+          const buttonId = RECOMMENDATION_PROVIDER_BUTTON_IDS[provider];
+          if (!buttonId) {
+            throw new Error(`Connecting ${formatRecommendationToken(provider)} is not available from this dashboard yet.`);
+          }
+
+          openDashboardSection('section-settings');
+          window.setTimeout(() => {
+            document.getElementById(buttonId)?.click();
+          }, 120);
+          return;
+        }
+
+        if (actionKind === 'open_dashboard_section') {
+          const section = recommendation?.action?.section;
+          if (!openDashboardSection(section)) {
+            throw new Error('That dashboard section is not available right now.');
+          }
+          return;
+        }
+
+        if (actionKind === 'trigger_create_brief') {
+          await createBrief({
+            source: 'workspace_recommendation'
+          });
+          return;
+        }
+
+        if (actionKind === 'trigger_create_plan') {
+          await create90DayPlan({
+            source: 'workspace_recommendation'
+          });
+          return;
+        }
+
+        if (actionKind === 'update_team_brief') {
+          window.location.href = updateTeamBriefBtn?.getAttribute('href') || '/start';
+          return;
+        }
+
+        throw new Error('This recommendation action is not supported yet.');
+      }
+
+      window.addEventListener('beforeunload', () => {
+        const recommendation = currentWorkspaceRecommendation();
+        const identity = recommendationIdentity(recommendation);
+        if (!recommendation || !identity || recommendationInteractionKeys.has(identity)) {
+          return;
+        }
+
+        trackAnalyticsEvent(
+          'workspace_recommendation_ignored',
+          recommendationAnalyticsProperties(recommendation),
+          {
+            eventKey: `workspace_recommendation_ignored:${getOrCreateSessionId()}:${identity}`
+          }
+        );
+      });
+
+      // Product tasks - autocomplete
+      const PRODUCT_TASKS_BASE = [
         {
           id: 'create-brief',
           title: 'Create Startup Brief',
           description: 'Generate a Google Doc summarizing your startup goals, thesis, and action plan.',
           storageKey: 'workspace_brief_status',
           actionLabel: 'Get Started',
-          action: 'createBrief'
+          action: 'createBrief',
+          autoTracked: true
         }
       ];
+
+      const PLAN_TASKS_BY_HORIZON = {
+        30: {
+          id: 'create-30-day-plan',
+          title: 'Create 30-Day Plan',
+          description: 'Generate a week-by-week plan with milestones and success metrics.',
+          storageKey: 'workspace_plan_status',
+          actionLabel: 'Get Started',
+          action: 'create90DayPlan',
+          autoTracked: true
+        },
+        60: {
+          id: 'create-60-day-plan',
+          title: 'Create 60-Day Plan',
+          description: 'Generate a week-by-week plan with milestones and success metrics.',
+          storageKey: 'workspace_plan_status',
+          actionLabel: 'Get Started',
+          action: 'create90DayPlan',
+          autoTracked: true
+        },
+        90: {
+          id: 'create-90-day-plan',
+          title: 'Create 90-Day Plan',
+          description: 'Generate a week-by-week plan with milestones and success metrics.',
+          storageKey: 'workspace_plan_status',
+          actionLabel: 'Get Started',
+          action: 'create90DayPlan',
+          autoTracked: true
+        }
+      };
 
       // OAuth tasks - completion determined by connected identifiers
       const OAUTH_TASKS = [
@@ -1902,17 +3150,36 @@
         }
       ];
 
-      // Admin tasks - reserved for future admin operations
-      const ADMIN_TASKS = [];
+      // Admin tasks - filtered based on preferred channels
+      const ADMIN_TASKS_CONFIG = [
+        {
+          id: 'add-oliver-slack',
+          title: 'Add Oliver to Slack Workspace',
+          description: 'Invite Oliver to your Slack workspace.',
+          channelKey: 'slack',
+          externalUrl: 'https://slack.com/oauth/v2/authorize?client_id=5584751405762.10556678065461&scope=channels:history,chat:write,groups:history,im:history,mpim:history,users:read,app_mentions:read&user_scope=',
+          actionLabel: 'Add'
+        },
+        {
+          id: 'add-oliver-discord',
+          title: 'Add Oliver to Discord Server',
+          description: 'Invite Oliver to your Discord server.',
+          channelKey: 'discord',
+          externalUrl: 'https://discord.com/oauth2/authorize?client_id=1475574666830680175&permissions=68608&integration_type=0&scope=bot',
+          actionLabel: 'Add'
+        }
+      ];
 
-      async function createBrief() {
+      async function createBrief(options = {}) {
         const blueprint = loadWorkspaceBlueprintFromStorage();
         if (!blueprint) {
           showMessage('Please complete your team brief first.');
           return;
         }
 
-        const btn = document.querySelector('[data-action="createBrief"]');
+        const normalizedOptions = typeof options === 'object' && options !== null ? options : {};
+        const btn = normalizedOptions.button || document.querySelector('[data-action="createBrief"]');
+        const originalButtonLabel = btn?.textContent || 'Get Started';
         if (btn) {
           btn.disabled = true;
           btn.textContent = 'Creating...';
@@ -1921,12 +3188,15 @@
         try {
           const { data: { session } } = await supabase.auth.getSession();
           const accessToken = session?.access_token;
+          if (!session || !accessToken) {
+            throw new Error('Please sign in first.');
+          }
 
           const response = await fetch(`${DOWHIZ_GATEWAY_URL}/api/workspace/create-brief`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {})
+              'Authorization': `Bearer ${accessToken}`
             },
             body: JSON.stringify({
               founder_name: blueprint.founder?.name || '',
@@ -1956,20 +3226,93 @@
           const result = await response.json();
           localStorage.setItem('workspace_brief_task_id', result.task_id || '');
           localStorage.setItem('workspace_brief_status', 'pending');
-          showMessage('Our AI employees are working hard to create your briefing doc! Please check your Google Docs in a few moments.', 'success');
+          localStorage.setItem('workspace_brief_message', 'Our AI employees are working hard to create your briefing doc! Please check your Google Docs in a few moments.');
           renderNextSteps(cachedIdentifiers);
+          await loadTasks(accessToken, { refreshRecommendation: true });
         } catch (err) {
           console.error('Failed to create brief:', err);
           showMessage(err.message || 'Failed to create brief. Please try again.');
         } finally {
           if (btn) {
             btn.disabled = false;
-            btn.textContent = 'Get Started';
+            btn.textContent = originalButtonLabel;
           }
         }
       }
 
       window.createBrief = createBrief;
+
+      async function create90DayPlan(options) {
+        const blueprint = loadWorkspaceBlueprintFromStorage();
+        if (!blueprint) {
+          showMessage('Please complete your team brief first.');
+          return;
+        }
+
+        const normalizedOptions = typeof options === 'object' && options !== null ? options : {};
+        const btn = normalizedOptions.button || document.querySelector('[data-action="create90DayPlan"]');
+        const originalButtonLabel = btn?.textContent || 'Get Started';
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Creating...';
+        }
+
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const accessToken = session?.access_token;
+          if (!session || !accessToken) {
+            throw new Error('Please sign in first.');
+          }
+
+          const response = await fetch(`${DOWHIZ_GATEWAY_URL}/api/workspace/create-90-day-plan`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${accessToken}`
+            },
+            body: JSON.stringify({
+              founder_name: blueprint.founder?.name || '',
+              founder_email: session?.user?.email || blueprint.founder?.email || '',
+              venture_name: blueprint.venture?.name || null,
+              thesis: blueprint.venture?.thesis || null,
+              stage: blueprint.venture?.stage || null,
+              goals: blueprint.goals_30_90_days || [],
+              current_assets: blueprint.current_assets || null,
+              plan_horizon_days: blueprint.plan_horizon_days || 90,
+              account_id: session?.user?.id || null
+            })
+          });
+
+          if (!response.ok) {
+            const text = await response.text();
+            let errorMsg = 'Failed to create 90-day plan';
+            try {
+              const error = JSON.parse(text);
+              errorMsg = error.error || errorMsg;
+            } catch {
+              if (response.status === 404) errorMsg = 'Endpoint not found. Backend may not be deployed.';
+            }
+            throw new Error(errorMsg);
+          }
+
+          const result = await response.json();
+          localStorage.setItem('workspace_plan_task_id', result.task_id || '');
+          localStorage.setItem('workspace_plan_status', 'pending');
+          localStorage.setItem('workspace_plan_message', 'Our AI employees are creating your action plan! Please check your Google Docs in a few moments.');
+          renderNextSteps(cachedIdentifiers);
+          await loadTasks(accessToken, { refreshRecommendation: true });
+        } catch (err) {
+          console.error('Failed to create 90-day plan:', err);
+          showMessage(err.message || 'Failed to create 90-day plan. Please try again.');
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalButtonLabel;
+          }
+        }
+      }
+
+      window.create90DayPlan = create90DayPlan;
 
       function markWorkflowTaskComplete(storageKey, checked) {
         if (checked) {
@@ -1985,6 +3328,7 @@
       function resetWorkflowTask(storageKey) {
         localStorage.removeItem(storageKey);
         localStorage.removeItem(storageKey.replace('_status', '_task_id'));
+        localStorage.removeItem(storageKey.replace('_status', '_message'));
         renderNextSteps(cachedIdentifiers);
       }
 
@@ -1996,9 +3340,17 @@
 
         const blueprint = loadWorkspaceBlueprintFromStorage();
         const preferredChannels = (blueprint?.preferred_channels || []).map(c => c.toLowerCase());
+        const horizonDays = blueprint?.plan_horizon_days || 90;
+        const planTask = PLAN_TASKS_BY_HORIZON[horizonDays] || PLAN_TASKS_BY_HORIZON[90];
+        const productTasks = [...PRODUCT_TASKS_BASE, planTask];
 
         // Filter OAuth tasks based on preferred channels
         const relevantOAuthTasks = OAUTH_TASKS.filter(task =>
+          preferredChannels.some(c => c.includes(task.channelKey))
+        );
+
+        // Filter Admin tasks based on preferred channels
+        const relevantAdminTasks = ADMIN_TASKS_CONFIG.filter(task =>
           preferredChannels.some(c => c.includes(task.channelKey))
         );
 
@@ -2016,20 +3368,40 @@
                 : `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 6v6l4 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
               const statusText = isComplete ? 'Complete' : 'In Progress';
               const statusClass = isComplete ? 'next-step-complete' : 'next-step-pending-text';
+              const messageKey = task.storageKey.replace('_status', '_message');
+              const storedMessage = !isComplete ? localStorage.getItem(messageKey) : null;
+              const manualCheckbox = task.autoTracked ? '' : `
+                  <label class="next-step-checkbox-label">
+                    <input type="checkbox" ${isComplete ? 'checked' : ''} onchange="markWorkflowTaskComplete('${task.storageKey}', this.checked)">
+                    ${isComplete ? 'Completed' : 'Mark as complete'}
+                  </label>`;
+              const resetBtn = `<button class="next-step-reset-btn" onclick="resetWorkflowTask('${task.storageKey}')">Reset</button>`;
               actionHtml = `
                 <div class="next-step-pending">
                   <span class="${statusClass}">
                     ${statusIcon}
                     ${statusText}
                   </span>
-                  <label class="next-step-checkbox-label">
-                    <input type="checkbox" ${isComplete ? 'checked' : ''} onchange="markWorkflowTaskComplete('${task.storageKey}', this.checked)">
-                    ${isComplete ? 'Completed' : 'Mark as complete'}
-                  </label>
-                  <button class="next-step-reset-btn" onclick="resetWorkflowTask('${task.storageKey}')">Reset</button>
+                  ${storedMessage ? `<p class="next-step-inline-message">${escapeHtml(storedMessage)}</p>` : ''}
+                  ${manualCheckbox}
+                  ${resetBtn}
                 </div>`;
             } else {
               actionHtml = `<button class="auth-btn auth-btn-primary" data-action="${task.action}" onclick="${task.action}()">${task.actionLabel}</button>`;
+            }
+          } else if (task.externalUrl) {
+            // Check if admin task is already completed
+            const completedTasks = JSON.parse(localStorage.getItem('dw_completed_admin_tasks') || '[]');
+            if (completedTasks.includes(task.id)) {
+              actionHtml = `<span class="next-step-complete"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg> Added</span>`;
+            } else if (task.id === 'add-oliver-discord') {
+              // Discord bot install needs dynamic state param for user tracking
+              actionHtml = `<a href="#" class="auth-btn auth-btn-primary" onclick="openDiscordBotAuth(event)">${task.actionLabel}</a>`;
+            } else if (task.id === 'add-oliver-slack') {
+              // Slack bot install needs dynamic state param for user tracking
+              actionHtml = `<a href="#" class="auth-btn auth-btn-primary" onclick="openSlackBotAuth(event)">${task.actionLabel}</a>`;
+            } else {
+              actionHtml = `<a href="${task.externalUrl}" target="_blank" rel="noopener noreferrer" class="auth-btn auth-btn-primary">${task.actionLabel}</a>`;
             }
           } else {
             const isComplete = identifiers.some(id => id.identifier_type === task.identifierType);
@@ -2067,11 +3439,9 @@
         }
 
         let html = '';
-        html += renderSection('Product', PRODUCT_TASKS, 'No product tasks available.');
+        html += renderSection('Product', productTasks, 'No product tasks available.');
         html += renderSection('Integrations', relevantOAuthTasks, 'No integrations selected. Update your team brief to add channels.');
-        if (ADMIN_TASKS.length > 0) {
-          html += renderSection('Admin', ADMIN_TASKS, 'No admin tasks available.');
-        }
+        html += renderSection('Admin', relevantAdminTasks, 'No admin tasks at this moment.');
 
         container.innerHTML = html;
       }
@@ -2304,6 +3674,13 @@
       document.getElementById('signout-btn').addEventListener('click', async () => {
         stopTaskPolling();
         cachedIdentifiers = [];
+        workspaceRecommendationResponse = null;
+        workspaceRecommendationStatus = 'idle';
+        workspaceRecommendationErrorMessage = '';
+        workspaceRecommendationSelectedKey = null;
+        workspaceRecommendationAlternativesVisible = false;
+        workspaceRecommendationWhyVisible = false;
+        workspaceRecommendationBusy = false;
         setDashboardMode(false);
         await supabase.auth.signOut();
         window.location.reload();
@@ -2444,6 +3821,60 @@
         }
       });
 
+      proactivityLevelSelect?.addEventListener('change', async (event) => {
+        const nextLevel = event.target.value;
+        const previousLevel = proactivityLevelSelect.dataset.currentValue || 'minimal';
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (!session) {
+          setProactivityLevelUi(previousLevel);
+          showMessage('Please sign in first.');
+          return;
+        }
+
+        proactivityLevelSelect.disabled = true;
+        setProactivityLevelStatus('Saving preference...');
+
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/api/workspace/recommendation-preferences`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              proactivity_level: nextLevel
+            })
+          });
+
+          if (!res.ok) {
+            throw new Error(await readApiErrorMessage(res, 'Failed to save proactivity setting.'));
+          }
+
+          const data = await res.json();
+          const effectiveLevel = data.effective_proactivity_level || data.proactivity_level || nextLevel;
+          setProactivityLevelUi(effectiveLevel);
+          setProactivityLevelStatus(`Saved. ${describeProactivityLevel(effectiveLevel)}`, 'success');
+
+          trackAnalyticsEvent(
+            'workspace_recommendation_preference_updated',
+            {
+              proactivity_level: nextLevel,
+              effective_proactivity_level: effectiveLevel
+            },
+            { accessToken: session.access_token }
+          );
+
+          await loadWorkspaceRecommendation(session.access_token, { force: true });
+        } catch (err) {
+          console.error('Failed to save recommendation preference:', err);
+          setProactivityLevelUi(previousLevel);
+          setProactivityLevelStatus(err.message || 'Failed to save proactivity setting.', 'error');
+        } finally {
+          proactivityLevelSelect.disabled = false;
+        }
+      });
+
       passwordResetForm?.addEventListener('submit', async (e) => {
         e.preventDefault();
         hideMessage();
@@ -2553,13 +3984,19 @@
         document.getElementById('account-id').textContent = accountData.account_id;
         document.getElementById('user-email').textContent = session.user.email;
         loadWorkspaceSummaryFromStorage();
+        workspaceRecommendationStatus = 'loading';
+        workspaceRecommendationErrorMessage = '';
+        renderWorkspaceRecommendationCard();
+        setProactivityLevelStatus('Loading saved preference...');
 
-        // Load identifiers, memo, and tasks in parallel
+        // Load identifiers, memo, tasks, and recommendation preferences in parallel
         await Promise.all([
           loadIdentifiers(session.access_token),
           loadMemo(session.access_token),
-          loadTasks(session.access_token)
+          loadTasks(session.access_token),
+          loadWorkspaceRecommendationPreferences(session.access_token)
         ]);
+        await loadWorkspaceRecommendation(session.access_token);
 
         // Start polling for task updates
         startTaskPolling();
@@ -2634,7 +4071,7 @@
           showMessage('Channel unlinked successfully!', 'success');
           await loadIdentifiers(accessToken);
           // Refresh tasks to remove tasks from the unlinked channel
-          await loadTasks(accessToken);
+          await loadTasks(accessToken, { refreshRecommendation: true });
         } catch (err) {
           showMessage(err.message);
         }
@@ -2793,6 +4230,106 @@
         // Clean up URL
         window.history.replaceState({}, document.title, window.location.pathname + '?loggedIn=true');
       }
+
+      // Check for Discord bot installation result
+      const discordBotResult = urlParams.get('discord_bot');
+      if (discordBotResult) {
+        if (discordBotResult === 'success') {
+          // Restore session from fragment (more secure than query param)
+          const hashParams = new URLSearchParams(window.location.hash.substring(1));
+          const encodedToken = hashParams.get('access_token');
+          if (encodedToken) {
+            try {
+              const accessToken = atob(encodedToken.replace(/-/g, '+').replace(/_/g, '/'));
+              await supabase.auth.setSession({ access_token: accessToken, refresh_token: '' });
+            } catch (e) {
+              console.error('Failed to restore session:', e);
+            }
+          }
+          showMessage('Oliver has been added to your Discord server!', 'success');
+          // Mark task as completed in local storage
+          const completedTasks = JSON.parse(localStorage.getItem('dw_completed_admin_tasks') || '[]');
+          if (!completedTasks.includes('add-oliver-discord')) {
+            completedTasks.push('add-oliver-discord');
+            localStorage.setItem('dw_completed_admin_tasks', JSON.stringify(completedTasks));
+          }
+          // Re-render next steps to show completed state
+          renderNextSteps(cachedIdentifiers || []);
+        } else if (discordBotResult === 'error') {
+          const reason = urlParams.get('reason') || 'unknown error';
+          showMessage(`Failed to add Oliver to Discord: ${reason}`, 'error');
+        }
+        // Clean up URL (removes both query params and hash)
+        window.history.replaceState({}, document.title, window.location.pathname + '?loggedIn=true');
+      }
+
+      // Discord bot installation function
+      async function openDiscordBotAuth(event) {
+        event.preventDefault();
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          showMessage('Please sign in first', 'error');
+          return;
+        }
+
+        // Base64 encode the access token as state (URL-safe, no padding)
+        const state = btoa(session.access_token).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        const redirectUri = encodeURIComponent(`${DOWHIZ_API_URL}/auth/discord/bot-callback`);
+        const discordBotUrl = `https://discord.com/oauth2/authorize?client_id=1475574666830680175&permissions=68608&scope=bot&response_type=code&redirect_uri=${redirectUri}&state=${state}`;
+
+        window.location.href = discordBotUrl;
+      }
+      window.openDiscordBotAuth = openDiscordBotAuth;
+
+      // Check for Slack bot installation result
+      const slackBotResult = urlParams.get('slack_bot');
+      if (slackBotResult) {
+        if (slackBotResult === 'success') {
+          // Restore session from fragment (more secure than query param)
+          const hashParams = new URLSearchParams(window.location.hash.substring(1));
+          const encodedToken = hashParams.get('access_token');
+          if (encodedToken) {
+            try {
+              const accessToken = atob(encodedToken.replace(/-/g, '+').replace(/_/g, '/'));
+              await supabase.auth.setSession({ access_token: accessToken, refresh_token: '' });
+            } catch (e) {
+              console.error('Failed to restore session:', e);
+            }
+          }
+          showMessage('Oliver has been added to your Slack workspace!', 'success');
+          // Mark task as completed in local storage
+          const completedTasks = JSON.parse(localStorage.getItem('dw_completed_admin_tasks') || '[]');
+          if (!completedTasks.includes('add-oliver-slack')) {
+            completedTasks.push('add-oliver-slack');
+            localStorage.setItem('dw_completed_admin_tasks', JSON.stringify(completedTasks));
+          }
+          // Re-render next steps to show completed state
+          renderNextSteps(cachedIdentifiers || []);
+        } else if (slackBotResult === 'error') {
+          const reason = urlParams.get('reason') || 'unknown error';
+          showMessage(`Failed to add Oliver to Slack: ${reason}`, 'error');
+        }
+        // Clean up URL (removes both query params and hash)
+        window.history.replaceState({}, document.title, window.location.pathname + '?loggedIn=true');
+      }
+
+      // Slack bot installation function
+      async function openSlackBotAuth(event) {
+        event.preventDefault();
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          showMessage('Please sign in first', 'error');
+          return;
+        }
+
+        // Base64 encode the access token as state (URL-safe, no padding)
+        const state = btoa(session.access_token).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        const redirectUri = encodeURIComponent(`${DOWHIZ_API_URL}/auth/slack/bot-callback`);
+        const slackBotUrl = `https://slack.com/oauth/v2/authorize?client_id=5584751405762.10556678065461&scope=channels:history,chat:write,groups:history,im:history,mpim:history,users:read,app_mentions:read&redirect_uri=${redirectUri}&state=${state}`;
+
+        window.location.href = slackBotUrl;
+      }
+      window.openSlackBotAuth = openSlackBotAuth;
 
       // Slack OAuth button
       document.getElementById('slack-oauth-btn').addEventListener('click', async () => {
@@ -3051,7 +4588,7 @@
           document.getElementById('link-identifier').value = '';
           await loadIdentifiers(session.access_token);
           // Refresh tasks to include the new channel
-          await loadTasks(session.access_token);
+          await loadTasks(session.access_token, { refreshRecommendation: true });
         } catch (err) {
           showLinkMessage(err.message);
         }
@@ -3062,7 +4599,8 @@
       let cachedIdentifiers = [];
 
       // Load tasks from the unified account-level storage
-      async function loadTasks(accessToken) {
+      async function loadTasks(accessToken, options = {}) {
+        const { refreshRecommendation = false } = options;
         const taskList = document.getElementById('task-list');
         const tasksStatus = document.getElementById('tasks-status');
 
@@ -3086,6 +4624,36 @@
           // Sort by created_at descending (newest first)
           allTasks.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
+          // Auto-complete "Get Started" when a new "Create Workspace Brief" task completes
+          const briefStatus = localStorage.getItem('workspace_brief_status');
+          const completedCount = allTasks.filter(t =>
+            (t.request_summary || '').toLowerCase().includes('workspace brief') &&
+            t.execution_status === 'success'
+          ).length;
+          const consumedCount = Number(localStorage.getItem('workspace_brief_consumed_count') || 0);
+          console.log('[workspace_brief] status:', briefStatus, 'completedCount:', completedCount, 'consumedCount:', consumedCount);
+          if (briefStatus === 'pending' && completedCount > consumedCount) {
+            localStorage.setItem('workspace_brief_consumed_count', completedCount);
+            localStorage.setItem('workspace_brief_status', 'complete');
+            localStorage.removeItem('workspace_brief_message');
+            renderNextSteps(cachedIdentifiers);
+          }
+
+          // Auto-complete when an action plan task completes
+          const planStatus = localStorage.getItem('workspace_plan_status');
+          const planCompletedCount = allTasks.filter(t =>
+            (t.request_summary || '').toLowerCase().includes('-day plan') &&
+            t.execution_status === 'success'
+          ).length;
+          const planConsumedCount = Number(localStorage.getItem('workspace_plan_consumed_count') || 0);
+          console.log('[workspace_plan] status:', planStatus, 'completedCount:', planCompletedCount, 'consumedCount:', planConsumedCount);
+          if (planStatus === 'pending' && planCompletedCount > planConsumedCount) {
+            localStorage.setItem('workspace_plan_consumed_count', planCompletedCount);
+            localStorage.setItem('workspace_plan_status', 'complete');
+            localStorage.removeItem('workspace_plan_message');
+            renderNextSteps(cachedIdentifiers);
+          }
+
           if (allTasks.length === 0) {
             taskList.innerHTML = '<li class="task-item" style="text-align: center; color: var(--text-muted, #888);">No tasks scheduled yet.</li>';
           } else {
@@ -3096,6 +4664,10 @@
         } catch (err) {
           console.error('Failed to load tasks:', err);
           taskList.innerHTML = `<li class="task-item" style="text-align: center; color: #ef4444;">Error loading tasks: ${err.message}</li>`;
+        } finally {
+          if (refreshRecommendation) {
+            await loadWorkspaceRecommendation(accessToken, { force: true });
+          }
         }
       }
 
