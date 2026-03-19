@@ -215,6 +215,108 @@ fn send_payload_includes_recipients_and_attachments() -> Result<(), Box<dyn std:
 }
 
 #[test]
+fn send_payload_sanitizes_attachment_names_to_ascii() -> Result<(), Box<dyn std::error::Error>> {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|err| err.into_inner());
+    let temp = TempDir::new()?;
+    let html_path = temp.path().join("reply_email_draft.html");
+    fs::write(&html_path, "<p>Hello</p>")?;
+
+    let attachments_dir = temp.path().join("reply_email_attachments");
+    fs::create_dir(&attachments_dir)?;
+    let attachment_a =
+        attachments_dir.join("VW欧美女性AI疗愈_一年组织架构_AI优化建议版_XMind版_v2.xmind");
+    let attachment_b = attachments_dir.join("doc_方案.txt");
+    let attachment_c = attachments_dir.join("doc_计划.txt");
+    fs::write(&attachment_a, "xmind")?;
+    fs::write(&attachment_b, "alpha")?;
+    fs::write(&attachment_c, "beta")?;
+
+    let mut attachments = vec![
+        attachment_a.clone(),
+        attachment_b.clone(),
+        attachment_c.clone(),
+    ];
+    attachments.sort();
+    let expected_attachments: Vec<serde_json::Value> = attachments
+        .into_iter()
+        .map(|path| {
+            let payload = fs::read(&path).unwrap_or_default();
+            let content_type = mime_guess::from_path(&path)
+                .first_or_octet_stream()
+                .essence_str()
+                .to_string();
+            let expected_name = if path == attachment_a {
+                "VW_AI_XMind_v2.xmind"
+            } else if path == attachment_b {
+                "doc.txt"
+            } else {
+                "doc_2.txt"
+            };
+            json!({
+                "Name": expected_name,
+                "Content": general_purpose::STANDARD.encode(payload),
+                "ContentType": content_type,
+            })
+        })
+        .collect();
+
+    let expected_payload = json!({
+        "From": "sender@example.com",
+        "To": "to@example.com",
+        "Bcc": "sender@example.com",
+        "Subject": "Unicode attachment test",
+        "TextBody": "Hello",
+        "HtmlBody": "<p>Hello</p>",
+        "Attachments": expected_attachments,
+    });
+
+    let response_body = json!({
+        "To": "to@example.com",
+        "SubmittedAt": "2024-01-01T00:00:00Z",
+        "MessageID": "test-message-id",
+        "ErrorCode": 0,
+        "Message": "OK",
+    });
+
+    let mut server = Server::new();
+    let api_base_url = server.url();
+    let mock = server
+        .mock("POST", "/email")
+        .match_header("x-postmark-server-token", "test-token")
+        .match_header("accept", "application/json")
+        .match_header("content-type", "application/json")
+        .match_body(Matcher::Json(expected_payload))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(response_body.to_string())
+        .create();
+
+    let _env = EnvGuard::set(&[
+        ("POSTMARK_SERVER_TOKEN", "test-token"),
+        ("POSTMARK_API_BASE_URL", api_base_url.as_str()),
+    ]);
+
+    let request = SendEmailParams {
+        subject: "Unicode attachment test".to_string(),
+        html_path,
+        attachments_dir,
+        from: Some("sender@example.com".to_string()),
+        to: vec!["to@example.com".to_string()],
+        cc: vec![],
+        bcc: vec![],
+        in_reply_to: None,
+        references: None,
+        reply_to: None,
+    };
+
+    let response = send_email(&request)?;
+    assert_eq!(response.message_id, "test-message-id");
+
+    mock.assert();
+    Ok(())
+}
+
+#[test]
 fn live_postmark_delivery_with_attachments() -> Result<(), Box<dyn std::error::Error>> {
     let _lock = ENV_MUTEX.lock().unwrap_or_else(|err| err.into_inner());
     let root_env = repo_root().join(".env");

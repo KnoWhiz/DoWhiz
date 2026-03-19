@@ -1,7 +1,7 @@
 # DoWhiz Proactive Chief of Staff V1
 
-- Status: Proposed
-- Last updated: 2026-03-17
+- Status: Implemented in V1
+- Last updated: 2026-03-19
 - Audience: Product, design, frontend, backend
 - Scope: V1 product spec for a proactive, low-annoyance recommendation layer
 
@@ -102,7 +102,15 @@ Recommended controls:
 1. `Do it`
 2. `Show 2 options`
 3. `Not now`
-4. `Why am I seeing this?`
+4. `Refresh`
+5. `Why am I seeing this?`
+
+Refresh cadence:
+
+1. Auto-refresh at most once per user's local calendar day, on the first dashboard open that day.
+2. Do not silently reshuffle the recommendation in the background during routine task polling.
+3. Always offer a manual `Refresh` control so the user can explicitly ask for a fresh read.
+4. If the user chooses `Not now`, hide the current recommendation for the rest of the local day unless they manually refresh.
 
 ### 7.2 Post-task continuation suggestion
 
@@ -153,7 +161,7 @@ Examples:
 
 1. Latest task failed.
 2. A task is waiting on a required approval.
-3. A manual setup step blocks progress.
+3. A required workspace connection step blocks progress.
 
 ### 8.4 Continuation opportunity
 
@@ -266,6 +274,7 @@ Guardrails are a core part of the product, not an afterthought.
 
 1. Do not repeat the same recommendation for 7 days unless the underlying state changes.
 2. If the user dismisses two proactive suggestions in a row, automatically downgrade them to a more conservative proactivity mode until new meaningful state change occurs.
+3. Routine dashboard polling should not trigger a fresh recommendation fetch; recommendation cadence should feel like a daily brief, not a live ticker.
 
 ## 13. Proactivity Settings
 
@@ -348,7 +357,7 @@ Suggested first technical step:
 
 Suggested first UI step:
 
-1. Replace the static-feeling "Next Steps" block in `website/public/auth/index.html` with a recommendation-driven component model while preserving manual setup visibility elsewhere on the page.
+1. Replace the static-feeling "Next Steps" block in `website/public/auth/index.html` with a recommendation-driven component model while preserving setup-blocker visibility elsewhere on the page.
 
 Suggested first analytics step:
 
@@ -358,10 +367,9 @@ Suggested first analytics step:
 
 These should be resolved before full implementation:
 
-1. Should "Not now" simply hide the current recommendation, or explicitly create a cooldown record?
-2. Should continuation suggestions be hardcoded by task type at first, or inferred from recent `request_summary` patterns?
-3. Which settings surface should own proactivity controls: Team Workspace, Settings, or both?
-4. Should approval-related recommendations be handled by the same recommendation layer or a distinct approval inbox pattern?
+1. Should continuation suggestions be hardcoded by task type at first, or inferred from recent `request_summary` patterns?
+2. Which settings surface should own proactivity controls: Team Workspace, Settings, or both?
+3. Should approval-related recommendations be handled by the same recommendation layer or a distinct approval inbox pattern?
 
 ## 19. Decision
 
