@@ -2253,9 +2253,22 @@ pub struct DiscordCallbackQuery {
 /// Query params for Discord bot installation callback
 #[derive(Debug, Deserialize)]
 pub struct DiscordBotCallbackQuery {
-    pub guild_id: String,
-    pub permissions: Option<String>,
+    pub code: String,
     pub state: String,
+    pub guild_id: Option<String>,
+    pub permissions: Option<String>,
+}
+
+/// Discord bot OAuth response (for bot installation)
+#[derive(Debug, Deserialize)]
+struct DiscordBotOAuthResponse {
+    pub guild: Option<DiscordGuild>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DiscordGuild {
+    pub id: String,
+    pub name: Option<String>,
 }
 
 /// Discord token response
@@ -2622,23 +2635,80 @@ pub async fn discord_bot_callback(
         }
     };
 
-    // Record the bot installation event for frontend complete task
+    // Get guild_id - either from params directly or by exchanging code
+    let guild_id = if let Some(gid) = params.guild_id.clone() {
+        gid
+    } else {
+        // Check if Discord OAuth is configured
+        let (client_id, client_secret, redirect_uri) = match (
+            &state.discord_client_id,
+            &state.discord_client_secret,
+            &state.discord_redirect_uri,
+        ) {
+            (Some(id), Some(secret), Some(_)) => {
+                let uri = format!("{}/auth/discord/bot-callback",
+                    std::env::var("DOWHIZ_API_URL").unwrap_or_else(|_| "https://api.production1.dowhiz.com/service".to_string()));
+                (id.clone(), secret.clone(), uri)
+            }
+            _ => {
+                return redirect_to("/auth/index.html?discord_bot=error&reason=not_configured");
+            }
+        };
+
+        // Exchange code for access token to get guild info
+        let client = reqwest::Client::new();
+        let token_res = client
+            .post("https://discord.com/api/oauth2/token")
+            .form(&[
+                ("client_id", client_id.as_str()),
+                ("client_secret", client_secret.as_str()),
+                ("code", params.code.as_str()),
+                ("grant_type", "authorization_code"),
+                ("redirect_uri", redirect_uri.as_str()),
+            ])
+            .send()
+            .await;
+
+        match token_res {
+            Ok(res) if res.status().is_success() => {
+                match res.json::<DiscordBotOAuthResponse>().await {
+                    Ok(data) => {
+                        data.guild.map(|g| g.id).unwrap_or_else(|| "unknown".to_string())
+                    }
+                    Err(e) => {
+                        error!("Failed to parse Discord response: {}", e);
+                        return redirect_to("/auth/index.html?discord_bot=error&reason=parse_error");
+                    }
+                }
+            }
+            Ok(res) => {
+                error!("Discord token exchange failed: {}", res.status());
+                return redirect_to("/auth/index.html?discord_bot=error&reason=token_exchange_failed");
+            }
+            Err(e) => {
+                error!("Discord token request failed: {}", e);
+                return redirect_to("/auth/index.html?discord_bot=error&reason=request_failed");
+            }
+        }
+    };
+
+    // Record the bot installation event
     track_auth_event(
         &state.account_store,
         "discord_bot_installed",
         Some(account.id),
         Some(account.auth_user_id),
-        Some(format!("discord_bot_installed:{}:{}", account.id, params.guild_id)),
+        Some(format!("discord_bot_installed:{}:{}", account.id, guild_id)),
         Some("/auth/discord/bot-callback"),
         serde_json::json!({
-            "guild_id": params.guild_id,
+            "guild_id": guild_id,
             "permissions": params.permissions,
         }),
     );
 
     info!(
         "Discord bot installed for account {} in guild {}",
-        account.id, params.guild_id
+        account.id, guild_id
     );
 
     redirect_to("/auth/index.html?discord_bot=success")
