@@ -122,6 +122,10 @@ fn resolve_account_for_run_task(
     task: &super::types::RunTaskTask,
     github_sender: Option<&str>,
 ) -> Option<Uuid> {
+    if let Some(account_id) = task.account_id {
+        return Some(account_id);
+    }
+
     if let Some(identifier) = task.reply_to.first() {
         if let Some(account_id) = lookup_account_by_channel(&task.channel, identifier) {
             return Some(account_id);
