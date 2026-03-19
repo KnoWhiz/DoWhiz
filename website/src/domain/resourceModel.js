@@ -285,33 +285,21 @@ function channelRequested(blueprint, needle) {
 }
 
 function applyRuntimeStateToResource(resource, capabilities, connected, identifiers) {
+  if (resource.category === RESOURCE_CATEGORY.BUILD_SYSTEM) {
+    return applyBuildSystemRuntimeState(resource, capabilities, connected, identifiers);
+  }
+
+  if (
+    resource.category === RESOURCE_CATEGORY.COORDINATION_LAYER ||
+    resource.category === RESOURCE_CATEGORY.APPROVAL_POLICY
+  ) {
+    return applyCoordinationRuntimeState(resource, capabilities, connected, identifiers);
+  }
+
   const next = {
     ...resource,
     provider: { ...resource.provider }
   };
-
-  if (resource.category === RESOURCE_CATEGORY.BUILD_SYSTEM) {
-    if (connected.github) {
-      next.provider = getProviderMetadata('github');
-      next.state = RESOURCE_PROVISIONING_STATE.CONNECTED;
-      next.note = buildConnectedNote('GitHub', findIdentifier(identifiers, 'github'));
-      next.manual_next_step = null;
-      return next;
-    }
-    if (capabilities.github) {
-      next.provider = getProviderMetadata('github');
-      next.state = RESOURCE_PROVISIONING_STATE.AVAILABLE_NOT_CONFIGURED;
-      next.note = 'GitHub runtime is available but not yet linked for this account.';
-      next.manual_next_step = 'Connect GitHub in account integrations to enable build workflows.';
-      return next;
-    }
-
-    next.provider = getProviderMetadata('github');
-    next.state = RESOURCE_PROVISIONING_STATE.PLANNED_MANUAL;
-    next.note = 'GitHub automation is not configured in this runtime environment.';
-    next.manual_next_step = 'Ask an admin to enable GitHub OAuth in this environment.';
-    return next;
-  }
 
   if (resource.category === RESOURCE_CATEGORY.FORMAL_DOCS) {
     if (connected.google_docs) {
@@ -363,45 +351,102 @@ function applyRuntimeStateToResource(resource, capabilities, connected, identifi
     return next;
   }
 
-  if (
-    resource.category === RESOURCE_CATEGORY.COORDINATION_LAYER ||
-    resource.category === RESOURCE_CATEGORY.APPROVAL_POLICY
-  ) {
-    const connectedProviderKey = connected.slack ? 'slack' : connected.discord ? 'discord' : null;
+  return next;
+}
 
-    if (connectedProviderKey) {
-      next.provider = getProviderMetadata(connectedProviderKey);
-      next.state = RESOURCE_PROVISIONING_STATE.CONNECTED;
-      next.note =
-        resource.category === RESOURCE_CATEGORY.APPROVAL_POLICY
-          ? `Approval policy is enforced in ${next.provider.display_name} with human review checkpoints.`
-          : buildConnectedNote(
-              next.provider.display_name,
-              findIdentifier(identifiers, connectedProviderKey)
-            );
-      next.manual_next_step = null;
-      return next;
-    }
+function applyBuildSystemRuntimeState(resource, capabilities, connected, identifiers) {
+  const next = {
+    ...resource,
+    provider: { ...resource.provider }
+  };
+  const selectedProviderKey = getSelectedProviderKey(resource, ['github', 'gitlab', 'bitbucket'], 'github');
+  const selectedProvider = getProviderMetadata(selectedProviderKey);
 
-    if (capabilities.slack || capabilities.discord) {
-      const preferredProvider = capabilities.slack ? 'slack' : 'discord';
-      next.provider = getProviderMetadata(preferredProvider);
-      next.state = RESOURCE_PROVISIONING_STATE.PLANNED_MANUAL;
-      next.note = `${next.provider.display_name} coordination runtime is available but not linked to this account.`;
-      next.manual_next_step =
-        resource.category === RESOURCE_CATEGORY.APPROVAL_POLICY
-          ? 'Link Slack or Discord and define explicit approval handoffs.'
-          : 'Link Slack or Discord to activate coordination loops.';
-      return next;
-    }
+  next.provider = selectedProvider;
 
-    next.state = RESOURCE_PROVISIONING_STATE.PLANNED_MANUAL;
-    next.note = 'Slack/Discord runtime is not configured in this environment.';
-    next.manual_next_step = 'Enable Slack or Discord integration before channel-native coordination.';
+  if (connected[selectedProviderKey]) {
+    next.state = RESOURCE_PROVISIONING_STATE.CONNECTED;
+    next.note = buildConnectedNote(selectedProvider.display_name, findIdentifier(identifiers, selectedProviderKey));
+    next.manual_next_step = null;
     return next;
   }
 
+  if (capabilities[selectedProviderKey]) {
+    next.state = RESOURCE_PROVISIONING_STATE.AVAILABLE_NOT_CONFIGURED;
+    next.note = `${selectedProvider.display_name} runtime is available but not yet linked for this account.`;
+    next.manual_next_step = `Connect ${selectedProvider.display_name} in account integrations to enable build workflows.`;
+    return next;
+  }
+
+  next.state = RESOURCE_PROVISIONING_STATE.PLANNED_MANUAL;
+
+  if (selectedProviderKey === 'github') {
+    next.note = 'GitHub automation is not configured in this runtime environment.';
+    next.manual_next_step = 'Ask an admin to enable GitHub OAuth in this environment.';
+    return next;
+  }
+
+  next.note = `${selectedProvider.display_name} remains the selected repository provider, but ${selectedProvider.display_name} automation is still phased/manual in this environment.`;
+  next.manual_next_step = `Continue with ${selectedProvider.display_name} manually for now, or switch the selected repo provider to GitHub if you want currently supported automation.`;
   return next;
+}
+
+function applyCoordinationRuntimeState(resource, capabilities, connected, identifiers) {
+  const next = {
+    ...resource,
+    provider: { ...resource.provider }
+  };
+  const selectedProviderKey = getSelectedProviderKey(resource, ['slack', 'discord'], 'slack');
+  const selectedProvider = getProviderMetadata(selectedProviderKey);
+
+  next.provider = selectedProvider;
+
+  if (connected[selectedProviderKey]) {
+    next.state = RESOURCE_PROVISIONING_STATE.CONNECTED;
+    next.note =
+      resource.category === RESOURCE_CATEGORY.APPROVAL_POLICY
+        ? `Approval policy is enforced in ${selectedProvider.display_name} with human review checkpoints.`
+        : buildConnectedNote(
+            selectedProvider.display_name,
+            findIdentifier(identifiers, selectedProviderKey)
+          );
+    next.manual_next_step = null;
+    return next;
+  }
+
+  if (capabilities[selectedProviderKey]) {
+    next.state = RESOURCE_PROVISIONING_STATE.AVAILABLE_NOT_CONFIGURED;
+    next.note =
+      resource.category === RESOURCE_CATEGORY.APPROVAL_POLICY
+        ? `${selectedProvider.display_name} approval routing is available but not linked to this account yet.`
+        : `${selectedProvider.display_name} coordination runtime is available but not linked to this account.`;
+    next.manual_next_step =
+      resource.category === RESOURCE_CATEGORY.APPROVAL_POLICY
+        ? `Link ${selectedProvider.display_name} and define explicit approval handoffs.`
+        : `Link ${selectedProvider.display_name} to activate coordination loops.`;
+    return next;
+  }
+
+  next.state = RESOURCE_PROVISIONING_STATE.PLANNED_MANUAL;
+  next.note =
+    resource.category === RESOURCE_CATEGORY.APPROVAL_POLICY
+      ? `${selectedProvider.display_name} remains the selected approval channel, but ${selectedProvider.display_name} runtime is not configured in this environment yet.`
+      : `${selectedProvider.display_name} remains the selected coordination channel, but ${selectedProvider.display_name} runtime is not configured in this environment yet.`;
+  next.manual_next_step =
+    resource.category === RESOURCE_CATEGORY.APPROVAL_POLICY
+      ? `Enable ${selectedProvider.display_name} integration before routing approvals through this channel.`
+      : `Enable ${selectedProvider.display_name} integration before channel-native coordination can go live.`;
+  return next;
+}
+
+function getSelectedProviderKey(resource, supportedProviderKeys, fallbackProviderKey) {
+  const providerKey = String(resource?.provider?.key || '').toLowerCase();
+
+  if (supportedProviderKeys.includes(providerKey)) {
+    return providerKey;
+  }
+
+  return fallbackProviderKey;
 }
 
 function findIdentifier(identifiers, ...types) {
