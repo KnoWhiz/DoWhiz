@@ -101,7 +101,7 @@ static NOTION_TRACKING_URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Pattern to extract actor name from "X mentioned you" style text (English)
 static MENTIONED_YOU_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"([A-Za-z][A-Za-z\s]+?)\s+(?:mentioned you|replied to|commented on)")
+    Regex::new(r"([A-Za-z][A-Za-z\s]+?)\s+(?:mentioned you|replied to|commented on|commented in)")
         .expect("valid regex")
 });
 
@@ -678,6 +678,22 @@ mod tests {
         let url = page_url.unwrap();
         assert!(url.contains("notion.so"), "Page URL should be a notion.so URL");
         assert!(url.contains("Dowhiz-testing"), "Page URL should contain page title");
+    }
+
+    #[test]
+    fn test_commented_in_pattern() {
+        // Notion uses "commented in" not "commented on"
+        let notification = detect_notion_email(
+            "notify@mail.notion.so",
+            "Oliver commented in Dowhiz_webhook test",
+            Some("Oliver commented in Dowhiz_webhook test\n\nHi there!"),
+            None,
+        );
+
+        assert!(notification.is_some());
+        let n = notification.unwrap();
+        assert_eq!(n.notification_type, NotionNotificationType::PageComment);
+        assert_eq!(n.actor_name, Some("Oliver".to_string()));
     }
 
     #[test]
