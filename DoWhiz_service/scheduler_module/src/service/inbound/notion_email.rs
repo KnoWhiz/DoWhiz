@@ -53,6 +53,48 @@ pub(crate) fn process_notion_email(
         notification.page_title,
     );
 
+    // Skip self-notifications to prevent feedback loops
+    // Check if the actor_name matches the employee's display name or any known alias
+    if let Some(actor) = &notification.actor_name {
+        let actor_lower = actor.to_lowercase();
+        let employee_id = &config.employee_profile.id;
+        let display_name = config.employee_profile.display_name.as_deref();
+
+        // Check against display_name (e.g., "Oliver")
+        if let Some(name) = display_name {
+            if actor_lower == name.to_lowercase() {
+                info!(
+                    "skipping self-notification from employee '{}' (display_name match)",
+                    actor
+                );
+                return Ok(());
+            }
+        }
+
+        // Check against common patterns: "DoWhiz at <name>", "Oliver the little bear", etc.
+        let employee_id_lower = employee_id.to_lowercase().replace('_', " ");
+        if actor_lower.contains(&employee_id_lower) {
+            info!(
+                "skipping self-notification from employee '{}' (employee_id match: {})",
+                actor, employee_id
+            );
+            return Ok(());
+        }
+
+        // Check against "DoWhiz at <display_name>" pattern
+        if let Some(name) = display_name {
+            if actor_lower.contains(&format!("dowhiz at {}", name.to_lowercase()))
+                || actor_lower.contains(&format!("dowhiz@{}", name.to_lowercase()))
+            {
+                info!(
+                    "skipping self-notification from employee '{}' (DoWhiz at pattern)",
+                    actor
+                );
+                return Ok(());
+            }
+        }
+    }
+
     // Determine the requester identity
     // For Notion emails, we use the actor who triggered the notification
     // or fall back to the original email sender
