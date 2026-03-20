@@ -100,9 +100,10 @@ impl MongoSchedulerStore {
     pub(crate) fn insert_task(&self, task: &ScheduledTask) -> Result<(), SchedulerError> {
         let task_json = serde_json::to_string(task)
             .map_err(|err| SchedulerError::Storage(format!("serialize task failed: {err}")))?;
-        self.tasks
+        let filter = self.task_filter(&task.id.to_string());
+        let result = self.tasks
             .update_one(
-                self.task_filter(&task.id.to_string()),
+                filter.clone(),
                 doc! {
                     "$set": {
                         "owner_scope": self.owner_scope_doc(),
@@ -122,15 +123,25 @@ impl MongoSchedulerStore {
                 UpdateOptions::builder().upsert(Some(true)).build(),
             )
             .map_err(mongo_err)?;
+
+        tracing::info!(
+            "insert_task: task_id={} owner_scope=({}, {}) upserted={} matched={}",
+            task.id,
+            self.owner_kind,
+            self.owner_id,
+            result.upserted_id.is_some(),
+            result.matched_count
+        );
         Ok(())
     }
 
     pub(crate) fn update_task(&self, task: &ScheduledTask) -> Result<(), SchedulerError> {
         let task_json = serde_json::to_string(task)
             .map_err(|err| SchedulerError::Storage(format!("serialize task failed: {err}")))?;
-        self.tasks
+        let filter = self.task_filter(&task.id.to_string());
+        let result = self.tasks
             .update_one(
-                self.task_filter(&task.id.to_string()),
+                filter.clone(),
                 doc! {
                     "$set": {
                         "enabled": task.enabled,
@@ -142,6 +153,25 @@ impl MongoSchedulerStore {
                 None,
             )
             .map_err(mongo_err)?;
+
+        // Log warning if no document was matched - this indicates a bug
+        if result.matched_count == 0 {
+            tracing::warn!(
+                "update_task matched 0 documents! task_id={} owner_scope=({}, {}) filter={:?}",
+                task.id,
+                self.owner_kind,
+                self.owner_id,
+                filter
+            );
+        } else {
+            tracing::debug!(
+                "update_task succeeded: task_id={} matched={} modified={} enabled={}",
+                task.id,
+                result.matched_count,
+                result.modified_count,
+                task.enabled
+            );
+        }
         Ok(())
     }
 
