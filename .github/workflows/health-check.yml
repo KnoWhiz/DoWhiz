@@ -124,7 +124,7 @@ jobs:
             if grep -qE "^MONGODB_URI=" "$ENV_FILE" 2>/dev/null; then
               echo "MongoDB URI: configured"
 
-              MONGODB_URI=$(grep -E "^MONGODB_URI=" "$ENV_FILE" | cut -d= -f2-)
+              MONGODB_URI=$(grep -E "^MONGODB_URI=" "$ENV_FILE" | cut -d= -f2- | tr -d '"')
               if command -v mongosh &>/dev/null; then
                 if mongosh "$MONGODB_URI" --eval "db.runCommand({ping:1})" --quiet 2>/dev/null | grep -q "ok"; then
                   echo "MongoDB Connection: OK"
