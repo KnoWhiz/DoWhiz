@@ -641,3 +641,133 @@ Key env names to verify first:
 - `RAW_PAYLOAD_STORAGE_BACKEND=azure` (recommended for gateway production flow)
 - `AZURE_STORAGE_CONTAINER_INGEST`
 - `AZURE_STORAGE_SAS_TOKEN` (or `AZURE_STORAGE_CONTAINER_SAS_URL`)
+
+## VM Debugging Guide
+
+### PM2 Service Management
+```bash
+# SSH shortcuts (configured in ~/.ssh/config)
+ssh dowhizprod1      # Production VM
+ssh dowhizstaging    # Staging VM
+
+# On VM - always source nvm first for pm2
+source ~/.nvm/nvm.sh
+
+# Service commands
+pm2 list                              # Check service status
+pm2 restart dw_worker                 # Restart worker only
+pm2 restart dw_gateway                # Restart gateway only
+pm2 restart all                       # Restart all services
+pm2 logs dw_worker --lines 50         # View recent worker logs
+pm2 logs dw_gateway --lines 50        # View recent gateway logs
+pm2 logs dw_worker --nostream         # View logs without streaming
+```
+
+### MongoDB Task Debugging
+```bash
+# On VM - source .env to get MONGODB_URI
+source ~/server/DoWhiz/DoWhiz_service/.env
+
+# Database names:
+# - Production: dowhiz_production_little_bear
+# - Staging: dowhiz_staging_boiled_egg (or dowhiz_staging_little_bear)
+
+# Count tasks for a user
+mongosh "$MONGODB_URI" --quiet --eval '
+db = db.getSiblingDB("dowhiz_production_little_bear");
+const userId = "USER_UUID_HERE";
+print("Tasks: " + db.tasks.countDocuments({ $or: [{ "owner_scope.id": userId }, { user_id: userId }] }));
+print("Index: " + db.task_index.countDocuments({ $or: [{ "owner_scope.id": userId }, { user_id: userId }] }));
+'
+
+# Delete all tasks for a user (to stop loops)
+mongosh "$MONGODB_URI" --quiet --eval '
+db = db.getSiblingDB("dowhiz_production_little_bear");
+const userId = "USER_UUID_HERE";
+db.tasks.deleteMany({ $or: [{ "owner_scope.id": userId }, { user_id: userId }] });
+db.task_index.deleteMany({ $or: [{ "owner_scope.id": userId }, { user_id: userId }] });
+'
+
+# View recent Notion tasks
+mongosh "$MONGODB_URI" --quiet --eval '
+db = db.getSiblingDB("dowhiz_production_little_bear");
+db.tasks.find({ "task.channel": "Notion" }).sort({ _id: -1 }).limit(5).forEach(printjson);
+'
+```
+
+### Azure Container Instances (ACI)
+```bash
+# Requires az login on VM or local machine
+az login --identity  # On VM with managed identity
+az login             # Interactive login
+
+# Resource group: rg-dowhiz-oliver-dev
+
+# List all ACI containers
+az container list --resource-group rg-dowhiz-oliver-dev -o table
+
+# Count containers
+az container list --resource-group rg-dowhiz-oliver-dev --query "length(@)"
+
+# Delete a specific container
+az container delete --resource-group rg-dowhiz-oliver-dev --name <container-name> --yes
+
+# Delete all containers (use with caution!)
+az container list --resource-group rg-dowhiz-oliver-dev --query "[].name" -o tsv | \
+  xargs -I {} az container delete --resource-group rg-dowhiz-oliver-dev --name {} --yes
+```
+
+### Notion Integration Debugging
+
+**Key files:**
+- `scheduler_module/src/service/inbound/notion_email.rs` - Email-based @mention detection
+- `scheduler_module/src/notion_email_detector.rs` - Email parsing and notification extraction
+- `scheduler_module/src/notion_store.rs` - NotionCredential storage (MongoDB)
+
+**Common issues:**
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| Duplicate replies in loop | Oliver's own comments trigger new notifications | Self-notification filter checks `actor_name` against employee name |
+| "no linked account" log | Email lookup uses `notify@mail.notion.so` | Use `account_id` from NotionCredential directly |
+| Notion token not found | Workspace not linked or wrong workspace_id | Check NotionCredential in MongoDB by workspace_id |
+| 2FA triggered | Account not properly linked | Ensure NotionCredential.account_id is populated |
+
+**Check Notion credentials in MongoDB:**
+```bash
+mongosh "$MONGODB_URI" --quiet --eval '
+db = db.getSiblingDB("dowhiz_production_little_bear");
+db.notion_credentials.find().forEach(printjson);
+'
+```
+
+**Grep logs for Notion activity:**
+```bash
+# On VM
+pm2 logs dw_gateway --lines 200 --nostream | grep -i "notion\|actor\|workspace"
+pm2 logs dw_worker --lines 200 --nostream | grep -i "notion\|self-notification\|skipping"
+```
+
+### Common Debug Patterns
+
+**Task execution loop (any channel):**
+1. Check MongoDB for stuck/repeating tasks
+2. Delete tasks for affected user
+3. Restart worker to clear memory cache
+4. Check logs for root cause
+
+**Service Bus issues:**
+```bash
+# Check queue depth (requires Azure CLI)
+az servicebus queue show --resource-group <rg> --namespace-name <ns> --name <queue> \
+  --query "countDetails.activeMessageCount"
+```
+
+**Environment variable issues:**
+```bash
+# On VM - check if env var is set
+source ~/server/DoWhiz/DoWhiz_service/.env && echo $VAR_NAME
+
+# Check what's in .env
+grep "NOTION\|MONGODB" ~/server/DoWhiz/DoWhiz_service/.env
+```
