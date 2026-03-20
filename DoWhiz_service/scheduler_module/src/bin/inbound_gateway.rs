@@ -8,8 +8,6 @@ mod google_drive_webhook;
 mod google_workspace;
 #[path = "inbound_gateway/handlers.rs"]
 mod handlers;
-#[path = "inbound_gateway/notion_webhook.rs"]
-mod notion_webhook;
 #[path = "inbound_gateway/routes.rs"]
 mod routes;
 #[path = "inbound_gateway/state.rs"]
@@ -49,7 +47,6 @@ use handlers::{
     ingest_slack, ingest_sms, ingest_telegram, ingest_wechat, ingest_whatsapp,
     verify_wechat_webhook, verify_whatsapp_webhook,
 };
-use notion_webhook::handle_notion_webhook;
 use routes::normalize_routes;
 use state::{build_address_map, GatewayConfig, GatewayState};
 
@@ -222,7 +219,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "/webhooks/google-drive-changes",
             post(handle_google_drive_webhook),
         )
-        .route("/webhook/notion", post(handle_notion_webhook))
         .route("/api/workspace/create-brief", post(create_workspace_brief))
         .route("/api/workspace/create-90-day-plan", post(create_90_day_plan))
         .with_state(state)
