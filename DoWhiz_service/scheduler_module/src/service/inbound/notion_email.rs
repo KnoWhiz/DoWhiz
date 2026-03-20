@@ -41,9 +41,9 @@ pub(crate) fn process_notion_email(
     config: &ServiceConfig,
     user_store: &UserStore,
     index_store: &IndexStore,
-    account_store: &AccountStore,
+    _account_store: &AccountStore,
     email_payload: &PostmarkInbound,
-    raw_payload: &[u8],
+    _raw_payload: &[u8],
     notification: &NotionEmailNotification,
 ) -> Result<(), BoxError> {
     info!(
@@ -102,70 +102,141 @@ pub(crate) fn process_notion_email(
         .map(|v| v.trim().to_string());
     let thread_state = bump_thread_state(&thread_state_path, &thread_key, message_id.clone())?;
 
-    // Try to get Notion OAuth token
+    // Try to get Notion OAuth token and account_id
     // Priority: 1) env var, 2) workspace_id (from tracking URL), 3) workspace_name fuzzy, 4) any credential
-    let access_token = std::env::var("NOTION_API_TOKEN").ok().or_else(|| {
-        match NotionStore::new() {
-            Ok(store) => {
-                // Try #1: workspace_id from decoded tracking URL (most reliable)
-                if let Some(ref ws_id) = notification.workspace_id {
-                    info!("Looking for Notion token by workspace_id: {}", ws_id);
-                    match store.get_credential_by_workspace(ws_id) {
-                        Ok(credential) => {
-                            info!(
-                                "Found Notion token by workspace_id '{}' (workspace_name: {:?})",
-                                ws_id,
-                                credential.workspace_name
-                            );
-                            return Some(credential.access_token);
+    let (access_token, credential_account_id): (Option<String>, Option<uuid::Uuid>) =
+        if let Ok(token) = std::env::var("NOTION_API_TOKEN") {
+            (Some(token), None)
+        } else {
+            match NotionStore::new() {
+                Ok(store) => {
+                    // Try #1: workspace_id from decoded tracking URL (most reliable)
+                    if let Some(ref ws_id) = notification.workspace_id {
+                        info!("Looking for Notion token by workspace_id: {}", ws_id);
+                        match store.get_credential_by_workspace(ws_id) {
+                            Ok(credential) => {
+                                info!(
+                                    "Found Notion token by workspace_id '{}' (workspace_name: {:?}, account_id: {})",
+                                    ws_id,
+                                    credential.workspace_name,
+                                    credential.account_id
+                                );
+                                (Some(credential.access_token), Some(credential.account_id))
+                            }
+                            Err(e) => {
+                                warn!("No Notion token found for workspace_id '{}': {}", ws_id, e);
+                                // Try next method
+                                if let Some(ref ws_name) = notification.workspace_name {
+                                    info!("Looking for Notion token by workspace_name: {}", ws_name);
+                                    match store.get_credential_by_workspace_name_fuzzy(ws_name) {
+                                        Ok(credential) => {
+                                            info!(
+                                                "Found Notion token for workspace_name '{}' (matched: {:?}, account_id: {})",
+                                                ws_name,
+                                                credential.workspace_name,
+                                                credential.account_id
+                                            );
+                                            (Some(credential.access_token), Some(credential.account_id))
+                                        }
+                                        Err(e2) => {
+                                            warn!("No Notion token found for workspace_name '{}': {}", ws_name, e2);
+                                            // Try fallback
+                                            match store.get_any_credential() {
+                                                Ok(credential) => {
+                                                    info!(
+                                                        "Found fallback Notion token (workspace_id: {}, workspace_name: {:?}, account_id: {})",
+                                                        credential.workspace_id,
+                                                        credential.workspace_name,
+                                                        credential.account_id
+                                                    );
+                                                    (Some(credential.access_token), Some(credential.account_id))
+                                                }
+                                                Err(e3) => {
+                                                    warn!("No fallback Notion credential available: {}", e3);
+                                                    (None, None)
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // No workspace_name, try fallback directly
+                                    match store.get_any_credential() {
+                                        Ok(credential) => {
+                                            info!(
+                                                "Found fallback Notion token (workspace_id: {}, workspace_name: {:?}, account_id: {})",
+                                                credential.workspace_id,
+                                                credential.workspace_name,
+                                                credential.account_id
+                                            );
+                                            (Some(credential.access_token), Some(credential.account_id))
+                                        }
+                                        Err(e2) => {
+                                            warn!("No fallback Notion credential available: {}", e2);
+                                            (None, None)
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        Err(e) => {
-                            warn!("No Notion token found for workspace_id '{}': {}", ws_id, e);
+                    } else if let Some(ref ws_name) = notification.workspace_name {
+                        // Try #2: workspace_name fuzzy match (from direct URLs)
+                        info!("Looking for Notion token by workspace_name: {}", ws_name);
+                        match store.get_credential_by_workspace_name_fuzzy(ws_name) {
+                            Ok(credential) => {
+                                info!(
+                                    "Found Notion token for workspace_name '{}' (matched: {:?}, account_id: {})",
+                                    ws_name,
+                                    credential.workspace_name,
+                                    credential.account_id
+                                );
+                                (Some(credential.access_token), Some(credential.account_id))
+                            }
+                            Err(e) => {
+                                warn!("No Notion token found for workspace_name '{}': {}", ws_name, e);
+                                // Try fallback
+                                match store.get_any_credential() {
+                                    Ok(credential) => {
+                                        info!(
+                                            "Found fallback Notion token (workspace_id: {}, workspace_name: {:?}, account_id: {})",
+                                            credential.workspace_id,
+                                            credential.workspace_name,
+                                            credential.account_id
+                                        );
+                                        (Some(credential.access_token), Some(credential.account_id))
+                                    }
+                                    Err(e2) => {
+                                        warn!("No fallback Notion credential available: {}", e2);
+                                        (None, None)
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Fallback #3: try to get any available credential
+                        info!("Trying fallback: looking for any available Notion credential");
+                        match store.get_any_credential() {
+                            Ok(credential) => {
+                                info!(
+                                    "Found fallback Notion token (workspace_id: {}, workspace_name: {:?}, account_id: {})",
+                                    credential.workspace_id,
+                                    credential.workspace_name,
+                                    credential.account_id
+                                );
+                                (Some(credential.access_token), Some(credential.account_id))
+                            }
+                            Err(e) => {
+                                warn!("No fallback Notion credential available: {}", e);
+                                (None, None)
+                            }
                         }
                     }
                 }
-
-                // Try #2: workspace_name fuzzy match (from direct URLs)
-                if let Some(ref ws_name) = notification.workspace_name {
-                    info!("Looking for Notion token by workspace_name: {}", ws_name);
-                    match store.get_credential_by_workspace_name_fuzzy(ws_name) {
-                        Ok(credential) => {
-                            info!(
-                                "Found Notion token for workspace_name '{}' (matched: {:?})",
-                                ws_name,
-                                credential.workspace_name
-                            );
-                            return Some(credential.access_token);
-                        }
-                        Err(e) => {
-                            warn!("No Notion token found for workspace_name '{}': {}", ws_name, e);
-                        }
-                    }
-                }
-
-                // Fallback #3: try to get any available credential
-                // This handles cases where neither workspace_id nor workspace_name is available
-                info!("Trying fallback: looking for any available Notion credential");
-                match store.get_any_credential() {
-                    Ok(credential) => {
-                        info!(
-                            "Found fallback Notion token (workspace_id: {}, workspace_name: {:?})",
-                            credential.workspace_id,
-                            credential.workspace_name
-                        );
-                        return Some(credential.access_token);
-                    }
-                    Err(e) => {
-                        warn!("No fallback Notion credential available: {}", e);
-                    }
+                Err(e) => {
+                    warn!("Failed to connect to NotionStore: {}", e);
+                    (None, None)
                 }
             }
-            Err(e) => {
-                warn!("Failed to connect to NotionStore: {}", e);
-            }
-        }
-        None
-    });
+        };
 
     // Write Notion context to workspace
     write_notion_email_context(
@@ -193,6 +264,7 @@ pub(crate) fn process_notion_email(
     };
 
     // Create RunTask with Notion channel
+    // Use account_id from NotionCredential if available
     let run_task = RunTaskTask {
         workspace_dir: workspace.clone(),
         input_email_dir: std::path::PathBuf::from("incoming_email"),
@@ -213,7 +285,7 @@ pub(crate) fn process_notion_email(
         employee_id: Some(config.employee_profile.id.clone()),
         requester_identifier_type: Some("notion_actor".to_string()),
         requester_identifier: Some(notion_identifier.clone()),
-        account_id: None,
+        account_id: credential_account_id,
     };
 
     let run_task_for_account = run_task.clone();
@@ -224,70 +296,61 @@ pub(crate) fn process_notion_email(
     index_store.sync_user_tasks(&user.user_id, scheduler.tasks())?;
 
     info!(
-        "scheduled Notion task user_id={} task_id={} workspace={} thread_epoch={} channel=Notion",
+        "scheduled Notion task user_id={} task_id={} workspace={} thread_epoch={} channel=Notion account_id={:?}",
         user.user_id,
         task_id,
         workspace.display(),
-        thread_state.epoch
+        thread_state.epoch,
+        credential_account_id
     );
 
-    // Check for linked account (use the email address for account lookup)
-    match account_store.get_account_by_identifier("email", &user_email) {
-        Ok(Some(account)) => {
-            info!(
-                "found linked account {} for Notion user {}",
-                account.id, user_email
+    // Enqueue to account-level storage if we have an account_id from the Notion credential
+    if let Some(account_id) = credential_account_id {
+        info!(
+            "found linked account {} from Notion credential",
+            account_id
+        );
+        let account_tasks_dir = config.users_root.join(account_id.to_string()).join("state");
+        if let Err(err) = std::fs::create_dir_all(&account_tasks_dir) {
+            warn!(
+                "failed to create account tasks dir for account {}: {}",
+                account_id, err
             );
-            let account_tasks_dir = config.users_root.join(account.id.to_string()).join("state");
-            if let Err(err) = std::fs::create_dir_all(&account_tasks_dir) {
-                warn!(
-                    "failed to create account tasks dir for account {}: {}",
-                    account.id, err
-                );
-            } else {
-                let account_tasks_db_path = account_tasks_dir.join("tasks.db");
-                match Scheduler::load(&account_tasks_db_path, ModuleExecutor::default()) {
-                    Ok(mut account_scheduler) => {
-                        match account_scheduler.add_one_shot_in_with_id(
-                            task_id,
-                            Duration::from_secs(0),
-                            TaskKind::RunTask(run_task_for_account),
-                        ) {
-                            Ok(()) => {
-                                info!(
-                                    "also enqueued task to account-level storage account={} task_id={} channel=Notion",
-                                    account.id, task_id
-                                );
-                            }
-                            Err(err) => {
-                                warn!(
-                                    "failed to add task to account scheduler for account {}: {}",
-                                    account.id, err
-                                );
-                            }
+        } else {
+            let account_tasks_db_path = account_tasks_dir.join("tasks.db");
+            match Scheduler::load(&account_tasks_db_path, ModuleExecutor::default()) {
+                Ok(mut account_scheduler) => {
+                    match account_scheduler.add_one_shot_in_with_id(
+                        task_id,
+                        Duration::from_secs(0),
+                        TaskKind::RunTask(run_task_for_account),
+                    ) {
+                        Ok(()) => {
+                            info!(
+                                "also enqueued task to account-level storage account={} task_id={} channel=Notion",
+                                account_id, task_id
+                            );
+                        }
+                        Err(err) => {
+                            warn!(
+                                "failed to add task to account scheduler for account {}: {}",
+                                account_id, err
+                            );
                         }
                     }
-                    Err(err) => {
-                        warn!(
-                            "failed to load account scheduler for account {}: {}",
-                            account.id, err
-                        );
-                    }
+                }
+                Err(err) => {
+                    warn!(
+                        "failed to load account scheduler for account {}: {}",
+                        account_id, err
+                    );
                 }
             }
         }
-        Ok(None) => {
-            info!(
-                "no linked account for Notion email '{}', skipping account-level task",
-                user_email
-            );
-        }
-        Err(err) => {
-            warn!(
-                "failed to look up account for Notion email '{}': {}",
-                user_email, err
-            );
-        }
+    } else {
+        info!(
+            "no account_id from Notion credential, skipping account-level task"
+        );
     }
 
     Ok(())
