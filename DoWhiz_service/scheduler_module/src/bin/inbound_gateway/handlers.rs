@@ -730,6 +730,13 @@ fn build_queue_payload(channel: Channel, message: &InboundMessage) -> IngestionP
     if channel == Channel::Email {
         // Keep queue envelopes small; email attachment bytes are loaded from raw payload/blob.
         payload.attachments.clear();
+        // Strip html_body for Notion emails to avoid PayloadTooLarge errors.
+        // payload.text_body contains the actual comment plaintext needed for processing.
+        // Note: this removes full comment history from payload.
+        let sender_lower = message.sender.to_lowercase();
+        if sender_lower.contains("notion.so") || sender_lower.contains("notion.com") {
+            payload.html_body = None;
+        }
     }
     payload
 }
@@ -1604,6 +1611,92 @@ mod tests {
         let json = r#"{"founder_name": "Test", "founder_email": "test@example.com"}"#;
         let result: Result<Create90DayPlanRequest, _> = serde_json::from_str(json);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_queue_payload_strips_html_body_for_notion_so_email() {
+        let message = InboundMessage {
+            channel: Channel::Email,
+            sender: "notify@mail.notion.so".to_string(),
+            sender_name: Some("Notion".to_string()),
+            recipient: "oliver@dowhiz.com".to_string(),
+            subject: Some("Someone mentioned you".to_string()),
+            text_body: Some("Comment text".to_string()),
+            html_body: Some("<html>Large HTML content...</html>".to_string()),
+            thread_id: "thread-1".to_string(),
+            message_id: Some("m1".to_string()),
+            attachments: vec![],
+            reply_to: vec![],
+            raw_payload: br#"{}"#.to_vec(),
+            metadata: ChannelMetadata::default(),
+        };
+        let payload = build_queue_payload(Channel::Email, &message);
+        assert!(payload.html_body.is_none());
+        assert!(payload.text_body.is_some());
+    }
+
+    #[test]
+    fn build_queue_payload_strips_html_body_for_notion_com_email() {
+        let message = InboundMessage {
+            channel: Channel::Email,
+            sender: "notifications@notion.com".to_string(),
+            sender_name: Some("Notion".to_string()),
+            recipient: "oliver@dowhiz.com".to_string(),
+            subject: Some("Someone mentioned you".to_string()),
+            text_body: Some("Comment text".to_string()),
+            html_body: Some("<html>Large HTML content...</html>".to_string()),
+            thread_id: "thread-1".to_string(),
+            message_id: Some("m1".to_string()),
+            attachments: vec![],
+            reply_to: vec![],
+            raw_payload: br#"{}"#.to_vec(),
+            metadata: ChannelMetadata::default(),
+        };
+        let payload = build_queue_payload(Channel::Email, &message);
+        assert!(payload.html_body.is_none());
+        assert!(payload.text_body.is_some());
+    }
+
+    #[test]
+    fn build_queue_payload_keeps_html_body_for_non_notion_email() {
+        let message = InboundMessage {
+            channel: Channel::Email,
+            sender: "user@gmail.com".to_string(),
+            sender_name: Some("User".to_string()),
+            recipient: "oliver@dowhiz.com".to_string(),
+            subject: Some("Hello".to_string()),
+            text_body: Some("Text content".to_string()),
+            html_body: Some("<html>HTML content</html>".to_string()),
+            thread_id: "thread-1".to_string(),
+            message_id: Some("m1".to_string()),
+            attachments: vec![],
+            reply_to: vec![],
+            raw_payload: br#"{}"#.to_vec(),
+            metadata: ChannelMetadata::default(),
+        };
+        let payload = build_queue_payload(Channel::Email, &message);
+        assert!(payload.html_body.is_some());
+    }
+
+    #[test]
+    fn build_queue_payload_keeps_html_body_for_non_email_channel() {
+        let message = InboundMessage {
+            channel: Channel::Slack,
+            sender: "notify@mail.notion.so".to_string(),
+            sender_name: None,
+            recipient: "C456".to_string(),
+            subject: None,
+            text_body: Some("hello".to_string()),
+            html_body: Some("<html>content</html>".to_string()),
+            thread_id: "thread-1".to_string(),
+            message_id: Some("m1".to_string()),
+            attachments: vec![],
+            reply_to: vec![],
+            raw_payload: br#"{}"#.to_vec(),
+            metadata: ChannelMetadata::default(),
+        };
+        let payload = build_queue_payload(Channel::Slack, &message);
+        assert!(payload.html_body.is_some());
     }
 }
 
