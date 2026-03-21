@@ -93,6 +93,16 @@ pub(crate) fn process_notion_email(
                 return Ok(());
             }
         }
+
+        // Check against Notion integration names (e.g., "dowhiz_staging", "dowhiz_production")
+        // These are the display names shown in Notion when the integration posts a comment
+        if actor_lower.starts_with("dowhiz_") || actor_lower == "dowhiz" {
+            info!(
+                "skipping self-notification from Notion integration '{}' (integration name match)",
+                actor
+            );
+            return Ok(());
+        }
     }
 
     // Determine the requester identity
