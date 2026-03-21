@@ -1311,6 +1311,63 @@
           grid-template-columns: 1fr;
         }
       }
+
+      .achievement-badges {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+        flex-wrap: wrap;
+      }
+
+      .achievement-badge {
+        display: none;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .achievement-badge.earned {
+        display: inline-flex;
+      }
+
+      .achievement-badge .badge-icon {
+        font-size: 0.85rem;
+      }
+
+      .badge-bronze {
+        background: linear-gradient(135deg, #cd7f32, #8b4513);
+        color: #fff;
+        box-shadow: 0 2px 4px rgba(205, 127, 50, 0.3);
+      }
+
+      .badge-silver {
+        background: linear-gradient(135deg, #c0c0c0, #808080);
+        color: #fff;
+        box-shadow: 0 2px 4px rgba(192, 192, 192, 0.3);
+      }
+
+      .badge-gold {
+        background: linear-gradient(135deg, #ffd700, #b8860b);
+        color: #1a1a1a;
+        box-shadow: 0 2px 4px rgba(255, 215, 0, 0.3);
+      }
+
+      .badge-platinum {
+        background: linear-gradient(135deg, #e5e4e2, #a0a0a0);
+        color: #1a1a1a;
+        box-shadow: 0 2px 4px rgba(229, 228, 226, 0.4);
+      }
+
+      .badge-diamond {
+        background: linear-gradient(135deg, #b9f2ff, #4dd0e1, #00bcd4);
+        color: #1a1a1a;
+        box-shadow: 0 2px 4px rgba(77, 208, 225, 0.4);
+      }
     </style>
     <script src="/theme.js"></script>
   </head>
@@ -1478,6 +1535,44 @@
                     <button id="info-btn" class="auth-btn auth-btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;">
                       Add Employee Hours
                     </button>
+                  </div>
+                  <div id="achievement-badges" class="achievement-badges">
+                    <span class="achievement-badge badge-bronze" data-threshold="1">
+                      <svg class="badge-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="9" r="6"/>
+                        <path d="M9 15l-3 7 6-3 6 3-3-7"/>
+                      </svg>
+                      Bronze
+                    </span>
+                    <span class="achievement-badge badge-silver" data-threshold="10">
+                      <svg class="badge-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="9" r="6"/>
+                        <path d="M9 15l-3 7 6-3 6 3-3-7"/>
+                      </svg>
+                      Silver
+                    </span>
+                    <span class="achievement-badge badge-gold" data-threshold="100">
+                      <svg class="badge-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="9" r="6"/>
+                        <path d="M9 15l-3 7 6-3 6 3-3-7"/>
+                      </svg>
+                      Gold
+                    </span>
+                    <span class="achievement-badge badge-platinum" data-threshold="500">
+                      <svg class="badge-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="12,2 15,9 22,9 17,14 19,21 12,17 5,21 7,14 2,9 9,9"/>
+                      </svg>
+                      Platinum
+                    </span>
+                    <span class="achievement-badge badge-diamond" data-threshold="1000">
+                      <svg class="badge-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="12,2 22,9 12,22 2,9"/>
+                        <line x1="2" y1="9" x2="22" y2="9"/>
+                        <line x1="12" y1="2" x2="7" y2="9"/>
+                        <line x1="12" y1="2" x2="17" y2="9"/>
+                      </svg>
+                      Diamond
+                    </span>
                   </div>
                   <p class="dashboard-overview-copy">Your personal identity and billing controls.</p>
                   <div class="account-grid">
@@ -3763,12 +3858,8 @@
         const usedEl = document.getElementById('used-hours');
         const balanceEl = document.getElementById('balance-hours');
 
-        purchasedEl.textContent = '...';
-        usedEl.textContent = '...';
-        balanceEl.textContent = '...';
         modal.classList.remove('hidden');
 
-        // Fetch balance from billing endpoint
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
           trackAnalyticsEvent(
@@ -3779,24 +3870,12 @@
             },
             { accessToken: session.access_token }
           );
-          try {
-            const res = await fetch(`${DOWHIZ_API_URL}/billing/balance`, {
-              headers: { 'Authorization': `Bearer ${session.access_token}` }
-            });
-            if (res.ok) {
-              const data = await res.json();
-              purchasedEl.textContent = (data.purchased_hours || 0).toFixed(2);
-              usedEl.textContent = (data.used_hours || 0).toFixed(2);
-              balanceEl.textContent = (data.balance_hours || 0).toFixed(2);
-              // Color the balance based on value
-              balanceEl.style.color = data.balance_hours > 0 ? 'var(--accent, #38bdf8)' : '#ef4444';
-            } else {
-              purchasedEl.textContent = '0.00';
-              usedEl.textContent = '0.00';
-              balanceEl.textContent = '0.00';
-            }
-          } catch (err) {
-            console.error('Failed to fetch balance:', err);
+          if (cachedBalance) {
+            purchasedEl.textContent = (cachedBalance.purchased_hours || 0).toFixed(2);
+            usedEl.textContent = (cachedBalance.used_hours || 0).toFixed(2);
+            balanceEl.textContent = (cachedBalance.balance_hours || 0).toFixed(2);
+            balanceEl.style.color = cachedBalance.balance_hours > 0 ? 'var(--accent, #38bdf8)' : '#ef4444';
+          } else {
             purchasedEl.textContent = '0.00';
             usedEl.textContent = '0.00';
             balanceEl.textContent = '0.00';
@@ -4064,7 +4143,8 @@
           loadIdentifiers(session.access_token),
           loadMemo(session.access_token),
           loadTasks(session.access_token),
-          loadWorkspaceRecommendationPreferences(session.access_token)
+          loadWorkspaceRecommendationPreferences(session.access_token),
+          loadBalanceAndBadges(session.access_token)
         ]);
         await loadWorkspaceRecommendation(session.access_token);
 
@@ -4281,6 +4361,8 @@
         if (paymentResult === 'success') {
           statusEl.textContent = 'Payment successful! Your hours have been added.';
           statusEl.style.color = '#22c55e';
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) await loadBalanceAndBadges(session.access_token);
         } else if (paymentResult === 'cancelled') {
           statusEl.textContent = 'Payment was cancelled.';
           statusEl.style.color = '#ef4444';
@@ -4667,6 +4749,33 @@
       // Task polling state
       let taskPollingInterval = null;
       let cachedIdentifiers = [];
+      let cachedBalance = null;
+
+      async function loadBalanceAndBadges(accessToken) {
+        try {
+          const res = await fetch(`${DOWHIZ_API_URL}/billing/balance`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+          if (res.ok) {
+            cachedBalance = await res.json();
+            updateAchievementBadges(cachedBalance.used_hours || 0);
+          }
+        } catch (err) {
+          console.error('Failed to load balance:', err);
+        }
+      }
+
+      function updateAchievementBadges(usedHours) {
+        const badges = document.querySelectorAll('.achievement-badge');
+        badges.forEach(badge => {
+          const threshold = parseFloat(badge.dataset.threshold);
+          if (usedHours >= threshold) {
+            badge.classList.add('earned');
+          } else {
+            badge.classList.remove('earned');
+          }
+        });
+      }
 
       // Load tasks from the unified account-level storage
       async function loadTasks(accessToken, options = {}) {
