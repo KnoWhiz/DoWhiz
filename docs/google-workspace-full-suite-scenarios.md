@@ -672,37 +672,43 @@ https://www.googleapis.com/auth/contacts
 
 ## 9. Design Decisions (Based on Feedback)
 
-### Resolved (Memory-Based Approach)
+### Core Principle: Ask Once, Remember Forever
 
-| Question | Decision |
+All preferences are learned through natural conversation on first encounter, then saved to `memo.md`.
+
+### Resolved Decisions
+
+| Question | Approach |
 |----------|----------|
-| Timezone | Ask once on first calendar action, save to memo.md, never ask again |
-| Team resolution | Learn from first mention ("engineering team" = emails), save to Contacts section |
-| Default duration | Observe patterns, suggest default, save preference |
-| Error tone | Ask once on first error, save preference |
+| Timezone | Ask on first calendar action → save → never ask again |
+| Team resolution | Ask for members on first mention → save to Contacts → auto-resolve later |
+| Default duration | Observe patterns → suggest default → save preference |
+| Error tone | Ask on first error → save preference |
+| **Task reminders** | Ask on first task: "要我在到期前提醒你吗？提前多久？" → save |
+| **Chart generation** | Default: Local Python (matplotlib) - no Google config needed. If user says "用 Sheet 自带的图表", switch and remember |
+| **Workflow failure** | Ask on first failure: "部分步骤已完成，要保留还是全部撤销？" → save preference |
+| Drive upload limits | 100MB simple upload; larger files auto-switch to resumable with notification |
 
-### Still Need Input
+### First-Time Interaction Examples
 
-1. **Task reminders**: Should agent proactively remind users of upcoming tasks?
-   - Option A: Yes, remind 1 day before due date (save preference in memo.md)
-   - Option B: Only when user asks
-   - Option C: Ask user preference on first task creation
+**Task Reminder**:
+> Agent: "任务 'Review proposal' 已创建，到期日是周五。要我在到期前提醒你吗？比如提前一天？"
+> User: "好的，提前一天提醒"
+> Agent: "收到！以后所有任务我都会提前一天提醒你。"
+> [Saved: Task reminder preference: 1 day before]
 
-2. **Drive upload limits**: Max file size for uploads?
-   - Suggested: 100MB (Google Drive API limit for simple upload)
-   - For larger files: "This file is 250MB. I'll need to use resumable upload which takes longer. Proceed?"
+**Chart Style**:
+> Agent: "我会用数据生成趋势图。默认我会本地生成图表（更灵活），或者你想用 Google Sheets 内置图表？"
+> User: "本地生成就行"
+> Agent: "好的，以后报告图表我都本地生成。"
+> [Saved: Chart generation: local (matplotlib)]
 
-3. **Chart generation for reports**: How should we generate charts from Sheet data?
-   - Option A: Use Google Sheets embedded charts (export as image)
-   - Option B: Generate locally with Python/matplotlib (more control)
-   - Option C: Use Google Charts API
-   - **Recommendation**: Option A for simplicity, fallback to B for custom styling
-
-4. **Cross-service workflow atomicity**: If one step fails mid-workflow, should we:
-   - Option A: Rollback all completed steps
-   - Option B: Keep completed steps, report what failed
-   - Option C: Ask user what to do
-   - **Recommendation**: Option B (keep progress, let user decide)
+**Workflow Failure**:
+> Agent: "报告文档已创建并共享，但预约会议时遇到问题（日历权限不足）。
+> 文档和共享已完成，需要保留吗？还是我把这些都撤销，你解决权限问题后重新开始？"
+> User: "保留已完成的"
+> Agent: "明白，以后遇到类似情况我会保留已完成的步骤。日历权限问题解决后告诉我，我帮你补约会议。"
+> [Saved: Workflow failure handling: keep completed steps]
 
 ---
 
