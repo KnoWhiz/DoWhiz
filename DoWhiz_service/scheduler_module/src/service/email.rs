@@ -56,7 +56,22 @@ pub fn process_inbound_payload(
     }
 
     let sender = payload.from.as_deref().unwrap_or("").trim();
-    if is_blacklisted_sender(sender, &config.employee_directory.service_addresses) {
+
+    // Check if this looks like a forwarded Notion notification email
+    // These have subjects like "mentioned you", "commented in", etc.
+    // We need to allow these through even if the sender is blacklisted
+    let subject = payload.subject.as_deref().unwrap_or("");
+    let subject_lower = subject.to_lowercase();
+    let looks_like_notion_forward = subject_lower.contains("mentioned you")
+        || subject_lower.contains("replied to")
+        || subject_lower.contains("commented in")
+        || subject_lower.contains("commented on")
+        || subject_lower.contains("发表了评论")
+        || subject_lower.contains("中提及了您");
+
+    if !looks_like_notion_forward
+        && is_blacklisted_sender(sender, &config.employee_directory.service_addresses)
+    {
         info!("skipping blacklisted sender: {}", sender);
         return Ok(());
     }
