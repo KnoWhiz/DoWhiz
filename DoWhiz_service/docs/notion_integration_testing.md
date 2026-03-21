@@ -7,18 +7,6 @@ This guide covers testing the Notion OAuth + API integration, which allows the d
 - Read page content via Notion API
 - Reply to comments via Notion API
 
-## Architecture
-
-```
-┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
-│ Notion Workspace    │     │ DoWhiz Gateway      │     │ DoWhiz Worker       │
-│                     │     │                     │     │                     │
-│ @mention in comment │────>│ Email notification  │────>│ RunTask with        │
-│                     │     │ from Notion         │     │ .notion_env token   │
-│                     │<────│                     │<────│                     │
-│ API comment reply   │     │ notion_api_cli      │     │ Codex/Claude agent  │
-└─────────────────────┘     └─────────────────────┘     └─────────────────────┘
-```
 
 ## Prerequisites
 
@@ -127,24 +115,21 @@ cd DoWhiz_service
 cargo test --release -p scheduler_module notion -- --nocapture
 ```
 
-### Step 5: Integration Test (with Services)
+### Step 5: Integration Test on Production (with Services)
 
-1. **Start the gateway:**
-   ```bash
-   ./scripts/run_gateway_local.sh
-   ```
+1. **Complete Notion OAuth:**
+   - Go to `dowhiz.com/auth/index.html`
+   - Click "Connect Notion" in the integrations section
+   - Authorize the Notion integration and grant access to your workspace/pages
+   - Verify the token is stored: check gateway logs for "Notion OAuth callback" success
 
-2. **Start the worker:**
-   ```bash
-   ./scripts/run_employee.sh boiled_egg 9001 --skip-hook --skip-ngrok
-   ```
+2. **Create a test @mention:**
+   - Share the Notion page with `oliver@dowhiz.com` (so the bot receives email notifications)
+   - Go to the shared Notion page
+   - Create a comment mentioning the bot (@Oliver or @Proto-DoWhiz)
+   - Notion will send an email notification to `oliver@dowhiz.com`
 
-3. **Create a test @mention:**
-   - Go to a Notion page shared with the integration
-   - Create a comment mentioning the bot
-   - Notion will send an email to the configured address
-
-4. **Verify:**
+3. **Verify:**
    - Check gateway logs for email processing
    - Check worker logs for task execution
    - Check Notion page for API reply

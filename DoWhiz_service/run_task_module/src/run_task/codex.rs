@@ -390,6 +390,10 @@ pub(super) fn run_codex_task(
         // (Codex sandbox may not pass environment variables to tools it spawns)
         if let Some(ref token) = request.google_access_token {
             cmd.arg("-e").arg(format!("GOOGLE_ACCESS_TOKEN={}", token));
+            // Also set GOOGLE_WORKSPACE_CLI_TOKEN for gws CLI (third-party @googleworkspace/cli)
+            // This takes highest priority and avoids OAuth refresh_token issues (invalid_rapt)
+            cmd.arg("-e")
+                .arg(format!("GOOGLE_WORKSPACE_CLI_TOKEN={}", token));
             // Also write to file as backup since Codex sandbox may strip env vars
             let token_file = host_workspace_dir.join(".google_access_token");
             if let Err(e) = std::fs::write(&token_file, token) {
@@ -523,6 +527,9 @@ pub(super) fn run_codex_task(
         // (Codex sandbox may not pass environment variables to tools it spawns)
         if let Some(ref token) = request.google_access_token {
             cmd.env("GOOGLE_ACCESS_TOKEN", token);
+            // Also set GOOGLE_WORKSPACE_CLI_TOKEN for gws CLI (third-party @googleworkspace/cli)
+            // This takes highest priority and avoids OAuth refresh_token issues (invalid_rapt)
+            cmd.env("GOOGLE_WORKSPACE_CLI_TOKEN", token);
             // Also write to file as backup since Codex sandbox may strip env vars
             let token_file = request.workspace_dir.join(".google_access_token");
             if let Err(e) = fs::write(&token_file, token) {
@@ -822,8 +829,11 @@ fn run_codex_task_azure_aci(
     for (key, value) in github_auth.env_overrides {
         env_overrides.push((key, value));
     }
-    if let Some(token) = request.google_access_token {
+    if let Some(ref token) = request.google_access_token {
         env_overrides.push(("GOOGLE_ACCESS_TOKEN".to_string(), token.to_string()));
+        // Also set GOOGLE_WORKSPACE_CLI_TOKEN for gws CLI (third-party @googleworkspace/cli)
+        // This takes highest priority and avoids OAuth refresh_token issues (invalid_rapt)
+        env_overrides.push(("GOOGLE_WORKSPACE_CLI_TOKEN".to_string(), token.to_string()));
     }
     if let Some(container_path) = askpass_container_path {
         env_overrides.push((
