@@ -1368,6 +1368,38 @@
         color: #1a1a1a;
         box-shadow: 0 2px 4px rgba(77, 208, 225, 0.4);
       }
+
+      .achievement-badge {
+        position: relative;
+        cursor: pointer;
+      }
+
+      .achievement-badge::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 0.4rem 0.6rem;
+        background: rgba(0, 0, 0, 0.85);
+        color: #fff;
+        font-size: 0.7rem;
+        font-weight: 400;
+        text-transform: none;
+        letter-spacing: normal;
+        white-space: nowrap;
+        border-radius: 4px;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.2s, visibility 0.2s;
+        margin-bottom: 6px;
+        pointer-events: none;
+      }
+
+      .achievement-badge:hover::after {
+        opacity: 1;
+        visibility: visible;
+      }
     </style>
     <script src="/theme.js"></script>
   </head>
@@ -1537,34 +1569,34 @@
                     </button>
                   </div>
                   <div id="achievement-badges" class="achievement-badges">
-                    <span class="achievement-badge badge-bronze" data-threshold="1">
+                    <span class="achievement-badge badge-bronze" data-threshold="1" data-tooltip="Bronze: Awarded for 1+ employee hours">
                       <svg class="badge-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="9" r="6"/>
                         <path d="M9 15l-3 7 6-3 6 3-3-7"/>
                       </svg>
                       Bronze
                     </span>
-                    <span class="achievement-badge badge-silver" data-threshold="10">
+                    <span class="achievement-badge badge-silver" data-threshold="10" data-tooltip="Silver: Awarded for 10+ employee hours">
                       <svg class="badge-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="9" r="6"/>
                         <path d="M9 15l-3 7 6-3 6 3-3-7"/>
                       </svg>
                       Silver
                     </span>
-                    <span class="achievement-badge badge-gold" data-threshold="100">
+                    <span class="achievement-badge badge-gold" data-threshold="100" data-tooltip="Gold: Awarded for 100+ employee hours">
                       <svg class="badge-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="9" r="6"/>
                         <path d="M9 15l-3 7 6-3 6 3-3-7"/>
                       </svg>
                       Gold
                     </span>
-                    <span class="achievement-badge badge-platinum" data-threshold="500">
+                    <span class="achievement-badge badge-platinum" data-threshold="500" data-tooltip="Platinum: Awarded for 500+ employee hours">
                       <svg class="badge-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                         <polygon points="12,2 15,9 22,9 17,14 19,21 12,17 5,21 7,14 2,9 9,9"/>
                       </svg>
                       Platinum
                     </span>
-                    <span class="achievement-badge badge-diamond" data-threshold="1000">
+                    <span class="achievement-badge badge-diamond" data-threshold="1000" data-tooltip="Diamond: Awarded for 1000+ employee hours">
                       <svg class="badge-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                         <polygon points="12,2 22,9 12,22 2,9"/>
                         <line x1="2" y1="9" x2="22" y2="9"/>
@@ -4767,14 +4799,15 @@
 
       function updateAchievementBadges(usedHours) {
         const badges = document.querySelectorAll('.achievement-badge');
+        let highestEarned = null;
         badges.forEach(badge => {
-          const threshold = parseFloat(badge.dataset.threshold);
-          if (usedHours >= threshold) {
-            badge.classList.add('earned');
-          } else {
-            badge.classList.remove('earned');
-          }
+          if (usedHours >= parseFloat(badge.dataset.threshold)) highestEarned = badge;
         });
+        const current = document.querySelector('.achievement-badge.earned');
+        if (current !== highestEarned) {
+          if (current) current.classList.remove('earned');
+          if (highestEarned) highestEarned.classList.add('earned');
+        }
       }
 
       // Load tasks from the unified account-level storage
