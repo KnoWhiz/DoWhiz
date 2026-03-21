@@ -748,6 +748,34 @@ pm2 logs dw_gateway --lines 200 --nostream | grep -i "notion\|actor\|workspace"
 pm2 logs dw_worker --lines 200 --nostream | grep -i "notion\|self-notification\|skipping"
 ```
 
+### Notion Feature Expansion (Planned)
+
+**Current `notion_api_cli` capabilities:**
+- `read-page` - Read page content
+- `get-comments` - Get comments on a page
+- `reply` - Reply to comment thread
+- `create-comment` - Create new comment
+- `search` - Search pages
+
+**Missing features (to be implemented):**
+
+| Feature | Notion API | CLI Command | Purpose |
+|---------|-----------|-------------|---------|
+| Create page | `POST /v1/pages` | `create-page --parent-id <id> --title "Title"` | Create new Notion page |
+| Append blocks | `PATCH /v1/blocks/{id}/children` | `append-block --page-id <id> --content "Text"` | Add content to page |
+| Update page | `PATCH /v1/pages/{id}` | `update-page --page-id <id> --property "Key=Value"` | Modify page properties |
+| Get database | `GET /v1/databases/{id}` | `get-database --database-id <id>` | Get database schema |
+| Query database | `POST /v1/databases/{id}/query` | `query-database --database-id <id>` | List database items (Task Board) |
+
+**Implementation files:**
+- `scheduler_module/src/notion_browser/api_client.rs` - Add new API methods
+- `scheduler_module/src/bin/notion_api_cli.rs` - Add new CLI commands
+- `scheduler_module/src/notion_browser/models.rs` - Add `BlockInput`, `NotionDatabase` structs
+
+**Estimated work:** ~650 lines of code across 3 phases.
+
+See full plan: `/root/.claude/plans/giggly-discovering-cosmos.md`
+
 ### Common Debug Patterns
 
 **Task execution loop (any channel):**
