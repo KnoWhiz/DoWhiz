@@ -439,12 +439,21 @@ pub const GOOGLE_DOCS_SCOPES: &[&str] = &[
     "https://www.googleapis.com/auth/drive.file",
 ];
 
-/// Full scopes for Google Workspace operations (Docs, Sheets, Slides, Drive).
+/// Full scopes for Google Workspace operations.
+/// Includes: Docs, Drive, Sheets, Slides, Calendar, Tasks, Contacts (read-only).
 pub const GOOGLE_WORKSPACE_SCOPES: &[&str] = &[
+    // Core document operations
     "https://www.googleapis.com/auth/documents",
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/presentations",
+    // Calendar and scheduling
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/calendar.events",
+    // Tasks
+    "https://www.googleapis.com/auth/tasks",
+    // Contacts (read-only for looking up email addresses)
+    "https://www.googleapis.com/auth/contacts.readonly",
 ];
 
 #[cfg(test)]
