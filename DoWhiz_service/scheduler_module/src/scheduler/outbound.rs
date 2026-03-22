@@ -811,6 +811,13 @@ pub fn notion_reply_queue_dir(employee_id: &str) -> PathBuf {
 pub(crate) fn execute_notion_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
     dotenvy::dotenv().ok();
 
+    // Check if agent already posted via Notion API (marker file written by agent)
+    let workspace_dir = task.html_path.parent().unwrap_or(Path::new("."));
+    if workspace_dir.join(".notion_api_replied").exists() {
+        info!("skipping notion send - agent already posted via API");
+        return Ok(());
+    }
+
     // Read text content from reply_message.txt (html_path field reused)
     let text_body = if task.html_path.exists() {
         fs::read_to_string(&task.html_path).unwrap_or_default()
