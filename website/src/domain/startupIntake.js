@@ -13,8 +13,43 @@ const DEFAULT_RESOURCE_SELECTIONS = {
   external_execution: 'email'
 };
 
-const INITIAL_ASSISTANT_PROMPT =
-  'Describe the project you want to start. I will ask follow-ups and build the JSON blueprint draft with you.';
+export const DEFAULT_INTAKE_CONVERSATION_COPY = {
+  intakeAriaLabel: 'Conversational workspace intake',
+  composerPlaceholder:
+    'Share project details or answer the latest question... (Enter to send, Cmd+Enter for new line)',
+  initialAssistantPrompt:
+    'Describe the project you want to start. I will ask follow-ups and build the JSON blueprint draft with you.',
+  send: 'Send',
+  thinking: 'Thinking...',
+  conversationApiErrorTitle: 'Conversation API error',
+  currentJsonDraftTitle: 'Current JSON Draft',
+  currentJsonDraftDescription: 'The model updates this draft every turn.',
+  readyToCreateBlueprint: 'Ready to create blueprint.',
+  missingFieldsStatus: (missingFields) =>
+    `Missing fields: ${missingFields.length ? missingFields.join(', ') : 'waiting for more details'}`,
+  currentJsonDraftSummary: 'Current JSON draft',
+  blueprintValidationIssuesTitle: 'Blueprint validation issues',
+  createBlueprintNow: 'Create blueprint now',
+  restartChat: 'Restart chat',
+  blueprintSavedTitle: 'Blueprint saved',
+  blueprintSavedDescription:
+    'Your team blueprint is saved locally and now appears in your dashboard workspace section.',
+  viewBlueprintJson: 'View blueprint JSON',
+  describeProjectLabel: 'Describe your project',
+  signedInSuccessOpeningWorkspace: 'Signed in successfully. Opening Team Workspace now.',
+  intakeJsonUpdatedFallback: 'I updated the intake JSON. Please continue with any missing details.',
+  modelUnavailable: 'I could not reach the startup intake model right now. Please try again in a few seconds.',
+  needMoreContext: 'I need more intake context first. Please describe your project to continue.',
+  missingFieldsBeforeBlueprint: (missingFields) =>
+    `I still need a few fields before creating the blueprint:\n- ${
+      missingFields.length ? missingFields.join('\n- ') : 'additional details'
+    }`,
+  validationFailed: (errors) => `Validation still failed:\n- ${errors.join('\n- ')}`,
+  blueprintSavedDirect: 'Blueprint saved. Opening Team Workspace now.',
+  blueprintSavedPopup: 'Blueprint saved. Sign in or sign up in the popup. It will close automatically after success.',
+  blueprintSavedRedirect:
+    'Blueprint saved. Popup was blocked, so redirecting to sign in. After auth, Team Workspace will reflect your blueprint.'
+};
 
 export function createConversationMessage(role, text) {
   return {
@@ -24,8 +59,10 @@ export function createConversationMessage(role, text) {
   };
 }
 
-export function createInitialConversationMessages() {
-  return [createConversationMessage('assistant', INITIAL_ASSISTANT_PROMPT)];
+export function createInitialConversationMessages(
+  initialPrompt = DEFAULT_INTAKE_CONVERSATION_COPY.initialAssistantPrompt
+) {
+  return [createConversationMessage('assistant', initialPrompt)];
 }
 
 function normalizeLaunchMode(mode) {

@@ -4,6 +4,7 @@ import { supabase } from '../../app/supabaseClient';
 import {
   AUTH_POPUP_SUCCESS_EVENT,
   DASHBOARD_PATH,
+  DEFAULT_INTAKE_CONVERSATION_COPY,
   createConversationMessage,
   createInitialConversationMessages,
   mapDraftToIntake,
@@ -13,14 +14,12 @@ import {
 } from '../../domain/startupIntake';
 import { createValidatedWorkspaceBlueprintFromIntake, saveWorkspaceBlueprint } from '../../domain/workspaceBlueprint';
 
-const DEFAULT_COMPOSER_PLACEHOLDER =
-  'Share project details or answer the latest question... (Enter to send, Cmd+Enter for new line)';
-
 function StartupIntakeConversation({
   variant = 'page',
   className = '',
-  intakeAriaLabel = 'Conversational workspace intake',
-  composerPlaceholder = DEFAULT_COMPOSER_PLACEHOLDER,
+  intakeAriaLabel,
+  composerPlaceholder,
+  copy = DEFAULT_INTAKE_CONVERSATION_COPY,
   showDraftDetails = true,
   showBlueprintDetails = true,
   footerActions = null,
@@ -29,7 +28,24 @@ function StartupIntakeConversation({
   onSubmitted,
   onHandoff
 }) {
-  const [messages, setMessages] = useState(() => createInitialConversationMessages());
+  const resolvedCopy = useMemo(
+    () => ({
+      ...DEFAULT_INTAKE_CONVERSATION_COPY,
+      ...copy,
+      intakeAriaLabel:
+        intakeAriaLabel ??
+        copy?.intakeAriaLabel ??
+        DEFAULT_INTAKE_CONVERSATION_COPY.intakeAriaLabel,
+      composerPlaceholder:
+        composerPlaceholder ??
+        copy?.composerPlaceholder ??
+        DEFAULT_INTAKE_CONVERSATION_COPY.composerPlaceholder
+    }),
+    [composerPlaceholder, copy, intakeAriaLabel]
+  );
+  const [messages, setMessages] = useState(() =>
+    createInitialConversationMessages(resolvedCopy.initialAssistantPrompt)
+  );
   const [inputValue, setInputValue] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [errors, setErrors] = useState([]);
@@ -98,7 +114,7 @@ function StartupIntakeConversation({
       setHasActiveSession(true);
       setMessages((prev) => [
         ...prev,
-        createConversationMessage('assistant', 'Signed in successfully. Opening Team Workspace now.')
+        createConversationMessage('assistant', resolvedCopy.signedInSuccessOpeningWorkspace)
       ]);
       window.location.assign(DASHBOARD_PATH);
     };
@@ -107,14 +123,14 @@ function StartupIntakeConversation({
     return () => {
       window.removeEventListener('message', handlePopupAuthSuccess);
     };
-  }, []);
+  }, [resolvedCopy.signedInSuccessOpeningWorkspace]);
 
   const addAssistantMessage = (text) => {
     setMessages((prev) => [...prev, createConversationMessage('assistant', text)]);
   };
 
   const resetConversation = () => {
-    setMessages(createInitialConversationMessages());
+    setMessages(createInitialConversationMessages(resolvedCopy.initialAssistantPrompt));
     setInputValue('');
     setIsSending(false);
     setErrors([]);
@@ -161,13 +177,13 @@ function StartupIntakeConversation({
       if (assistantMessage) {
         addAssistantMessage(assistantMessage);
       } else {
-        addAssistantMessage('I updated the intake JSON. Please continue with any missing details.');
+        addAssistantMessage(resolvedCopy.intakeJsonUpdatedFallback);
       }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Startup intake conversation request failed.';
       setRequestError(message);
-      addAssistantMessage('I could not reach the startup intake model right now. Please try again in a few seconds.');
+      addAssistantMessage(resolvedCopy.modelUnavailable);
     } finally {
       setIsSending(false);
     }
@@ -205,16 +221,12 @@ function StartupIntakeConversation({
     });
 
     if (!intakeDraft) {
-      addAssistantMessage('I need more intake context first. Please describe your project to continue.');
+      addAssistantMessage(resolvedCopy.needMoreContext);
       return;
     }
 
     if (!readyForBlueprint) {
-      addAssistantMessage(
-        `I still need a few fields before creating the blueprint:\n- ${
-          missingFields.length ? missingFields.join('\n- ') : 'additional details'
-        }`
-      );
+      addAssistantMessage(resolvedCopy.missingFieldsBeforeBlueprint(missingFields));
       return;
     }
 
@@ -224,7 +236,7 @@ function StartupIntakeConversation({
     if (!result.is_valid) {
       setErrors(result.errors);
       setBlueprint(null);
-      addAssistantMessage(`Validation still failed:\n- ${result.errors.join('\n- ')}`);
+      addAssistantMessage(resolvedCopy.validationFailed(result.errors));
       return;
     }
 
@@ -233,7 +245,7 @@ function StartupIntakeConversation({
     setErrors([]);
 
     if (hasActiveSession) {
-      addAssistantMessage('Blueprint saved. Opening Team Workspace now.');
+      addAssistantMessage(resolvedCopy.blueprintSavedDirect);
       emitHandoff('direct');
       window.location.assign(DASHBOARD_PATH);
       return;
@@ -242,16 +254,12 @@ function StartupIntakeConversation({
     const authPopup = openDashboardAuthPopup();
     if (authPopup) {
       authPopup.focus();
-      addAssistantMessage(
-        'Blueprint saved. Sign in or sign up in the popup. It will close automatically after success.'
-      );
+      addAssistantMessage(resolvedCopy.blueprintSavedPopup);
       emitHandoff('popup');
       return;
     }
 
-    addAssistantMessage(
-      'Blueprint saved. Popup was blocked, so redirecting to sign in. After auth, Team Workspace will reflect your blueprint.'
-    );
+    addAssistantMessage(resolvedCopy.blueprintSavedRedirect);
     emitHandoff('redirect');
     window.location.assign(DASHBOARD_PATH);
   };
@@ -267,7 +275,7 @@ function StartupIntakeConversation({
 
   return (
     <div className={rootClassName}>
-      <section className={`${sectionClassName} intake-chat-shell`} aria-label={intakeAriaLabel}>
+      <section className={`${sectionClassName} intake-chat-shell`} aria-label={resolvedCopy.intakeAriaLabel}>
         <div className="intake-chat-feed" ref={chatFeedRef} aria-live="polite" aria-relevant="additions text">
           {messages.map((message) => (
             <article key={message.id} className={`intake-chat-message is-${message.role}`}>
@@ -278,7 +286,7 @@ function StartupIntakeConversation({
 
         <form className="intake-chat-composer" onSubmit={handleTextSubmit}>
           <label className="visually-hidden" htmlFor={inputId}>
-            Describe your project
+            {resolvedCopy.describeProjectLabel}
           </label>
           <textarea
             id={inputId}
@@ -286,7 +294,7 @@ function StartupIntakeConversation({
             value={inputValue}
             onChange={(event) => setInputValue(event.target.value)}
             onKeyDown={handleChatComposerKeyDown}
-            placeholder={composerPlaceholder}
+            placeholder={resolvedCopy.composerPlaceholder}
             disabled={isSending}
             rows={2}
             aria-busy={isSending}
@@ -297,14 +305,14 @@ function StartupIntakeConversation({
             disabled={isSending}
             aria-disabled={isSending}
           >
-            {isSending ? 'Thinking...' : 'Send'}
+            {isSending ? resolvedCopy.thinking : resolvedCopy.send}
           </button>
         </form>
       </section>
 
       {requestError ? (
         <section className={`${sectionClassName} intake-errors`} aria-live="polite" role="status">
-          <h2>Conversation API error</h2>
+          <h2>{resolvedCopy.conversationApiErrorTitle}</h2>
           <ul>
             <li>{requestError}</li>
           </ul>
@@ -315,18 +323,18 @@ function StartupIntakeConversation({
         <section className={`${sectionClassName} intake-conversation-state`} aria-live="polite">
           {showDraftDetails ? (
             <>
-              <h2>Current JSON Draft</h2>
-              <p>The model updates this draft every turn.</p>
+              <h2>{resolvedCopy.currentJsonDraftTitle}</h2>
+              <p>{resolvedCopy.currentJsonDraftDescription}</p>
             </>
           ) : null}
           <p className="workspace-inline-note">
             {readyForBlueprint
-              ? 'Ready to create blueprint.'
-              : `Missing fields: ${missingFields.length ? missingFields.join(', ') : 'waiting for more details'}`}
+              ? resolvedCopy.readyToCreateBlueprint
+              : resolvedCopy.missingFieldsStatus(missingFields)}
           </p>
           {showDraftDetails ? (
             <details className="intake-advanced intake-conversation-details">
-              <summary>Current JSON draft</summary>
+              <summary>{resolvedCopy.currentJsonDraftSummary}</summary>
               <pre className="intake-conversation-summary">{summarizeToolSelections(intakeDraft)}</pre>
               <pre className="intake-blueprint-preview">{draftJson}</pre>
             </details>
@@ -336,7 +344,7 @@ function StartupIntakeConversation({
 
       {errors.length ? (
         <section className={`${sectionClassName} intake-errors`} aria-live="polite" role="status">
-          <h2>Blueprint validation issues</h2>
+          <h2>{resolvedCopy.blueprintValidationIssuesTitle}</h2>
           <ul>
             {errors.map((error) => (
               <li key={error}>{error}</li>
@@ -347,20 +355,20 @@ function StartupIntakeConversation({
 
       <div className="route-actions intake-conversation-actions">
         <button type="button" className="btn btn-primary" onClick={handleCreateBlueprint}>
-          Create blueprint now
+          {resolvedCopy.createBlueprintNow}
         </button>
         <button type="button" className="btn btn-secondary" onClick={resetConversation}>
-          Restart chat
+          {resolvedCopy.restartChat}
         </button>
         {footerActions}
       </div>
 
       {showBlueprintDetails && blueprint ? (
         <section className={`${sectionClassName} intake-conversation-state`} aria-live="polite">
-          <h2>Blueprint saved</h2>
-          <p>Your team blueprint is saved locally and now appears in your dashboard workspace section.</p>
+          <h2>{resolvedCopy.blueprintSavedTitle}</h2>
+          <p>{resolvedCopy.blueprintSavedDescription}</p>
           <details className="intake-advanced">
-            <summary>View blueprint JSON</summary>
+            <summary>{resolvedCopy.viewBlueprintJson}</summary>
             <pre className="intake-blueprint-preview">{blueprintJson}</pre>
           </details>
         </section>
