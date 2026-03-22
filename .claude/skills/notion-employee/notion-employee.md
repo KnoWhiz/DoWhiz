@@ -86,13 +86,16 @@ notion_api_cli reply $DISCUSSION_ID "Your reply message"
 
 # Append a block to the page
 notion_api_cli append-block $PAGE_ID "Content to add"
+
+# IMPORTANT: Mark that we've already replied via API (prevents double-send)
+touch .notion_api_replied
 ```
 
-### Step 6: Write reply_message.txt
+### Step 6: Write reply_message.txt (Internal Logging Only)
 
-Write your response summary for the task system:
+Write a brief internal note for the task system. This is **NOT** sent to Notion - it's only for DoWhiz logs:
 ```bash
-echo "I've replied to the Notion comment with: [summary of your reply]" > reply_message.txt
+echo "Done" > reply_message.txt
 ```
 
 ## notion_api_cli Reference

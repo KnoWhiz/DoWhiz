@@ -811,6 +811,13 @@ pub fn notion_reply_queue_dir(employee_id: &str) -> PathBuf {
 pub(crate) fn execute_notion_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
     dotenvy::dotenv().ok();
 
+    // Check if agent already posted via Notion API (marker file written by agent)
+    let workspace_dir = task.html_path.parent().unwrap_or(Path::new("."));
+    if workspace_dir.join(".notion_api_replied").exists() {
+        info!("skipping notion send - agent already posted via API");
+        return Ok(());
+    }
+
     // Read text content from reply_message.txt (html_path field reused)
     let text_body = if task.html_path.exists() {
         fs::read_to_string(&task.html_path).unwrap_or_default()
@@ -951,5 +958,49 @@ mod tests {
         assert!(!is_discord_unknown_message_reference(
             r#"{"message":"Unknown Channel","code":10003}"#
         ));
+    }
+
+    #[test]
+    fn notion_send_skips_when_api_replied_marker_exists() {
+        use super::{execute_notion_send, SendReplyTask};
+        use crate::channel::Channel;
+        use std::fs;
+
+        // Create a temp workspace directory
+        let temp_dir = std::env::temp_dir().join(format!("notion_test_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        // Create reply_message.txt with some content
+        let html_path = temp_dir.join("reply_message.txt");
+        fs::write(&html_path, "This should NOT be sent to Notion").unwrap();
+
+        // Create the .notion_api_replied marker file
+        let marker_path = temp_dir.join(".notion_api_replied");
+        fs::write(&marker_path, "").unwrap();
+
+        // Create a minimal SendReplyTask
+        let task = SendReplyTask {
+            channel: Channel::Notion,
+            subject: "Test".to_string(),
+            html_path,
+            attachments_dir: temp_dir.clone(),
+            from: None,
+            to: vec![],
+            cc: vec![],
+            bcc: vec![],
+            in_reply_to: None,
+            references: None,
+            archive_root: None,
+            thread_epoch: None,
+            thread_state_path: None,
+            employee_id: None,
+        };
+
+        // execute_notion_send should return Ok(()) without doing anything
+        let result = execute_notion_send(&task);
+        assert!(result.is_ok(), "expected Ok but got {:?}", result);
+
+        // Clean up
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }

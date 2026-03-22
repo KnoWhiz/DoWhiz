@@ -456,7 +456,7 @@ fn write_notion_email_context(
     // Write the notification context as JSON
     let context_path = workspace.join(".notion_email_context.json");
     let instructions = if has_api_access {
-        "This task was triggered by a Notion @mention. Use notion_api_cli to read the page and post replies. The NOTION_API_TOKEN is available in .notion_env - source it before using the CLI."
+        "This task was triggered by a Notion @mention. Use notion_api_cli to read the page and post replies. The NOTION_API_TOKEN is available in .notion_env - source it before using the CLI. IMPORTANT: After posting via notion_api_cli, run 'touch .notion_api_replied' to prevent duplicate sends."
     } else {
         "This task was triggered by a Notion @mention. No API token is available - the workspace owner needs to authorize the bot at dowhiz.com/settings. For now, inform the user that you cannot access the page."
     };
