@@ -959,4 +959,48 @@ mod tests {
             r#"{"message":"Unknown Channel","code":10003}"#
         ));
     }
+
+    #[test]
+    fn notion_send_skips_when_api_replied_marker_exists() {
+        use super::{execute_notion_send, SendReplyTask};
+        use crate::channel::Channel;
+        use std::fs;
+
+        // Create a temp workspace directory
+        let temp_dir = std::env::temp_dir().join(format!("notion_test_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        // Create reply_message.txt with some content
+        let html_path = temp_dir.join("reply_message.txt");
+        fs::write(&html_path, "This should NOT be sent to Notion").unwrap();
+
+        // Create the .notion_api_replied marker file
+        let marker_path = temp_dir.join(".notion_api_replied");
+        fs::write(&marker_path, "").unwrap();
+
+        // Create a minimal SendReplyTask
+        let task = SendReplyTask {
+            channel: Channel::Notion,
+            subject: "Test".to_string(),
+            html_path,
+            attachments_dir: temp_dir.clone(),
+            from: None,
+            to: vec![],
+            cc: vec![],
+            bcc: vec![],
+            in_reply_to: None,
+            references: None,
+            archive_root: None,
+            thread_epoch: None,
+            thread_state_path: None,
+            employee_id: None,
+        };
+
+        // execute_notion_send should return Ok(()) without doing anything
+        let result = execute_notion_send(&task);
+        assert!(result.is_ok(), "expected Ok but got {:?}", result);
+
+        // Clean up
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
 }
