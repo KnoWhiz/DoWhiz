@@ -376,6 +376,15 @@ The agent has access to:
 
 ```rust
 pub(crate) fn execute_notion_send(task: &SendReplyTask) -> Result<(), SchedulerError> {
+    let workspace_dir = task.html_path.parent().unwrap_or(Path::new("."));
+
+    // Check if agent already posted via Notion API (marker file written by agent)
+    if workspace_dir.join(".notion_api_replied").exists() {
+        // .notion_api_replied is the marker file indicating Codex already responded via Notion CLI
+        info!("skipping notion send - agent already posted via API");
+        return Ok(());
+    }
+
     // Read reply text from workspace
     let text_body = fs::read_to_string(&task.html_path)?;
 
@@ -402,6 +411,7 @@ pub(crate) fn execute_notion_send(task: &SendReplyTask) -> Result<(), SchedulerE
 
 - Codex decides to use `notion_api_cli` to send its response directly via Notion API, or not - separate logic
   - ***This is a potential bug, as Codex can invoke the notion_api, and write to task.html_path, causing two responses: one from direct API from Codex within ACI, and one from OutboundAdapter***
+  - **Fix:** Agent (prompted in `employee_notion.md`) executes `touch .notion_api_replied` after posting via `notion_api_cli`. The `execute_notion_send` function checks for this marker file and returns `Ok(())` early, preventing the duplicate send.
 
 ---
 
