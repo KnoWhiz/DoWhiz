@@ -663,6 +663,33 @@ pm2 logs dw_gateway --lines 50        # View recent gateway logs
 pm2 logs dw_worker --nostream         # View logs without streaming
 ```
 
+**⚠️ PM2 Environment Variable Caching (Critical)**
+
+PM2 caches environment variables when a process is started. `pm2 restart --update-env` only updates from the current shell environment, **NOT** from the .env file. This can cause "ghost" env vars that persist even after being removed from .env.
+
+**Symptoms:**
+- Feature flag still active despite being removed from .env
+- App behavior doesn't match .env configuration
+- `pm2 env <id>` shows variables not in .env file
+
+**Solution - Force clean restart:**
+```bash
+# Instead of: pm2 restart dw_worker --update-env
+# Use:
+pm2 delete dw_worker
+pm2 start ~/server/DoWhiz/DoWhiz_service/target/release/rust_service \
+  --name dw_worker \
+  --cwd ~/server/DoWhiz/DoWhiz_service \
+  -- --host 0.0.0.0 --port 9001
+```
+
+**When to use:**
+- After removing env vars from .env or GitHub Secrets
+- When debugging unexpected behavior related to environment variables
+- If `pm2 env <id> | grep VAR_NAME` shows a variable that shouldn't exist
+
+**Example (2026-03-22):** `NOTION_EMAIL_DETECTION_DISABLED=1` was cached in PM2 from a previous debug session, causing Notion emails to be processed as regular emails instead of using the Notion API integration. Fixed by `pm2 delete` + `pm2 start`.
+
 ### MongoDB Task Debugging
 ```bash
 # On VM - source .env to get MONGODB_URI
