@@ -12,6 +12,7 @@ mod wechat;
 mod whatsapp;
 
 pub(super) use bluebubbles::process_bluebubbles_event;
+pub(crate) use discord::hydrate_discord_attachments;
 pub(crate) use discord::persist_discord_ingest_context;
 pub(super) use discord::process_discord_inbound_message;
 pub(crate) use discord_context::build_discord_message_text_with_quote;

@@ -29,5 +29,5 @@ pub use workspace::{bootstrap_startup_workspace_files, copy_dir_recursive};
 pub(crate) use config::{default_employee_config_path, resolve_telegram_bot_token};
 pub(crate) use inbound::{
     build_discord_message_text_with_quote, build_discord_router_context,
-    hydrate_discord_context_files, persist_discord_ingest_context,
+    hydrate_discord_attachments, hydrate_discord_context_files, persist_discord_ingest_context,
 };

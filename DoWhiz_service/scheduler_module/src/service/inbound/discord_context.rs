@@ -63,12 +63,19 @@ pub(crate) struct DiscordRouterContext {
 }
 
 #[derive(Debug, Deserialize)]
+struct DiscordRawPayloadAttachmentLite {
+    filename: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct DiscordRawPayloadLite {
     id: u64,
     author_id: u64,
     author_name: String,
     content: String,
     timestamp: String,
+    #[serde(default)]
+    attachments: Vec<DiscordRawPayloadAttachmentLite>,
     #[serde(default)]
     referenced_message_id: Option<u64>,
     #[serde(default)]
@@ -118,7 +125,7 @@ pub(crate) fn build_discord_router_context(
     raw_payload: &[u8],
 ) -> Result<DiscordRouterContext, BoxError> {
     let snapshot = collect_discord_context_snapshot(config, message, raw_payload)?;
-    let user_text = message.text_body.clone().unwrap_or_default();
+    let user_text = render_user_message_text(message);
     let message_text = format_message_with_quote(&user_text, snapshot.quoted_message.as_ref());
 
     let inline_thread = render_entries(&snapshot.inline_thread_messages);
@@ -160,7 +167,7 @@ pub(crate) fn build_discord_message_text_with_quote(
     message: &crate::channel::InboundMessage,
     raw_payload: &[u8],
 ) -> String {
-    let user_text = message.text_body.clone().unwrap_or_default();
+    let user_text = render_user_message_text(message);
     let quoted = build_quoted_message_from_raw(raw_payload);
     format_message_with_quote(&user_text, quoted.as_ref())
 }
@@ -465,6 +472,25 @@ fn format_message_with_quote(user_text: &str, quoted: Option<&DiscordMessageEntr
     }
 }
 
+fn render_user_message_text(message: &crate::channel::InboundMessage) -> String {
+    let user_text = message.text_body.clone().unwrap_or_default();
+    if !user_text.trim().is_empty() {
+        return user_text;
+    }
+
+    let attachment_names = message
+        .attachments
+        .iter()
+        .map(|attachment| attachment.name.trim())
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>();
+    if attachment_names.is_empty() {
+        return user_text;
+    }
+
+    format!("[attachments: {}]", attachment_names.join(", "))
+}
+
 fn resolve_discord_bot_token(config: &ServiceConfig) -> Option<String> {
     let emp_upper = config.employee_profile.id.to_uppercase().replace('-', "_");
     let emp_token_key = format!("{}_DISCORD_BOT_TOKEN", emp_upper);
@@ -636,7 +662,11 @@ fn build_current_message_entry(
             author_name: payload.author_name,
             content: payload.content,
             reference_message_id: payload.referenced_message_id.map(|id| id.to_string()),
-            attachments: Vec::new(),
+            attachments: payload
+                .attachments
+                .into_iter()
+                .map(|attachment| attachment.filename)
+                .collect(),
         };
     }
 
@@ -654,7 +684,11 @@ fn build_current_message_entry(
             .unwrap_or_else(|| "unknown".to_string()),
         content: message.text_body.clone().unwrap_or_default(),
         reference_message_id: message.metadata.discord_referenced_message_id.clone(),
-        attachments: Vec::new(),
+        attachments: message
+            .attachments
+            .iter()
+            .map(|attachment| attachment.name.clone())
+            .collect(),
     }
 }
 
@@ -792,6 +826,7 @@ fn render_single_entry(message: &DiscordMessageEntry) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::channel::{Attachment, Channel, ChannelMetadata, InboundMessage};
     use tempfile::TempDir;
 
     fn entry(id: &str, author: &str, content: &str) -> DiscordMessageEntry {
@@ -855,5 +890,31 @@ mod tests {
             .join("incoming_email")
             .join("discord_context_for_agent.md")
             .exists());
+    }
+
+    #[test]
+    fn build_discord_message_text_with_quote_mentions_attachment_when_body_is_empty() {
+        let message = InboundMessage {
+            channel: Channel::Discord,
+            sender: "12345".to_string(),
+            sender_name: Some("tester".to_string()),
+            recipient: "67890".to_string(),
+            subject: None,
+            text_body: Some(String::new()),
+            html_body: None,
+            thread_id: "thread-1".to_string(),
+            message_id: Some("msg-1".to_string()),
+            attachments: vec![Attachment {
+                name: "sea_spot_saver_bingran_confirmation.png".to_string(),
+                content_type: "image/png".to_string(),
+                content: String::new(),
+            }],
+            reply_to: vec!["12345".to_string(), "67890".to_string()],
+            raw_payload: Vec::new(),
+            metadata: ChannelMetadata::default(),
+        };
+
+        let rendered = build_discord_message_text_with_quote(&message, b"{}");
+        assert!(rendered.contains("[attachments: sea_spot_saver_bingran_confirmation.png]"));
     }
 }
