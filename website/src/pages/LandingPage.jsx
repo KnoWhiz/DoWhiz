@@ -1060,7 +1060,7 @@ function LandingPage({ locale }) {
                   </a>
                 ))}
                 <a href={`mailto:${SUPPORT_EMAIL}`} className="footer-link">
-                  {isChinesePage ? '联系邮箱' : 'Contact'}
+                  {isChinesePage ? '联系' : 'Contact'}
                 </a>
               </div>
             </div>

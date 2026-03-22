@@ -214,20 +214,11 @@
   }
 
   .landing-page-cn .hero-title {
-    max-width: 10ch;
-    font-size: clamp(2.2rem, 10vw, 3rem);
+    font-size: clamp(1.9rem, 7.6vw, 2.35rem);
   }
 
   .landing-page-cn .hero-subtitle {
-    max-width: 100%;
-  }
-
-  .landing-page-cn .hero-eyebrow {
-    font-size: 0.68rem;
-  }
-
-  .landing-page-cn .nav-btn {
-    font-size: 0.78rem;
+    max-width: 24ch;
   }
 
   .section-title {
