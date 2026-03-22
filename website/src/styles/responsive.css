@@ -81,6 +81,10 @@
     text-align: left;
   }
 
+  .hero-pillar-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .features-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -170,6 +174,10 @@
     max-width: 31ch;
   }
 
+  .hero-note {
+    font-size: 0.92rem;
+  }
+
   .hero-intake-panel {
     padding: 0.85rem;
     border-radius: 1rem;
@@ -191,6 +199,35 @@
   .hero-secondary-cta {
     width: 100%;
     max-width: 360px;
+  }
+
+  .hero-chip-row {
+    justify-content: center;
+  }
+
+  .hero-pillar-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-pillar-card {
+    padding: 0.95rem;
+  }
+
+  .landing-page-cn .hero-title {
+    max-width: 10ch;
+    font-size: clamp(2.2rem, 10vw, 3rem);
+  }
+
+  .landing-page-cn .hero-subtitle {
+    max-width: 100%;
+  }
+
+  .landing-page-cn .hero-eyebrow {
+    font-size: 0.68rem;
+  }
+
+  .landing-page-cn .nav-btn {
+    font-size: 0.78rem;
   }
 
   .section-title {

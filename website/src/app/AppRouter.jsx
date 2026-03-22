@@ -8,9 +8,9 @@ function AppRouter() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/cn" element={<LandingPage />} />
-        <Route path="/cn/*" element={<LandingPage />} />
+        <Route path="/" element={<LandingPage locale="en-US" />} />
+        <Route path="/cn" element={<LandingPage locale="zh-CN" />} />
+        <Route path="/cn/*" element={<LandingPage locale="zh-CN" />} />
         <Route path="/start" element={<StartupIntakePage />} />
         <Route path="/workspace" element={<WorkspaceHomePage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
