@@ -112,10 +112,15 @@ pub(super) fn prepare_workspace(
 
     // Use channel-specific reply file and attachments directory
     // Non-email channels use plain text reply_message.txt
+    // Notion uses .notion_api_replied marker file (agent posts via API directly)
     // Email and GoogleDocs use HTML reply_email_draft.html
     let (reply_path, reply_attachments_dir) = match request.channel.to_lowercase().as_str() {
         "slack" | "discord" | "telegram" | "sms" | "bluebubbles" => (
             request.workspace_dir.join("reply_message.txt"),
+            request.workspace_dir.join("reply_attachments"),
+        ),
+        "notion" => (
+            request.workspace_dir.join(".notion_api_replied"),
             request.workspace_dir.join("reply_attachments"),
         ),
         _ => (
