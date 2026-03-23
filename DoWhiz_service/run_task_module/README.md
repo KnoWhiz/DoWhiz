@@ -44,6 +44,12 @@ Common optional controls:
 - `CODEX_MODEL`, `CLAUDE_MODEL`
 - `RUN_TASK_TIMEOUT_SECS`
 - `CODEX_SANDBOX_MODE`, `CODEX_BYPASS_SANDBOX`
+- Bright Data social scraping:
+  - `BRIGHT_DATA_API_KEY`
+  - optional `BRIGHT_DATA_XIAOHONGSHU_COLLECTOR`
+  - optional `BRIGHT_DATA_XIAOHONGSHU_TRIGGER_URL`
+  - run_task forwards these vars into docker and Azure ACI Codex executions so
+    shared Bright Data skills can authenticate inside remote task containers
 - Google Workspace CLI (`gws`) auth:
   - preferred: `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE`
   - or components: `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE_CLIENT_ID`,

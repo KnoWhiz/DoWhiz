@@ -222,7 +222,9 @@ Azure ACI execution path (required vars):
   `BRIGHT_DATA_XIAOHONGSHU_COLLECTOR` or
   `BRIGHT_DATA_XIAOHONGSHU_TRIGGER_URL` when Bright Data Scraper Studio has already
   provisioned a Xiaohongshu / RedNote custom scraper. Shared workspace skill:
-  `DoWhiz_service/skills/bright-data-social`.
+  `DoWhiz_service/skills/bright-data-social`. run_task forwards these keys into
+  local, docker, and Azure ACI task environments so the shared skill can
+  authenticate inside real worker containers.
 - Google Drive push: `GOOGLE_DRIVE_PUSH_ENABLED`, `GOOGLE_DRIVE_WEBHOOK_URL`
 - Browser-based web auth for private Notion/Google pages is agent-driven at task runtime
   (no service-side bootstrap step).
