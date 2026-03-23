@@ -24,7 +24,8 @@ use crate::memory_queue::{global_memory_queue, MemoryWriteRequest};
 use crate::message_router::{MessageRouter, RouterDecision};
 use crate::service::{
     build_discord_message_text_with_quote, build_discord_router_context,
-    hydrate_discord_context_files, persist_discord_ingest_context, ServiceConfig,
+    hydrate_discord_attachments, hydrate_discord_context_files, persist_discord_ingest_context,
+    ServiceConfig,
 };
 use crate::user_store::UserStore;
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
@@ -151,142 +152,149 @@ impl EventHandler for DiscordEventHandler {
             inbound.text_body
         );
 
-        // Try local router first for simple queries
+        // Try local router first for simple queries.
+        // Attachment-only messages should always go through the full pipeline so the
+        // image/file is available in the workspace.
         if let Some(text) = &inbound.text_body {
-            // Look up unified account first
-            let account_id = lookup_account_by_channel(&Channel::Discord, &inbound.sender);
+            if text.trim().is_empty() && !inbound.attachments.is_empty() {
+                info!("Skipping local router for attachment-only Discord message");
+            } else {
+                // Look up unified account first
+                let account_id = lookup_account_by_channel(&Channel::Discord, &inbound.sender);
 
-            // Look up legacy user for fallback
-            let (memory, user_paths) = match self
-                .state
-                .user_store
-                .get_or_create_user("discord", &inbound.sender)
-            {
-                Ok(user) => {
-                    let paths = self
-                        .state
-                        .user_store
-                        .user_paths(&self.state.config.users_root, &user.user_id);
+                // Look up legacy user for fallback
+                let (memory, user_paths) = match self
+                    .state
+                    .user_store
+                    .get_or_create_user("discord", &inbound.sender)
+                {
+                    Ok(user) => {
+                        let paths = self
+                            .state
+                            .user_store
+                            .user_paths(&self.state.config.users_root, &user.user_id);
 
-                    // Read memo from blob storage if account linked, else from local file
-                    let memo = if let Some(aid) = account_id {
-                        if let Some(blob_store) = get_blob_store() {
-                            match blob_store.read_memo(aid).await {
-                                Ok(content) => Some(content),
-                                Err(e) => {
-                                    warn!(
-                                        "Failed to read memo from blob for account {}: {}",
-                                        aid, e
-                                    );
-                                    fs::read_to_string(paths.memory_dir.join("memo.md")).ok()
+                        // Read memo from blob storage if account linked, else from local file
+                        let memo = if let Some(aid) = account_id {
+                            if let Some(blob_store) = get_blob_store() {
+                                match blob_store.read_memo(aid).await {
+                                    Ok(content) => Some(content),
+                                    Err(e) => {
+                                        warn!(
+                                            "Failed to read memo from blob for account {}: {}",
+                                            aid, e
+                                        );
+                                        fs::read_to_string(paths.memory_dir.join("memo.md")).ok()
+                                    }
                                 }
+                            } else {
+                                fs::read_to_string(paths.memory_dir.join("memo.md")).ok()
                             }
                         } else {
                             fs::read_to_string(paths.memory_dir.join("memo.md")).ok()
-                        }
-                    } else {
-                        fs::read_to_string(paths.memory_dir.join("memo.md")).ok()
-                    };
-                    (memo, Some((user.user_id, paths)))
-                }
-                Err(e) => {
-                    warn!("Failed to get user for memory: {}", e);
-                    (None, None)
-                }
-            };
-
-            let employee_name = self.state.config.employee_profile.display_name.as_deref();
-            let router_context = match build_discord_router_context(
-                &self.state.config,
-                &inbound,
-                &inbound.raw_payload,
-            ) {
-                Ok(context) => Some(context),
-                Err(err) => {
-                    warn!("Failed to build Discord router context: {}", err);
-                    None
-                }
-            };
-            let router_message = router_context
-                .as_ref()
-                .map(|context| context.message.as_str())
-                .unwrap_or(text);
-            let extra_context = router_context
-                .as_ref()
-                .map(|context| context.context.as_str());
-            match self
-                .state
-                .message_router
-                .classify(
-                    router_message,
-                    memory.as_deref(),
-                    employee_name,
-                    extra_context,
-                )
-                .await
-            {
-                RouterDecision::Simple {
-                    response,
-                    memory_update,
-                } => {
-                    info!("Router handled message locally, sending quick response");
-
-                    // Write memory update if present (to blob storage if account linked)
-                    if let (Some(update), Some((user_id, paths))) = (memory_update, &user_paths) {
-                        // Create diff for memory queue
-                        let diff = MemoryDiff {
-                            changed_sections: HashMap::from([(
-                                "Notes".to_string(),
-                                SectionChange::Added(vec![update.clone()]),
-                            )]),
                         };
-
-                        let request = MemoryWriteRequest {
-                            account_id,
-                            user_id: user_id.clone(),
-                            user_memory_dir: paths.memory_dir.clone(),
-                            diff,
-                        };
-
-                        if let Err(e) = global_memory_queue().submit(request) {
-                            warn!("Failed to write memory update: {}", e);
-                        } else if let Some(aid) = account_id {
-                            info!("Updated memory for unified account {}", aid);
-                        } else {
-                            info!("Updated memory for legacy user {}", user_id);
-                        }
+                        (memo, Some((user.user_id, paths)))
                     }
+                    Err(e) => {
+                        warn!("Failed to get user for memory: {}", e);
+                        (None, None)
+                    }
+                };
 
-                    if let Err(e) = send_quick_discord_response(
-                        &self.state.outbound_adapter.bot_token,
-                        &inbound,
-                        &msg,
-                        &response,
+                let employee_name = self.state.config.employee_profile.display_name.as_deref();
+                let router_context = match build_discord_router_context(
+                    &self.state.config,
+                    &inbound,
+                    &inbound.raw_payload,
+                ) {
+                    Ok(context) => Some(context),
+                    Err(err) => {
+                        warn!("Failed to build Discord router context: {}", err);
+                        None
+                    }
+                };
+                let router_message = router_context
+                    .as_ref()
+                    .map(|context| context.message.as_str())
+                    .unwrap_or(text);
+                let extra_context = router_context
+                    .as_ref()
+                    .map(|context| context.context.as_str());
+                match self
+                    .state
+                    .message_router
+                    .classify(
+                        router_message,
+                        memory.as_deref(),
+                        employee_name,
+                        extra_context,
                     )
                     .await
-                    {
-                        error!("failed to send quick Discord response: {}", e);
-                    }
+                {
+                    RouterDecision::Simple {
+                        response,
+                        memory_update,
+                    } => {
+                        info!("Router handled message locally, sending quick response");
 
-                    if let Err(err) = persist_discord_ingest_context(
-                        &self.state.config,
-                        &self.state.user_store,
-                        &inbound,
-                        &inbound.raw_payload,
-                        router_context.as_ref().map(|context| &context.snapshot),
-                    ) {
-                        warn!(
-                            "Failed to persist Discord context after quick reply: {}",
-                            err
-                        );
+                        // Write memory update if present (to blob storage if account linked)
+                        if let (Some(update), Some((user_id, paths))) = (memory_update, &user_paths)
+                        {
+                            // Create diff for memory queue
+                            let diff = MemoryDiff {
+                                changed_sections: HashMap::from([(
+                                    "Notes".to_string(),
+                                    SectionChange::Added(vec![update.clone()]),
+                                )]),
+                            };
+
+                            let request = MemoryWriteRequest {
+                                account_id,
+                                user_id: user_id.clone(),
+                                user_memory_dir: paths.memory_dir.clone(),
+                                diff,
+                            };
+
+                            if let Err(e) = global_memory_queue().submit(request) {
+                                warn!("Failed to write memory update: {}", e);
+                            } else if let Some(aid) = account_id {
+                                info!("Updated memory for unified account {}", aid);
+                            } else {
+                                info!("Updated memory for legacy user {}", user_id);
+                            }
+                        }
+
+                        if let Err(e) = send_quick_discord_response(
+                            &self.state.outbound_adapter.bot_token,
+                            &inbound,
+                            &msg,
+                            &response,
+                        )
+                        .await
+                        {
+                            error!("failed to send quick Discord response: {}", e);
+                        }
+
+                        if let Err(err) = persist_discord_ingest_context(
+                            &self.state.config,
+                            &self.state.user_store,
+                            &inbound,
+                            &inbound.raw_payload,
+                            router_context.as_ref().map(|context| &context.snapshot),
+                        ) {
+                            warn!(
+                                "Failed to persist Discord context after quick reply: {}",
+                                err
+                            );
+                        }
+                        return;
                     }
-                    return;
-                }
-                RouterDecision::Complex => {
-                    info!("Router forwarding to full pipeline");
-                }
-                RouterDecision::Passthrough => {
-                    info!("Router passthrough (disabled or error)");
+                    RouterDecision::Complex => {
+                        info!("Router forwarding to full pipeline");
+                    }
+                    RouterDecision::Passthrough => {
+                        info!("Router passthrough (disabled or error)");
+                    }
                 }
             }
         }
@@ -349,6 +357,18 @@ fn process_discord_message(
 
     // Save the incoming Discord message to workspace
     append_discord_message(&workspace, message, raw_msg, thread_state.last_email_seq)?;
+    if let Err(err) = hydrate_discord_attachments(
+        config,
+        &workspace,
+        &message.raw_payload,
+        thread_state.last_email_seq,
+    ) {
+        warn!(
+            "failed to hydrate discord attachments for {}: {}",
+            workspace.display(),
+            err
+        );
+    }
     if let Err(err) = hydrate_discord_context_files(
         config,
         &workspace,

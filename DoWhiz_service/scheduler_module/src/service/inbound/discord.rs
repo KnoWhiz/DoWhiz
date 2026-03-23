@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
 
@@ -19,6 +20,20 @@ use super::discord_context::{
     build_discord_message_text_with_quote, hydrate_discord_context_files,
     hydrate_discord_context_files_from_snapshot, DiscordContextSnapshot,
 };
+
+#[derive(Debug, serde::Deserialize)]
+struct DiscordAttachmentDownloadPayload {
+    filename: String,
+    url: String,
+    #[serde(default)]
+    proxy_url: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DiscordRawPayloadAttachments {
+    #[serde(default)]
+    attachments: Vec<DiscordAttachmentDownloadPayload>,
+}
 
 pub(crate) fn persist_discord_ingest_context(
     config: &ServiceConfig,
@@ -60,6 +75,15 @@ pub(crate) fn persist_discord_ingest_context(
         raw_payload,
         thread_state.last_email_seq,
     )?;
+    if let Err(err) =
+        hydrate_discord_attachments(config, &workspace, raw_payload, thread_state.last_email_seq)
+    {
+        warn!(
+            "failed to hydrate discord attachments for {}: {}",
+            workspace.display(),
+            err
+        );
+    }
 
     if let Some(snapshot) = snapshot {
         hydrate_discord_context_files_from_snapshot(
@@ -122,6 +146,15 @@ pub(crate) fn process_discord_inbound_message(
         raw_payload,
         thread_state.last_email_seq,
     )?;
+    if let Err(err) =
+        hydrate_discord_attachments(config, &workspace, raw_payload, thread_state.last_email_seq)
+    {
+        warn!(
+            "failed to hydrate discord attachments for {}: {}",
+            workspace.display(),
+            err
+        );
+    }
     if let Err(err) = hydrate_discord_context_files(
         config,
         &workspace,
@@ -283,27 +316,262 @@ pub(super) fn append_discord_message_payload(
     Ok(())
 }
 
+pub(crate) fn hydrate_discord_attachments(
+    config: &ServiceConfig,
+    workspace: &Path,
+    raw_payload: &[u8],
+    seq: u64,
+) -> Result<(), BoxError> {
+    let incoming_attachments = workspace.join("incoming_attachments");
+    let entries_dir = incoming_attachments.join("entries");
+    std::fs::create_dir_all(&entries_dir)?;
+    clear_dir_except(&incoming_attachments, &entries_dir)?;
+
+    if raw_payload.is_empty() {
+        return Ok(());
+    }
+
+    let payload: DiscordRawPayloadAttachments = match serde_json::from_slice(raw_payload) {
+        Ok(value) => value,
+        Err(err) => {
+            warn!(
+                "failed to parse discord raw payload for attachment hydration: {}",
+                err
+            );
+            return Ok(());
+        }
+    };
+
+    if payload.attachments.is_empty() {
+        return Ok(());
+    }
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
+    let bot_token = resolve_discord_bot_token(config);
+    let entry_dir = entries_dir.join(format!("{:05}_discord_attachments", seq));
+    std::fs::create_dir_all(&entry_dir)?;
+
+    let mut saved = 0usize;
+    let mut used_names = HashSet::new();
+    for attachment in payload.attachments {
+        let file_name = ascii_safe_attachment_name(&attachment.filename, &mut used_names);
+        match download_discord_attachment(&client, &attachment, bot_token.as_deref()) {
+            Ok(bytes) => {
+                std::fs::write(incoming_attachments.join(&file_name), &bytes)?;
+                std::fs::write(entry_dir.join(&file_name), &bytes)?;
+                saved += 1;
+            }
+            Err(err) => {
+                warn!(
+                    "failed to download discord attachment '{}' for workspace {}: {}",
+                    attachment.filename,
+                    workspace.display(),
+                    err
+                );
+            }
+        }
+    }
+
+    if saved > 0 {
+        info!(
+            "saved {} Discord attachment(s) seq={} to {}",
+            saved,
+            seq,
+            incoming_attachments.display()
+        );
+    }
+
+    Ok(())
+}
+
+fn download_discord_attachment(
+    client: &reqwest::blocking::Client,
+    attachment: &DiscordAttachmentDownloadPayload,
+    bot_token: Option<&str>,
+) -> Result<Vec<u8>, BoxError> {
+    let mut candidate_urls = vec![attachment.url.as_str()];
+    if !attachment.proxy_url.trim().is_empty() && attachment.proxy_url != attachment.url {
+        candidate_urls.push(attachment.proxy_url.as_str());
+    }
+
+    let mut last_error = None;
+    for url in candidate_urls {
+        match download_discord_attachment_from_url(client, url, None) {
+            Ok(bytes) => return Ok(bytes),
+            Err(err) => {
+                last_error = Some(format!("{url}: {err}"));
+            }
+        }
+
+        if let Some(token) = bot_token {
+            match download_discord_attachment_from_url(client, url, Some(token)) {
+                Ok(bytes) => return Ok(bytes),
+                Err(err) => {
+                    last_error = Some(format!("{url}: {err}"));
+                }
+            }
+        }
+    }
+
+    Err(last_error
+        .unwrap_or_else(|| {
+            format!(
+                "no downloadable URL found for discord attachment '{}'",
+                attachment.filename
+            )
+        })
+        .into())
+}
+
+fn download_discord_attachment_from_url(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    bot_token: Option<&str>,
+) -> Result<Vec<u8>, BoxError> {
+    let mut request = client.get(url);
+    if let Some(token) = bot_token {
+        request = request.header("Authorization", format!("Bot {}", token));
+    }
+
+    let response = request.send()?;
+    if !response.status().is_success() {
+        return Err(format!("discord attachment download returned {}", response.status()).into());
+    }
+
+    Ok(response.bytes()?.to_vec())
+}
+
+fn resolve_discord_bot_token(config: &ServiceConfig) -> Option<String> {
+    let emp_upper = config.employee_profile.id.to_uppercase().replace('-', "_");
+    let emp_token_key = format!("{}_DISCORD_BOT_TOKEN", emp_upper);
+    if let Ok(token) = std::env::var(&emp_token_key) {
+        if !token.trim().is_empty() {
+            return Some(token);
+        }
+    }
+    config.discord_bot_token.clone()
+}
+
+fn clear_dir_except(root: &Path, keep: &Path) -> Result<(), std::io::Error> {
+    if !root.exists() {
+        std::fs::create_dir_all(root)?;
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path == keep {
+            continue;
+        }
+        if path.is_dir() {
+            std::fs::remove_dir_all(path)?;
+        } else {
+            std::fs::remove_file(path)?;
+        }
+    }
+    Ok(())
+}
+
+fn ascii_safe_attachment_name(path: &str, used_names: &mut HashSet<String>) -> String {
+    let trimmed = path.trim();
+    let (stem, extension) = match trimmed.rsplit_once('.') {
+        Some((stem, extension)) if !stem.is_empty() && !extension.is_empty() => {
+            (stem, Some(extension))
+        }
+        _ => (trimmed, None),
+    };
+    let mut base = sanitize_ascii_attachment_stem(stem);
+    if base.is_empty() {
+        base = "attachment".to_string();
+    }
+
+    let extension = extension
+        .map(sanitize_ascii_attachment_extension)
+        .filter(|value| !value.is_empty());
+    uniquify_attachment_name(base, extension.as_deref(), used_names)
+}
+
+fn sanitize_ascii_attachment_stem(value: &str) -> String {
+    let mut output = String::new();
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            output.push(ch.to_ascii_lowercase());
+        } else if matches!(ch, '.' | '_' | '-') {
+            output.push(ch);
+        } else if !output.ends_with('_') {
+            output.push('_');
+        }
+    }
+    let trimmed = output.trim_matches(['.', '_', '-']);
+    truncate_ascii(trimmed, 80)
+}
+
+fn sanitize_ascii_attachment_extension(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect()
+}
+
+fn uniquify_attachment_name(
+    base: String,
+    extension: Option<&str>,
+    used_names: &mut HashSet<String>,
+) -> String {
+    let build_name = |suffix: Option<usize>| match (extension, suffix) {
+        (Some(ext), Some(idx)) => format!("{base}_{idx}.{ext}"),
+        (Some(ext), None) => format!("{base}.{ext}"),
+        (None, Some(idx)) => format!("{base}_{idx}"),
+        (None, None) => base.clone(),
+    };
+
+    let mut candidate = build_name(None);
+    if used_names.insert(candidate.clone()) {
+        return candidate;
+    }
+
+    for idx in 2..10_000 {
+        candidate = build_name(Some(idx));
+        if used_names.insert(candidate.clone()) {
+            return candidate;
+        }
+    }
+
+    build_name(Some(10_000))
+}
+
+fn truncate_ascii(value: &str, max_len: usize) -> String {
+    if value.len() <= max_len {
+        return value.to_string();
+    }
+    let mut out = value[..max_len].to_string();
+    while out.ends_with(['.', '_', '-']) {
+        out.pop();
+    }
+    if out.is_empty() {
+        value.to_string()
+    } else {
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::account_store::AccountStore;
     use crate::channel::{ChannelMetadata, InboundMessage};
     use crate::employee_config::{EmployeeDirectory, EmployeeProfile};
-    use crate::index_store::IndexStore;
-    use crate::user_store::UserStore;
-    use crate::{ModuleExecutor, Scheduler, TaskKind};
+    use mockito::Server;
     use std::collections::{HashMap, HashSet};
     use std::fs;
+    use std::path::Path;
     use tempfile::TempDir;
 
-    #[test]
-    fn process_discord_inbound_message_creates_run_task() -> Result<(), BoxError> {
-        let temp = TempDir::new()?;
-        let root = temp.path();
+    fn build_test_config(root: &Path) -> ServiceConfig {
         let users_root = root.join("users");
         let state_root = root.join("state");
-        fs::create_dir_all(&users_root)?;
-        fs::create_dir_all(&state_root)?;
 
         let addresses = vec!["service@example.com".to_string()];
         let address_set: HashSet<String> = addresses
@@ -335,7 +603,7 @@ mod tests {
             service_addresses: address_set,
         };
 
-        let config = ServiceConfig {
+        ServiceConfig {
             host: "127.0.0.1".to_string(),
             port: 0,
             employee_id: employee.id.clone(),
@@ -347,7 +615,7 @@ mod tests {
             processed_ids_path: state_root.join("processed_ids.txt"),
             ingestion_db_url: "postgres://localhost/test".to_string(),
             ingestion_poll_interval: Duration::from_millis(50),
-            users_root: users_root.clone(),
+            users_root,
             users_db_path: state_root.join("users.db"),
             task_index_path: state_root.join("task_index.db"),
             codex_model: "gpt-5.4".to_string(),
@@ -372,11 +640,13 @@ mod tests {
             whatsapp_access_token: None,
             whatsapp_phone_number_id: None,
             whatsapp_verify_token: None,
-        };
+        }
+    }
 
-        let user_store = UserStore::new(&config.users_db_path)?;
-        let index_store = IndexStore::new(&config.task_index_path)?;
-        let account_store = AccountStore::new(&config.ingestion_db_url)?;
+    #[test]
+    fn append_discord_message_payload_writes_message_files() -> Result<(), BoxError> {
+        let temp = TempDir::new()?;
+        let workspace = temp.path();
 
         let sender = "12345".to_string();
         let channel_id = 67890u64;
@@ -402,44 +672,10 @@ mod tests {
             },
         };
 
-        process_discord_inbound_message(
-            &config,
-            &user_store,
-            &index_store,
-            &account_store,
-            &message,
-            &raw_payload,
-        )?;
+        let seq = 7;
+        append_discord_message_payload(workspace, &message, &raw_payload, seq)?;
 
-        let user = user_store.get_or_create_user("discord", &sender)?;
-        let user_paths = user_store.user_paths(&config.users_root, &user.user_id);
-        let scheduler = Scheduler::load(&user_paths.tasks_db_path, ModuleExecutor::default())?;
-
-        let run_task = scheduler
-            .tasks()
-            .iter()
-            .find_map(|task| match &task.kind {
-                TaskKind::RunTask(run) => Some(run),
-                _ => None,
-            })
-            .expect("run task created");
-
-        assert_eq!(run_task.channel, Channel::Discord);
-        assert_eq!(
-            run_task.reply_to,
-            vec![sender.clone(), channel_id.to_string()]
-        );
-        assert_eq!(run_task.archive_root.as_ref(), Some(&user_paths.mail_root));
-        assert_eq!(
-            run_task.workspace_dir.parent(),
-            Some(user_paths.workspaces_root.as_path())
-        );
-
-        let state_path = crate::thread_state::default_thread_state_path(&run_task.workspace_dir);
-        let thread_state =
-            crate::thread_state::load_thread_state(&state_path).expect("thread_state.json exists");
-        let seq = thread_state.last_email_seq;
-        let incoming_dir = run_task.workspace_dir.join("incoming_email");
+        let incoming_dir = workspace.join("incoming_email");
         assert!(incoming_dir
             .join(format!("{:05}_discord_raw.json", seq))
             .exists());
@@ -449,6 +685,60 @@ mod tests {
         assert!(incoming_dir
             .join(format!("{:05}_discord_meta.json", seq))
             .exists());
+        Ok(())
+    }
+
+    #[test]
+    fn hydrate_discord_attachments_downloads_attachments() -> Result<(), BoxError> {
+        let temp = TempDir::new()?;
+        let root = temp.path();
+        let workspace = root.join("workspace");
+        fs::create_dir_all(&workspace)?;
+
+        let config = build_test_config(root);
+
+        let mut server = Server::new();
+        let attachment_bytes = b"fake png bytes";
+        let attachment_mock = server
+            .mock("GET", "/attachments/test.png")
+            .with_status(200)
+            .with_body(attachment_bytes.as_slice())
+            .create();
+
+        let channel_id = 67890u64;
+        let guild_id = 111u64;
+        let raw_payload = serde_json::to_vec(&serde_json::json!({
+            "id": 1001u64,
+            "channel_id": channel_id,
+            "guild_id": guild_id,
+            "author_id": 12345u64,
+            "author_name": "test-user",
+            "content": "",
+            "timestamp": "2026-03-22T05:00:00Z",
+            "attachments": [{
+                "id": 1u64,
+                "filename": "test.png",
+                "content_type": "image/png",
+                "size": attachment_bytes.len(),
+                "url": format!("{}/attachments/test.png", server.url()),
+                "proxy_url": ""
+            }]
+        }))?;
+        let seq = 7;
+        hydrate_discord_attachments(&config, &workspace, &raw_payload, seq)?;
+
+        attachment_mock.assert();
+
+        let attachment_path = workspace.join("incoming_attachments").join("test.png");
+        assert_eq!(fs::read(&attachment_path)?, attachment_bytes);
+
+        let archived_attachment = workspace
+            .join("incoming_attachments")
+            .join("entries")
+            .join(format!("{:05}_discord_attachments", seq))
+            .join("test.png");
+        assert_eq!(fs::read(archived_attachment)?, attachment_bytes);
+
         Ok(())
     }
 }

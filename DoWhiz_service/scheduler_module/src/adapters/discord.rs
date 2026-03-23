@@ -90,6 +90,18 @@ impl DiscordInboundAdapter {
             referenced_message_author_id: referenced_message.map(|m| m.author.id.get()),
             referenced_message_author_name: referenced_message.map(|m| m.author.name.clone()),
             referenced_message_content: referenced_message.map(|m| m.content.clone()),
+            attachments: message
+                .attachments
+                .iter()
+                .map(|attachment| DiscordMessageAttachmentPayload {
+                    id: attachment.id.get(),
+                    filename: attachment.filename.clone(),
+                    content_type: attachment.content_type.clone(),
+                    size: attachment.size,
+                    url: attachment.url.clone(),
+                    proxy_url: attachment.proxy_url.clone(),
+                })
+                .collect(),
         })
         .unwrap_or_default();
 
@@ -151,9 +163,9 @@ impl DiscordOutboundAdapter {
             .map_err(|e| AdapterError::SendError(format!("DM channel creation failed: {}", e)))?;
 
         if response.status().is_success() {
-            let dm_response: DiscordDmChannelResponse = response
-                .json()
-                .map_err(|e| AdapterError::SendError(format!("Failed to parse DM response: {}", e)))?;
+            let dm_response: DiscordDmChannelResponse = response.json().map_err(|e| {
+                AdapterError::SendError(format!("Failed to parse DM response: {}", e))
+            })?;
             dm_response
                 .id
                 .parse()
@@ -271,6 +283,19 @@ pub struct DiscordMessagePayload {
     pub referenced_message_author_name: Option<String>,
     #[serde(default)]
     pub referenced_message_content: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<DiscordMessageAttachmentPayload>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DiscordMessageAttachmentPayload {
+    pub id: u64,
+    pub filename: String,
+    #[serde(default)]
+    pub content_type: Option<String>,
+    pub size: u32,
+    pub url: String,
+    pub proxy_url: String,
 }
 
 /// Request body for creating a Discord message.

@@ -39,6 +39,10 @@ fn resolve_expected_reply_path(workspace_dir: &Path, default_path: PathBuf) -> P
         "slack" | "discord" | "telegram" | "sms" | "whatsapp" | "bluebubbles" => {
             workspace_dir.join("reply_message.txt")
         }
+        "notion" => {
+            // Notion agent posts directly via API and creates .notion_api_replied marker
+            workspace_dir.join(".notion_api_replied")
+        }
         _ => default_path,
     }
 }
