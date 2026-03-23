@@ -576,6 +576,9 @@ pub(crate) fn try_quick_response_discord(
     let Some(text) = message.text_body.as_deref() else {
         return Ok(false);
     };
+    if text.trim().is_empty() && !message.attachments.is_empty() {
+        return Ok(false);
+    }
     let channel_id = match message.metadata.discord_channel_id {
         Some(value) => value,
         None => return Ok(false),

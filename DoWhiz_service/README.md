@@ -126,6 +126,7 @@ Route model (`channel + key -> employee_id + tenant_id`):
 Notes:
 - Discord message routing uses bot-token-to-employee mapping for selected client; route table is mainly used to enable channel defaults/tenant defaults.
 - Discord inbound requests prepare a transient `discord_context/` folder inside the task workspace with thread context plus a large recent channel-history window for agent summarization; this context is not persisted outside the workspace.
+- Discord inbound attachment URLs are preserved in archived raw payloads, and current-message files are downloaded into `incoming_attachments/` before the task runs.
 
 ## 4) Environment Variables
 
