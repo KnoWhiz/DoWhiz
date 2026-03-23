@@ -106,6 +106,10 @@ Each employee can define:
 - optional `agents_path`, `claude_path`, `soul_path`, `skills_dir`
 - channel toggles: `discord_enabled`, `slack_enabled`, `bluebubbles_enabled`
 
+When `skills_dir` is set, the shared skill directories under that path are copied into
+each task workspace at `.agents/skills/`, so new shared skills can be added without
+changing run_task runtime code.
+
 ### 3.2 Gateway config
 
 Default path resolution:
@@ -213,6 +217,12 @@ Azure ACI execution path (required vars):
   If component keys are set, run_task materializes
   `.secrets/google_workspace_cli_credentials.json` in each workspace and injects
   `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` for local/docker/Azure ACI execution.
+- Bright Data social scraping:
+  `BRIGHT_DATA_API_KEY` for shared auth, plus optional
+  `BRIGHT_DATA_XIAOHONGSHU_COLLECTOR` or
+  `BRIGHT_DATA_XIAOHONGSHU_TRIGGER_URL` when Bright Data Scraper Studio has already
+  provisioned a Xiaohongshu / RedNote custom scraper. Shared workspace skill:
+  `DoWhiz_service/skills/bright-data-social`.
 - Google Drive push: `GOOGLE_DRIVE_PUSH_ENABLED`, `GOOGLE_DRIVE_WEBHOOK_URL`
 - Browser-based web auth for private Notion/Google pages is agent-driven at task runtime
   (no service-side bootstrap step).
