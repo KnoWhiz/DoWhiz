@@ -19,9 +19,10 @@ use chrono::Utc;
 use tracing::{info, warn};
 
 use crate::account_store::AccountStore;
+use crate::adapters::google_docs::contains_employee_mention;
 use crate::channel::Channel;
 use crate::index_store::IndexStore;
-use crate::notion_email_detector::NotionEmailNotification;
+use crate::notion_email_detector::{NotionEmailNotification, NotionNotificationType};
 use crate::notion_store::NotionStore;
 use crate::user_store::{extract_emails, UserStore};
 use crate::{ModuleExecutor, RunTaskTask, Scheduler, TaskKind};
@@ -102,6 +103,40 @@ pub(crate) fn process_notion_email(
                 actor
             );
             return Ok(());
+        }
+    }
+
+    // Filter notifications based on type - only respond to explicit @mentions
+    // CommentMention/PageMention/CommentReply indicate direct targeting
+    // PageComment/Other require checking if the employee was actually @mentioned in the content
+    match notification.notification_type {
+        NotionNotificationType::CommentMention
+        | NotionNotificationType::PageMention
+        | NotionNotificationType::CommentReply => {
+            // Direct mentions - process these
+            info!(
+                "processing direct mention notification type={:?}",
+                notification.notification_type
+            );
+        }
+        NotionNotificationType::PageComment | NotionNotificationType::Other => {
+            // General page activity - only process if we were explicitly @mentioned
+            let content_to_check = format!(
+                "{}\n{}",
+                notification.comment_preview.as_deref().unwrap_or(""),
+                notification.subject.as_str()
+            );
+            if !contains_employee_mention(&content_to_check) {
+                info!(
+                    "skipping PageComment notification - employee not @mentioned in content (type={:?}, actor={:?})",
+                    notification.notification_type,
+                    notification.actor_name
+                );
+                return Ok(());
+            }
+            info!(
+                "processing PageComment notification with explicit @mention in content",
+            );
         }
     }
 
