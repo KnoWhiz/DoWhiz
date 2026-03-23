@@ -73,6 +73,12 @@ const GOOGLE_WORKSPACE_CLI_CREDENTIAL_COMPONENT_KEYS: &[&str] = &[
 ];
 const GOOGLE_WORKSPACE_CLI_CREDENTIALS_REL_PATH: &str =
     ".secrets/google_workspace_cli_credentials.json";
+const BRIGHT_DATA_API_KEY_ENV_KEY: &str = "BRIGHT_DATA_API_KEY";
+const BRIGHTDATA_API_KEY_ENV_KEY: &str = "BRIGHTDATA_API_KEY";
+const BRIGHT_DATA_OPTIONAL_ENV_KEYS: &[&str] = &[
+    "BRIGHT_DATA_XIAOHONGSHU_COLLECTOR",
+    "BRIGHT_DATA_XIAOHONGSHU_TRIGGER_URL",
+];
 
 const REMOTE_OUTPUT_FILENAME: &str = ".codex_remote_output.log";
 const REMOTE_EXIT_CODE_FILENAME: &str = ".codex_remote_exit_code";
@@ -322,6 +328,7 @@ pub(super) fn run_codex_task(
     }
     ensure_github_cli_auth(&github_auth)?;
     let payment_env_overrides = collect_payment_env_overrides();
+    let bright_data_env_overrides = collect_bright_data_env_overrides();
     let google_workspace_cli_env_overrides = collect_google_workspace_cli_env_overrides(
         host_workspace_dir
             .as_deref()
@@ -408,6 +415,9 @@ pub(super) fn run_codex_task(
             }
         }
         for (key, value) in &payment_env_overrides {
+            cmd.arg("-e").arg(format!("{}={}", key, value));
+        }
+        for (key, value) in &bright_data_env_overrides {
             cmd.arg("-e").arg(format!("{}={}", key, value));
         }
         for (key, value) in &google_workspace_cli_env_overrides {
@@ -513,7 +523,7 @@ pub(super) fn run_codex_task(
             .arg(prompt)
             .env("AZURE_OPENAI_API_KEY_BACKUP", api_key)
             .env("AZURE_OPENAI_ENDPOINT_BACKUP", &azure_endpoint)
-            .env_remove("OPENAI_API_KEY")  // Prevent Codex from using OpenAI instead of Azure
+            .env_remove("OPENAI_API_KEY") // Prevent Codex from using OpenAI instead of Azure
             .current_dir(request.workspace_dir);
         // Extend PATH with DoWhiz bin directory for tools like google-docs
         let current_path = env::var("PATH").unwrap_or_default();
@@ -544,6 +554,9 @@ pub(super) fn run_codex_task(
             }
         }
         for (key, value) in &payment_env_overrides {
+            cmd.env(key, value);
+        }
+        for (key, value) in &bright_data_env_overrides {
             cmd.env(key, value);
         }
         for (key, value) in &google_workspace_cli_env_overrides {
@@ -733,6 +746,7 @@ fn run_codex_task_azure_aci(
     let codex_home = host_workspace_dir.join(DOCKER_CODEX_HOME_DIR);
     ensure_codex_config_at(&codex_home, &container_workspace_dir, &azure_endpoint)?;
     let payment_env_overrides = collect_payment_env_overrides();
+    let bright_data_env_overrides = collect_bright_data_env_overrides();
     let google_workspace_cli_env_overrides =
         collect_google_workspace_cli_env_overrides(&host_workspace_dir)?;
     let human_approval_gate_env_overrides = collect_human_approval_gate_env_overrides();
@@ -804,6 +818,9 @@ fn run_codex_task_azure_aci(
         ("DEPLOY_TARGET".to_string(), "azure_aci_runner".to_string()),
     ];
     for (key, value) in payment_env_overrides {
+        env_overrides.push((key, value));
+    }
+    for (key, value) in bright_data_env_overrides {
         env_overrides.push((key, value));
     }
     for (key, value) in google_workspace_cli_env_overrides {
@@ -1768,6 +1785,24 @@ fn collect_human_approval_gate_env_overrides() -> Vec<(String, String)> {
         }
         if !has_human_approval_reply_to {
             overrides.push((HUMAN_APPROVAL_REPLY_TO_ENV_KEY.to_string(), mailbox_email));
+        }
+    }
+
+    overrides
+}
+
+fn collect_bright_data_env_overrides() -> Vec<(String, String)> {
+    let mut overrides = Vec::new();
+    if let Some(api_key) = read_env_trimmed(BRIGHT_DATA_API_KEY_ENV_KEY)
+        .or_else(|| read_env_trimmed(BRIGHTDATA_API_KEY_ENV_KEY))
+    {
+        overrides.push((BRIGHT_DATA_API_KEY_ENV_KEY.to_string(), api_key.clone()));
+        overrides.push((BRIGHTDATA_API_KEY_ENV_KEY.to_string(), api_key));
+    }
+
+    for key in BRIGHT_DATA_OPTIONAL_ENV_KEYS {
+        if let Some(value) = read_env_trimmed(key) {
+            overrides.push(((*key).to_string(), value));
         }
     }
 
@@ -2760,6 +2795,56 @@ mod tests {
     }
 
     #[test]
+    fn test_collect_bright_data_env_overrides_sets_canonical_and_alias_keys() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::set(BRIGHT_DATA_API_KEY_ENV_KEY, "bright-key"),
+            EnvVarGuard::unset(BRIGHTDATA_API_KEY_ENV_KEY),
+            EnvVarGuard::set("BRIGHT_DATA_XIAOHONGSHU_COLLECTOR", "collector-123"),
+            EnvVarGuard::unset("BRIGHT_DATA_XIAOHONGSHU_TRIGGER_URL"),
+        ];
+
+        let overrides = collect_bright_data_env_overrides();
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| { k == BRIGHT_DATA_API_KEY_ENV_KEY && v == "bright-key" }));
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| { k == BRIGHTDATA_API_KEY_ENV_KEY && v == "bright-key" }));
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| { k == "BRIGHT_DATA_XIAOHONGSHU_COLLECTOR" && v == "collector-123" }));
+        assert!(!overrides
+            .iter()
+            .any(|(k, _)| { k == "BRIGHT_DATA_XIAOHONGSHU_TRIGGER_URL" }));
+    }
+
+    #[test]
+    fn test_collect_bright_data_env_overrides_falls_back_to_cli_alias() {
+        let _lock = env_lock();
+        let _guards = vec![
+            EnvVarGuard::unset(BRIGHT_DATA_API_KEY_ENV_KEY),
+            EnvVarGuard::set(BRIGHTDATA_API_KEY_ENV_KEY, "alias-only-key"),
+            EnvVarGuard::unset("BRIGHT_DATA_XIAOHONGSHU_COLLECTOR"),
+            EnvVarGuard::set(
+                "BRIGHT_DATA_XIAOHONGSHU_TRIGGER_URL",
+                "https://brightdata.example/trigger",
+            ),
+        ];
+
+        let overrides = collect_bright_data_env_overrides();
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| { k == BRIGHT_DATA_API_KEY_ENV_KEY && v == "alias-only-key" }));
+        assert!(overrides
+            .iter()
+            .any(|(k, v)| { k == BRIGHTDATA_API_KEY_ENV_KEY && v == "alias-only-key" }));
+        assert!(overrides.iter().any(|(k, v)| {
+            k == "BRIGHT_DATA_XIAOHONGSHU_TRIGGER_URL" && v == "https://brightdata.example/trigger"
+        }));
+    }
+
+    #[test]
     fn test_collect_human_approval_gate_env_overrides_collects_expected_keys() {
         let _lock = env_lock();
         let _guards = vec![
@@ -3248,6 +3333,83 @@ addresses = ["dowhiz@deep-tutor.com"]
         let first = build_aci_container_name();
         let second = build_aci_container_name();
         assert_ne!(first, second);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_create_aci_container_passes_bright_data_env_overrides() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _lock = env_lock();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let bin_dir = temp.path().join("bin");
+        fs::create_dir_all(&bin_dir).expect("create bin dir");
+        let capture_path = temp.path().join("az-args.txt");
+        let az_path = bin_dir.join("az");
+        fs::write(
+            &az_path,
+            r#"#!/bin/sh
+set -e
+capture_file="${TEST_AZ_CAPTURE_FILE:?}"
+printf '%s\n' "$@" > "$capture_file"
+"#,
+        )
+        .expect("write fake az");
+        let mut perms = fs::metadata(&az_path).expect("az metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&az_path, perms).expect("chmod fake az");
+
+        let original_path = env::var("PATH").unwrap_or_default();
+        let path_value = format!("{}:{}", bin_dir.display(), original_path);
+        let capture_value = capture_path.to_string_lossy().to_string();
+        let _guards = vec![
+            EnvVarGuard::set("PATH", &path_value),
+            EnvVarGuard::set("TEST_AZ_CAPTURE_FILE", &capture_value),
+        ];
+
+        let config = AzureAciConfig {
+            resource_group: "stg-rg".to_string(),
+            image: "stg.azurecr.io/dowhiz-service:test".to_string(),
+            location: None,
+            registry_server: None,
+            registry_username: None,
+            registry_password: None,
+            cpu: "1.0".to_string(),
+            memory_gb: "2.0".to_string(),
+            storage_account: "storageacct".to_string(),
+            storage_key: "storagekey".to_string(),
+            file_share: "run-task-share".to_string(),
+            host_share_root: PathBuf::from("/host/share"),
+            container_share_root: PathBuf::from("/mnt/dowhiz-share"),
+        };
+        let env_overrides = vec![
+            (
+                BRIGHT_DATA_API_KEY_ENV_KEY.to_string(),
+                "bright-key".to_string(),
+            ),
+            (
+                BRIGHTDATA_API_KEY_ENV_KEY.to_string(),
+                "bright-key".to_string(),
+            ),
+            (
+                "BRIGHT_DATA_XIAOHONGSHU_COLLECTOR".to_string(),
+                "collector-123".to_string(),
+            ),
+        ];
+
+        create_aci_container(
+            &config,
+            "dwz-codex-bright-data-test",
+            "/bin/bash -lc 'echo ok'",
+            &env_overrides,
+        )
+        .expect("create container");
+
+        let args = fs::read_to_string(&capture_path).expect("read captured args");
+        assert!(args.contains("--environment-variables"));
+        assert!(args.contains("BRIGHT_DATA_API_KEY=bright-key"));
+        assert!(args.contains("BRIGHTDATA_API_KEY=bright-key"));
+        assert!(args.contains("BRIGHT_DATA_XIAOHONGSHU_COLLECTOR=collector-123"));
     }
 
     #[test]
